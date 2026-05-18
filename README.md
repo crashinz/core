@@ -28,12 +28,6 @@ ChatSpace Community Edition gives communities self-hosted shared rooms with avat
   <img src="assets/images/chat-pane-community.png" alt="Community chat" height="34">
   &nbsp;&nbsp;
   <img src="assets/images/chat-pane-dm.png" alt="DMs" height="34">
-  &nbsp;&nbsp;
-  <img src="assets/images/flying-dm.png" alt="Flying DM" height="38">
-  &nbsp;&nbsp;
-  <img src="assets/images/chess-icon.png" alt="Chess" height="34">
-  &nbsp;&nbsp;
-  <img src="assets/images/checkers-icon.png" alt="Checkers" height="34">
 </p>
 
 ## What It Includes
