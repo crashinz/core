@@ -1,0 +1,373 @@
+<?php
+require_once __DIR__ . '/includes/base.php';
+$user = require_user();
+$pdo = db();
+$communityEjection = active_community_ejection($pdo, (int)$user['id']);
+if ($communityEjection) {
+    redirect_to('/community_ejected.php');
+}
+$roomKey = trim((string)($_GET['id'] ?? ''));
+$stmt = $pdo->prepare('SELECT r.*, u.display_name AS owner_name FROM rooms r JOIN users u ON u.id = r.owner_id WHERE r.id = ? LIMIT 1');
+$stmt->execute([ctype_digit($roomKey) ? (int)$roomKey : 0]);
+$room = $stmt->fetch();
+if (!$room && $roomKey !== '') {
+    $stmt = $pdo->prepare('SELECT r.*, u.display_name AS owner_name FROM rooms r JOIN users u ON u.id = r.owner_id WHERE r.public_id = ? LIMIT 1');
+    $stmt->execute([$roomKey]);
+    $room = $stmt->fetch();
+}
+if (!$room) {
+    redirect_to('/lobby.php');
+}
+$roomId = (int)$room['id'];
+$activeEjection = active_room_ejection($pdo, $roomId, (int)$user['id']);
+if ($activeEjection) {
+    $_SESSION['room_ejection_notice'] = [
+        'permanent' => (bool)$activeEjection['permanent'],
+        'duration_minutes' => $activeEjection['duration_minutes'] !== null ? (int)$activeEjection['duration_minutes'] : null,
+    ];
+    redirect_to('/lobby.php');
+}
+$session = active_session_for_room($pdo, $roomId);
+cleanup_stale_participants($pdo, (int)$session['id']);
+$participant = participant_for_user($pdo, (int)$session['id'], $user);
+$pdo->prepare('UPDATE users SET current_room_id = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([$roomId, (int)$user['id']]);
+$pdo->prepare('UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$participant['id']]);
+
+emit_event($pdo, (int)$session['id'], 'participant_join', [
+    'id' => (int)$participant['id'],
+    'user_id' => (int)$user['id'],
+    'display_name' => $participant['display_name'],
+    'role' => $user['role'] ?? 'user',
+    'is_owner' => (int)$room['owner_id'] === (int)$user['id'],
+    'avatar_path' => $participant['avatar_path'],
+    'avatar_url' => resolve_avatar($participant['avatar_path']),
+    'position_x' => (float)$participant['position_x'],
+    'position_y' => (float)$participant['position_y'],
+    'webcam_path' => $participant['webcam_path'],
+    'linked_to' => $participant['linked_to_participant_id'] ? (int)$participant['linked_to_participant_id'] : null,
+    'joined_at' => gmdate('Y-m-d H:i:s'),
+]);
+$lastEventId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ' . (int)$session['id'])->fetchColumn();
+
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><?= e($room['name']) ?> - ChatSpace CE</title>
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+</head>
+<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>">
+<div class="room-layout">
+  <div class="version-banner" id="version-banner" hidden>
+    <span id="version-banner-text">A new ChatSpace version is available.</span>
+    <button class="btn btn-aqua" id="version-refresh" type="button">Refresh</button>
+  </div>
+  <main class="main">
+    <section class="room-stage" id="room-stage">
+      <div class="room-bg" <?php if ($room['background_path'] && !str_starts_with((string)$room['background_mime'], 'video/')): ?>style="background-image:url('<?= e(media_url($room['background_path'])) ?>')"<?php endif; ?>>
+        <?php if ($room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
+        <video autoplay loop muted playsinline><source src="<?= e(media_url($room['background_path'])) ?>" type="<?= e($room['background_mime']) ?>"></video>
+        <?php endif; ?>
+      </div>
+    </section>
+    <div class="divider" id="horizontal-divider"></div>
+    <section class="chat-pane">
+      <div class="messages" id="messages"></div>
+      <form class="composer" id="composer">
+        <button class="composer-icon-btn" id="attach-btn" type="button" aria-label="Add attachment">+</button>
+        <div class="attach-menu" id="attach-menu" hidden>
+          <button type="button" id="attach-file-btn">Attach File</button>
+          <button type="button" id="attach-voice-btn">Attach Voice Note</button>
+        </div>
+        <input class="hidden-file-input" id="chat-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.rtf,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/rtf">
+        <textarea id="chat-input" maxlength="1000" rows="1" autocomplete="off" placeholder="Message <?= e($room['name']) ?>"></textarea>
+        <div class="composer-actions">
+          <span class="char-counter" id="char-counter">0/1000</span>
+          <button class="composer-icon-btn emoji-btn" id="emoji-btn" type="button" aria-label="Emoji picker">😊</button>
+          <button class="send-btn" type="submit" aria-label="Send message"><img src="<?= e(app_url('/assets/images/chat-input-send.png')) ?>" alt=""></button>
+        </div>
+      </form>
+      <div class="chat-tabs" id="chat-tabs">
+        <button class="chat-tab active" type="button" data-chat-tab="room"><img src="<?= e(app_url('/assets/images/chat-pane-bubble.png')) ?>" alt=""> <span>Chat Room</span><span class="tab-badge" hidden>0</span></button>
+        <button class="chat-tab" type="button" data-chat-tab="community"><img src="<?= e(app_url('/assets/images/chat-pane-community.png')) ?>" alt=""> <span>Community Chat</span><span class="tab-badge" hidden>0</span></button>
+        <span id="link-tabs"></span>
+      </div>
+    </section>
+  </main>
+  <aside class="sidebar">
+    <section class="side-section">
+      <button class="gear-btn" id="room-menu-btn" type="button" aria-label="Room menu">⚙</button>
+      <div class="side-title">Room</div>
+      <strong><?= e($room['name']) ?></strong>
+      <div class="minor">Created by <?= e($room['owner_name']) ?></div>
+      <?php if ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
+      <button class="btn btn-primary" id="edit-room-btn" type="button" style="width:100%;margin-top:12px;">Edit Room</button>
+      <?php endif; ?>
+    </section>
+    <section class="side-section">
+      <div class="side-title">Chatting <span id="participant-count-label">(0)</span></div>
+      <div class="user-list" id="user-list"></div>
+    </section>
+    <div class="sidebar-bottom-tools">
+      <section class="side-section">
+        <div class="side-title">Voice Chat</div>
+        <div class="voice-list" id="voice-list"></div>
+        <button class="btn btn-voice" id="voice-toggle" style="width:100%;margin-top:8px;">Join Voice</button>
+      </section>
+      <section class="side-section">
+        <div class="side-title">Games</div>
+        <div class="game-list" id="active-games"></div>
+        <div class="game-picker" style="margin-top:8px;">
+          <button class="game-btn" data-game="chess" type="button"><img src="<?= e(app_url('/assets/images/chess-icon.png')) ?>" alt="">Chess</button>
+          <button class="game-btn" data-game="checkers" type="button"><img src="<?= e(app_url('/assets/images/checkers-icon.png')) ?>" alt="">Checkers</button>
+        </div>
+      </section>
+      <section class="side-section">
+        <button class="btn icon-label" id="locate-btn" style="width:100%;"><img src="<?= e(app_url('/assets/images/locate.png')) ?>" alt="">Locate Friends</button>
+        <div class="app-version" id="app-version">Checking version...</div>
+      </section>
+    </div>
+  </aside>
+</div>
+<div class="modal" id="voice-note-modal">
+  <div class="modal-box voice-note-box">
+    <div class="modal-head">
+      <strong>Voice Note</strong>
+      <button class="btn" id="voice-note-cancel" type="button">Cancel</button>
+    </div>
+    <div class="voice-note-status" id="voice-note-status">Recording...</div>
+    <button class="btn btn-aqua" id="voice-note-stop" type="button">Stop and Send</button>
+  </div>
+</div>
+<div class="modal" id="room-edit-modal">
+  <form class="modal-box" id="room-edit-form" enctype="multipart/form-data">
+    <div class="modal-head">
+      <strong>Edit Room</strong>
+      <button class="btn" id="room-edit-close" type="button">Close</button>
+    </div>
+    <div class="room-edit-preview" id="room-edit-preview">
+      <?php if ($room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
+      <video muted loop playsinline preload="metadata"><source src="<?= e(media_url($room['background_path'])) ?>" type="<?= e($room['background_mime']) ?>"></video>
+      <?php elseif ($room['background_path']): ?>
+      <img src="<?= e(media_url($room['background_path'])) ?>" alt="Current room background">
+      <?php else: ?>
+      <div class="room-edit-preview-empty">No background selected</div>
+      <?php endif; ?>
+    </div>
+    <label>Room name<input id="room-edit-name" name="name" value="<?= e($room['name']) ?>" required></label>
+    <label>Background image or video
+      <span class="file-picker">
+        <input id="room-edit-background" type="file" name="background" accept="image/*,video/mp4,video/webm">
+        <span class="file-picker-btn">Choose Background</span>
+        <span class="file-picker-name" id="room-edit-background-name">No file selected</span>
+      </span>
+      <span class="upload-progress" id="room-edit-upload-progress" aria-live="polite">
+        <span class="upload-progress-track"><span class="upload-progress-bar"></span></span>
+        <span class="upload-progress-meta"><span class="upload-progress-msg">Waiting...</span><span class="upload-progress-pct">0%</span></span>
+      </span>
+    </label>
+    <div class="ejection-list-wrap">
+      <div class="side-title">Kicked Users</div>
+      <div class="ejection-list" id="room-ejection-list">Loading...</div>
+    </div>
+    <button class="btn btn-primary" type="submit">Save Room</button>
+  </form>
+</div>
+<div class="modal" id="host-warn-modal">
+  <form class="modal-box host-action-box" id="host-warn-form">
+    <div class="modal-head">
+      <strong>Warn User</strong>
+      <button class="window-close" id="host-warn-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="host-target-line" id="host-warn-target"></div>
+    <label class="host-field">Warning message<textarea id="host-warn-message" maxlength="1000" rows="5" placeholder="Type the warning this user will see..." required></textarea></label>
+    <div class="host-action-footer">
+      <span class="minor">They must acknowledge it before continuing.</span>
+      <button class="btn btn-danger" type="submit">Send Warning</button>
+    </div>
+  </form>
+</div>
+<div class="modal" id="host-kick-modal">
+  <form class="modal-box host-action-box" id="host-kick-form">
+    <div class="modal-head">
+      <strong>Kick from Room</strong>
+      <button class="window-close" id="host-kick-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="host-target-line" id="host-kick-target"></div>
+    <label class="host-field host-duration-field">Duration
+      <select id="host-kick-duration">
+        <option value="5">5 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="60">60 minutes</option>
+        <option value="1440">1440 minutes</option>
+        <option value="permanent">Permanent</option>
+      </select>
+    </label>
+    <button class="btn btn-danger host-kick-submit" type="submit">Kick from Room</button>
+  </form>
+</div>
+<div class="modal" id="community-eject-modal">
+  <form class="modal-box host-action-box" id="community-eject-form">
+    <div class="modal-head">
+      <strong>Community Eject</strong>
+      <button class="window-close" id="community-eject-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="host-target-line" id="community-eject-target"></div>
+    <label class="host-field host-duration-field">Duration
+      <select id="community-eject-duration">
+        <option value="5">5 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="60">60 minutes</option>
+        <option value="1440">1440 minutes</option>
+        <option value="permanent">Forever</option>
+      </select>
+    </label>
+    <label class="host-field">Reason
+      <textarea id="community-eject-reason" maxlength="1000"></textarea>
+    </label>
+    <button class="btn btn-danger host-kick-submit" type="submit">Community Eject</button>
+  </form>
+</div>
+<div class="modal" id="host-notice-modal">
+  <div class="modal-box warning-box">
+    <div class="modal-head">
+      <strong id="host-notice-title">Notice</strong>
+    </div>
+    <div id="host-notice-message"></div>
+    <button class="btn btn-aqua" id="host-notice-understand" type="button" style="width:100%;margin-top:14px;">I understand</button>
+  </div>
+</div>
+<div class="modal" id="link-icon-modal">
+  <div class="modal-box link-icon-box">
+    <div class="modal-head">
+      <strong>Link Icon</strong>
+      <button class="window-close" id="link-icon-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="link-icon-grid" id="link-icon-grid">
+      <?php foreach (['plus','heart','wedding-rings','wedding-rings-lesbian','wedding-rings-gay','help','archer','cross-swords','lips','lotus','handcuffs'] as $icon): ?>
+      <button type="button" data-link-icon="<?= e($icon) ?>"><img src="<?= e(app_url('/assets/images/cs-icons/' . $icon . '.png')) ?>" alt=""><span><?= e(ucwords(str_replace('-', ' ', $icon))) ?></span></button>
+      <?php endforeach; ?>
+    </div>
+  </div>
+</div>
+<div class="modal" id="warning-modal">
+  <div class="modal-box warning-box">
+    <div class="modal-head">
+      <strong>Warning</strong>
+      <button class="window-close" id="warning-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div id="warning-message">You cannot link with this user.</div>
+  </div>
+</div>
+<div class="modal" id="delete-message-modal">
+  <div class="modal-box warning-box">
+    <div class="modal-head">
+      <strong>Delete Message</strong>
+      <button class="window-close" id="delete-message-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div>Are you sure you want to delete this message?</div>
+    <div class="delete-message-actions">
+      <button class="btn" id="delete-message-cancel" type="button">Cancel</button>
+      <button class="btn btn-danger" id="delete-message-confirm" type="button">Delete Message</button>
+    </div>
+  </div>
+</div>
+<div id="ctx-menu">
+  <button id="ctx-change-avatar" type="button">Change Avatar</button>
+  <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
+  <button id="ctx-dm" type="button">Send DM</button>
+  <button id="ctx-block" class="danger" type="button">Block</button>
+  <button id="ctx-unblock" type="button">Unblock</button>
+  <button id="ctx-unlink" class="danger" type="button">Unlink</button>
+  <div class="ctx-divider" id="ctx-tools-divider"></div>
+  <div class="ctx-submenu-wrap" id="ctx-tools-wrap">
+    <button id="ctx-tools" type="button">Tools <span>›</span></button>
+    <div class="ctx-submenu" id="ctx-tools-submenu">
+      <button id="ctx-host-warn" type="button">Warn</button>
+      <button id="ctx-host-kick" class="danger" type="button">Kick from Room</button>
+      <button id="ctx-community-eject" class="danger" type="button">Community Eject</button>
+    </div>
+  </div>
+</div>
+<div id="text-ctx-menu">
+  <button id="text-copy" type="button">Copy</button>
+  <button id="text-cut" type="button">Cut</button>
+  <button id="text-paste" type="button">Paste</button>
+</div>
+<div id="msg-action-menu">
+  <div class="msg-react-row">
+    <button type="button" data-msg-reaction="❤️">❤️</button>
+    <button type="button" data-msg-reaction="👍">👍</button>
+    <button type="button" data-msg-reaction="👎">👎</button>
+    <button type="button" data-msg-reaction="😂">😂</button>
+    <button type="button" data-msg-reaction="😌">😌</button>
+    <button type="button" data-msg-reaction="✅">✅</button>
+  </div>
+  <button id="msg-edit-action" type="button">Edit</button>
+  <button id="msg-delete-action" class="danger" type="button">Delete</button>
+</div>
+<div id="tab-ctx-menu">
+  <button id="tab-clear-history" type="button">Clear History</button>
+  <button id="tab-close-dm" type="button">Close DM</button>
+  <button id="tab-unlink" class="danger" type="button">Unlink</button>
+</div>
+<div id="room-menu">
+  <button id="lock-session-btn" type="button"><img src="<?= e(app_url('/assets/images/secure.png')) ?>" alt="">Lock Session</button>
+  <a id="rooms-link" href="<?= e(app_url('/lobby.php?leave=1')) ?>"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Lobby</a>
+  <a id="logout-link" href="<?= e(app_url('/logout.php')) ?>"><img src="<?= e(app_url('/assets/images/logout.png')) ?>" alt="">Log Out</a>
+</div>
+<div class="session-lock" id="session-lock" aria-hidden="true">
+  <form class="session-lock-box" id="session-lock-form">
+    <div class="session-lock-brand">
+      <img src="<?= e(app_url('/assets/images/chatspace-ce-logo.png')) ?>" alt="">
+      <div>
+        <strong>Session Locked</strong>
+        <span><?= e($user['display_name']) ?></span>
+      </div>
+    </div>
+    <label>Account password
+      <input id="session-lock-password" type="password" autocomplete="current-password">
+    </label>
+    <div class="session-lock-error" id="session-lock-error" role="alert"></div>
+    <button class="btn btn-primary" type="submit">Unlock Session</button>
+  </form>
+</div>
+<div id="emoji-picker">
+  <button type="button">😀</button><button type="button">😂</button><button type="button">😌</button><button type="button">😏</button>
+  <button type="button">😉</button><button type="button">😈</button><button type="button">🖤</button><button type="button">✨</button>
+  <button type="button">🔥</button><button type="button">💜</button><button type="button">👍</button><button type="button">❤️</button>
+  <button type="button">🤣</button><button type="button">😭</button><button type="button">🥰</button><button type="button">👀</button>
+</div>
+<input type="file" id="avatar-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
+<div class="modal" id="game-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <strong id="game-title">Game</strong>
+      <button class="btn" id="game-close">Close</button>
+    </div>
+    <iframe id="game-frame" title="Game" style="width:100%;height:66vh;border:1px solid var(--line);border-radius:8px;background:#fff;"></iframe>
+  </div>
+</div>
+<div class="modal" id="locate-modal">
+  <div class="modal-box locate-box">
+    <div class="modal-head">
+      <strong>Locate Friends</strong>
+      <button class="window-close" id="locate-close" type="button" aria-label="Close">×</button>
+    </div>
+    <label>Friend name
+      <input id="friend-search" autocomplete="off" placeholder="Type part of a name">
+    </label>
+    <div id="friend-loading" class="locate-loading" style="display:none;">
+      <span class="spinner"></span>
+      <span>Searching...</span>
+    </div>
+    <div class="friend-list" id="friend-results" style="margin-top:12px;"></div>
+  </div>
+</div>
+<script src="<?= e(app_url('/assets/js/room.js')) ?>"></script>
+</body>
+</html>

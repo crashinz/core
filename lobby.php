@@ -1,0 +1,362 @@
+<?php
+require_once __DIR__ . '/includes/base.php';
+$user = require_user();
+$pdo = db();
+$communityEjection = active_community_ejection($pdo, (int)$user['id']);
+if ($communityEjection) {
+    redirect_to('/community_ejected.php');
+}
+$ejectionNotice = $_SESSION['room_ejection_notice'] ?? null;
+unset($_SESSION['room_ejection_notice']);
+cleanup_stale_participants($pdo);
+
+if (($_GET['leave'] ?? '') === '1') {
+    $pdo->prepare('UPDATE participants SET last_seen_at = NULL, webcam_path = NULL WHERE user_id = ?')->execute([(int)$user['id']]);
+    $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$user['id']]);
+    redirect_to('/lobby.php');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $name = trim($_POST['name'] ?? '');
+    if ($name !== '') {
+        $bgPath = null;
+        $bgMime = null;
+        if (!empty($_FILES['background']['tmp_name']) && is_uploaded_file($_FILES['background']['tmp_name'])) {
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime = $finfo->file($_FILES['background']['tmp_name']) ?: '';
+            $allowed = ['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'];
+            $isVideo = str_starts_with($mime, 'video/');
+            $maxBytes = $isVideo ? app_setting_bytes($pdo, 'room_video_max_size_mb', 200) : app_setting_bytes($pdo, 'room_image_max_size_mb', 10);
+            if (in_array($mime, $allowed, true) && (int)$_FILES['background']['size'] <= $maxBytes) {
+                $ext = match ($mime) {
+                    'image/png' => 'png',
+                    'image/webp' => 'webp',
+                    'image/gif' => 'gif',
+                    'video/mp4' => 'mp4',
+                    'video/webm' => 'webm',
+                    default => 'jpg',
+                };
+                $file = bin2hex(random_bytes(12)) . '.' . $ext;
+                $dest = __DIR__ . '/assets/uploads/backgrounds/' . $file;
+                move_uploaded_file($_FILES['background']['tmp_name'], $dest);
+                $bgPath = '/assets/uploads/backgrounds/' . $file;
+                $bgMime = $mime;
+            }
+        }
+        $stmt = $pdo->prepare('INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime) VALUES (?,?,?,?,?)');
+        $stmt->execute([uuid_v4(), (int)$user['id'], $name, $bgPath, $bgMime]);
+        active_session_for_room($pdo, (int)$pdo->lastInsertId());
+        redirect_to('/lobby.php');
+    }
+}
+
+$onlineCutoff = stale_cutoff($pdo);
+$roomsStmt = $pdo->prepare(
+    'SELECT r.*, u.display_name AS owner_name,
+        (
+          SELECT COUNT(DISTINCT p.user_id)
+            FROM participants p
+            JOIN room_sessions rs ON rs.id = p.session_id
+           WHERE rs.room_id = r.id
+             AND p.last_seen_at >= ?
+        ) AS online_count
+     FROM rooms r JOIN users u ON u.id = r.owner_id
+     WHERE NOT EXISTS (
+        SELECT 1 FROM room_ejections re
+         WHERE re.room_id = r.id
+           AND re.user_id = ' . (int)$user['id'] . '
+           AND ' . active_ejection_sql('re') . '
+     )
+     ORDER BY r.created_at DESC'
+);
+$roomsStmt->execute([$onlineCutoff]);
+$rooms = $roomsStmt->fetchAll();
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lobby - ChatSpace CE</title>
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+</head>
+<body data-app-base="<?= e(app_base_path()) ?>">
+<main class="picker-shell">
+  <section class="picker-main">
+    <div class="topbar">
+      <div class="lobby-brand-block">
+        <div class="app-title">
+          <img src="<?= e(app_url('/assets/images/chatspace-ce-logo.png')) ?>" alt="">
+          <div>
+            <div class="app-name">ChatSpace</div>
+            <div class="app-edition">Community Edition</div>
+          </div>
+        </div>
+        <h1 class="picker-title">Lobby</h1>
+      </div>
+      <div class="top-actions lobby-account">
+        <div class="minor lobby-signed-in">Signed in as <strong><?= e($user['display_name']) ?></strong></div>
+        <button class="gear-btn lobby-gear" id="lobby-menu-btn" type="button" aria-label="Lobby menu">⚙</button>
+      </div>
+      <div id="lobby-menu">
+        <button id="password-open" type="button">Update Password</button>
+        <?php if (in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
+        <button id="admin-open" type="button">Admin</button>
+        <?php endif; ?>
+        <a href="<?= e(app_url('/logout.php')) ?>">Log Out</a>
+      </div>
+    </div>
+    <div class="room-grid">
+      <form class="room-card create-room-tile" id="create-room-form" method="post" enctype="multipart/form-data">
+        <div class="create-room-tile-inner">
+          <h2>Create Room</h2>
+          <label>Room name<input name="name" required placeholder="Moonlit Study, Neon Lounge, Table 7..."></label>
+          <label>Background image or video
+            <span class="file-picker">
+              <input id="room-background-input" type="file" name="background" accept="image/*,video/mp4,video/webm">
+              <span class="file-picker-btn">Choose Background</span>
+              <span class="file-picker-name" id="room-background-name">No file selected</span>
+            </span>
+            <span class="upload-progress" id="room-upload-progress" aria-live="polite">
+              <span class="upload-progress-track"><span class="upload-progress-bar"></span></span>
+              <span class="upload-progress-meta"><span class="upload-progress-msg">Waiting...</span><span class="upload-progress-pct">0%</span></span>
+            </span>
+          </label>
+          <button class="btn btn-primary" type="submit">Create Room</button>
+        </div>
+      </form>
+      <?php foreach ($rooms as $room): ?>
+      <article class="room-card">
+        <div class="room-card-media" <?php if ($room['background_path'] && !str_starts_with((string)$room['background_mime'], 'video/')): ?>style="background-image:url('<?= e(media_url($room['background_path'])) ?>')"<?php endif; ?>>
+          <?php if ($room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
+          <video autoplay muted loop playsinline><source src="<?= e(media_url($room['background_path'])) ?>" type="<?= e($room['background_mime']) ?>"></video>
+          <?php endif; ?>
+        </div>
+        <div class="room-card-body">
+          <h2><?= e($room['name']) ?></h2>
+          <div class="minor"><?= (int)$room['online_count'] ?> online · made by <?= e($room['owner_name']) ?></div>
+          <p class="room-card-actions">
+            <a class="btn btn-primary" href="<?= e(app_url('/chatroom.php?id=' . rawurlencode((string)$room['public_id']))) ?>">Enter</a>
+            <?php if ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
+            <button class="btn btn-primary room-edit-open" type="button" data-room-id="<?= e($room['public_id']) ?>" data-room-name="<?= e($room['name']) ?>" data-room-bg="<?= e($room['background_path'] ? media_url($room['background_path']) : '') ?>" data-room-mime="<?= e($room['background_mime'] ?? '') ?>">Edit</button>
+            <?php endif; ?>
+          </p>
+        </div>
+      </article>
+      <?php endforeach; ?>
+    </div>
+  </section>
+</main>
+<div class="modal" id="lobby-room-edit-modal">
+  <form class="modal-box" id="lobby-room-edit-form" enctype="multipart/form-data">
+    <div class="modal-head">
+      <strong>Edit Room</strong>
+      <button class="btn" id="lobby-room-edit-close" type="button">Close</button>
+    </div>
+    <input type="hidden" id="lobby-room-edit-id" name="room_public_id">
+    <div class="room-edit-preview" id="lobby-room-edit-preview"></div>
+    <label>Room name<input id="lobby-room-edit-name" name="name" required></label>
+    <label>Background image or video
+      <span class="file-picker">
+        <input id="lobby-room-edit-background" type="file" name="background" accept="image/*,video/mp4,video/webm">
+        <span class="file-picker-btn">Choose Background</span>
+        <span class="file-picker-name" id="lobby-room-edit-background-name">No file selected</span>
+      </span>
+      <span class="upload-progress" id="lobby-room-edit-upload-progress" aria-live="polite">
+        <span class="upload-progress-track"><span class="upload-progress-bar"></span></span>
+        <span class="upload-progress-meta"><span class="upload-progress-msg">Waiting...</span><span class="upload-progress-pct">0%</span></span>
+      </span>
+    </label>
+    <div class="ejection-list-wrap">
+      <div class="side-title">Kicked Users</div>
+      <div class="ejection-list" id="lobby-room-ejection-list">Loading...</div>
+    </div>
+    <button class="btn btn-primary" type="submit">Save Room</button>
+  </form>
+</div>
+<?php if ($ejectionNotice): ?>
+<div class="modal open" id="lobby-ejection-modal">
+  <div class="modal-box warning-box">
+    <div class="modal-head">
+      <strong>Room Ejection</strong>
+    </div>
+    <div>
+      <?php if (!empty($ejectionNotice['permanent'])): ?>
+      You have been permanently ejected from the room.
+      <?php else: ?>
+      You have been ejected from the room for <?= (int)($ejectionNotice['duration_minutes'] ?? 0) ?> minutes.
+      <?php endif; ?>
+    </div>
+    <button class="btn btn-aqua" id="lobby-ejection-understand" type="button" style="width:100%;margin-top:14px;">I understand</button>
+  </div>
+</div>
+<?php endif; ?>
+<div class="modal" id="password-modal">
+  <form class="modal-box password-box" id="password-form">
+    <div class="modal-head">
+      <strong>Update Password</strong>
+      <button class="window-close" id="password-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="password-status" id="password-status" aria-live="polite"></div>
+    <label>Old password<input id="password-old" name="old_password" type="password" required autocomplete="current-password"></label>
+    <label>New password<input id="password-new" name="new_password" type="password" required minlength="8" autocomplete="new-password"></label>
+    <label>Confirm new password<input id="password-confirm" name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label>
+    <div class="password-actions">
+      <button class="btn btn-primary" type="submit">Update</button>
+      <button class="btn" id="password-cancel" type="button">Cancel</button>
+    </div>
+  </form>
+</div>
+<?php if (in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
+<div class="modal" id="admin-modal">
+  <div class="modal-box admin-box">
+    <div class="modal-head">
+      <strong>Admin Dashboard</strong>
+      <button class="btn" id="admin-close" type="button">Close</button>
+    </div>
+    <div class="admin-dashboard">
+      <nav class="admin-nav" aria-label="Admin sections">
+        <div class="admin-nav-label">Overview</div>
+        <button class="admin-nav-item active" data-admin-section="overview" type="button">
+          <img src="<?= e(app_url('/assets/images/chatspace-ce-logo.png')) ?>" alt=""> Dashboard
+        </button>
+        <div class="admin-nav-label">Users</div>
+        <button class="admin-nav-item" data-admin-section="users" type="button">
+          <img src="<?= e(app_url('/assets/images/locate.png')) ?>" alt=""> Manage Users
+          <span class="admin-nav-count" id="admin-user-count">0</span>
+        </button>
+        <div class="admin-nav-label">System</div>
+        <button class="admin-nav-item" data-admin-section="settings" type="button">
+          <span class="admin-nav-symbol">⚙</span> Limits
+        </button>
+        <button class="admin-nav-item" data-admin-section="database" type="button">
+          <img src="<?= e(app_url('/assets/images/secure.png')) ?>" alt=""> Database
+        </button>
+        <div class="admin-nav-label">Moderation</div>
+        <button class="admin-nav-item" data-admin-section="moderation" type="button">
+          <img src="<?= e(app_url('/assets/images/block-user.png')) ?>" alt=""> Actions
+          <span class="admin-nav-count" id="admin-moderation-count">0</span>
+        </button>
+        <button class="admin-nav-item" data-admin-section="logs" type="button">
+          <img src="<?= e(app_url('/assets/images/chat-pane-bubble.png')) ?>" alt=""> Tool Logs
+          <span class="admin-nav-count" id="admin-log-count">0</span>
+        </button>
+      </nav>
+      <div class="admin-main">
+        <section class="admin-section active" id="admin-section-overview">
+          <div class="admin-section-title">Operator Overview</div>
+          <div class="admin-section-sub">Quick status for accounts, enforcement, platform limits, and backup controls.</div>
+          <div class="admin-summary-grid">
+            <button class="admin-summary-card" type="button" data-admin-jump="users">
+              <span>Users</span>
+              <strong id="admin-summary-users">0</strong>
+              <small>Manage accounts and roles</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="moderation">
+              <span>Moderation</span>
+              <strong id="admin-summary-moderation">0</strong>
+              <small>Blocks and active ejections</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings">
+              <span>Limits</span>
+              <strong>6</strong>
+              <small>Rate and upload controls</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="database">
+              <span>Database</span>
+              <strong>DB</strong>
+              <small>Download or restore backups</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="admin-section" id="admin-section-users">
+          <div class="admin-section-title">Manage Users</div>
+          <div class="admin-section-sub">Create accounts, reset passwords, and set account roles.</div>
+          <div class="admin-panel">
+            <form class="admin-create" id="admin-create">
+              <input name="display_name" placeholder="Display name" required>
+              <input name="email" type="email" placeholder="Email" required>
+              <input name="password" type="password" placeholder="Password" required>
+              <select name="role">
+                <option value="user">User</option>
+                <option value="guide">Guide</option>
+                <option value="developer">Developer</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button class="btn btn-aqua" type="submit">Add User</button>
+            </form>
+          </div>
+          <div class="admin-panel">
+            <div class="admin-users" id="admin-users"></div>
+          </div>
+        </section>
+
+        <section class="admin-section" id="admin-section-settings">
+          <div class="admin-section-title">Limits</div>
+          <div class="admin-section-sub">Tune chat speed, avatar movement, and media upload boundaries.</div>
+          <div class="admin-panel">
+            <form class="admin-settings" id="admin-settings">
+              <label>Chat posts per second <input name="chat_posts_per_second" type="number" min="0.2" max="30" step="0.1"></label>
+              <label>Avatar movements per second <input name="avatar_movements_per_second" type="number" min="1" max="60" step="1"></label>
+              <label>Avatar max size MB <input name="avatar_max_size_mb" type="number" min="0.5" max="50" step="0.5"></label>
+              <label>Room image max size MB <input name="room_image_max_size_mb" type="number" min="1" max="100" step="1"></label>
+              <label>Room video max size MB <input name="room_video_max_size_mb" type="number" min="5" max="1000" step="5"></label>
+              <label>Idle removal minutes <input name="participant_idle_timeout_minutes" type="number" min="0.5" max="120" step="0.5"></label>
+              <button class="btn btn-aqua" type="submit">Save Settings</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="admin-section" id="admin-section-database">
+          <div class="admin-section-title">Database</div>
+          <div class="admin-section-sub">Download a local backup or restore a known-good SQLite database.</div>
+          <div class="admin-panel">
+            <div class="admin-actions">
+              <a class="btn" href="<?= e(app_url('/api/admin_database.php?action=download')) ?>">Download Database</a>
+              <form id="admin-db-restore" class="admin-restore">
+                <label class="file-picker">
+                  <input name="database" type="file" accept=".sqlite,.db,application/vnd.sqlite3,application/octet-stream" required>
+                  <span class="file-picker-btn">Choose Backup</span>
+                  <span class="file-picker-name" id="admin-db-restore-name">No file selected</span>
+                </label>
+                <button class="btn btn-danger" type="submit">Restore Database</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section class="admin-section" id="admin-section-moderation">
+          <div class="admin-section-title">Moderation</div>
+          <div class="admin-section-sub">Remove blocks, undo room kicks, and reverse community ejections.</div>
+          <div class="admin-moderation-grid">
+            <section class="admin-panel">
+              <h3>User Blocks</h3>
+              <div class="admin-list" id="admin-blocks">Loading...</div>
+            </section>
+            <section class="admin-panel">
+              <h3>Room Kicks</h3>
+              <div class="admin-list" id="admin-room-ejections">Loading...</div>
+            </section>
+            <section class="admin-panel admin-panel-wide">
+              <h3>Community Ejections</h3>
+              <div class="admin-list" id="admin-community-ejections">Loading...</div>
+            </section>
+          </div>
+        </section>
+
+        <section class="admin-section" id="admin-section-logs">
+          <div class="admin-section-title">Tool Logs</div>
+          <div class="admin-section-sub">Review host, staff, and admin actions across rooms.</div>
+          <div class="admin-panel">
+            <div class="admin-list admin-log-list" id="admin-tool-logs">Loading...</div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+<script src="<?= e(app_url('/assets/js/lobby.js')) ?>"></script>
+</body>
+</html>

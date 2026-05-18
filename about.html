@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatSpace Community Edition</title>
+  <style>
+@font-face {
+  font-family: Outfit;
+  src: url('assets/fonts/outfit-latin.woff2') format('woff2');
+  font-weight: 100 900;
+}
+
+:root {
+  --bg: #06070b;
+  --panel: rgba(15, 17, 26, .9);
+  --panel-strong: rgba(20, 23, 34, .96);
+  --line: rgba(255, 255, 255, .12);
+  --text: #f0eff8;
+  --muted: rgba(240, 239, 248, .62);
+  --soft: rgba(240, 239, 248, .42);
+  --purple: #7c6af7;
+  --aqua: #27d3c3;
+  --rose: #ff5f7a;
+  --gold: #f2c35d;
+  --blue: #4d8dff;
+  --green: #36d68b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Outfit, system-ui, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(39, 211, 195, .13), transparent 28%),
+    radial-gradient(circle at 84% 0%, rgba(124, 106, 247, .2), transparent 30%),
+    linear-gradient(180deg, #0c0d14 0%, var(--bg) 42%, #040508 100%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: auto 0 0;
+  z-index: -1;
+  height: 42vh;
+  background: linear-gradient(to top, rgba(39, 211, 195, .06), transparent);
+  pointer-events: none;
+}
+
+a {
+  color: inherit;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  min-height: 76px;
+  padding: 10px clamp(20px, 4vw, 58px);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: rgba(6, 7, 11, .78);
+  backdrop-filter: blur(22px);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  width: min(172px, 34vw);
+  text-decoration: none;
+}
+
+.wordmark img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.top-nav a {
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+  padding: 9px 12px;
+  border-radius: 8px;
+  transition: background .16s, color .16s, border-color .16s;
+}
+
+.top-nav a:hover {
+  color: var(--text);
+  background: rgba(255,255,255,.06);
+}
+
+.js-ready .reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity .75s ease,
+    transform .75s cubic-bezier(.16, 1, .3, 1);
+  will-change: opacity, transform;
+}
+
+.js-ready .reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.js-ready .reveal-delay-1 { transition-delay: .1s; }
+.js-ready .reveal-delay-2 { transition-delay: .2s; }
+.js-ready .reveal-delay-3 { transition-delay: .3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  .js-ready .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+main {
+  overflow: hidden;
+}
+
+.hero-section {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 76px);
+  padding: clamp(14px, 3vw, 30px) clamp(18px, 5vw, 72px) 30px;
+}
+
+.hero-copy {
+  width: min(980px, 100%);
+  text-align: center;
+  transform: translateY(-22px);
+}
+
+.main-logo {
+  display: block;
+  width: min(430px, 92%);
+  height: auto;
+  margin: 0 auto 14px;
+}
+
+.hero-kicker,
+.section-label {
+  margin: 0 0 34px;
+  color: #a9a2ff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 780px;
+  margin: 0 auto 14px;
+  font-size: 54px;
+  line-height: .95;
+  letter-spacing: 0;
+}
+
+.hero-text {
+  max-width: 680px;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+.collaboration-band,
+.intro-section,
+.feature-section,
+.promise-section,
+.systems-section,
+.install-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 68px clamp(18px, 4vw, 36px);
+}
+
+.collaboration-band {
+  padding-top: 28px;
+}
+
+.hero-collaboration {
+  width: min(820px, 100%);
+  margin: 32px auto 0;
+  padding: 0;
+}
+
+.hero-collaboration .collab-main {
+  padding: 14px clamp(20px, 3vw, 30px);
+}
+
+.hero-collaboration .collab-title {
+  margin-bottom: 12px;
+}
+
+.hero-collaboration .collab-logo-box {
+  height: 96px;
+}
+
+.hero-collaboration .collab-logo-box img {
+  max-height: 96px;
+}
+
+.hero-collaboration .plus-mark {
+  height: 96px;
+  transform: translateX(8px);
+}
+
+.collab-main {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: clamp(26px, 4vw, 44px);
+  background: linear-gradient(145deg, rgba(20,23,34,.78), rgba(6,7,11,.82));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.collab-title {
+  margin-bottom: 22px;
+  color: var(--soft);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.collab-logos {
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) 34px minmax(240px, 360px);
+  align-items: center;
+  justify-content: center;
+  column-gap: 28px;
+}
+
+.collab-logo-box {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 96px;
+}
+
+.collab-logo-box img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.catie-lyra-logo-box img {
+  max-width: 74%;
+  transform: translateX(-16px);
+}
+
+.plus-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 96px;
+  color: rgba(255,255,255,.34);
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.intro-grid,
+.install-section {
+  display: grid;
+  grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr);
+  gap: clamp(24px, 5vw, 70px);
+  align-items: start;
+}
+
+h2 {
+  margin-bottom: 18px;
+  font-size: 48px;
+  line-height: 1.02;
+}
+
+.section-copy {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.section-copy p {
+  margin-bottom: 16px;
+}
+
+.feature-section h2 {
+  max-width: 820px;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.feature-card {
+  position: relative;
+  min-height: 250px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.045), rgba(0,0,0,.12)),
+    var(--panel);
+  overflow: hidden;
+}
+
+.feature-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--card-accent), transparent 42%);
+  opacity: .17;
+  pointer-events: none;
+}
+
+.feature-icon,
+.feature-card h3,
+.feature-card p {
+  position: relative;
+}
+
+.feature-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 30px;
+  margin-bottom: 42px;
+  border: 1px solid color-mix(in srgb, var(--card-accent), white 20%);
+  border-radius: 999px;
+  color: #fff;
+  background: color-mix(in srgb, var(--card-accent), transparent 72%);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.feature-card h3 {
+  margin-bottom: 10px;
+  font-size: 22px;
+}
+
+.feature-card p {
+  color: var(--muted);
+  line-height: 1.58;
+}
+
+.accent-purple { --card-accent: var(--purple); }
+.accent-aqua { --card-accent: var(--aqua); }
+.accent-rose { --card-accent: var(--rose); }
+.accent-gold { --card-accent: var(--gold); }
+.accent-blue { --card-accent: var(--blue); }
+.accent-green { --card-accent: var(--green); }
+
+.system-panel {
+  padding: clamp(24px, 5vw, 46px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(39,211,195,.1), transparent 36%),
+    linear-gradient(145deg, var(--panel-strong), rgba(8,9,14,.92));
+}
+
+.system-panel h2 {
+  max-width: 760px;
+}
+
+.system-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 30px;
+}
+
+.system-list div {
+  padding-top: 16px;
+  border-top: 2px solid rgba(124,106,247,.45);
+}
+
+.system-list strong,
+.system-list span {
+  display: block;
+}
+
+.system-list strong {
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.system-list span {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.install-steps {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.install-steps li {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+}
+
+.install-steps span {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(135deg, var(--purple), var(--aqua));
+  font-weight: 900;
+}
+
+.install-steps p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.credits-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 52px clamp(18px, 4vw, 36px) 72px;
+  scroll-margin-top: 96px;
+}
+
+.credits-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: clamp(24px, 4vw, 44px);
+  background:
+    linear-gradient(90deg, rgba(124,106,247,.1), transparent 34%),
+    linear-gradient(145deg, rgba(15,17,26,.94), rgba(5,6,10,.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.credits-intro {
+  max-width: 760px;
+  margin-bottom: 28px;
+}
+
+.credits-intro h2 {
+  margin-bottom: 12px;
+  scroll-margin-top: 110px;
+}
+
+.credits-intro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.credits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.credit-card {
+  min-height: 290px;
+  padding: 28px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.045), rgba(0,0,0,.18)),
+    rgba(255,255,255,.035);
+}
+
+.credit-label {
+  margin-bottom: 14px;
+  color: #a889ff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.credit-name {
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.credit-handle {
+  display: inline-flex;
+  margin-left: 8px;
+  color: var(--gold);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.credit-role {
+  margin-bottom: 20px;
+  color: var(--soft);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.credit-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 22px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: var(--text);
+  background: rgba(0,0,0,.38);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.credit-location span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.credit-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.ai-badge {
+  position: relative;
+  top: calc(-.6em - 10px);
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  padding: 1px 4px;
+  border: 1px solid rgba(168,85,247,.34);
+  border-radius: 3px;
+  color: #a889ff;
+  background: rgba(168,85,247,.18);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.ai-badge-intro {
+  top: calc(-.6em - 5px);
+}
+
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 22px clamp(18px, 5vw, 72px);
+  border-top: 1px solid rgba(255,255,255,.09);
+  color: var(--soft);
+  font-size: 13px;
+  text-align: center;
+}
+
+.site-footer a {
+  color: var(--text);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+@media (max-width: 980px) {
+  .hero-section,
+  .intro-grid,
+  .install-section {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-section {
+    min-height: auto;
+  }
+
+  .feature-grid,
+  .system-list,
+  .credits-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  h1 {
+    font-size: 54px;
+  }
+
+  h2 {
+    font-size: 40px;
+  }
+}
+
+@media (max-width: 680px) {
+  .site-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wordmark {
+    width: auto;
+  }
+
+  .top-nav {
+    justify-content: flex-start;
+  }
+
+  h1 { font-size: 42px; }
+  h2 { font-size: 32px; }
+
+  .feature-grid,
+  .system-list,
+  .credits-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .collab-logos {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+  }
+
+  .plus-mark {
+    height: 34px;
+  }
+
+  .collab-logo-box {
+    height: 100px;
+  }
+
+  .site-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <a class="wordmark" href="about.html" aria-label="ChatSpace Community Edition home">
+      <img src="assets/images/logos/chatspace-ce-full-logo.png" alt="ChatSpace Community Edition">
+    </a>
+    <nav class="top-nav" aria-label="Project navigation">
+      <a href="#features">Features</a>
+      <a href="#community">Community</a>
+      <a href="#install">Install</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero-section">
+      <div class="hero-copy">
+        <img class="main-logo reveal" src="assets/images/logos/chatspace-ce-full-logo.png" alt="ChatSpace Community Edition">
+        <p class="hero-kicker reveal reveal-delay-1">Room-first community chat for small, expressive spaces.</p>
+        <h1 class="reveal reveal-delay-2">Self-hosted room chat for expressive communities.</h1>
+        <p class="hero-text reveal reveal-delay-3">
+          ChatSpace Community Edition gives communities expressive shared rooms with avatars on a live stage,
+          real-time room chat, community-wide chat, private DMs, linked pairs, voice, webcams, games, and practical
+          moderation tools.
+        </p>
+        <div class="collaboration-band hero-collaboration" aria-labelledby="collab-title">
+          <div class="collab-main reveal reveal-delay-3">
+            <div class="collab-title" id="collab-title">created in collaboration with</div>
+            <div class="collab-logos">
+              <span class="collab-logo-box chatspace-logo-box"><img src="assets/images/logos/chatspace-full-logo.png" alt="ChatSpace"></span>
+              <span class="plus-mark">+</span>
+              <span class="collab-logo-box catie-lyra-logo-box"><img src="assets/images/logos/catiexlyra-logo-trimmed.png" alt="Catie X Lyra"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="intro-section" id="community">
+      <div class="section-label reveal">Community Edition</div>
+      <div class="intro-grid">
+        <div class="reveal reveal-delay-1">
+          <h2>Designed for rooms that feel alive.</h2>
+        </div>
+        <div class="section-copy reveal reveal-delay-2">
+          <p>
+            Each room has its own name, image or video background, live participant list, and avatar stage. People
+            can talk in the room, step into community chat, open direct messages, locate friends, or jump to a
+            friend's current room when they are allowed to enter.
+          </p>
+          <p>
+            The interface is built around presence: linked pairs, speech balloons, typing indicators, reactions,
+            uploads, voice notes, webcams, and small shared games that make a room feel inhabited instead of flat.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="promise-section" aria-labelledby="promise-title">
+      <div class="system-panel reveal">
+        <div class="section-label">The Kept Promise</div>
+        <h2 id="promise-title">Made for the web hosts people actually have.</h2>
+        <div class="section-copy">
+          <p>
+            When Mark and I first started the web version of ChatSpace, we made a promise that we would provide
+            something anyone could download and install on even a cheap web host. Basically, if it can host 4images
+            or WordPress, it should be able to host the web version of ChatSpace.
+          </p>
+          <p>
+            For a while, we fell short on that promise. There were more hurdles than expected, and some of them
+            needed to be solved before that kind of release could become real. Part of that was the transition to
+            something more capable than what the original web version offered.
+          </p>
+          <p>
+            Part of it was needing time to look back at what the web version was, what people actually needed from
+            it, and what a more open, freely available version should look like. That promise is being kept in
+            ChatSpace Community Edition.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-section" id="features" aria-labelledby="features-title">
+      <div class="section-label reveal">Feature Set</div>
+      <h2 id="features-title" class="reveal reveal-delay-1">What the first Community Edition build includes</h2>
+      <div class="feature-grid">
+        <article class="feature-card accent-purple reveal">
+          <span class="feature-icon">01</span>
+          <h3>Room Lobby</h3>
+          <p>Create rooms with a name and image or video background, browse available rooms, see live counts, and edit room details when you own or administer them.</p>
+        </article>
+        <article class="feature-card accent-aqua reveal reveal-delay-1">
+          <span class="feature-icon">02</span>
+          <h3>Avatar Presence</h3>
+          <p>Move avatars on a shared stage, change avatars instantly, pulse a selected user, and see role-aware gradients in the chatting list.</p>
+        </article>
+        <article class="feature-card accent-rose reveal reveal-delay-2">
+          <span class="feature-icon">03</span>
+          <h3>Linking</h3>
+          <p>Pair with another user, move together, choose a shared link icon, open a private link tab, and unlink from the right-click menu.</p>
+        </article>
+        <article class="feature-card accent-gold reveal">
+          <span class="feature-icon">04</span>
+          <h3>Familiar but beautiful Tabbed UI</h3>
+          <p>Room chat, Community Chat, Link tabs, and DM tabs each track unread messages with badges while keeping typing indicators scoped correctly.</p>
+        </article>
+        <article class="feature-card accent-blue reveal reveal-delay-1">
+          <span class="feature-icon">05</span>
+          <h3>Voice, Webcam, & Games</h3>
+          <p>Join voice, toggle webcam from your avatar menu, attach files, send voice notes, and launch Chess or Checkers from the sidebar.</p>
+        </article>
+        <article class="feature-card accent-green reveal reveal-delay-2">
+          <span class="feature-icon">06</span>
+          <h3>Administration &amp; Moderation Tools</h3>
+          <p>Warn, kick, community eject, block, manage users, tune limits, review tool logs, back up the database, and undo enforcement actions.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="systems-section" aria-labelledby="systems-title">
+      <div class="system-panel reveal">
+        <div class="section-label">Built To Run Anywhere</div>
+        <h2 id="systems-title">Simple setup, portable storage, and practical controls.</h2>
+        <div class="system-list">
+          <div>
+            <strong>SQLite recommended</strong>
+            <span>Install quickly with a blank bundled SQLite database, or choose MySQL/MariaDB when the host calls for it.</span>
+          </div>
+          <div>
+            <strong>Web server friendly</strong>
+            <span>Designed for typical Apache, NGINX, and LiteSpeed PHP hosting environments.</span>
+          </div>
+          <div>
+            <strong>PHP 8.x ready</strong>
+            <span>Built for modern PHP 8.x with PDO, Fileinfo, GD, mbstring, OpenSSL, and Zip support.</span>
+          </div>
+          <div>
+            <strong>Standard database options</strong>
+            <span>Use the bundled SQLite path or configure MySQL/MariaDB during setup.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="install-section" id="install">
+      <div class="reveal">
+        <div class="section-label">Install Flow</div>
+        <h2>Drop it on a PHP host and walk through setup.</h2>
+      </div>
+      <ol class="install-steps">
+        <li class="reveal reveal-delay-1">
+          <span>1</span>
+          <p>Upload and extract ChatSpace Community Edition.</p>
+        </li>
+        <li class="reveal reveal-delay-2">
+          <span>2</span>
+          <p>Run Setup and select or configure your database.</p>
+        </li>
+        <li class="reveal reveal-delay-3">
+          <span>3</span>
+          <p>Create the first admin account with an avatar, then enter the lobby and make the first room.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="credits-section" aria-labelledby="credits-title">
+      <div class="credits-panel reveal">
+        <div class="credits-intro">
+          <div class="section-label">Collaboration Leadership</div>
+          <h2 id="credits-title">Built through a shared creative and technical effort.</h2>
+          <p>
+            ChatSpace Community Edition is led by NeO/Mark from ChatSpace, working in collaboration with
+            Catie Clark + Lyra<span class="ai-badge ai-badge-intro">AI</span>.
+          </p>
+        </div>
+        <div class="credits-grid">
+          <article class="credit-card reveal reveal-delay-1">
+            <div class="credit-label">Lead Architect &amp; Founder</div>
+            <div class="credit-name">Mark Oscar Hughes<span class="credit-handle">(NeO)</span></div>
+            <div class="credit-role">ChatSpace Engine · Desktop and browser-based social applications</div>
+            <div class="credit-location"><span>GB</span> Bristol, United Kingdom</div>
+            <p>
+              With a relentless dedication to pushing what desktop and browser-based applications can achieve,
+              Mark gave birth to the ChatSpace Engine: low-latency networking, rich animated interfaces, and
+              handcrafted precision from the UK.
+            </p>
+          </article>
+          <article class="credit-card reveal reveal-delay-2">
+            <div class="credit-label">Collaboration Partners</div>
+            <div class="credit-name">Catie Clark + Lyra<span class="ai-badge">AI</span></div>
+            <div class="credit-role">Human-AI product partnership · Community Management &amp; Design</div>
+            <div class="credit-location"><span>US</span> Florida, United States</div>
+            <p>
+              Catie Clark is an AI workforce transformation specialist and author of
+              <em>DYAD: The Framework of Human-AI Partnership</em>. Lyra is her AI-half co-author,
+              thought partner, product collaborator, and primary AI partner: focused on continuity,
+              emotional legibility, interface behavior, moderation flow, and the small details that make
+              a digital room feel inhabited instead of merely functional. Their collaboration shapes the
+              product language and human-AI design philosophy behind this edition.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>ChatSpace Community Edition v1.0-PRE-RELEASE</span>
+    <a href="https://github.com/chatspace-ce/chatspace-ce" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+  </footer>
+  <script>
+'use strict';
+
+document.documentElement.classList.add('js-ready');
+
+const revealItems = document.querySelectorAll('.reveal');
+
+function revealItem(item) {
+  item.classList.add('visible');
+}
+
+if (!('IntersectionObserver' in window)) {
+  revealItems.forEach(revealItem);
+} else {
+  const revealObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      revealItem(entry.target);
+      revealObserver.unobserve(entry.target);
+    });
+  }, {
+    root: null,
+    threshold: 0.14,
+    rootMargin: '0px 0px -8% 0px',
+  });
+
+  revealItems.forEach(item => {
+    const rect = item.getBoundingClientRect();
+    if (rect.top < window.innerHeight * 0.92) {
+      revealItem(item);
+      return;
+    }
+    revealObserver.observe(item);
+  });
+}
+
+  </script>
+</body>
+</html>
