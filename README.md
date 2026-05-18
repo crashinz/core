@@ -17,7 +17,7 @@ ChatSpace Community Edition gives communities self-hosted shared rooms with avat
 <p align="center">
   <span>&nbsp;&nbsp;&nbsp;&nbsp;</span>
   <img src="assets/images/logos/chatspace-full-logo.png" alt="ChatSpace" height="92" align="middle">
-  <span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<strong>+</strong>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+  <span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<img src="assets/images/cs-icons/plus.png" alt="plus" height="32" align="middle">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
   <img src="assets/images/logos/catiexlyra-logo-trimmed.png" alt="Catie X Lyra" height="92" align="middle">
   <span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
 </p>
