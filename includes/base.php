@@ -461,8 +461,6 @@ function migrate(PDO $pdo): void {
     if (!in_array('role', $userColNames, true)) {
         $pdo->exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
     }
-    $pdo->prepare("UPDATE users SET role = 'admin' WHERE lower(display_name) = 'catie'")->execute();
-    $pdo->prepare("UPDATE users SET role = 'user' WHERE lower(display_name) = 'lyra'")->execute();
     $settingsCols = $pdo->query('PRAGMA table_info(app_settings)')->fetchAll();
     $settingsColNames = array_map(fn(array $col): string => (string)$col['name'], $settingsCols);
     if (in_array('key', $settingsColNames, true) && !in_array('setting_key', $settingsColNames, true)) {
