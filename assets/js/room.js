@@ -1736,37 +1736,62 @@ function showAvatarSpeech(participantId, msg) {
   if (isUserBlocked(p.user_id)) return;
   const isGif = msg?.message_type === 'gif';
   const text = isGif ? '' : messageSpeechText(msg || {});
+  const token = (p.speechToken || 0) + 1;
+  p.speechToken = token;
   if (!p.speechEl) {
     const el = document.createElement('div');
     el.className = 'chat-bubble';
     roomStage.appendChild(el);
     p.speechEl = el;
   }
+  clearTimeout(speechTimers.get(participantId));
+  p.speechEl.classList.remove('show');
   p.speechEl.classList.toggle('chat-bubble-gif', isGif);
+  let timerStarted = false;
+  const scheduleHide = () => {
+    if (timerStarted || p.speechToken !== token) return;
+    timerStarted = true;
+    if (isGif) {
+      speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 3200));
+      gifLoopDurationMs(msg.content).then(duration => {
+        if (p.speechToken === token && p.speechEl?.classList.contains('chat-bubble-gif')) {
+          clearTimeout(speechTimers.get(participantId));
+          speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), duration));
+        }
+      });
+    } else {
+      speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 5200));
+    }
+  };
+  const reveal = () => {
+    if (p.speechToken !== token || !p.speechEl) return;
+    positionAvatar(p);
+    requestAnimationFrame(() => {
+      if (p.speechToken !== token || !p.speechEl) return;
+      positionAvatar(p);
+      p.speechEl.classList.add('show');
+      scheduleHide();
+    });
+  };
   if (isGif) {
-    const url = esc(mediaUrl(msg.content));
-    const name = esc(msg.original_name || 'GIF');
-    p.speechEl.innerHTML = `<img src="${url}" alt="${name}">`;
-    p.speechEl.querySelector('img')?.addEventListener('load', () => positionAvatar(p), { once: true });
+    const img = document.createElement('img');
+    img.src = mediaUrl(msg.content);
+    img.alt = msg.original_name || 'GIF';
+    p.speechEl.replaceChildren(img);
+    let revealed = false;
+    const revealOnce = () => {
+      if (revealed) return;
+      revealed = true;
+      reveal();
+    };
+    img.addEventListener('load', revealOnce, { once: true });
+    img.addEventListener('error', revealOnce, { once: true });
+    if (img.decode) img.decode().then(revealOnce).catch(() => { if (img.complete) revealOnce(); });
+    if (img.complete) revealOnce();
+    setTimeout(revealOnce, 900);
   } else {
     p.speechEl.textContent = text.length > 180 ? `${text.slice(0, 177)}...` : text;
-  }
-  positionAvatar(p);
-  requestAnimationFrame(() => {
-    positionAvatar(p);
-    p.speechEl?.classList.add('show');
-  });
-  clearTimeout(speechTimers.get(participantId));
-  if (isGif) {
-    speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 3200));
-    gifLoopDurationMs(msg.content).then(duration => {
-      if (p.speechEl?.classList.contains('chat-bubble-gif')) {
-        clearTimeout(speechTimers.get(participantId));
-        speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), duration));
-      }
-    });
-  } else {
-    speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 5200));
+    reveal();
   }
 }
 
