@@ -206,6 +206,48 @@ function uploadFormWithProgress(form, url, progressEl) {
   });
 }
 
+function uploadPlainFormWithProgress(form, url, progressEl) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const previousDisabled = submitBtn ? submitBtn.disabled : false;
+    if (submitBtn) submitBtn.disabled = true;
+    setUploadProgress(progressEl, 0, 'Uploading...');
+
+    xhr.upload.addEventListener('progress', event => {
+      if (!event.lengthComputable) {
+        setUploadProgress(progressEl, 5, 'Uploading...');
+        return;
+      }
+      const pct = (event.loaded / event.total) * 100;
+      setUploadProgress(progressEl, pct, pct >= 100 ? 'Processing import...' : 'Uploading import...');
+    });
+
+    xhr.addEventListener('load', () => {
+      setUploadProgress(progressEl, 100, 'Processing import...');
+      if (submitBtn) submitBtn.disabled = previousDisabled;
+      if (xhr.status >= 200 && xhr.status < 400) {
+        resolve(xhr);
+        return;
+      }
+      reject(new Error(xhr.responseText || 'Import failed'));
+    });
+
+    xhr.addEventListener('error', () => {
+      if (submitBtn) submitBtn.disabled = previousDisabled;
+      reject(new Error('Import failed. The file may be too large or the connection may have dropped.'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      if (submitBtn) submitBtn.disabled = previousDisabled;
+      reject(new Error('Import canceled.'));
+    });
+
+    xhr.open('POST', url);
+    xhr.send(new FormData(form));
+  });
+}
+
 async function loadLobbyRoomEjections(roomPublicId) {
   if (!lobbyRoomEjectionList || !roomPublicId) return;
   lobbyRoomEjectionList.innerHTML = '<div class="minor">Loading...</div>';
@@ -380,6 +422,7 @@ const adminRoomEjections = document.getElementById('admin-room-ejections');
 const adminCommunityEjections = document.getElementById('admin-community-ejections');
 const adminSettings = document.getElementById('admin-settings');
 const adminDbRestore = document.getElementById('admin-db-restore');
+const adminDbImportProgress = document.getElementById('admin-db-import-progress');
 const adminLinkIcons = document.getElementById('admin-link-icons');
 const adminLinkIconCreate = document.getElementById('admin-link-icon-create');
 const adminCounts = {
@@ -721,17 +764,26 @@ adminSettings?.addEventListener('submit', async e => {
 adminDbRestore?.database?.addEventListener('change', () => {
   const file = adminDbRestore.database.files && adminDbRestore.database.files[0];
   document.getElementById('admin-db-restore-name').textContent = file ? file.name : 'No file selected';
+  resetUploadProgress(adminDbImportProgress);
 });
 
 adminDbRestore?.addEventListener('submit', async e => {
   e.preventDefault();
-  const resp = await fetch(appUrl('/api/admin_database.php'), { method: 'POST', body: new FormData(adminDbRestore) });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || data.error) {
-    alert(data.error || 'Database restore failed');
-    return;
+  try {
+    const xhr = await uploadPlainFormWithProgress(adminDbRestore, appUrl('/api/admin_database.php'), adminDbImportProgress);
+    const data = JSON.parse(xhr.responseText || '{}');
+    if (data.error) throw new Error(data.error);
+    setUploadProgress(adminDbImportProgress, 100, 'Import complete. Reloading...');
+    window.location.reload();
+  } catch (err) {
+    let message = err.message || 'Database import failed';
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed.error) message = parsed.error;
+    } catch (_err) {}
+    setUploadProgress(adminDbImportProgress, 100, 'Import failed.');
+    alert(message);
   }
-  window.location.reload();
 });
 
 adminLinkIconCreate?.icon?.addEventListener('change', () => {

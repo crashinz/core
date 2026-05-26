@@ -347,6 +347,9 @@ $rooms = $roomsStmt->fetchAll();
               <a class="btn" href="<?= e(app_url('/api/admin_database.php?action=download')) ?>">Download Database</a>
               <a class="btn btn-primary" href="<?= e(app_url('/api/admin_database.php?action=export_core')) ?>">Export Users + Rooms + Settings</a>
               <form id="admin-db-restore" class="admin-restore">
+                <div class="admin-import-note">
+                  Portable imports match users by email. If the bundle contains the same email as this install's admin, that account is updated to the imported name, role, avatar, and password.
+                </div>
                 <label>Import type
                   <select name="restore_type">
                     <option value="sqlite">Full SQLite database</option>
@@ -358,6 +361,10 @@ $rooms = $roomsStmt->fetchAll();
                   <span class="file-picker-btn">Choose File</span>
                   <span class="file-picker-name" id="admin-db-restore-name">No file selected</span>
                 </label>
+                <span class="upload-progress" id="admin-db-import-progress" aria-live="polite">
+                  <span class="upload-progress-track"><span class="upload-progress-bar"></span></span>
+                  <span class="upload-progress-meta"><span class="upload-progress-msg">Waiting...</span><span class="upload-progress-pct">0%</span></span>
+                </span>
                 <button class="btn btn-danger" type="submit">Import</button>
               </form>
             </div>
