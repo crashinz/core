@@ -36,7 +36,10 @@ $messagePayload = function(array $row): array {
         'role' => $row['role'] ?? 'user',
         'is_owner' => (bool)($row['is_owner'] ?? false),
         'content' => $row['content'],
-        'message_type' => 'text',
+        'message_type' => $row['message_type'] ?? 'text',
+        'file_size' => $row['file_size'] !== null ? (int)$row['file_size'] : null,
+        'mime_type' => $row['mime_type'] ?? null,
+        'original_name' => $row['original_name'] ?? null,
         'sent_at' => $row['sent_at'],
     ];
 };

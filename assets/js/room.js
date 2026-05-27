@@ -2348,8 +2348,26 @@ document.getElementById('chat-input').addEventListener('keydown', e => {
   document.getElementById('composer').requestSubmit();
 });
 
-function addUploadedRoomMessage(msg) {
-  switchChat('room');
+function addUploadedChatMessage(msg) {
+  if (msg.channel === 'community') {
+    addMessageToChannel(msg, 'community', false);
+    return;
+  }
+  if (msg.channel === 'link') {
+    const partnerId = activeLinkPartnerId();
+    addMessageToChannel(msg, partnerId ? `link:${partnerId}` : activeChat, false);
+    return;
+  }
+  if (msg.channel === 'dm') {
+    const dmUserId = Number(msg.partner_user_id || msg.target_user_id || activeDmUserId());
+    addMessageToChannel(msg, dmUserId ? `dm:${dmUserId}` : activeChat, false);
+    showDmFlight(msg);
+    return;
+  }
+  if (msg.channel === 'game') {
+    addMessageToChannel(msg, gameChatKey(msg.lobby_code), false);
+    return;
+  }
   renderMessage(msg, true);
 }
 
@@ -2357,14 +2375,43 @@ function uploadChatFile(file) {
   const formData = new FormData();
   formData.append('session_id', cfg.sessionId);
   formData.append('join_token', cfg.myJoinToken);
+  formData.append('channel', channelForApi(activeChat));
+  const partnerId = activeLinkPartnerId();
+  const dmUserId = activeDmUserId();
+  if (partnerId) formData.append('target_participant_id', String(partnerId));
+  if (dmUserId) formData.append('target_user_id', String(dmUserId));
+  if (activeChat.startsWith('game:')) formData.append('lobby_code', activeChat.slice(5));
   formData.append('file', file);
-  return apiUpload('/api/files.php', formData).then(addUploadedRoomMessage);
+  return apiUpload('/api/files.php', formData).then(addUploadedChatMessage);
 }
 
 chatFileInput.addEventListener('change', () => {
   const file = chatFileInput.files && chatFileInput.files[0];
   chatFileInput.value = '';
   if (!file) return;
+  uploadChatFile(file).catch(err => alert(err.message || err));
+});
+
+function pastedImageFile(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return null;
+  const items = Array.from(clipboard.items || []);
+  for (const item of items) {
+    if (item.kind === 'file' && String(item.type || '').startsWith('image/')) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg').split(';')[0];
+      return new File([file], file.name || `pasted-image-${Date.now()}.${ext}`, { type: file.type || 'image/png' });
+    }
+  }
+  const files = Array.from(clipboard.files || []);
+  return files.find(file => String(file.type || '').startsWith('image/')) || null;
+}
+
+document.getElementById('chat-input').addEventListener('paste', e => {
+  const file = pastedImageFile(e);
+  if (!file) return;
+  e.preventDefault();
   uploadChatFile(file).catch(err => alert(err.message || err));
 });
 

@@ -348,6 +348,10 @@ function migrate(PDO $pdo): void {
             lobby_code TEXT NOT NULL,
             participant_id INTEGER NOT NULL,
             content TEXT NOT NULL,
+            message_type TEXT NOT NULL DEFAULT 'text',
+            file_size INTEGER DEFAULT NULL,
+            mime_type TEXT DEFAULT NULL,
+            original_name TEXT DEFAULT NULL,
             sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -680,6 +684,20 @@ function migrate(PDO $pdo): void {
     }
     if (!in_array('is_deleted', $communityMessageColNames, true)) {
         $pdo->exec('ALTER TABLE community_messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+    }
+    $gameChatCols = $pdo->query('PRAGMA table_info(game_chat_messages)')->fetchAll();
+    $gameChatColNames = array_map(fn(array $col): string => (string)$col['name'], $gameChatCols);
+    if (!in_array('message_type', $gameChatColNames, true)) {
+        $pdo->exec("ALTER TABLE game_chat_messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'text'");
+    }
+    if (!in_array('file_size', $gameChatColNames, true)) {
+        $pdo->exec('ALTER TABLE game_chat_messages ADD COLUMN file_size INTEGER DEFAULT NULL');
+    }
+    if (!in_array('mime_type', $gameChatColNames, true)) {
+        $pdo->exec('ALTER TABLE game_chat_messages ADD COLUMN mime_type TEXT DEFAULT NULL');
+    }
+    if (!in_array('original_name', $gameChatColNames, true)) {
+        $pdo->exec('ALTER TABLE game_chat_messages ADD COLUMN original_name TEXT DEFAULT NULL');
     }
     $stmt = $pdo->query('SELECT id FROM rooms WHERE public_id IS NULL OR public_id = ""');
     foreach ($stmt->fetchAll() as $row) {
