@@ -512,6 +512,8 @@ const adminBlocks = document.getElementById('admin-blocks');
 const adminRoomEjections = document.getElementById('admin-room-ejections');
 const adminCommunityEjections = document.getElementById('admin-community-ejections');
 const adminSettings = document.getElementById('admin-settings');
+const adminDbExport = document.getElementById('admin-db-export');
+const adminUserExportLabel = document.getElementById('admin-user-export-label');
 const adminDbRestore = document.getElementById('admin-db-restore');
 const adminDbImportProgress = document.getElementById('admin-db-import-progress');
 const adminLinkIcons = document.getElementById('admin-link-icons');
@@ -856,6 +858,41 @@ adminSettings?.addEventListener('submit', async e => {
   } finally {
     submit.disabled = false;
   }
+});
+
+function syncAdminExportUserMode() {
+  if (!adminDbExport?.users || !adminDbExport?.gestures) return;
+  if (!adminDbExport.users.checked) adminDbExport.gestures.checked = false;
+  adminDbExport.gestures.disabled = !adminDbExport.users.checked;
+  if (adminUserExportLabel) adminUserExportLabel.textContent = adminDbExport.gestures.checked ? 'User Data + Gestures' : 'User Data';
+}
+
+adminDbExport?.gestures?.addEventListener('change', () => {
+  if (adminDbExport.gestures.checked) adminDbExport.users.checked = true;
+  syncAdminExportUserMode();
+});
+
+adminDbExport?.users?.addEventListener('change', syncAdminExportUserMode);
+syncAdminExportUserMode();
+
+adminDbExport?.addEventListener('submit', e => {
+  e.preventDefault();
+  const users = adminDbExport.users.checked;
+  const gestures = users && adminDbExport.gestures.checked;
+  const rooms = adminDbExport.rooms.checked;
+  const settings = adminDbExport.settings.checked;
+  if (!users && !rooms && !settings) {
+    alert('Select at least one export section.');
+    return;
+  }
+  const qs = new URLSearchParams({
+    action: 'export_bundle',
+    users: users ? '1' : '0',
+    gestures: gestures ? '1' : '0',
+    rooms: rooms ? '1' : '0',
+    settings: settings ? '1' : '0',
+  });
+  window.location.href = appUrl(`/api/admin_database.php?${qs}`);
 });
 
 adminDbRestore?.database?.addEventListener('change', () => {

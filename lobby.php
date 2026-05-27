@@ -373,18 +373,21 @@ $rooms = $roomsStmt->fetchAll();
           <div class="admin-section-sub">Download full SQLite backups, or move users, rooms, settings, and files through a portable JSON bundle.</div>
           <div class="admin-panel">
             <div class="admin-actions">
-              <a class="btn" href="<?= e(app_url('/api/admin_database.php?action=download')) ?>">Download Database</a>
-              <a class="btn btn-primary" href="<?= e(app_url('/api/admin_database.php?action=export_core')) ?>">Export Users + Rooms + Settings</a>
+              <a class="btn" href="<?= e(app_url('/api/admin_database.php?action=download')) ?>">Full Backup</a>
+              <form id="admin-db-export" class="admin-export-options">
+                <div class="admin-import-note">
+                  Select the portable data map to export. Files used by selected records are included in the JSON bundle.
+                </div>
+                <label class="admin-export-choice"><input name="users" type="checkbox" value="1" checked><span id="admin-user-export-label">User Data</span></label>
+                <label class="admin-export-choice admin-export-subchoice"><input name="gestures" type="checkbox" value="1"><span>Include Gestures</span></label>
+                <label class="admin-export-choice"><input name="rooms" type="checkbox" value="1" checked><span>Room Data</span></label>
+                <label class="admin-export-choice"><input name="settings" type="checkbox" value="1" checked><span>Settings</span></label>
+                <button class="btn btn-primary" type="submit">Export Selected</button>
+              </form>
               <form id="admin-db-restore" class="admin-restore">
                 <div class="admin-import-note">
-                  Portable imports match users by email. If the bundle contains the same email as this install's admin, that account is updated to the imported name, role, avatar, and password.
+                  Imports auto-detect full SQLite backups or portable JSON bundles. Portable imports apply whichever sections are present and match users by email.
                 </div>
-                <label>Import type
-                  <select name="restore_type">
-                    <option value="sqlite">Full SQLite database</option>
-                    <option value="core_bundle">Users + Rooms + Settings bundle</option>
-                  </select>
-                </label>
                 <label class="file-picker">
                   <input name="database" type="file" accept=".sqlite,.db,.json,application/json,application/vnd.sqlite3,application/octet-stream" required>
                   <span class="file-picker-btn">Choose File</span>
