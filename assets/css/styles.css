@@ -1444,15 +1444,33 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   position: relative;
   top: -1px;
 }
-.app-version {
+.sidebar-status-line {
   margin-top: 34px;
   transform: translateY(8px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.app-version,
+.latency-monitor {
   color: var(--text-muted);
   font-size: 10px;
   line-height: 1.25;
-  text-align: right;
   overflow-wrap: anywhere;
 }
+.app-version {
+  min-width: 0;
+  text-align: left;
+}
+.latency-monitor {
+  flex: 0 0 auto;
+  text-align: right;
+  font-weight: 900;
+}
+.latency-monitor.latency-good { color: rgba(126, 243, 223, .86); }
+.latency-monitor.latency-warn { color: rgba(255, 211, 127, .9); }
+.latency-monitor.latency-bad { color: rgba(255, 143, 161, .92); }
 .icon-label {
   display: inline-flex;
   align-items: center;

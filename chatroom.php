@@ -164,7 +164,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
       </section>
       <section class="side-section">
         <button class="btn icon-label" id="locate-btn" style="width:100%;"><img src="<?= e(app_url('/assets/images/locate.png')) ?>" alt="">Locate Friends</button>
-        <div class="app-version" id="app-version">Checking version...</div>
+        <div class="sidebar-status-line"><span class="app-version" id="app-version">Checking version...</span><span class="latency-monitor" id="latency-monitor">Latency --ms</span></div>
       </section>
     </div>
   </aside>
