@@ -138,7 +138,7 @@ function mysqlize_schema(string $schema): string {
     $schema = str_replace('INTEGER', 'INT', $schema);
     $schema = str_replace('REAL', 'DOUBLE', $schema);
     $schema = preg_replace('/\bTEXT\b/', 'VARCHAR(1024)', $schema) ?? $schema;
-    $longTextColumns = ['payload', 'content', 'original_content', 'url_preview_json', 'state_json', 'data', 'reason'];
+    $longTextColumns = ['payload', 'content', 'original_content', 'url_preview_json', 'reply_to_json', 'state_json', 'data', 'reason'];
     foreach ($longTextColumns as $column) {
         $schema = preg_replace('/\b' . $column . '\s+VARCHAR\(1024\)/', $column . ' LONGTEXT', $schema) ?? $schema;
     }
@@ -264,6 +264,7 @@ function migrate(PDO $pdo): void {
             content TEXT NOT NULL,
             original_content TEXT DEFAULT NULL,
             url_preview_json TEXT DEFAULT NULL,
+            reply_to_json TEXT DEFAULT NULL,
             message_type TEXT NOT NULL DEFAULT 'text',
             file_size INTEGER DEFAULT NULL,
             mime_type TEXT DEFAULT NULL,
@@ -489,6 +490,7 @@ function migrate(PDO $pdo): void {
             content TEXT NOT NULL,
             original_content TEXT DEFAULT NULL,
             url_preview_json TEXT DEFAULT NULL,
+            reply_to_json TEXT DEFAULT NULL,
             message_type TEXT NOT NULL DEFAULT 'text',
             file_size INTEGER DEFAULT NULL,
             mime_type TEXT DEFAULT NULL,
@@ -551,6 +553,7 @@ function migrate(PDO $pdo): void {
             'avatar_path VARCHAR(512) DEFAULT NULL',
             'avatar_url VARCHAR(512) DEFAULT NULL',
             'url_preview_json LONGTEXT DEFAULT NULL',
+            'reply_to_json LONGTEXT DEFAULT NULL',
         ] as $definition) {
             try {
                 $pdo->exec('ALTER TABLE messages ADD COLUMN ' . $definition);
@@ -583,6 +586,9 @@ function migrate(PDO $pdo): void {
             $previewColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $previewCols);
             if (!in_array('url_preview_json', $previewColNames, true)) {
                 $pdo->exec('ALTER TABLE ' . $previewTable . ' ADD COLUMN url_preview_json LONGTEXT DEFAULT NULL');
+            }
+            if (!in_array('reply_to_json', $previewColNames, true)) {
+                $pdo->exec('ALTER TABLE ' . $previewTable . ' ADD COLUMN reply_to_json LONGTEXT DEFAULT NULL');
             }
         }
         seed_app_settings($pdo);
@@ -683,6 +689,9 @@ function migrate(PDO $pdo): void {
     if (!in_array('url_preview_json', $messageColNames, true)) {
         $pdo->exec('ALTER TABLE messages ADD COLUMN url_preview_json TEXT DEFAULT NULL');
     }
+    if (!in_array('reply_to_json', $messageColNames, true)) {
+        $pdo->exec('ALTER TABLE messages ADD COLUMN reply_to_json TEXT DEFAULT NULL');
+    }
     if (!in_array('file_size', $messageColNames, true)) {
         $pdo->exec('ALTER TABLE messages ADD COLUMN file_size INTEGER DEFAULT NULL');
     }
@@ -711,6 +720,9 @@ function migrate(PDO $pdo): void {
     }
     if (!in_array('url_preview_json', $communityMessageColNames, true)) {
         $pdo->exec('ALTER TABLE community_messages ADD COLUMN url_preview_json TEXT DEFAULT NULL');
+    }
+    if (!in_array('reply_to_json', $communityMessageColNames, true)) {
+        $pdo->exec('ALTER TABLE community_messages ADD COLUMN reply_to_json TEXT DEFAULT NULL');
     }
     if (!in_array('message_type', $communityMessageColNames, true)) {
         $pdo->exec("ALTER TABLE community_messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'text'");

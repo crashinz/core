@@ -1162,6 +1162,48 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background: rgba(0,0,0,.2);
   color: var(--text);
 }
+.msg-reply-preview {
+  width: min(520px, calc(100% - var(--msg-text-indent)));
+  margin: 2px 0 9px var(--msg-text-indent);
+  padding: 7px 10px 8px 12px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(124,106,247,.24);
+  border-left: 3px solid rgba(124,106,247,.78);
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, rgba(124,106,247,.16), rgba(0,0,0,.18) 58%, rgba(0,0,0,.05)),
+    rgba(255,255,255,.035);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.msg-reply-preview span {
+  color: rgba(255,255,255,.64);
+  font-size: 11px;
+  font-weight: 800;
+}
+.msg-reply-preview strong {
+  color: rgba(255,255,255,.9);
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-reply-preview:hover {
+  border-color: rgba(124,106,247,.48);
+  background:
+    linear-gradient(90deg, rgba(124,106,247,.24), rgba(0,0,0,.2) 58%, rgba(0,0,0,.08)),
+    rgba(255,255,255,.045);
+}
+.message-reply-flash {
+  animation: replyFlash 1.15s ease;
+}
+@keyframes replyFlash {
+  0%, 100% { box-shadow: inset 0 0 0 1px transparent; }
+  20% { box-shadow: inset 0 0 0 1px rgba(124,106,247,.9), 0 0 24px rgba(124,106,247,.18); }
+}
 .msg-reactions {
   display: flex;
   flex-wrap: wrap;
@@ -1333,6 +1375,48 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background: rgba(255,255,255,.05);
   border-radius: 999px;
   padding: 4px 10px;
+}
+.reply-draft {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 8px -2px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid rgba(124,106,247,.34);
+  border-left: 3px solid rgba(124,106,247,.9);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(124,106,247,.2), rgba(8,9,15,.92) 58%),
+    rgba(255,255,255,.04);
+}
+.reply-draft[hidden] { display: none; }
+.reply-draft div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.reply-draft strong {
+  color: #fff;
+  font-size: 12px;
+}
+.reply-draft span {
+  color: rgba(255,255,255,.68);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reply-draft button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  color: #fff;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
 }
 .composer {
   display: flex;

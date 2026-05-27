@@ -55,6 +55,9 @@ const gestureNext = document.getElementById('gesture-next');
 const emojiGrid = document.getElementById('emoji-grid');
 const attachMenu = document.getElementById('attach-menu');
 const chatFileInput = document.getElementById('chat-file-input');
+const replyDraftEl = document.getElementById('reply-draft');
+const replyDraftAuthorEl = document.getElementById('reply-draft-author');
+const replyDraftPreviewEl = document.getElementById('reply-draft-preview');
 const voiceDeviceModal = document.getElementById('voice-device-modal');
 const voiceDeviceForm = document.getElementById('voice-device-form');
 const voiceInputDevice = document.getElementById('voice-input-device');
@@ -86,6 +89,7 @@ let msgActionTargetChat = null;
 let tabCtxTargetChat = null;
 let pendingDeleteMessageId = null;
 let pendingDeleteChatKey = null;
+let replyDraft = null;
 let webcamStream = null;
 let webcamTimer = null;
 const AVATAR_STAGE_SIZE = 150;
@@ -1462,6 +1466,7 @@ function switchChat(chatKey) {
   if (chatKey === activeChat) return;
   stopTypingNow();
   stopGameTypingNow();
+  clearReplyDraft();
   activeChat = chatKey;
   setGameLayerVisibility();
   renderActiveChat();
@@ -1509,6 +1514,7 @@ function renderActiveChat() {
     .forEach(msg => bindMessageAutoScroll(appendMessageEl(msg), true));
   scrollMessagesToBottom();
   updateComposerPlaceholder();
+  renderReplyDraft();
   document.querySelectorAll('.chat-tab').forEach(tab => {
     tab.classList.toggle('active', tab.dataset.chatTab === activeChat);
   });
@@ -1614,6 +1620,62 @@ function messageSpeechText(msg) {
   if (msg.message_type === 'gif') return 'sent a GIF';
   if (msg.message_type === 'gesture') return gestureFromMessage(msg)?.text || msg.original_name || 'sent a gesture';
   return msg.content;
+}
+
+function messagePreviewText(msg) {
+  const raw = messageSpeechText(msg) || 'Message';
+  return String(raw).replace(/\s+/g, ' ').trim().slice(0, 180) || 'Message';
+}
+
+function renderReplyDraft() {
+  if (!replyDraftEl) return;
+  const valid = replyDraft && replyDraft.chatKey === activeChat;
+  replyDraftEl.hidden = !valid;
+  if (!valid) return;
+  if (replyDraftAuthorEl) replyDraftAuthorEl.textContent = `Replying to ${replyDraft.display_name || 'Someone'}`;
+  if (replyDraftPreviewEl) replyDraftPreviewEl.textContent = replyDraft.preview || 'Message';
+}
+
+function clearReplyDraft() {
+  replyDraft = null;
+  renderReplyDraft();
+}
+
+function startReplyDraft(msg, chatKey = activeChat) {
+  if (!msg || msg.system || msg.is_deleted || chatKey.startsWith('game:')) return;
+  replyDraft = {
+    id: Number(msg.id),
+    chatKey,
+    display_name: msg.display_name || participants.get(Number(msg.participant_id))?.display_name || 'Someone',
+    preview: messagePreviewText(msg),
+  };
+  renderReplyDraft();
+  document.getElementById('chat-input')?.focus();
+}
+
+function appendReplyPayload(payload) {
+  if (!replyDraft || replyDraft.chatKey !== activeChat) return payload;
+  payload.reply_to_id = replyDraft.id;
+  payload.reply_to_channel = channelForApi(replyDraft.chatKey);
+  return payload;
+}
+
+function replyPreviewHtml(msg) {
+  const reply = msg.reply_to;
+  if (!reply?.id) return '';
+  const author = esc(reply.display_name || 'Someone');
+  const preview = esc(reply.preview || reply.original_name || 'Message');
+  return `<button class="msg-reply-preview" type="button" data-reply-target="${esc(reply.id)}"><span>Reply to ${author}</span><strong>${preview}</strong></button>`;
+}
+
+function jumpToMessage(messageId) {
+  const row = messagesEl.querySelector(`[data-message-id="${CSS.escape(String(messageId))}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('message-reply-flash');
+  void row.offsetWidth;
+  row.classList.add('message-reply-flash');
+  window.setTimeout(() => row.classList.remove('message-reply-flash'), 1250);
 }
 
 function gestureFromMessage(msg) {
@@ -1940,7 +2002,7 @@ function appendMessageEl(msg) {
   const original = canShowOriginal ? `<details class="msg-original"><summary>Show original</summary><div>${esc(msg.original_content)}</div></details>` : '';
   const body = msg.is_deleted && cfg.canModerateMessages ? `<div class="msg-deleted-body">${messageBodyHtml(msg)}</div>` : messageBodyHtml(msg);
   const optionsButton = msg.channel === 'game' ? '' : '<button class="msg-options" type="button" aria-label="Message options">⋯</button>';
-  row.innerHTML = `<div class="bubble"><div class="msg-head"><div class="msg-name ${participantRoleClass(author)}" title="${esc(participantRoleLabel(author))}"><img src="${esc(messageAvatarUrl(msg, p))}" alt=""><span class="msg-name-copy"><span class="msg-name-text">${esc(p ? displayNameFor(p) : msg.display_name)}</span>${flagTime}</span></div>${optionsButton}</div><div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${renderReactions(msg)}</div></div>`;
+  row.innerHTML = `<div class="bubble"><div class="msg-head"><div class="msg-name ${participantRoleClass(author)}" title="${esc(participantRoleLabel(author))}"><img src="${esc(messageAvatarUrl(msg, p))}" alt=""><span class="msg-name-copy"><span class="msg-name-text">${esc(p ? displayNameFor(p) : msg.display_name)}</span>${flagTime}</span></div>${optionsButton}</div>${replyPreviewHtml(msg)}<div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${renderReactions(msg)}</div></div>`;
   row.querySelector('.msg-options')?.addEventListener('click', e => {
     e.stopPropagation();
     openMessageActionMenu(e.clientX, e.clientY, msg);
@@ -1954,6 +2016,10 @@ function appendMessageEl(msg) {
   }
   row.querySelectorAll('.reaction-chip').forEach(btn => {
     btn.addEventListener('click', () => applyReaction(msg.id, btn.dataset.msgReaction, activeChat));
+  });
+  row.querySelector('.msg-reply-preview')?.addEventListener('click', e => {
+    e.preventDefault();
+    jumpToMessage(e.currentTarget.dataset.replyTarget);
   });
   messagesEl.appendChild(row);
   return row;
@@ -1999,7 +2065,7 @@ document.getElementById('composer').addEventListener('submit', e => {
     return;
   }
   stopTypingNow();
-  const payload = { session_id: cfg.sessionId, join_token: cfg.myJoinToken, content, channel: activeChat };
+  const payload = appendReplyPayload({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, content, channel: activeChat });
   const partnerId = activeLinkPartnerId();
   const dmUserId = activeDmUserId();
   if (partnerId) {
@@ -2010,6 +2076,7 @@ document.getElementById('composer').addEventListener('submit', e => {
     payload.target_user_id = dmUserId;
   }
   apiPost('/api/messages.php', payload).then(msg => {
+    clearReplyDraft();
     if (msg.channel === 'community') addMessageToChannel(msg, 'community', false);
     else if (msg.channel === 'link') addMessageToChannel(msg, `link:${partnerId}`, false);
     else if (msg.channel === 'dm') {
@@ -2470,6 +2537,8 @@ document.getElementById('chat-input').addEventListener('keydown', e => {
   document.getElementById('composer').requestSubmit();
 });
 
+document.getElementById('reply-draft-cancel')?.addEventListener('click', clearReplyDraft);
+
 function addUploadedChatMessage(msg) {
   if (msg.channel === 'community') {
     addMessageToChannel(msg, 'community', false);
@@ -2503,8 +2572,15 @@ function uploadChatFile(file) {
   if (partnerId) formData.append('target_participant_id', String(partnerId));
   if (dmUserId) formData.append('target_user_id', String(dmUserId));
   if (activeChat.startsWith('game:')) formData.append('lobby_code', activeChat.slice(5));
+  if (replyDraft && replyDraft.chatKey === activeChat) {
+    formData.append('reply_to_id', String(replyDraft.id));
+    formData.append('reply_to_channel', channelForApi(replyDraft.chatKey));
+  }
   formData.append('file', file);
-  return apiUpload('/api/files.php', formData).then(addUploadedChatMessage);
+  return apiUpload('/api/files.php', formData).then(msg => {
+    clearReplyDraft();
+    addUploadedChatMessage(msg);
+  });
 }
 
 chatFileInput.addEventListener('change', () => {
@@ -2572,9 +2648,16 @@ async function startVoiceNote() {
     const formData = new FormData();
     formData.append('session_id', cfg.sessionId);
     formData.append('join_token', cfg.myJoinToken);
+    if (replyDraft && replyDraft.chatKey === 'room' && activeChat === 'room') {
+      formData.append('reply_to_id', String(replyDraft.id));
+      formData.append('reply_to_channel', 'room');
+    }
     formData.append('audio', blob, 'voice-note.webm');
     apiUpload('/api/voice_notes.php', formData)
-      .then(addUploadedRoomMessage)
+      .then(msg => {
+        clearReplyDraft();
+        addUploadedRoomMessage(msg);
+      })
       .catch(err => alert(err.message || err));
   });
   voiceNoteRecorder.start();
@@ -2770,6 +2853,7 @@ function openMessageActionMenu(x, y, msg) {
   msgActionTargetChat = activeChat;
   const mine = Number(msg.participant_id) === cfg.myParticipantId;
   const editable = mine && (msg.message_type || 'text') === 'text';
+  document.getElementById('msg-reply-action').style.display = activeChat.startsWith('game:') ? 'none' : 'block';
   document.getElementById('msg-edit-action').style.display = editable ? 'block' : 'none';
   document.getElementById('msg-delete-action').style.display = mine ? 'block' : 'none';
   msgActionMenu.classList.add('visible');
@@ -3027,7 +3111,7 @@ mediaSearchInput?.addEventListener('input', e => {
 
 async function sendGif(result) {
   closeMediaPicker();
-  const payload = { session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'gif', gif_url: result.url, title: result.title || 'GIF', channel: activeChat };
+  const payload = appendReplyPayload({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'gif', gif_url: result.url, title: result.title || 'GIF', channel: activeChat });
   const partnerId = activeLinkPartnerId();
   const dmUserId = activeDmUserId();
   if (partnerId) {
@@ -3039,6 +3123,7 @@ async function sendGif(result) {
   }
   try {
     const msg = await apiPost('/api/messages.php', payload);
+    clearReplyDraft();
     if (msg.channel === 'community') addMessageToChannel(msg, 'community', false);
     else if (msg.channel === 'link') addMessageToChannel(msg, `link:${partnerId}`, false);
     else if (msg.channel === 'dm') {
@@ -3250,9 +3335,10 @@ function toggleGestureAudio(gesture, btn) {
 
 async function sendGesture(gesture) {
   closeMediaPicker();
-  const payload = { session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'gesture', gesture_id: gesture.id, channel: 'room' };
+  const payload = appendReplyPayload({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'gesture', gesture_id: gesture.id, channel: 'room' });
   try {
     const msg = await apiPost('/api/messages.php', payload);
+    clearReplyDraft();
     switchChat('room');
     renderMessage(msg, true);
   } catch (err) {
@@ -3416,6 +3502,14 @@ document.querySelectorAll('[data-msg-reaction]').forEach(btn => {
     closeMessageActionMenu();
     await applyReaction(messageId, btn.dataset.msgReaction, chatKey);
   });
+});
+
+document.getElementById('msg-reply-action')?.addEventListener('click', () => {
+  const chatKey = msgActionTargetChat || activeChat;
+  const msg = currentActiveMessage(msgActionTargetId, chatKey);
+  closeMessageActionMenu();
+  if (!msg) return;
+  startReplyDraft(msg, chatKey);
 });
 
 document.getElementById('msg-edit-action')?.addEventListener('click', async () => {

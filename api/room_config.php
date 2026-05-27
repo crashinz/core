@@ -58,6 +58,7 @@ function community_message_payload(array $m, string $channel, array $reactionsMa
         'is_owner' => !empty($m['author_is_owner']),
         'content' => $m['content'],
         'url_preview' => message_url_preview($m['url_preview_json'] ?? null),
+        'reply_to' => message_url_preview($m['reply_to_json'] ?? null),
         'message_type' => $m['message_type'] ?? 'text',
         'file_size' => $m['file_size'] !== null ? (int)$m['file_size'] : null,
         'mime_type' => $m['mime_type'] ?? null,
@@ -161,6 +162,7 @@ $messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMa
         'is_owner' => !empty($m['author_is_owner']),
         'content' => $m['content'],
         'url_preview' => message_url_preview($m['url_preview_json'] ?? null),
+        'reply_to' => message_url_preview($m['reply_to_json'] ?? null),
         'message_type' => $m['message_type'] ?? 'text',
         'file_size' => $m['file_size'] !== null ? (int)$m['file_size'] : null,
         'mime_type' => $m['mime_type'] ?? null,
@@ -181,7 +183,7 @@ $messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMa
 }, $rawMessages);
 
 $stmt = $pdo->query(
-    "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json,
+    "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json, cm.reply_to_json,
             cm.message_type, cm.file_size, cm.mime_type, cm.original_name, cm.edited_at, cm.sent_at,
             u.role AS author_role,
             0 AS author_is_owner
@@ -204,7 +206,7 @@ if (!$linkedTo) {
 if ($linkedTo) {
     $linkKey = link_key_for((int)$participant['id'], $linkedTo);
     $stmt = $pdo->prepare(
-        "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json,
+        "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json, cm.reply_to_json,
                 cm.message_type, cm.file_size, cm.mime_type, cm.original_name, cm.edited_at, cm.sent_at, cm.link_key,
                 u.role AS author_role,
                 CASE WHEN cm.user_id = ? THEN 1 ELSE 0 END AS author_is_owner
@@ -234,7 +236,7 @@ foreach ($stmt->fetchAll() as $row) {
 $dmLeft = 'dm:' . (int)$user['id'] . ':%';
 $dmRight = 'dm:%:' . (int)$user['id'];
 $stmt = $pdo->prepare(
-    "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json,
+    "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json, cm.reply_to_json,
             cm.message_type, cm.file_size, cm.mime_type, cm.original_name, cm.edited_at, cm.sent_at, cm.link_key,
             u.role AS author_role,
             0 AS author_is_owner

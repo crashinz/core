@@ -55,11 +55,46 @@ if (!move_uploaded_file($tmpName, $target)) {
 
 $publicPath = '/assets/uploads/voice/' . $filename;
 $avatarUrl = $participant['webcam_path'] ?: resolve_avatar($participant['avatar_path']);
+
+function voice_reply_preview_text(array $message): string {
+    $type = (string)($message['message_type'] ?? 'text');
+    if ($type === 'gif') return 'sent a GIF';
+    if ($type === 'gesture') {
+        $gesture = message_gesture((string)($message['content'] ?? ''));
+        return trim((string)($gesture['text'] ?? $gesture['name'] ?? $message['original_name'] ?? 'sent a gesture'));
+    }
+    if ($type === 'file') return trim((string)($message['original_name'] ?? 'sent a file'));
+    if ($type === 'voice_note') return 'sent a voice note';
+    $text = trim(preg_replace('/\s+/', ' ', (string)($message['content'] ?? '')));
+    return $text === '' ? 'Message' : (function_exists('mb_substr') ? mb_substr($text, 0, 180, 'UTF-8') : substr($text, 0, 180));
+}
+
+$replyTo = null;
+$replyId = (int)($_POST['reply_to_id'] ?? 0);
+if ($replyId > 0) {
+    if ((string)($_POST['reply_to_channel'] ?? 'room') !== 'room') json_out(['error' => 'Reply target unavailable'], 400);
+    $stmt = $pdo->prepare('SELECT * FROM messages WHERE id = ? AND session_id = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1');
+    $stmt->execute([$replyId, $sessionId]);
+    $message = $stmt->fetch();
+    if (!$message) json_out(['error' => 'Reply target unavailable'], 404);
+    $replyTo = [
+        'id' => (int)$message['id'],
+        'channel' => 'room',
+        'participant_id' => isset($message['participant_id']) ? (int)$message['participant_id'] : null,
+        'user_id' => isset($message['user_id']) ? (int)$message['user_id'] : null,
+        'display_name' => $message['display_name'] ?? 'Someone',
+        'message_type' => $message['message_type'] ?? 'text',
+        'original_name' => $message['original_name'] ?? null,
+        'preview' => voice_reply_preview_text($message),
+    ];
+}
+$replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
+
 $stmt = $pdo->prepare(
-    "INSERT INTO messages (session_id, participant_id, user_id, display_name, avatar_path, avatar_url, content, message_type, file_size, mime_type, original_name)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+    "INSERT INTO messages (session_id, participant_id, user_id, display_name, avatar_path, avatar_url, content, reply_to_json, message_type, file_size, mime_type, original_name)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
 );
-$stmt->execute([$sessionId, (int)$participant['id'], (int)$participant['user_id'], $participant['display_name'], $participant['avatar_path'], $avatarUrl, $publicPath, 'voice_note', (int)$file['size'], $mimeType, 'Voice Note']);
+$stmt->execute([$sessionId, (int)$participant['id'], (int)$participant['user_id'], $participant['display_name'], $participant['avatar_path'], $avatarUrl, $publicPath, $replyToJson, 'voice_note', (int)$file['size'], $mimeType, 'Voice Note']);
 $id = (int)$pdo->lastInsertId();
 
 $msg = [
@@ -76,6 +111,7 @@ $msg = [
     'file_size' => (int)$file['size'],
     'mime_type' => $mimeType,
     'original_name' => 'Voice Note',
+    'reply_to' => $replyTo,
     'sent_at' => gmdate('Y-m-d H:i:s'),
 ];
 

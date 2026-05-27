@@ -106,6 +106,13 @@ $linkIconCatalog = link_icon_catalog($pdo);
     <div class="divider" id="horizontal-divider"></div>
     <section class="chat-pane">
       <div class="messages" id="messages"></div>
+      <div class="reply-draft" id="reply-draft" hidden>
+        <div>
+          <strong id="reply-draft-author">Replying to someone</strong>
+          <span id="reply-draft-preview"></span>
+        </div>
+        <button id="reply-draft-cancel" type="button" aria-label="Cancel reply">×</button>
+      </div>
       <form class="composer" id="composer">
         <button class="composer-icon-btn" id="attach-btn" type="button" aria-label="Add attachment"><img src="<?= e(app_url('/assets/images/input-add.png')) ?>" alt=""></button>
         <div class="attach-menu" id="attach-menu" hidden>
@@ -425,6 +432,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
     <button type="button" data-msg-reaction="😌">😌</button>
     <button type="button" data-msg-reaction="✅">✅</button>
   </div>
+  <button id="msg-reply-action" type="button">Reply</button>
   <button id="msg-edit-action" type="button">Edit</button>
   <button id="msg-delete-action" class="danger" type="button">Delete</button>
 </div>
