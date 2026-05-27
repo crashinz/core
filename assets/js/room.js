@@ -4714,6 +4714,13 @@ async function pollVoice() {
   restartVoicePoll(voiceJoined ? 1000 : 2000);
 }
 
+function voiceControlIcon(kind) {
+  if (kind === 'mic') {
+    return '<span class="voice-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path><path d="M8 22h8"></path></svg></span>';
+  }
+  return '<span class="voice-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"></path><path d="M4 13v5a2 2 0 0 0 2 2h2v-7H4Z"></path><path d="M20 13v5a2 2 0 0 1-2 2h-2v-7h4Z"></path></svg></span>';
+}
+
 function renderVoiceList(list) {
   latestVoiceParticipants = Array.isArray(list) ? list : [];
   if (voiceSideSection) voiceSideSection.classList.toggle('has-voice', latestVoiceParticipants.length > 0);
@@ -4733,10 +4740,10 @@ function renderVoiceList(list) {
     row.dataset.participantId = person.id;
     const statusText = speaking ? 'Speaking' : 'In voice';
     const controls = own
-      ? `<button class="voice-control${muted ? ' active' : ''}" data-voice-mute type="button" title="${muted ? 'Unmute mic' : 'Mute mic'}" aria-label="${muted ? 'Unmute mic' : 'Mute mic'}"><span class="voice-icon voice-icon-mic"></span></button>
-         <button class="voice-control${deafened ? ' active' : ''}" data-voice-deafen type="button" title="${deafened ? 'Undeafen' : 'Deafen'}" aria-label="${deafened ? 'Undeafen' : 'Deafen'}"><span class="voice-icon voice-icon-volume"></span></button>`
-      : `${muted ? '<span class="voice-status-icon active" title="Mic muted"><span class="voice-icon voice-icon-mic"></span></span>' : ''}
-         ${deafened ? '<span class="voice-status-icon active" title="Deafened"><span class="voice-icon voice-icon-volume"></span></span>' : ''}`;
+      ? `<button class="voice-control${muted ? ' active' : ''}" data-voice-mute type="button" title="${muted ? 'Unmute mic' : 'Mute mic'}" aria-label="${muted ? 'Unmute mic' : 'Mute mic'}">${voiceControlIcon('mic')}</button>
+         <button class="voice-control${deafened ? ' active' : ''}" data-voice-deafen type="button" title="${deafened ? 'Undeafen' : 'Deafen'}" aria-label="${deafened ? 'Undeafen' : 'Deafen'}">${voiceControlIcon('headphones')}</button>`
+      : `${muted ? `<span class="voice-status-icon active" title="Mic muted">${voiceControlIcon('mic')}</span>` : ''}
+         ${deafened ? `<span class="voice-status-icon active" title="Deafened">${voiceControlIcon('headphones')}</span>` : ''}`;
     row.innerHTML = `<span class="user-avatar-wrap"><img src="${esc(avatarUrl(person))}" alt=""><span class="voice-speaking-dot${speaking ? ' speaking' : ''}"></span></span><div><strong class="person-name-line"><span>${esc(displayNameFor(person))}</span></strong><div class="minor">${own ? 'You' : statusText}</div></div><div class="voice-card-actions">${controls}</div>`;
     row.querySelector('[data-voice-mute]')?.addEventListener('click', () => setVoiceMuted(!voiceMuted));
     row.querySelector('[data-voice-deafen]')?.addEventListener('click', () => setVoiceDeafened(!voiceDeafened));
