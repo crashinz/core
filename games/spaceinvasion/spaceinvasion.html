@@ -93,7 +93,7 @@ button{
 button:hover{ transform:translateY(-1px); background:linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06)); box-shadow:0 12px 28px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.18);}
 
 /* Waiting overlay with copy row */
-.waiting-cover{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); backdrop-filter:blur(3px); z-index:6;}
+.waiting-cover{position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); backdrop-filter:blur(3px); z-index:6;}
 .waiting-panel{background:color-mix(in srgb, #1a1a1f 85%, #000 15%); border:1px solid rgba(255,255,255,0.15); border-radius:14px; padding:20px 22px; min-width:320px; max-width:min(92vw,560px); text-align:center; box-shadow:0 18px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08);}
 .spinner{width:18px; height:18px; border-radius:50%; border:2px solid rgba(255,255,255,0.25); border-top-color:rgba(255,255,255,0.9); animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; margin-right:8px;}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -131,6 +131,7 @@ body.embedded .canvas-wrap{
   min-height:0;
 }
 body.embedded .waiting-cover{
+  display:none !important;
   border-radius:0;
 }
 </style>
@@ -457,8 +458,8 @@ async function joinAndBegin(){
   statusTimer = setInterval(async ()=>{
     const s = await getLobbyStatus();
     const isOngoing = s && (s.status === 'ongoing');
-    inviteRow.style.display = isOngoing ? 'none' : 'block';
-    waitingMsg.textContent = isOngoing ? (state.started ? 'Game on' : 'Starting…') : 'Waiting for Opponent…';
+    inviteRow.style.display = 'none';
+    statusEl.textContent = isOngoing || sawOtherJoin ? 'Game on' : 'Solo mode - waiting for opponent';
   }, 800);
 }
 
@@ -545,7 +546,10 @@ function throttleMoveBroadcast(x){
 function applyMove(sender, p){
   switch(p.type){
     case 'join':
-      if(sender !== user){ sawOtherJoin = true; }
+      if(sender !== user){
+        sawOtherJoin = true;
+        statusEl.textContent = 'Game on';
+      }
       break;
     case 'start': {
       // accept either p.startAt (ms) or p.at (seconds)
@@ -559,6 +563,9 @@ function applyMove(sender, p){
         initStars(); bindKeys();
         state.lastFrame = performance.now();
         requestAnimationFrame(tick);
+      } else {
+        sawOtherJoin = true;
+        statusEl.textContent = 'Game on';
       }
       break;
     }
@@ -661,16 +668,21 @@ function softRestart(){
 
 /* ================= Kickoff ================= */
 async function kickoff(){
-  waitingCover.style.display = 'flex';
-  inviteRow.style.display = 'block';
-  statusEl.textContent = 'Waiting for Opponent';
+  waitingCover.style.display = 'none';
+  inviteRow.style.display = 'none';
+  statusEl.textContent = 'Solo mode - waiting for opponent';
 
   // 1) Register
   await joinAndBegin();
 
-  // 2) Do not send our own join move - server lobby.php join already broadcasts it
+  // 2) Start immediately in solo mode; networking upgrades it when a partner joins.
+  if(!state.startAt){
+    state.startAt = Date.now()+300;
+    state.started = true;
+    initStars();
+    bindKeys();
+  }
 
-  // Start render loop idle - gameplay begins after we receive {type:'start'}
   state.lastFrame = performance.now();
   requestAnimationFrame(tick);
 }

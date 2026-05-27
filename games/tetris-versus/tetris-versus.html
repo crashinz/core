@@ -100,7 +100,7 @@ button{
 }
 button:hover{transform:translateY(-1px); background:linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06)); box-shadow:0 12px 28px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.18);}
 
-.waiting-cover{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); backdrop-filter:blur(3px); z-index:6;}
+.waiting-cover{position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); backdrop-filter:blur(3px); z-index:6;}
 .waiting-panel{background:color-mix(in srgb, #1a1a1f 85%, #000 15%); border:1px solid rgba(255,255,255,0.15); border-radius:14px; padding:20px 22px; min-width:320px; max-width:min(92vw,560px); text-align:center; box-shadow:0 18px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08);}
 .spinner{width:18px; height:18px; border-radius:50%; border:2px solid rgba(255,255,255,0.25); border-top-color:rgba(255,255,255,0.9); animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; margin-right:8px;}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -139,6 +139,7 @@ body.embedded .versus{
   overflow:auto;
 }
 body.embedded .waiting-cover{
+  display:none !important;
   border-radius:0;
 }
   </style>
@@ -476,13 +477,17 @@ let started=false, bothJoined=false, gameOver=false, winner=null;
 /* ================= Waiting/Join UX ================= */
 function setWaiting(mode){
   if(mode){
-    waitingCover.style.display='flex';
-    if(mode==='waiting'){ waitingMsg.textContent='Waiting for Opponent…'; el('status').textContent='Waiting for Opponent…'; inviteRow.style.display='block'; }
-    else { waitingMsg.textContent='Opponent left — please Leave'; el('status').textContent='Opponent left'; inviteRow.style.display='none'; }
-  } else { waitingCover.style.display='none'; el('status').textContent='Game in progress'; inviteRow.style.display='none'; }
+    waitingCover.style.display='none';
+    inviteRow.style.display='none';
+    el('status').textContent = mode === 'left' ? 'Solo mode' : 'Solo mode - waiting for opponent';
+  } else {
+    waitingCover.style.display='none';
+    el('status').textContent='Game in progress';
+    inviteRow.style.display='none';
+  }
 }
 function ensureBothPresent(){ if(!bothJoined){ bothJoined=true; started=true; setWaiting(null); myGame?.sendState(true); sendMove('ready',{at:Date.now()}).catch(()=>{}); } }
-function onOpponentLeft(){ bothJoined=false; started=false; setWaiting('left'); }
+function onOpponentLeft(){ bothJoined=false; started=true; setWaiting('left'); }
 
 /* ================= Poll opponent via moves.php + lobby.php ================= */
 let lastSeq=0;
@@ -583,6 +588,7 @@ requestAnimationFrame(loop);
 
   myGame=new Game(mySide);
   myGame.spawn(); myGame.syncHUD();
+  started = true;
   bindControls();
 
   await seedMoves();
@@ -602,7 +608,6 @@ Game.prototype.spawn=function(){
     this.sendResult({topout:true});
     sendMove('topout',{});
     el('status').textContent='You lose…';
-    setWaiting('left');
   }
 };
 </script>
