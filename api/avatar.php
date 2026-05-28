@@ -24,13 +24,14 @@ move_uploaded_file($_FILES['avatar']['tmp_name'], $dest);
 $public = '/assets/uploads/avatars/' . $file;
 
 $pdo->prepare('UPDATE users SET avatar_path = ? WHERE id = ?')->execute([$public, (int)$p['user_id']]);
-$pdo->prepare('UPDATE participants SET avatar_path = ?, webcam_path = NULL WHERE user_id = ?')->execute([$public, (int)$p['user_id']]);
+$pdo->prepare('UPDATE participants SET avatar_path = ?, webcam_path = NULL, webcam_enabled = 0 WHERE user_id = ?')->execute([$public, (int)$p['user_id']]);
 
 emit_event($pdo, $sessionId, 'avatar', [
     'participant_id' => (int)$p['id'],
     'avatar_path' => $public,
     'avatar_url' => $public,
     'webcam_path' => null,
+    'webcam_enabled' => false,
 ]);
 
 json_out(['ok' => true, 'avatar_path' => $public, 'avatar_url' => $public]);

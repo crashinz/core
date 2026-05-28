@@ -91,7 +91,7 @@ let pendingDeleteMessageId = null;
 let pendingDeleteChatKey = null;
 let replyDraft = null;
 let webcamStream = null;
-let webcamTimer = null;
+const pendingRemoteVideoStreams = new Map();
 const AVATAR_STAGE_SIZE = 150;
 let voiceStream = null;
 let voiceJoined = false;
@@ -411,6 +411,17 @@ function isWebcamAssetUrl(url) {
   return String(url || '').includes('/assets/uploads/webcam/');
 }
 
+function addAvatarContextListeners(el) {
+  if (!el) return;
+  el.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const current = participants.get(Number(el.dataset.participantId));
+    if (!current) return;
+    openAvatarContextMenu(e.clientX, e.clientY, current);
+  });
+}
+
 function setAvatarImageSource(img, nextSrc, flip = false) {
   if (!img || !nextSrc) return;
   if (!flip) {
@@ -428,12 +439,70 @@ function setAvatarImageSource(img, nextSrc, flip = false) {
   }, 330);
 }
 
-function applyWebcamPath(participantId, webcamPath) {
+function attachParticipantVideo(participantId, stream, own = false) {
+  const person = participants.get(Number(participantId));
+  if (!person || !stream) {
+    if (stream) pendingRemoteVideoStreams.set(Number(participantId), stream);
+    return;
+  }
+  pendingRemoteVideoStreams.delete(Number(participantId));
+  let video = person.webcamVideoEl;
+  if (!video) {
+    video = document.createElement('video');
+    video.className = 'avatar avatar-webcam-video';
+    video.dataset.participantId = person.id;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = own;
+    addAvatarContextListeners(video);
+    if (own) makeDraggable(video);
+    roomStage.insertBefore(video, person.labelEl || null);
+    person.webcamVideoEl = video;
+  }
+  if (video.srcObject !== stream) video.srcObject = stream;
+  video.muted = own;
+  video.classList.toggle('avatar-webcam-self', own);
+  video.play?.().catch(() => {});
+  person.webcam_enabled = true;
+  person.avatarEl?.classList.add('avatar-hidden-behind-webcam');
+  positionAvatar(person);
+}
+
+function detachParticipantVideo(participantId, flip = true) {
+  const person = participants.get(Number(participantId));
+  pendingRemoteVideoStreams.delete(Number(participantId));
+  if (!person) return;
+  const video = person.webcamVideoEl;
+  person.webcamVideoEl = null;
+  person.webcam_enabled = false;
+  person.webcam_path = null;
+  person.avatarEl?.classList.remove('avatar-hidden-behind-webcam');
+  if (!video) return;
+  video.srcObject = null;
+  if (!flip) {
+    video.remove();
+    return;
+  }
+  video.classList.remove('avatar-flipping');
+  void video.offsetWidth;
+  video.classList.add('avatar-flipping');
+  window.setTimeout(() => video.remove(), 330);
+}
+
+function applyWebcamState(participantId, enabled, webcamPath = null) {
   const person = participants.get(Number(participantId));
   if (!person) return;
-  const next = Object.assign({}, person, { webcam_path: webcamPath || null });
+  const next = Object.assign({}, person, {
+    webcam_path: webcamPath || null,
+    webcam_enabled: Boolean(enabled || webcamPath),
+  });
   if (!next.webcam_path && isWebcamAssetUrl(next.avatar_url)) next.avatar_url = null;
   renderParticipant(next);
+  if (!next.webcam_enabled) detachParticipantVideo(participantId);
+}
+
+function applyWebcamPath(participantId, webcamPath) {
+  applyWebcamState(participantId, Boolean(webcamPath), webcamPath || null);
 }
 
 function messageAvatarUrl(msg, participant = null) {
@@ -813,7 +882,7 @@ function renderParticipant(p, options = {}) {
   if (roomExitInProgress && Number(p.id) === Number(cfg?.myParticipantId)) return;
   const existing = participants.get(p.id) || {};
   const hadImage = Boolean(existing.avatarEl);
-  const wasWebcam = Boolean(existing.webcam_path);
+  const wasWebcam = Boolean(existing.webcam_path || existing.webcam_enabled);
   const merged = Object.assign(existing, p);
   if (!merged.webcam_path && isWebcamAssetUrl(merged.avatar_url)) merged.avatar_url = null;
   participants.set(p.id, merged);
@@ -832,20 +901,17 @@ function renderParticipant(p, options = {}) {
     merged.avatarEl = img;
     merged.labelEl = label;
     if (p.id === cfg.myParticipantId) makeDraggable(img);
-    img.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      const current = participants.get(Number(img.dataset.participantId));
-      if (!current) return;
-      openAvatarContextMenu(e.clientX, e.clientY, current);
-    });
+    addAvatarContextListeners(img);
   }
-  const nowWebcam = Boolean(merged.webcam_path);
+  const nowWebcam = Boolean(merged.webcam_path || merged.webcam_enabled);
   setAvatarImageSource(img, avatarUrl(merged), hadImage && wasWebcam !== nowWebcam);
   refreshLinkClasses();
-  img.classList.toggle('webcam', Boolean(merged.webcam_path));
+  img.classList.toggle('webcam', Boolean(merged.webcam_path || merged.webcam_enabled));
   label.textContent = displayNameFor(merged);
   positionAvatar(merged);
+  const pendingVideo = pendingRemoteVideoStreams.get(Number(merged.id));
+  if (pendingVideo) attachParticipantVideo(merged.id, pendingVideo, Number(merged.id) === Number(cfg.myParticipantId));
+  if (merged.webcamVideoEl && merged.webcam_enabled) merged.avatarEl?.classList.add('avatar-hidden-behind-webcam');
   if (options.animateJoin) runAvatarPixelEffect(merged, 'in');
   renderPeople();
   renderLinkTabs();
@@ -856,10 +922,12 @@ function removeStagePresence(person) {
   person.labelEl?.remove();
   person.typingEl?.remove();
   person.speechEl?.remove();
+  person.webcamVideoEl?.remove();
   person.avatarEl = null;
   person.labelEl = null;
   person.typingEl = null;
   person.speechEl = null;
+  person.webcamVideoEl = null;
 }
 
 function removeParticipant(participantId, options = {}) {
@@ -870,6 +938,11 @@ function removeParticipant(participantId, options = {}) {
   typingTimers.delete(id);
   clearTimeout(speechTimers.get(id));
   speechTimers.delete(id);
+  pendingRemoteVideoStreams.delete(id);
+  if (peers.has(id)) {
+    peers.get(id).close();
+    peers.delete(id);
+  }
   const finish = () => {
     removeStagePresence(person);
     if (options.keepRecord) {
@@ -927,6 +1000,10 @@ function positionAvatar(p) {
   const y = Math.max(0, Math.min(h - ah, p.position_y * h));
   img.style.left = `${x}px`;
   img.style.top = `${y}px`;
+  if (p.webcamVideoEl) {
+    p.webcamVideoEl.style.left = `${x}px`;
+    p.webcamVideoEl.style.top = `${y}px`;
+  }
   label.style.left = `${x + aw / 2}px`;
   label.style.top = `${y + ah + 7}px`;
   if (p.typingEl) {
@@ -976,12 +1053,13 @@ function refreshLinkClasses() {
 
 function pulseParticipantAvatar(participantId) {
   const person = participants.get(Number(participantId));
-  if (!person?.avatarEl) return;
-  person.avatarEl.classList.remove('avatar-pulse');
-  void person.avatarEl.offsetWidth;
-  person.avatarEl.classList.add('avatar-pulse');
+  const el = person?.webcamVideoEl || person?.avatarEl;
+  if (!el) return;
+  el.classList.remove('avatar-pulse');
+  void el.offsetWidth;
+  el.classList.add('avatar-pulse');
   window.setTimeout(() => {
-    person.avatarEl?.classList.remove('avatar-pulse');
+    el.classList.remove('avatar-pulse');
   }, 1500);
 }
 
@@ -1831,7 +1909,7 @@ function roomEffectContext(effect) {
     roomStage,
     participants,
     getParticipant: id => participants.get(Number(id)),
-    getAvatars: () => [...participants.values()].filter(p => p.avatarEl).map(p => ({ participant: p, element: p.avatarEl })),
+    getAvatars: () => [...participants.values()].filter(p => p.avatarEl || p.webcamVideoEl).map(p => ({ participant: p, element: p.webcamVideoEl || p.avatarEl })),
     addStageListener: (type, handler, options) => {
       roomStage.addEventListener(type, handler, options);
       disposers.push(() => roomStage.removeEventListener(type, handler, options));
@@ -2155,6 +2233,7 @@ async function poll() {
         renderParticipantWhenReady(Object.assign({ online: true }, p), { animateJoin: !hadStageAvatar }).catch(() => {
           renderParticipant(Object.assign({ online: true }, p), { animateJoin: !hadStageAvatar });
         });
+        if (webcamStream && Number(p.id) !== Number(cfg.myParticipantId)) connectMediaPeer(p.id);
         if (!alreadyKnown && p.id !== cfg.myParticipantId) addSystemMessage(`${p.display_name} joined the room.`);
       }
       if (ev.type === 'participant_leave') {
@@ -2172,7 +2251,7 @@ async function poll() {
         }
       }
       if (ev.type === 'webcam') {
-        applyWebcamPath(p.participant_id, p.webcam_path || null);
+        applyWebcamState(p.participant_id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null);
       }
       if (ev.type === 'avatar') {
         const person = participants.get(p.participant_id);
@@ -2181,6 +2260,8 @@ async function poll() {
           person.avatar_url = p.avatar_url;
           person.avatar_version = Date.now();
           person.webcam_path = p.webcam_path || null;
+          person.webcam_enabled = Boolean(p.webcam_enabled || p.webcam_path);
+          if (!person.webcam_enabled) detachParticipantVideo(person.id);
           renderParticipant(person);
         }
       }
@@ -2757,7 +2838,7 @@ async function refreshPresence() {
       const existing = participants.get(p.id);
       if (existing) {
         existing.online = p.online;
-        if (p.online) applyWebcamPath(existing.id, p.webcam_path || null);
+        if (p.online) applyWebcamState(existing.id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null);
         else if (existing.avatarEl) removeParticipant(existing.id, { keepRecord: true });
       }
     });
@@ -3765,38 +3846,32 @@ ctxToggleWebcam.addEventListener('click', async () => {
   if (webcamStream) {
     webcamStream.getTracks().forEach(t => t.stop());
     webcamStream = null;
-    clearInterval(webcamTimer);
     await apiPost('/api/webcam_frame.php', { action: 'off', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
-    applyWebcamPath(cfg.myParticipantId, null);
+    detachParticipantVideo(cfg.myParticipantId);
+    applyWebcamState(cfg.myParticipantId, false, null);
+    renegotiateMediaPeers();
     return;
   }
-  webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-  const video = document.createElement('video');
-  video.srcObject = webcamStream;
-  video.muted = true;
-  await video.play();
-  const canvas = document.createElement('canvas');
-  canvas.width = 250;
-  canvas.height = 250;
-  const ctx = canvas.getContext('2d');
-  function drawWebcamCover() {
-    const vw = video.videoWidth || canvas.width;
-    const vh = video.videoHeight || canvas.height;
-    const scale = Math.max(canvas.width / vw, canvas.height / vh);
-    const sw = canvas.width / scale;
-    const sh = canvas.height / scale;
-    const sx = Math.max(0, (vw - sw) / 2);
-    const sy = Math.max(0, (vh - sh) / 2);
-    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 640 }, frameRate: { ideal: 30, max: 30 } },
+      audio: false,
+    });
+    const me = participants.get(cfg.myParticipantId);
+    if (me) {
+      me.webcam_enabled = true;
+      me.webcam_path = null;
+      renderParticipant(me);
+      attachParticipantVideo(cfg.myParticipantId, webcamStream, true);
+    }
+    await apiPost('/api/webcam_frame.php', { action: 'on', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
+    connectMediaPeers();
+    restartVoicePoll(0);
+  } catch (err) {
+    if (webcamStream) webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+    showWarning(err.message || 'Could not enable webcam.');
   }
-  async function sendFrame() {
-    drawWebcamCover();
-    const image = canvas.toDataURL('image/jpeg', .72);
-    const data = await apiPost('/api/webcam_frame.php', { action: 'frame', session_id: cfg.sessionId, join_token: cfg.myJoinToken, image }).catch(() => null);
-    if (data?.webcam_path) applyWebcamPath(cfg.myParticipantId, data.webcam_path);
-  }
-  await sendFrame();
-  webcamTimer = setInterval(sendFrame, 2600);
 });
 
 function setRoomHeight(pct) {
@@ -4680,6 +4755,75 @@ function selectedVoiceAudioConstraints() {
   return { deviceId: { exact: deviceId } };
 }
 
+function mediaActive() {
+  return Boolean(voiceJoined || webcamStream);
+}
+
+function shouldPollMediaFast() {
+  return mediaActive() || [...participants.values()].some(person => Boolean(person.webcam_enabled || person.webcam_path));
+}
+
+function localMediaTracks() {
+  return [
+    ...(voiceStream ? voiceStream.getAudioTracks() : []),
+    ...(webcamStream ? webcamStream.getVideoTracks() : []),
+  ].filter(track => track.readyState !== 'ended');
+}
+
+function syncPeerLocalTracks(pc) {
+  if (!pc) return;
+  const desired = localMediaTracks();
+  for (const track of desired) {
+    const sender = pc.getSenders().find(item => item.track?.kind === track.kind);
+    if (sender) {
+      if (sender.track !== track) sender.replaceTrack(track).catch(() => {});
+    } else {
+      const stream = track.kind === 'video' ? webcamStream : voiceStream;
+      if (stream) pc.addTrack(track, stream);
+    }
+  }
+  pc.getSenders().forEach(sender => {
+    if (!sender.track) return;
+    if (!desired.some(track => track.kind === sender.track.kind)) pc.removeTrack(sender);
+  });
+}
+
+async function makePeerOffer(participantId, pc = peers.get(Number(participantId))) {
+  if (!pc || pc.__makingOffer || pc.signalingState !== 'stable') return;
+  pc.__makingOffer = true;
+  try {
+    syncPeerLocalTracks(pc);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await sendSignal(participantId, 'offer', pc.localDescription);
+  } catch (err) {
+    console.warn(err);
+  } finally {
+    pc.__makingOffer = false;
+  }
+}
+
+async function connectMediaPeer(participantId) {
+  const id = Number(participantId);
+  if (!id || id === Number(cfg.myParticipantId) || !mediaActive()) return;
+  const pc = await getPeer(id, false);
+  await makePeerOffer(id, pc);
+}
+
+function connectMediaPeers() {
+  if (!mediaActive()) return;
+  participants.forEach(person => {
+    if (Number(person.id) !== Number(cfg.myParticipantId)) connectMediaPeer(person.id);
+  });
+}
+
+function renegotiateMediaPeers() {
+  peers.forEach((pc, id) => {
+    syncPeerLocalTracks(pc);
+    makePeerOffer(id, pc);
+  });
+}
+
 document.getElementById('voice-toggle').addEventListener('click', async () => {
   if (voiceJoined) await leaveVoice();
   else await openVoiceDeviceModal();
@@ -4708,6 +4852,7 @@ async function joinVoice() {
     await syncVoiceStatus(true);
     startVoiceAnalyser();
     document.querySelectorAll('audio[id^="voice-audio-"]').forEach(applyAudioOutput);
+    connectMediaPeers();
     restartVoicePoll(0);
     closeVoiceDeviceModal();
     populateVoiceDevices().catch(() => {});
@@ -4729,11 +4874,14 @@ async function leaveVoice() {
   lastVoiceStatusSignature = '';
   stopVoiceAnalyser();
   updateVoiceToggleButton();
-  for (const pc of peers.values()) pc.close();
-  peers.clear();
   document.querySelectorAll('audio[id^="voice-audio-"]').forEach(audio => audio.remove());
   if (voiceStream) voiceStream.getTracks().forEach(t => t.stop());
   voiceStream = null;
+  if (webcamStream) renegotiateMediaPeers();
+  else {
+    for (const pc of peers.values()) pc.close();
+    peers.clear();
+  }
   await apiPost('/api/voice_signal.php', { action: 'leave', session_id: cfg.sessionId, participant_id: cfg.myParticipantId, join_token: cfg.myJoinToken }).catch(() => {});
   latestVoiceParticipants = latestVoiceParticipants.filter(v => Number(v.id) !== Number(cfg.myParticipantId));
   renderVoiceList(latestVoiceParticipants);
@@ -4741,36 +4889,54 @@ async function leaveVoice() {
 }
 
 async function getPeer(id, polite = false) {
-  if (peers.has(id)) return peers.get(id);
+  if (peers.has(id)) {
+    const existing = peers.get(id);
+    if (polite) existing.__polite = true;
+    syncPeerLocalTracks(existing);
+    return existing;
+  }
   const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  pc.__polite = polite;
   peers.set(id, pc);
-  if (voiceStream) voiceStream.getTracks().forEach(track => pc.addTrack(track, voiceStream));
+  syncPeerLocalTracks(pc);
   pc.ontrack = e => {
-    let audio = document.getElementById(`voice-audio-${id}`);
-    if (!audio) {
-      audio = document.createElement('audio');
-      audio.id = `voice-audio-${id}`;
-      audio.autoplay = true;
-      document.body.appendChild(audio);
+    const track = e.track;
+    if (track.kind === 'video') {
+      const stream = e.streams?.[0] || new MediaStream([track]);
+      attachParticipantVideo(id, stream);
+      track.addEventListener('ended', () => detachParticipantVideo(id));
+      return;
     }
-    audio.muted = voiceDeafened;
-    audio.srcObject = e.streams[0];
-    applyAudioOutput(audio);
+    if (track.kind === 'audio' && voiceJoined) {
+      let audio = document.getElementById(`voice-audio-${id}`);
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = `voice-audio-${id}`;
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+      }
+      audio.muted = voiceDeafened;
+      audio.srcObject = e.streams?.[0] || new MediaStream([track]);
+      applyAudioOutput(audio);
+    }
   };
   pc.onicecandidate = e => {
     if (e.candidate) sendSignal(id, 'ice', e.candidate);
   };
   pc.onnegotiationneeded = async () => {
     if (polite) return;
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await sendSignal(id, 'offer', pc.localDescription);
+    await makePeerOffer(id, pc);
   };
   return pc;
 }
 
+function mediaSignalData(data) {
+  if (!data || typeof data !== 'object') return data;
+  return Object.assign({}, data, { chatspace_media: webcamStream ? 'video' : 'voice' });
+}
+
 function sendSignal(toId, type, data) {
-  return apiPost('/api/voice_signal.php', { action: 'signal', session_id: cfg.sessionId, from_id: cfg.myParticipantId, to_id: toId, join_token: cfg.myJoinToken, type, data });
+  return apiPost('/api/voice_signal.php', { action: 'signal', session_id: cfg.sessionId, from_id: cfg.myParticipantId, to_id: toId, join_token: cfg.myJoinToken, type, data: mediaSignalData(data) });
 }
 
 async function pollVoice() {
@@ -4780,16 +4946,36 @@ async function pollVoice() {
     renderVoiceList(data.voice_participants || []);
     for (const sig of data.signals || []) {
       lastVoiceSignalId = Math.max(lastVoiceSignalId, sig.id);
-      if (!voiceJoined) continue;
       const from = sig.from_participant_id;
       if (!from || from === cfg.myParticipantId) continue;
+      const remote = participants.get(Number(from));
+      const remoteHasWebcam = Boolean(remote?.webcam_enabled || remote?.webcam_path);
+      const signalHasVideo = sig.data?.chatspace_media === 'video';
+      const shouldHandleMedia = Boolean(voiceJoined || webcamStream || remoteHasWebcam || signalHasVideo);
+      if (!shouldHandleMedia && sig.type !== 'leave') continue;
+      if (sig.type === 'leave') {
+        document.getElementById(`voice-audio-${from}`)?.remove();
+        if (peers.has(from) && !remoteHasWebcam) {
+          detachParticipantVideo(from);
+          peers.get(from).close();
+          peers.delete(from);
+        }
+        continue;
+      }
       const pc = await getPeer(from, sig.type === 'offer');
       if (sig.type === 'join') {
+        if (!voiceJoined && !webcamStream) continue;
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await sendSignal(from, 'offer', pc.localDescription);
       }
       if (sig.type === 'offer') {
+        syncPeerLocalTracks(pc);
+        const offerCollision = pc.__makingOffer || pc.signalingState !== 'stable';
+        if (offerCollision) {
+          if (!pc.__polite) continue;
+          await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
+        }
         await pc.setRemoteDescription(sig.data);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -4797,15 +4983,11 @@ async function pollVoice() {
       }
       if (sig.type === 'answer') await pc.setRemoteDescription(sig.data);
       if (sig.type === 'ice') await pc.addIceCandidate(sig.data).catch(() => {});
-      if (sig.type === 'leave' && peers.has(from)) {
-        peers.get(from).close();
-        peers.delete(from);
-      }
     }
   } catch (err) {
     console.warn(err);
   }
-  restartVoicePoll(voiceJoined ? 1000 : 2000);
+  restartVoicePoll(shouldPollMediaFast() ? 800 : 2000);
 }
 
 function voiceControlIcon(kind) {

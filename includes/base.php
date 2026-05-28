@@ -244,6 +244,7 @@ function migrate(PDO $pdo): void {
             position_x REAL NOT NULL DEFAULT 0.15,
             position_y REAL NOT NULL DEFAULT 0.25,
             webcam_path TEXT DEFAULT NULL,
+            webcam_enabled INTEGER NOT NULL DEFAULT 0,
             linked_to_participant_id INTEGER DEFAULT NULL,
             last_seen_at TEXT DEFAULT NULL,
             joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -574,6 +575,11 @@ function migrate(PDO $pdo): void {
         if (!in_array('recovery_code_suffix', $mysqlUserColNames, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN recovery_code_suffix VARCHAR(16) DEFAULT NULL');
         }
+        $mysqlParticipantCols = $pdo->query('SHOW COLUMNS FROM participants')->fetchAll();
+        $mysqlParticipantColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $mysqlParticipantCols);
+        if (!in_array('webcam_enabled', $mysqlParticipantColNames, true)) {
+            $pdo->exec('ALTER TABLE participants ADD COLUMN webcam_enabled INTEGER NOT NULL DEFAULT 0');
+        }
         $mysqlVoiceCols = $pdo->query('SHOW COLUMNS FROM voice_sessions')->fetchAll();
         $mysqlVoiceColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $mysqlVoiceCols);
         foreach (['muted', 'deafened', 'speaking'] as $voiceCol) {
@@ -638,9 +644,13 @@ function migrate(PDO $pdo): void {
         $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_room_sessions_public_id ON room_sessions(public_id)');
     }
     $participantCols = $pdo->query('PRAGMA table_info(participants)')->fetchAll();
+    $participantColNames = array_map(fn(array $col): string => (string)$col['name'], $participantCols);
     $hasLinkedTo = false;
     foreach ($participantCols as $col) {
         if (($col['name'] ?? '') === 'linked_to_participant_id') $hasLinkedTo = true;
+    }
+    if (!in_array('webcam_enabled', $participantColNames, true)) {
+        $pdo->exec('ALTER TABLE participants ADD COLUMN webcam_enabled INTEGER NOT NULL DEFAULT 0');
     }
     if (!$hasLinkedTo) {
         $pdo->exec('ALTER TABLE participants ADD COLUMN linked_to_participant_id INTEGER DEFAULT NULL');
@@ -1321,7 +1331,7 @@ function cleanup_stale_participants(PDO $pdo, ?int $sessionId = null): void {
     $stale = $stmt->fetchAll();
     if (!$stale) return;
 
-    $clearParticipant = $pdo->prepare('UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, linked_to_participant_id = NULL WHERE id = ? OR linked_to_participant_id = ?');
+    $clearParticipant = $pdo->prepare('UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, webcam_enabled = 0, linked_to_participant_id = NULL WHERE id = ? OR linked_to_participant_id = ?');
     $clearUser = $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?');
     $clearVoice = $pdo->prepare('DELETE FROM voice_sessions WHERE participant_id = ?');
     foreach ($stale as $row) {

@@ -102,6 +102,7 @@ $participants = array_map(function(array $p) use ($roomOwnerId): array {
         'position_x' => (float)$p['position_x'],
         'position_y' => (float)$p['position_y'],
         'webcam_path' => $p['webcam_path'],
+        'webcam_enabled' => !empty($p['webcam_enabled']),
         'linked_to' => $p['linked_to_participant_id'] ? (int)$p['linked_to_participant_id'] : null,
         'online' => $p['last_seen_at'] && strtotime($p['last_seen_at']) >= time() - 35,
     ];

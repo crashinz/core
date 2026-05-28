@@ -31,7 +31,9 @@ $session = active_session_for_room($pdo, $roomId);
 cleanup_stale_participants($pdo, (int)$session['id']);
 $participant = participant_for_user($pdo, (int)$session['id'], $user);
 $pdo->prepare('UPDATE users SET current_room_id = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([$roomId, (int)$user['id']]);
-$pdo->prepare('UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$participant['id']]);
+$pdo->prepare('UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP, webcam_path = NULL, webcam_enabled = 0 WHERE id = ?')->execute([(int)$participant['id']]);
+$participant['webcam_path'] = null;
+$participant['webcam_enabled'] = 0;
 
 emit_event($pdo, (int)$session['id'], 'participant_join', [
     'id' => (int)$participant['id'],
@@ -44,6 +46,7 @@ emit_event($pdo, (int)$session['id'], 'participant_join', [
     'position_x' => (float)$participant['position_x'],
     'position_y' => (float)$participant['position_y'],
     'webcam_path' => $participant['webcam_path'],
+    'webcam_enabled' => !empty($participant['webcam_enabled']),
     'linked_to' => $participant['linked_to_participant_id'] ? (int)$participant['linked_to_participant_id'] : null,
     'joined_at' => gmdate('Y-m-d H:i:s'),
 ]);

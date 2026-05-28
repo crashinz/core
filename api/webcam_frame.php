@@ -7,15 +7,28 @@ $sessionId = resolve_session_id($pdo, $body['session_id'] ?? '');
 $p = auth_participant($pdo, $sessionId, $body['join_token'] ?? '');
 $action = $body['action'] ?? 'frame';
 
-if ($action === 'off') {
-    $pdo->prepare('UPDATE participants SET webcam_path = NULL WHERE id = ?')->execute([(int)$p['id']]);
+if ($action === 'on') {
+    $pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = 1 WHERE id = ?')->execute([(int)$p['id']]);
     emit_event($pdo, $sessionId, 'webcam', [
         'participant_id' => (int)$p['id'],
         'webcam_path' => null,
+        'webcam_enabled' => true,
         'avatar_path' => $p['avatar_path'],
         'avatar_url' => resolve_avatar($p['avatar_path']),
     ]);
-    json_out(['ok' => true, 'webcam_path' => null, 'avatar_path' => $p['avatar_path'], 'avatar_url' => resolve_avatar($p['avatar_path'])]);
+    json_out(['ok' => true, 'webcam_path' => null, 'webcam_enabled' => true]);
+}
+
+if ($action === 'off') {
+    $pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = 0 WHERE id = ?')->execute([(int)$p['id']]);
+    emit_event($pdo, $sessionId, 'webcam', [
+        'participant_id' => (int)$p['id'],
+        'webcam_path' => null,
+        'webcam_enabled' => false,
+        'avatar_path' => $p['avatar_path'],
+        'avatar_url' => resolve_avatar($p['avatar_path']),
+    ]);
+    json_out(['ok' => true, 'webcam_path' => null, 'webcam_enabled' => false, 'avatar_path' => $p['avatar_path'], 'avatar_url' => resolve_avatar($p['avatar_path'])]);
 }
 
 $image = (string)($body['image'] ?? '');
@@ -26,6 +39,6 @@ $file = 'webcam_' . (int)$p['id'] . '.jpg';
 $path = __DIR__ . '/../assets/uploads/webcam/' . $file;
 file_put_contents($path, $bytes);
 $public = '/assets/uploads/webcam/' . $file;
-$pdo->prepare('UPDATE participants SET webcam_path = ? WHERE id = ?')->execute([$public, (int)$p['id']]);
-emit_event($pdo, $sessionId, 'webcam', ['participant_id' => (int)$p['id'], 'webcam_path' => $public]);
-json_out(['ok' => true, 'webcam_path' => $public]);
+$pdo->prepare('UPDATE participants SET webcam_path = ?, webcam_enabled = 1 WHERE id = ?')->execute([$public, (int)$p['id']]);
+emit_event($pdo, $sessionId, 'webcam', ['participant_id' => (int)$p['id'], 'webcam_path' => $public, 'webcam_enabled' => true]);
+json_out(['ok' => true, 'webcam_path' => $public, 'webcam_enabled' => true]);

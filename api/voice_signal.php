@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'role' => $r['role'] ?: 'user',
         'is_owner' => (int)$r['user_id'] === (int)$r['owner_id'],
         'avatar_path' => $r['avatar_path'],
-        'avatar_url' => $r['webcam_path'] ?: resolve_avatar($r['avatar_path']),
+        'avatar_url' => resolve_avatar($r['avatar_path']),
         'webcam_path' => $r['webcam_path'],
         'muted' => (bool)$r['muted'],
         'deafened' => (bool)$r['deafened'],

@@ -2088,6 +2088,16 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   z-index: 2;
 }
 .avatar:active { cursor: grabbing; }
+.avatar-webcam-video {
+  background: #05060a;
+}
+.avatar-webcam-video.avatar-webcam-self {
+  transform: rotateY(180deg);
+}
+.avatar-hidden-behind-webcam {
+  opacity: 0;
+  pointer-events: none;
+}
 .avatar.avatar-flipping {
   animation: avatarHorizontalFlip .32s cubic-bezier(.4,0,.2,1);
   transform-origin: center;
@@ -2206,7 +2216,8 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   opacity: 0;
   transition: opacity .15s ease;
 }
-.avatar:hover + .avatar-name {
+.avatar:hover + .avatar-name,
+.avatar:hover ~ .avatar-name {
   opacity: 1;
 }
 .avatar-name.avatar-name-hidden { opacity: 0 !important; }
