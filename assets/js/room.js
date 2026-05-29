@@ -1966,8 +1966,8 @@ async function applyRoomEffect(effectPayload, announce = false) {
 }
 
 async function loadRoomEffectsState() {
-  const qs = new URLSearchParams({ session_id: cfg.sessionId, join_token: cfg.myJoinToken });
-  const data = await fetch(appUrl('/api/room_effects.php?' + qs)).then(r => r.json());
+  const qs = new URLSearchParams({ action: 'effects', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
+  const data = await fetch(appUrl('/api/room_admin.php?' + qs)).then(r => r.json());
   if (data.error) throw new Error(data.error);
   cfg.roomEffects = data.effects || [];
   cfg.activeRoomEffect = data.current || null;
@@ -4269,10 +4269,10 @@ document.getElementById('room-effects-form')?.addEventListener('submit', async e
   const select = document.getElementById('room-effect-select');
   if (!select.value) return;
   try {
-    const data = await apiPost('/api/room_effects.php', {
+    const data = await apiPost('/api/room_admin.php', {
+      action: 'effect_start',
       session_id: cfg.sessionId,
       join_token: cfg.myJoinToken,
-      action: 'start',
       effect_key: select.value,
       duration_minutes: document.getElementById('room-effect-duration').value,
     });
@@ -4287,10 +4287,10 @@ document.getElementById('room-effects-form')?.addEventListener('submit', async e
 
 document.getElementById('room-effect-stop')?.addEventListener('click', async () => {
   try {
-    await apiPost('/api/room_effects.php', {
+    await apiPost('/api/room_admin.php', {
       session_id: cfg.sessionId,
       join_token: cfg.myJoinToken,
-      action: 'stop',
+      action: 'effect_stop',
     });
     cfg.activeRoomEffect = null;
     await applyRoomEffect(null, false);
@@ -4319,7 +4319,8 @@ document.getElementById('room-delete-confirm')?.addEventListener('click', async 
   const btn = e.currentTarget;
   btn.disabled = true;
   try {
-    await apiPost('/api/room_delete.php', {
+    await apiPost('/api/room_admin.php', {
+      action: 'delete',
       session_id: cfg.sessionId,
       join_token: cfg.myJoinToken,
     });
@@ -4342,6 +4343,7 @@ document.getElementById('room-edit-form')?.addEventListener('submit', async e =>
   e.preventDefault();
   const form = e.currentTarget;
   const fd = new FormData(form);
+  fd.append('action', 'update');
   fd.append('session_id', cfg.sessionId);
   fd.append('join_token', cfg.myJoinToken);
   const bgFile = fd.get('background');
@@ -4350,7 +4352,7 @@ document.getElementById('room-edit-form')?.addEventListener('submit', async e =>
   const progressEl = document.getElementById('room-edit-upload-progress');
   const submitBtn = form.querySelector('button[type="submit"]');
   try {
-    const update = await apiUploadWithProgress('/api/room_update.php', fd, progressEl, submitBtn);
+    const update = await apiUploadWithProgress('/api/room_admin.php', fd, progressEl, submitBtn);
     applyRoomUpdate(update);
     resetUploadProgress(progressEl);
     document.getElementById('room-edit-modal').classList.remove('open');
@@ -4365,8 +4367,8 @@ async function loadRoomEjections() {
   if (!list) return;
   list.innerHTML = '<div class="minor">Loading...</div>';
   try {
-    const qs = new URLSearchParams({ session_id: cfg.sessionId });
-    const data = await fetch(appUrl('/api/room_ejections.php?' + qs)).then(r => r.json());
+    const qs = new URLSearchParams({ action: 'ejections', session_id: cfg.sessionId });
+    const data = await fetch(appUrl('/api/room_admin.php?' + qs)).then(r => r.json());
     list.innerHTML = '';
     if (!(data.ejections || []).length) {
       list.innerHTML = '<div class="minor">No active kicks.</div>';
@@ -4378,7 +4380,7 @@ async function loadRoomEjections() {
       const duration = ejection.permanent ? 'Permanent' : `${ejection.duration_minutes} minutes`;
       row.innerHTML = `<div><strong>${esc(ejection.display_name)}</strong><div class="minor">${esc(duration)} · by ${esc(ejection.ejected_by_name)}</div></div><button class="btn btn-danger" type="button">Delete</button>`;
       row.querySelector('button').addEventListener('click', async () => {
-        await apiPost('/api/room_ejections.php', { action: 'delete', session_id: cfg.sessionId, id: ejection.id });
+        await apiPost('/api/room_admin.php', { action: 'ejection_delete', session_id: cfg.sessionId, id: ejection.id });
         await loadRoomEjections();
       });
       list.appendChild(row);

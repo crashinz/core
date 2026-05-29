@@ -409,7 +409,8 @@ async function loadLobbyRoomEjections(roomPublicId) {
   if (!lobbyRoomEjectionList || !roomPublicId) return;
   lobbyRoomEjectionList.innerHTML = '<div class="minor">Loading...</div>';
   try {
-    const data = await fetch(appUrl('/api/room_ejections.php?room_public_id=' + encodeURIComponent(roomPublicId))).then(r => r.json());
+    const qs = new URLSearchParams({ action: 'ejections', room_public_id: roomPublicId });
+    const data = await fetch(appUrl('/api/room_admin.php?' + qs)).then(r => r.json());
     lobbyRoomEjectionList.innerHTML = '';
     if (!(data.ejections || []).length) {
       lobbyRoomEjectionList.innerHTML = '<div class="minor">No active kicks.</div>';
@@ -421,7 +422,7 @@ async function loadLobbyRoomEjections(roomPublicId) {
       const duration = ejection.permanent ? 'Permanent' : `${ejection.duration_minutes} minutes`;
       row.innerHTML = `<div><strong>${esc(ejection.display_name)}</strong><div class="minor">${esc(duration)} · by ${esc(ejection.ejected_by_name)}</div></div><button class="btn btn-danger" type="button">Delete</button>`;
       row.querySelector('button').addEventListener('click', async () => {
-        await lobbyApiPost('/api/room_ejections.php', { action: 'delete', room_public_id: roomPublicId, id: ejection.id });
+        await lobbyApiPost('/api/room_admin.php', { action: 'ejection_delete', room_public_id: roomPublicId, id: ejection.id });
         await loadLobbyRoomEjections(roomPublicId);
       });
       lobbyRoomEjectionList.appendChild(row);
@@ -484,9 +485,10 @@ document.getElementById('lobby-room-delete-confirm')?.addEventListener('click', 
   btn.disabled = true;
   try {
     const fd = new FormData();
+    fd.append('action', 'delete');
     fd.append('room_public_id', lobbyRoomEditId.value);
     fd.append('_csrf', CSRF_TOKEN);
-    const resp = await fetch(appUrl('/api/room_delete.php'), { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN }, body: fd });
+    const resp = await fetch(appUrl('/api/room_admin.php'), { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN }, body: fd });
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || 'Room delete failed');
     window.location.href = appUrl('/lobby.php?room_deleted=1');
@@ -524,7 +526,15 @@ lobbyRoomEditBackground?.addEventListener('change', () => {
 lobbyRoomEditForm?.addEventListener('submit', async e => {
   e.preventDefault();
   try {
-    const resp = await uploadFormWithProgress(lobbyRoomEditForm, appUrl('/api/room_update.php'), lobbyRoomEditProgress);
+    const fdAction = lobbyRoomEditForm.querySelector('input[name="action"]');
+    if (!fdAction) {
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.name = 'action';
+      hidden.value = 'update';
+      lobbyRoomEditForm.appendChild(hidden);
+    }
+    const resp = await uploadFormWithProgress(lobbyRoomEditForm, appUrl('/api/room_admin.php'), lobbyRoomEditProgress);
     const data = JSON.parse(resp.responseText || '{}');
     if (data.error) throw new Error(data.error);
     window.location.reload();
