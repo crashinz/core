@@ -150,15 +150,82 @@ $baseMsg = [
     'sent_at' => gmdate('Y-m-d H:i:s'),
 ];
 
-if ($channel === 'community') {
+function insert_uploaded_file_message(PDO $pdo, string $channel, array $baseMsg, array $route): array {
+    $commonColumns = ['participant_id', 'user_id', 'display_name', 'avatar_path', 'avatar_url', 'content', 'reply_to_json', 'message_type', 'file_size', 'mime_type', 'original_name'];
+    $commonValues = [
+        $baseMsg['participant_id'],
+        $baseMsg['user_id'],
+        $baseMsg['display_name'],
+        $baseMsg['avatar_path'],
+        $baseMsg['avatar_url'],
+        $baseMsg['content'],
+        $route['reply_to_json'] ?? null,
+        $baseMsg['message_type'],
+        $baseMsg['file_size'],
+        $baseMsg['mime_type'],
+        $baseMsg['original_name'],
+    ];
+
+    if (in_array($channel, ['community', 'link', 'dm'], true)) {
+        $scope = $channel;
+        $columns = ['scope'];
+        $values = [$scope];
+        if ($channel === 'link') {
+            $columns[] = 'session_id';
+            $values[] = $route['session_id'];
+            $columns[] = 'link_key';
+            $values[] = $route['link_key'];
+        } elseif ($channel === 'dm') {
+            $columns[] = 'link_key';
+            $values[] = $route['dm_key'];
+        }
+        $columns = array_merge($columns, $commonColumns);
+        $values = array_merge($values, $commonValues);
+        $placeholders = implode(',', array_fill(0, count($columns), '?'));
+        $stmt = $pdo->prepare('INSERT INTO community_messages (' . implode(', ', $columns) . ') VALUES (' . $placeholders . ')');
+        $stmt->execute($values);
+
+        $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => $channel] + $baseMsg;
+        if ($channel === 'community') {
+            emit_community_event($pdo, 'community', null, null, 'community_message', $msg);
+            return $msg;
+        }
+        if ($channel === 'link') {
+            $msg = ['link_key' => $route['link_key']] + $msg;
+            emit_community_event($pdo, 'link', (int)$route['session_id'], $route['link_key'], 'link_message', $msg);
+            return $msg;
+        }
+        $msg = [
+            'dm_key' => $route['dm_key'],
+            'target_user_id' => (int)$route['target_user_id'],
+            'partner_user_id' => (int)$route['target_user_id'],
+            'is_owner' => false,
+        ] + $msg;
+        emit_community_event($pdo, 'dm', null, $route['dm_key'], 'dm_message', $msg);
+        return $msg;
+    }
+
+    if ($channel === 'game') {
+        $stmt = $pdo->prepare(
+            'INSERT INTO game_chat_messages (lobby_code, participant_id, content, message_type, file_size, mime_type, original_name)
+             VALUES (?,?,?,?,?,?,?)'
+        );
+        $stmt->execute([$route['lobby_code'], $baseMsg['participant_id'], $baseMsg['content'], $baseMsg['message_type'], $baseMsg['file_size'], $baseMsg['mime_type'], $baseMsg['original_name']]);
+        return ['id' => (int)$pdo->lastInsertId(), 'channel' => 'game', 'lobby_code' => $route['lobby_code']] + $baseMsg;
+    }
+
     $stmt = $pdo->prepare(
-        "INSERT INTO community_messages (scope, participant_id, user_id, display_name, avatar_path, avatar_url, content, reply_to_json, message_type, file_size, mime_type, original_name)
-         VALUES ('community',?,?,?,?,?,?,?,?,?,?,?)"
+        'INSERT INTO messages (session_id, participant_id, user_id, display_name, avatar_path, avatar_url, content, reply_to_json, message_type, file_size, mime_type, original_name)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
     );
-    $stmt->execute([(int)$participant['id'], (int)$participant['user_id'], $participant['display_name'], $participant['avatar_path'], $avatarUrl, $publicPath, $replyToJson, 'file', (int)$file['size'], $mimeType, $originalName]);
-    $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => 'community'] + $baseMsg;
-    emit_community_event($pdo, 'community', null, null, 'community_message', $msg);
-    json_out($msg);
+    $stmt->execute(array_merge([(int)$route['session_id']], $commonValues));
+    $msg = ['id' => (int)$pdo->lastInsertId()] + $baseMsg;
+    emit_event($pdo, (int)$route['session_id'], 'message', $msg);
+    return $msg;
+}
+
+if ($channel === 'community') {
+    json_out(insert_uploaded_file_message($pdo, 'community', $baseMsg, ['reply_to_json' => $replyToJson]));
 }
 
 if ($channel === 'link') {
@@ -173,14 +240,11 @@ if ($channel === 'link') {
     $stmt->execute([$sessionId, $targetId, (int)$participant['id'], (int)$participant['id']]);
     if (!$stmt->fetch()) json_out(['error' => 'You are not linked to that participant'], 403);
     $linkKey = link_key_for((int)$participant['id'], $targetId);
-    $stmt = $pdo->prepare(
-        "INSERT INTO community_messages (scope, session_id, link_key, participant_id, user_id, display_name, avatar_path, avatar_url, content, reply_to_json, message_type, file_size, mime_type, original_name)
-         VALUES ('link',?,?,?,?,?,?,?,?,?,?,?,?,?)"
-    );
-    $stmt->execute([$sessionId, $linkKey, (int)$participant['id'], (int)$participant['user_id'], $participant['display_name'], $participant['avatar_path'], $avatarUrl, $publicPath, $replyToJson, 'file', (int)$file['size'], $mimeType, $originalName]);
-    $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => 'link', 'link_key' => $linkKey] + $baseMsg;
-    emit_community_event($pdo, 'link', $sessionId, $linkKey, 'link_message', $msg);
-    json_out($msg);
+    json_out(insert_uploaded_file_message($pdo, 'link', $baseMsg, [
+        'session_id' => $sessionId,
+        'link_key' => $linkKey,
+        'reply_to_json' => $replyToJson,
+    ]));
 }
 
 if ($channel === 'dm') {
@@ -198,14 +262,11 @@ if ($channel === 'dm') {
     $stmt->execute([(int)$participant['user_id'], $targetUserId, $targetUserId, (int)$participant['user_id']]);
     if ($stmt->fetch()) json_out(['error' => 'You cannot DM this user.'], 403);
     $dmKey = dm_key_for((int)$participant['user_id'], $targetUserId);
-    $stmt = $pdo->prepare(
-        "INSERT INTO community_messages (scope, link_key, participant_id, user_id, display_name, avatar_path, avatar_url, content, reply_to_json, message_type, file_size, mime_type, original_name)
-         VALUES ('dm',?,?,?,?,?,?,?,?,?,?,?,?)"
-    );
-    $stmt->execute([$dmKey, (int)$participant['id'], (int)$participant['user_id'], $participant['display_name'], $participant['avatar_path'], $avatarUrl, $publicPath, $replyToJson, 'file', (int)$file['size'], $mimeType, $originalName]);
-    $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => 'dm', 'dm_key' => $dmKey, 'target_user_id' => $targetUserId, 'partner_user_id' => $targetUserId, 'is_owner' => false] + $baseMsg;
-    emit_community_event($pdo, 'dm', null, $dmKey, 'dm_message', $msg);
-    json_out($msg);
+    json_out(insert_uploaded_file_message($pdo, 'dm', $baseMsg, [
+        'dm_key' => $dmKey,
+        'target_user_id' => $targetUserId,
+        'reply_to_json' => $replyToJson,
+    ]));
 }
 
 if ($channel === 'game') {
@@ -223,23 +284,10 @@ if ($channel === 'game') {
     if (!$game) json_out(['error' => 'Game not found'], 404);
     $playerIds = array_filter([(int)($game['user1_id'] ?? 0), (int)($game['user2_id'] ?? 0)]);
     if (!in_array((int)$participant['id'], $playerIds, true)) json_out(['error' => 'Join the game to use game chat'], 403);
-    $stmt = $pdo->prepare(
-        'INSERT INTO game_chat_messages (lobby_code, participant_id, content, message_type, file_size, mime_type, original_name)
-         VALUES (?,?,?,?,?,?,?)'
-    );
-    $stmt->execute([$lobby, (int)$participant['id'], $publicPath, 'file', (int)$file['size'], $mimeType, $originalName]);
-    $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => 'game', 'lobby_code' => $lobby] + $baseMsg;
-    json_out($msg);
+    json_out(insert_uploaded_file_message($pdo, 'game', $baseMsg, ['lobby_code' => $lobby]));
 }
 
-$stmt = $pdo->prepare(
-    "INSERT INTO messages (session_id, participant_id, user_id, display_name, avatar_path, avatar_url, content, reply_to_json, message_type, file_size, mime_type, original_name)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-);
-$stmt->execute([$sessionId, (int)$participant['id'], (int)$participant['user_id'], $participant['display_name'], $participant['avatar_path'], $avatarUrl, $publicPath, $replyToJson, 'file', (int)$file['size'], $mimeType, $originalName]);
-$id = (int)$pdo->lastInsertId();
-
-$msg = ['id' => $id] + $baseMsg;
-
-emit_event($pdo, $sessionId, 'message', $msg);
-json_out($msg);
+json_out(insert_uploaded_file_message($pdo, 'room', $baseMsg, [
+    'session_id' => $sessionId,
+    'reply_to_json' => $replyToJson,
+]));
