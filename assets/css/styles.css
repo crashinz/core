@@ -280,6 +280,50 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   display: grid;
   gap: 13px;
 }
+.setup-admin-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.setup-admin-mode > span {
+  color: rgba(255,255,255,.52);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.setup-mode-tab {
+  min-height: 46px;
+  padding: 11px 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+  color: rgba(255,255,255,.72);
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+.setup-mode-tab.active {
+  border-color: rgba(124,106,247,.75);
+  background: linear-gradient(135deg, rgba(124,106,247,.84), rgba(82,134,255,.84));
+  color: #fff;
+}
+.setup-mode-panel {
+  display: none;
+}
+.setup-mode-panel.active {
+  display: block;
+}
+.setup-import-note {
+  padding: 12px 14px;
+  border: 1px solid rgba(124,106,247,.22);
+  border-radius: 8px;
+  background: rgba(124,106,247,.095);
+  color: rgba(232,232,240,.82);
+  font-size: 13px;
+  line-height: 1.45;
+}
 .setup-choice-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -352,6 +396,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 @media (max-width: 720px) {
   .setup-preflight,
   .setup-choice-grid,
+  .setup-admin-mode,
   .form-row {
     grid-template-columns: 1fr;
   }

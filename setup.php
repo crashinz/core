@@ -1,15 +1,33 @@
 <?php
 require_once __DIR__ . '/includes/base.php';
+require_once __DIR__ . '/includes/database_backups.php';
 
 $error = '';
 $success = '';
 $step = chatspace_configured() ? 'admin' : 'database';
 
-function setup_admin_exists(): bool {
+function setup_direct_pdo(): PDO {
+    if (db_driver() === 'mysql') {
+        $host = defined('CHATSPACE_DB_HOST') ? CHATSPACE_DB_HOST : '127.0.0.1';
+        $port = (int)(defined('CHATSPACE_DB_PORT') ? CHATSPACE_DB_PORT : 3306);
+        $name = defined('CHATSPACE_DB_NAME') ? CHATSPACE_DB_NAME : 'chatspace_ce';
+        $user = defined('CHATSPACE_DB_USER') ? CHATSPACE_DB_USER : 'root';
+        $pass = defined('CHATSPACE_DB_PASS') ? CHATSPACE_DB_PASS : '';
+        return new PDO("mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4", $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    }
+    $pdo = new PDO('sqlite:' . sqlite_path());
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    return $pdo;
+}
+
+function setup_admin_exists(bool $sharedConnection = true): bool {
     if (!chatspace_configured()) return false;
     try {
-        $pdo = db();
-        return (bool)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
+        $pdo = $sharedConnection ? db() : setup_direct_pdo();
+        $exists = (bool)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
+        if (!$sharedConnection) $pdo = null;
+        return $exists;
     } catch (Throwable) {
         return false;
     }
@@ -116,7 +134,32 @@ function setup_brand_logo_upload(): string {
     return '/assets/uploads/branding/' . $file;
 }
 
-if (setup_admin_exists() && ($_GET['done'] ?? '') !== '1') {
+function setup_response(array $payload, int $status = 200): never {
+    json_out($payload, $status);
+}
+
+function setup_restore_backup_upload(): array {
+    if (!chatspace_configured()) throw new RuntimeException('Database setup is not complete.');
+    if (setup_admin_exists(false)) throw new RuntimeException('Setup restore is only available before the first admin account exists.');
+    if (empty($_FILES['database']['tmp_name']) || !is_uploaded_file($_FILES['database']['tmp_name'])) {
+        throw new RuntimeException('Choose a backup file to import.');
+    }
+    $tmp = $_FILES['database']['tmp_name'];
+    $decoded = json_decode((string)file_get_contents($tmp), true);
+    if (is_array($decoded) && ($decoded['format'] ?? '') === 'chatspace-ce-portable-bundle') {
+        $result = backup_import_core_bundle(db(), $decoded, 0);
+    } else {
+        $result = backup_restore_sqlite_upload($tmp, true, 0);
+    }
+    if (!setup_admin_exists()) {
+        throw new RuntimeException('Backup restored, but it did not include an admin account. Import a backup with an admin user or create a new admin user.');
+    }
+    unset($_SESSION['user_id'], $_SESSION['session_locked']);
+    return $result;
+}
+
+$isSetupRestorePost = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'restore';
+if (!$isSetupRestorePost && setup_admin_exists() && ($_GET['done'] ?? '') !== '1') {
     redirect_to('/login.php');
 }
 
@@ -185,7 +228,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'restore') {
+    try {
+        setup_restore_backup_upload();
+        setup_response(['ok' => true, 'redirect' => app_url('/setup.php?done=1&restored=1')]);
+    } catch (Throwable $e) {
+        $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
+        if (str_contains($accept, 'application/json') || (string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
+            setup_response(['error' => $e->getMessage()], 400);
+        }
+        $error = $e->getMessage();
+        $step = 'admin';
+    }
+}
+
 if (($_GET['done'] ?? '') === '1') $step = 'done';
+$restoredSetup = ($_GET['restored'] ?? '') === '1';
 $requirements = setup_requirements();
 $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['ok']);
 ?>
@@ -261,42 +319,70 @@ $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['
         <button class="btn btn-primary setup-submit" type="submit" <?= $requiredMissing ? 'disabled' : '' ?>>Continue</button>
       </form>
     <?php elseif ($step === 'admin'): ?>
-      <h1>Create Admin User</h1>
-      <p class="subtitle">This account controls the community, rooms, users, and moderation tools.</p>
-      <form method="post" class="setup-form" enctype="multipart/form-data" novalidate>
-        <?= csrf_input() ?>
-        <input type="hidden" name="step" value="admin">
-        <label>Display name<input name="display_name" required></label>
-        <label>Avatar image
-          <span class="file-picker">
-            <input id="setup-avatar" type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp" required>
-            <span class="file-picker-btn">Choose Avatar</span>
-            <span class="file-picker-name" id="setup-avatar-name">No file selected</span>
-          </span>
-        </label>
-        <label>Email<input name="email" type="email" required autocomplete="email"></label>
-        <div class="form-row">
-          <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
-          <label>Confirm password<input name="confirm_password" type="password" minlength="8" required autocomplete="new-password"></label>
-        </div>
-        <div class="setup-branding-fields">
-          <h2>Community Branding</h2>
-          <p class="minor">Optional. Add a community name and logo for this installation.</p>
-          <label>Community name<input name="community_name" maxlength="80" placeholder="Your Community"></label>
-          <label>Community logo
+      <h1>Admin Account</h1>
+      <p class="subtitle">Create the first admin user, or import an existing ChatSpace backup to restore users, rooms, settings, and files now.</p>
+      <div class="setup-admin-mode">
+        <button class="setup-mode-tab active" type="button" data-setup-mode="create">Create Admin User</button>
+        <span>or</span>
+        <button class="setup-mode-tab" type="button" data-setup-mode="restore">Import Backup</button>
+      </div>
+      <section class="setup-mode-panel active" id="setup-mode-create">
+        <form method="post" class="setup-form" enctype="multipart/form-data" novalidate>
+          <?= csrf_input() ?>
+          <input type="hidden" name="step" value="admin">
+          <label>Display name<input name="display_name" required></label>
+          <label>Avatar image
             <span class="file-picker">
-              <input id="setup-community-logo" type="file" name="community_logo" accept="image/jpeg,image/png,image/gif,image/webp">
-              <span class="file-picker-btn">Choose Logo</span>
-              <span class="file-picker-name" id="setup-community-logo-name">No file selected</span>
+              <input id="setup-avatar" type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp" required>
+              <span class="file-picker-btn">Choose Avatar</span>
+              <span class="file-picker-name" id="setup-avatar-name">No file selected</span>
             </span>
           </label>
-        </div>
-        <button class="btn btn-primary setup-submit" type="submit">Create Admin</button>
-      </form>
+          <label>Email<input name="email" type="email" required autocomplete="email"></label>
+          <div class="form-row">
+            <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
+            <label>Confirm password<input name="confirm_password" type="password" minlength="8" required autocomplete="new-password"></label>
+          </div>
+          <div class="setup-branding-fields">
+            <h2>Community Branding</h2>
+            <p class="minor">Optional. Add a community name and logo for this installation.</p>
+            <label>Community name<input name="community_name" maxlength="80" placeholder="Your Community"></label>
+            <label>Community logo
+              <span class="file-picker">
+                <input id="setup-community-logo" type="file" name="community_logo" accept="image/jpeg,image/png,image/gif,image/webp">
+                <span class="file-picker-btn">Choose Logo</span>
+                <span class="file-picker-name" id="setup-community-logo-name">No file selected</span>
+              </span>
+            </label>
+          </div>
+          <button class="btn btn-primary setup-submit" type="submit">Create Admin User</button>
+        </form>
+      </section>
+      <section class="setup-mode-panel" id="setup-mode-restore">
+        <form method="post" class="setup-form setup-restore-form" id="setup-restore-form" enctype="multipart/form-data" novalidate>
+          <?= csrf_input() ?>
+          <input type="hidden" name="step" value="restore">
+          <div class="setup-import-note">
+            Import a full SQLite backup or a portable JSON bundle. Portable imports apply whatever sections are present and include bundled files such as avatars, room media, gestures, and link icons.
+          </div>
+          <label>Backup file
+            <span class="file-picker">
+              <input id="setup-backup-file" name="database" type="file" accept=".sqlite,.db,.json,application/json,application/vnd.sqlite3,application/octet-stream" required>
+              <span class="file-picker-btn">Choose Backup</span>
+              <span class="file-picker-name" id="setup-backup-name">No file selected</span>
+            </span>
+          </label>
+          <span class="upload-progress" id="setup-backup-progress" aria-live="polite">
+            <span class="upload-progress-track"><span class="upload-progress-bar"></span></span>
+            <span class="upload-progress-meta"><span class="upload-progress-msg">Waiting...</span><span class="upload-progress-pct">0%</span></span>
+          </span>
+          <button class="btn btn-danger setup-submit" type="submit">Import Backup</button>
+        </form>
+      </section>
     <?php else: ?>
       <h1>Setup Complete</h1>
-      <p class="subtitle">ChatSpace Community Edition is ready.</p>
-      <a class="btn btn-primary setup-submit" href="<?= e(app_url('/lobby.php')) ?>">Enter Lobby</a>
+      <p class="subtitle"><?= $restoredSetup ? 'Backup restored. Sign in with one of the restored accounts to continue.' : 'ChatSpace Community Edition is ready.' ?></p>
+      <a class="btn btn-primary setup-submit" href="<?= e(app_url($restoredSetup ? '/login.php' : '/lobby.php')) ?>"><?= $restoredSetup ? 'Go to Login' : 'Enter Lobby' ?></a>
     <?php endif; ?>
   </section>
 </main>
