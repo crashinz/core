@@ -39,9 +39,8 @@ function package_asset_name(?string $name, string $fallback): string {
 }
 
 function clean_gesture_text(string $text, string $fallback): string {
-    $text = strip_tags($text);
     $text = preg_replace('/[\r\n\t]+/', ' ', $text) ?? $text;
-    $text = preg_replace('/[^\p{L}\p{N}\p{P}\p{Zs}]/u', '', $text) ?? $text;
+    $text = preg_replace('/[^\p{L}\p{N}\p{P}\p{S}\p{Zs}]/u', '', $text) ?? $text;
     $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
     return $text === '' ? $fallback : $text;
 }
