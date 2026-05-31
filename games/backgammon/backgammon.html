@@ -237,7 +237,10 @@ function computeBase(){
   return idx >= 0 ? path.slice(0, idx) : '';
 }
 const base = computeBase();
-const LIST_URL = `${base}/list_lobbies.php?game=${gameId}`;
+const LIST_URL = `${base}/games/list_lobbies.php?game=${gameId}`;
+function gameApiPath(path){
+  return path.startsWith('/api/') ? `/games${path}` : path;
+}
 
 function leaveToParent(){
   try { window.parent.postMessage({ type:'game_close', lobby: code }, window.location.origin); } catch {}
@@ -263,6 +266,7 @@ const waitingMsg   = el('waitingMsg');
 /* =================== API helpers =================== */
 async function apiGet(p){
   try{
+    p = gameApiPath(p);
     const u=(p.startsWith('/'))?`${base}${p}`:`${p}`;
     const r=await fetch(u);
     if(!r.ok){ const t=await r.text().catch(()=> ''); console.warn('GET failed', r.status, t); return {}; }
@@ -270,6 +274,7 @@ async function apiGet(p){
   }catch(e){ console.warn('GET error', e); return {}; }
 }
 async function apiPost(p,d){
+  p = gameApiPath(p);
   const u=(p.startsWith('/'))?`${base}${p}`:`${p}`;
   const payload = Object.assign({}, d || {}, { _csrf: csrf });
   try{
@@ -281,15 +286,14 @@ async function apiPost(p,d){
 
 /* =================== Networking (moves.php) =================== */
 let lastSeq = 0;
+function moveList(data){ return Array.isArray(data) ? data : (Array.isArray(data?.moves) ? data.moves : []); }
 async function fetchEvents(){
   try{
-    const arr = await apiGet(`/api/moves.php?lobby=${encodeURIComponent(code)}&lastSeq=${lastSeq}`);
-    if(Array.isArray(arr)){
-      for(const m of arr){
-        lastSeq = Math.max(lastSeq, m.sequence||0);
-        const p = m.payload || {};
-        applyMove(m.user_id||0, p);
-      }
+    const arr = moveList(await apiGet(`/api/moves.php?lobby=${encodeURIComponent(code)}&lastSeq=${lastSeq}`));
+    for(const m of arr){
+      lastSeq = Math.max(lastSeq, m.sequence||0);
+      const p = m.payload || {};
+      applyMove(m.user_id||0, p);
     }
   }catch(e){ console.warn('moves poll failed', e); }
 }
@@ -305,7 +309,7 @@ async function joinLobby(){
   catch(e){ console.warn('joinLobby error', e); }
 }
 async function lobbyStatus(){
-  try{ return await apiPost(`/api/lobby.php`, { action:'status', lobby: code }); }
+  try{ return await apiGet(`/api/lobby.php?action=status&lobby_id=${encodeURIComponent(code)}`); }
   catch(e){ return {}; }
 }
 
@@ -745,7 +749,7 @@ let hostStartPosted = false; // prevents duplicate 'start'
 
 async function checkLobby(){
   const s = await lobbyStatus().catch(()=>null);
-  const ready = !!(s && (s.player_count >= 2 || s.opponent_joined || (s.players && s.players.length >= 2)));
+  const ready = !!(s && (s.player_count >= 2 || s.opponent_joined || (s.players && s.players.length >= 2) || (s.user1_id && s.user2_id)));
 
   if (!state.started) {
     if (ready && player === 1 && !hostStartPosted) {

@@ -4242,9 +4242,11 @@ function gameIconUrl(type) {
 
 function gameFrameUrl(game) {
   const meta = GAME_CATALOG[game.game_type] || { path: game.game_type, entry: 'index.html', gameId: 0 };
+  const mySeat = (game.players || []).find(player => Number(player.participant_id) === Number(cfg.myParticipantId))?.seat || 1;
   const qs = new URLSearchParams({
     lobby: game.lobby_code,
     user: String(cfg.myParticipantId),
+    player: String(mySeat),
     game: String(meta.gameId || 0),
     embedded: '1',
     csrf: CSRF_TOKEN,

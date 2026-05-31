@@ -11,9 +11,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 $body = input_json();
 $lobby = (string)($body['lobby_id'] ?? $body['lobby'] ?? '');
 if ($lobby === '') json_out(['error' => 'missing lobby'], 400);
+$incoming = $body['state'] ?? [];
+if (is_array($incoming) && array_intersect(array_keys($incoming), ['p1', 'p2'])) {
+    $stmt = $pdo->prepare('SELECT state_json FROM game_state WHERE lobby_code = ? LIMIT 1');
+    $stmt->execute([$lobby]);
+    $existingRaw = $stmt->fetchColumn();
+    $existing = $existingRaw ? json_decode((string)$existingRaw, true) : [];
+    if (!is_array($existing)) $existing = [];
+    $incoming = array_replace($existing, $incoming);
+}
 $pdo->prepare(db_uses_mysql_syntax($pdo)
     ? 'INSERT INTO game_state (lobby_code, state_json, updated_at) VALUES (?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = CURRENT_TIMESTAMP'
     : 'INSERT OR REPLACE INTO game_state (lobby_code, state_json, updated_at) VALUES (?,?,CURRENT_TIMESTAMP)'
 )
-    ->execute([$lobby, json_encode($body['state'] ?? [])]);
+    ->execute([$lobby, json_encode($incoming)]);
 json_out(['ok' => true]);
