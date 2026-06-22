@@ -922,8 +922,78 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .vp-music-launch {
   min-height: 36px;
 }
+.floating-modal {
+  inset: auto;
+  width: 0;
+  height: 0;
+  padding: 0;
+  background: transparent;
+  place-items: unset;
+  pointer-events: none;
+}
+.floating-modal.open {
+  display: block;
+}
 .vp-music-modal-box {
+  position: fixed;
+  left: var(--vp-music-left, 50%);
+  top: var(--vp-music-top, 50%);
+  transform: translate(-50%, -50%);
   width: min(760px, 94vw);
+  max-height: min(78vh, 620px);
+  pointer-events: auto;
+  box-shadow: 0 22px 64px rgba(0,0,0,.5), 0 0 0 1px rgba(124,106,247,.2);
+}
+.vp-music-modal-box.is-dragging {
+  user-select: none;
+}
+.vp-music-modal-box.minimized {
+  width: min(340px, calc(100vw - 28px));
+  max-height: none;
+  padding: 12px 14px;
+  overflow: visible;
+}
+.vp-music-modal-box.minimized .modal-head {
+  margin-bottom: 0;
+}
+.vp-music-modal-box.minimized .vp-music-frame-wrap {
+  display: none;
+}
+.vp-music-drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+.vp-music-drag-handle strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vp-music-drag-handle:active {
+  cursor: grabbing;
+}
+.vp-music-window-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+.window-minimize {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.9);
+  font-size: 17px;
+  font-weight: 1000;
+  line-height: 1;
+  cursor: pointer;
+}
+.window-minimize:hover {
+  background: rgba(124,106,247,.32);
 }
 .vp-music-frame-wrap {
   display: grid;

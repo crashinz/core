@@ -35,6 +35,9 @@ const vpMusicLaunch = document.getElementById('vp-music-launch');
 const vpMusicModal = document.getElementById('vp-music-modal');
 const vpMusicModalTitle = document.getElementById('vp-music-modal-title');
 const vpMusicModalClose = document.getElementById('vp-music-modal-close');
+const vpMusicModalMinimize = document.getElementById('vp-music-modal-minimize');
+const vpMusicDragHandle = document.getElementById('vp-music-drag-handle');
+const vpMusicModalBox = vpMusicModal?.querySelector('.vp-music-modal-box');
 const vpMusicFrameWrap = document.getElementById('vp-music-frame-wrap');
 const messagesEl = document.getElementById('messages');
 const userListEl = document.getElementById('user-list');
@@ -502,14 +505,85 @@ function openImportedMusicModal(track) {
     vpMusicFrameWrap.innerHTML = `<a class="btn btn-primary" href="${esc(track.url)}" target="_blank" rel="noopener noreferrer">Open Music</a>`;
   }
   vpMusicModal.classList.add('open');
+  setImportedMusicMinimized(false);
+  clampImportedMusicModal();
 }
 
 function closeImportedMusicModal() {
   vpMusicModal?.classList.remove('open');
   if (vpMusicFrameWrap) vpMusicFrameWrap.innerHTML = '';
+  setImportedMusicMinimized(false);
 }
 
 vpMusicModalClose?.addEventListener('click', closeImportedMusicModal);
+vpMusicModalMinimize?.addEventListener('click', () => {
+  setImportedMusicMinimized(!vpMusicModalBox?.classList.contains('minimized'));
+});
+
+function setImportedMusicMinimized(minimized) {
+  if (!vpMusicModalBox) return;
+  vpMusicModalBox.classList.toggle('minimized', Boolean(minimized));
+  if (vpMusicModalMinimize) {
+    vpMusicModalMinimize.textContent = minimized ? '+' : '−';
+    vpMusicModalMinimize.setAttribute('aria-label', minimized ? 'Restore' : 'Minimize');
+  }
+  requestAnimationFrame(clampImportedMusicModal);
+}
+
+function clampImportedMusicModal() {
+  if (!vpMusicModalBox || !vpMusicModal?.classList.contains('open')) return;
+  const rect = vpMusicModalBox.getBoundingClientRect();
+  const halfW = rect.width / 2;
+  const halfH = rect.height / 2;
+  const centerX = rect.left + halfW;
+  const centerY = rect.top + halfH;
+  const x = Math.max(halfW + 8, Math.min(window.innerWidth - halfW - 8, centerX));
+  const y = Math.max(halfH + 8, Math.min(window.innerHeight - halfH - 8, centerY));
+  vpMusicModalBox.style.setProperty('--vp-music-left', `${x}px`);
+  vpMusicModalBox.style.setProperty('--vp-music-top', `${y}px`);
+}
+
+function initImportedMusicDrag() {
+  if (!vpMusicDragHandle || !vpMusicModalBox) return;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startCenterX = 0;
+  let startCenterY = 0;
+  const move = event => {
+    if (!dragging) return;
+    const rect = vpMusicModalBox.getBoundingClientRect();
+    const halfW = rect.width / 2;
+    const halfH = rect.height / 2;
+    const x = Math.max(halfW + 8, Math.min(window.innerWidth - halfW - 8, startCenterX + event.clientX - startX));
+    const y = Math.max(halfH + 8, Math.min(window.innerHeight - halfH - 8, startCenterY + event.clientY - startY));
+    vpMusicModalBox.style.setProperty('--vp-music-left', `${x}px`);
+    vpMusicModalBox.style.setProperty('--vp-music-top', `${y}px`);
+  };
+  const stop = event => {
+    if (!dragging) return;
+    dragging = false;
+    vpMusicModalBox.classList.remove('is-dragging');
+    vpMusicDragHandle.releasePointerCapture?.(event.pointerId);
+  };
+  vpMusicDragHandle.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    const rect = vpMusicModalBox.getBoundingClientRect();
+    dragging = true;
+    startX = event.clientX;
+    startY = event.clientY;
+    startCenterX = rect.left + rect.width / 2;
+    startCenterY = rect.top + rect.height / 2;
+    vpMusicModalBox.classList.add('is-dragging');
+    vpMusicDragHandle.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  vpMusicDragHandle.addEventListener('pointermove', move);
+  vpMusicDragHandle.addEventListener('pointerup', stop);
+  vpMusicDragHandle.addEventListener('pointercancel', stop);
+  window.addEventListener('resize', clampImportedMusicModal);
+}
+initImportedMusicDrag();
 
 function linkifiedTextHtml(text) {
   const raw = String(text || '');
