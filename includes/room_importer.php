@@ -272,7 +272,14 @@ function room_import_clean_manifest_value(string $value): string {
 }
 
 function room_import_css_asset_manifest(string $html, string $sourceUrl): array {
-    $manifest = ['images' => [], 'background_image' => '', 'text_color' => '', 'music' => []];
+   $manifest = [
+    'images' => [],
+    'background_image' => '',
+    'text_color' => '',
+    'audio_player_bg' => '',
+    'audio_player_text_buttons' => '',
+    'music' => []
+];
     if (!preg_match_all('~--([A-Za-z0-9_-]+)\s*:\s*(?:"([^"]*)"|\'([^\']*)\'|([^;]+))\s*;~', $html, $matches, PREG_SET_ORDER)) {
         return $manifest;
     }
@@ -281,23 +288,82 @@ function room_import_css_asset_manifest(string $html, string $sourceUrl): array 
         $rawValue = (string)($match[2] !== '' ? $match[2] : ($match[3] !== '' ? $match[3] : $match[4]));
         $value = room_import_clean_manifest_value($rawValue);
         if ($value === '') continue;
-        if (in_array($key, ['main-image', 'header-image', 'splash-image'], true)) {
-            $url = room_import_candidate_media_url($value, $sourceUrl);
-            if ($url !== '') $manifest['images'][] = ['src' => $url, 'role' => 'header'];
-        } elseif (str_starts_with($key, 'avatar-image')) {
-            $url = room_import_candidate_media_url($value, $sourceUrl);
-            $role = $key === 'avatar-image-1' ? 'avatar-left' : ($key === 'avatar-image-2' ? 'avatar-right' : 'avatar-piece');
-            if ($url !== '') $manifest['images'][] = ['src' => $url, 'role' => $role];
-        } elseif (in_array($key, ['background-image', 'page-background', 'room-background'], true)) {
-            $url = room_import_candidate_media_url($value, $sourceUrl);
-            if ($url !== '') $manifest['background_image'] = $url;
-        } elseif (in_array($key, ['website-font-color', 'primary-font-color', 'font-color', 'text-color'], true)) {
-            $color = room_import_css_color($value);
-            if ($color !== '') $manifest['text_color'] = $color;
-        } elseif (in_array($key, ['youtube-link', 'music-link', 'song-url', 'audio-link', 'stream-link'], true)) {
-            $url = room_import_candidate_media_url($value, $sourceUrl);
-            if ($url !== '') $manifest['music'][] = ['label' => room_import_is_youtube_url($url) ? 'YouTube Music' : room_import_media_label($url), 'url' => $url];
-        }
+    if ($key === 'main-image') {
+    $url = room_import_candidate_media_url($value, $sourceUrl);
+    if ($url !== '') {
+        $manifest['images'][] = [
+            'src'  => $url,
+            'role' => 'header'
+        ];
+    }
+}
+
+elseif ($key === 'main-image-2') {
+    $url = room_import_candidate_media_url($value, $sourceUrl);
+    if ($url !== '') {
+        $manifest['images'][] = [
+            'src'  => $url,
+            'role' => 'header'
+        ];
+    }
+}
+
+elseif ($key === 'poem-image') {
+    $url = room_import_candidate_media_url($value, $sourceUrl);
+    if ($url !== '') {
+        $manifest['images'][] = [
+            'src'  => $url,
+            'role' => 'poem'
+        ];
+    }
+}
+
+elseif (str_starts_with($key, 'avatar-image')) {
+    $url = room_import_candidate_media_url($value, $sourceUrl);
+
+    $role = $key === 'avatar-image-1'
+        ? 'avatar-left'
+        : ($key === 'avatar-image-2'
+            ? 'avatar-right'
+            : 'avatar-piece');
+
+    if ($url !== '') {
+        $manifest['images'][] = [
+            'src'  => $url,
+            'role' => $role
+        ];
+    }
+}
+elseif ($key === 'background-image') {
+    $url = room_import_candidate_media_url($value, $sourceUrl);
+
+    if ($url !== '') {
+        $manifest['background_image'] = $url;
+    }
+}
+
+elseif ($key === 'website-font-color') {
+    $color = room_import_css_color($value);
+
+    if ($color !== '') {
+        $manifest['text_color'] = $color;
+    }
+}
+elseif ($key === 'audio-player-bg') {
+    $color = room_import_css_color($value);
+    if ($color !== '') $manifest['audio_player_bg'] = $color;
+}
+elseif ($key === 'audio-player-text-buttons') {
+    $color = room_import_css_color($value);
+    if ($color !== '') $manifest['audio_player_text_buttons'] = $color;
+}
+elseif (in_array($key, ['youtube-link', 'music-link', 'song-url', 'audio-link', 'stream-link'], true)) {
+    $url = room_import_candidate_media_url($value, $sourceUrl);
+    if ($url !== '') $manifest['music'][] = [
+        'label' => room_import_is_youtube_url($url) ? 'YouTube Music' : room_import_media_label($url),
+        'url' => $url
+    ];
+}
     }
     return $manifest;
 }
@@ -326,6 +392,8 @@ function room_import_parse(string $html, string $sourceUrl): array {
         if ($bgColor !== '') $backgroundColor = $bgColor;
     }
     $textColor = room_import_css_color((string)($cssManifest['text_color'] ?? ''));
+	$audioPlayerBg = room_import_css_color((string)($cssManifest['audio_player_bg'] ?? ''));
+	$audioPlayerTextButtons = room_import_css_color((string)($cssManifest['audio_player_text_buttons'] ?? ''));
     if ($textColor === '' && $body instanceof DOMElement) {
         $textColor = room_import_css_color((string)$body->getAttribute('text') ?: room_import_style_value($bodyStyle, 'color'));
     }
@@ -379,6 +447,7 @@ function room_import_parse(string $html, string $sourceUrl): array {
     foreach (($cssManifest['music'] ?? []) as $track) {
         if (is_array($track)) $rememberAudio((string)($track['url'] ?? ''), true);
     }
+
 
     $walk = function (DOMNode $node, array $style = []) use (&$walk, &$sections, &$textBuffer, &$textStyle, $sourceUrl, $flushText, $rememberAudio, $rememberImage): void {
         if (count($sections) >= 24) return;
@@ -448,14 +517,19 @@ function room_import_parse(string $html, string $sourceUrl): array {
     }
     $flushText();
 
-    $roleSet = false;
-    foreach ($sections as &$section) {
-        if (($section['type'] ?? '') === 'image' && !$roleSet) {
-            $section['role'] = 'header';
-            $roleSet = true;
-        }
+$roleSet = false;
+
+foreach ($sections as &$section) {
+    if (
+        ($section['type'] ?? '') === 'image'
+        && empty($section['role'])
+        && !$roleSet
+    ) {
+        $section['role'] = 'header';
+        $roleSet = true;
     }
-    unset($section);
+}
+unset($section);
 
     if (preg_match_all('~https?://[^\s"\'<>]+\.(?:mp3|m4a|aac|ogg|oga|opus|wav|m3u|m3u8|pls|asx|wma)(?:[^\s"\'<>]*)~i', $html, $matches)) {
         foreach ($matches[0] as $url) $rememberAudio(room_import_candidate_media_url($url, $sourceUrl));
@@ -467,11 +541,59 @@ function room_import_parse(string $html, string $sourceUrl): array {
         foreach ($matches[0] as $url) $rememberAudio(room_import_candidate_media_url($url, $sourceUrl), true);
     }
 
+$header = [];
+$avatars = [];
+$other = [];
+
+foreach ($sections as $section) {
+    if (($section['type'] ?? '') === 'image') {
+        $role = (string)($section['role'] ?? '');
+
+        if ($role === 'header') {
+            $header[] = $section;
+            continue;
+        }
+
+        if (
+    $role === 'avatar-left' ||
+    $role === 'avatar-right' ||
+    $role === 'avatar-piece'
+) {
+    $avatars[] = $section;
+    continue;
+}
+    }
+
+    $other[] = $section;
+}
+
+/*
+if ($header && $avatars && count($other) >= 1) {
+    $sections = array_merge(
+        [$header[0]],
+        [$other[0]],
+        $avatars,
+        array_slice($other, 1)
+    );
+}
+*/
+
+if ($header && $avatars && count($other) >= 2) {
+    $sections = array_merge(
+        $header,
+        array_slice($other, 0, 2),
+        $avatars,
+        array_slice($other, 2)
+    );
+}
+
     return [
-        'source_url' => $sourceUrl,
-        'title' => $title,
-        'background_color' => $backgroundColor,
-        'text_color' => $textColor,
+		'source_url' => $sourceUrl,
+		'title' => $title,
+		'background_color' => $backgroundColor,
+		'text_color' => $textColor,
+		'audio_player_bg' => $audioPlayerBg,
+		'audio_player_text_buttons' => $audioPlayerTextButtons,
         'background_image' => $backgroundImage,
         'sections' => array_slice($sections, 0, 24),
         'music' => $audio,
@@ -498,16 +620,31 @@ function room_import_download_asset(string $url, string $kind, string $referer =
     $file = bin2hex(random_bytes(12)) . '.' . $types[$mime];
     $dest = $dir . '/' . $file;
     if (file_put_contents($dest, $body, LOCK_EX) === false) return null;
-    return '/assets/uploads/imported-rooms/' . $file;
+
+$rootDir = dirname(__DIR__);
+
+$docRoot = rtrim(realpath($_SERVER['DOCUMENT_ROOT']) ?: '', DIRECTORY_SEPARATOR);
+$rootReal = rtrim(realpath($rootDir) ?: $rootDir, DIRECTORY_SEPARATOR);
+
+$baseUrl = str_replace('\\', '/', substr($rootReal, strlen($docRoot)));
+
+if ($baseUrl === '/') {
+    $baseUrl = '';
+}
+
+return $baseUrl . '/assets/uploads/imported-rooms/' . $file;
+
 }
 
 function room_import_localize(array $preview): array {
     $layout = [
-        'source_url' => $preview['source_url'] ?? '',
-        'background_color' => $preview['background_color'] ?? '#000000',
-        'text_color' => $preview['text_color'] ?? '',
-        'sections' => [],
-    ];
+    'source_url' => $preview['source_url'] ?? '',
+    'background_color' => $preview['background_color'] ?? '#000000',
+    'text_color' => $preview['text_color'] ?? '',
+    'audio_player_bg' => $preview['audio_player_bg'] ?? '',
+    'audio_player_text_buttons' => $preview['audio_player_text_buttons'] ?? '',
+    'sections' => [],
+];
     $sourceUrl = (string)($preview['source_url'] ?? '');
     $backgroundPath = '';
     if (!empty($preview['background_image'])) {
@@ -587,9 +724,15 @@ function room_import_file_paths(?string $layoutJson, ?string $musicJson): array 
             foreach ($item as $value) {
                 if (is_array($value)) {
                     $stack[] = $value;
-                } elseif (is_string($value) && str_starts_with($value, '/assets/uploads/imported-rooms/')) {
-                    $paths[] = $value;
-                }
+                } elseif (
+    is_string($value) &&
+    (
+        str_starts_with($value, '/assets/uploads/imported-rooms/')
+        || str_contains($value, '/assets/uploads/imported-rooms/')
+    )
+) {
+    $paths[] = $value;
+}
             }
         }
     }

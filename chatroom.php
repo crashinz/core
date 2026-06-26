@@ -63,6 +63,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e($room['name']) ?> - ChatSpace CE</title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+  <link rel="stylesheet" href="/player/Generic.css"> 
 </head>
 <body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>">
 <div class="room-layout">
@@ -154,8 +155,30 @@ $linkIconCatalog = link_icon_catalog($pdo);
       <div class="vp-music-player" id="vp-music-player" hidden>
         <div class="side-title">Room Audio</div>
         <select id="vp-music-select" hidden></select>
+
+
         <audio id="vp-music-audio" controls preload="none"></audio>
-        <button class="btn btn-primary vp-music-launch" id="vp-music-launch" type="button" hidden>Launch Music</button>
+
+<button
+    class="btn btn-primary vp-music-launch"
+    id="vp-music-launch"
+    type="button"
+    hidden>
+    Launch YouTube Pop-Up
+</button>
+
+<button
+    class="btn btn-primary vp-music-launch"
+    id="vp-music-embed"
+    type="button"
+    hidden>
+    Launch YouTube Embed
+</button>
+
+<div id="vp-music-youtube" hidden></div>
+
+
+
       </div>
     </section>
     <section class="side-section games-side-section">
@@ -195,7 +218,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
       <strong id="vp-music-modal-title">Room Music</strong>
       <div class="vp-music-window-actions">
         <button class="window-minimize" id="vp-music-modal-minimize" type="button" aria-label="Minimize">−</button>
-        <button class="window-close" id="vp-music-modal-close" type="button" aria-label="Close">×</button>
+      <button class="window-close" id="vp-music-modal-close" type="button" aria-label="Close">×</button>
       </div>
     </div>
     <div class="vp-music-frame-wrap" id="vp-music-frame-wrap"></div>
@@ -585,6 +608,10 @@ $linkIconCatalog = link_icon_catalog($pdo);
     <div class="friend-list" id="friend-results" style="margin-top:12px;"></div>
   </div>
 </div>
+<script src="/player/jquery-3.2.1.min.js"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="/player/player.js"></script>
+
 <script src="<?= e(app_url('/assets/js/avatar-processing.js')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/room.js')) ?>"></script>
 </body>

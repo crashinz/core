@@ -21,6 +21,7 @@ function cacheBust(url) {
 }
 
 let cfg = null;
+const vpMusicYoutube = document.getElementById('vp-music-youtube');
 const participants = new Map();
 const dmUsers = new Map();
 const messages = new Map();
@@ -32,6 +33,7 @@ const vpMusicPlayer = document.getElementById('vp-music-player');
 const vpMusicSelect = document.getElementById('vp-music-select');
 const vpMusicAudio = document.getElementById('vp-music-audio');
 const vpMusicLaunch = document.getElementById('vp-music-launch');
+const vpMusicEmbed = document.getElementById('vp-music-embed');
 const vpMusicModal = document.getElementById('vp-music-modal');
 const vpMusicModalTitle = document.getElementById('vp-music-modal-title');
 const vpMusicModalClose = document.getElementById('vp-music-modal-close');
@@ -412,7 +414,9 @@ function importedImageHtml(section) {
 }
 
 function importedAvatarSection(section) {
-  return section?.type === 'image' && section.path && ['avatar-left', 'avatar-right', 'avatar-piece'].includes(section.role);
+  return section?.type === 'image'
+      && section.path
+      && ['avatar-left', 'avatar-right'].includes(section.role);
 }
 
 function renderImportedRoomLayout(layout) {
@@ -431,20 +435,98 @@ function renderImportedRoomLayout(layout) {
   const textColor = safeCssColor(layout.text_color);
   if (textColor) roomStage?.style.setProperty('--vp-import-text', textColor);
   else roomStage?.style.removeProperty('--vp-import-text');
+  const playerBg = safeCssColor(layout.audio_player_bg);
+const playerText = safeCssColor(layout.audio_player_text_buttons);
+
+if (playerBg) {
+    roomStage?.style.setProperty('--audio-player-bg', playerBg);
+    roomStage?.style.setProperty('--audio-player-track-bg', playerBg);
+    roomStage?.style.setProperty('--audio-player-progress-bg', playerBg);
+    roomStage?.style.setProperty('--audio-player-volume-track', playerBg);
+} else {
+    roomStage?.style.removeProperty('--audio-player-bg');
+    roomStage?.style.removeProperty('--audio-player-track-bg');
+    roomStage?.style.removeProperty('--audio-player-progress-bg');
+    roomStage?.style.removeProperty('--audio-player-volume-track');
+}
+
+if (playerText) {
+    roomStage?.style.setProperty('--audio-player-text-buttons', playerText);
+    roomStage?.style.setProperty('--audio-player-icon-color', playerText);
+    roomStage?.style.setProperty('--audio-player-progress', playerText);
+    roomStage?.style.setProperty('--audio-player-progress-handle', playerText);
+    roomStage?.style.setProperty('--audio-player-volume-fill', playerText);
+} else {
+    roomStage?.style.removeProperty('--audio-player-text-buttons');
+    roomStage?.style.removeProperty('--audio-player-icon-color');
+    roomStage?.style.removeProperty('--audio-player-progress');
+    roomStage?.style.removeProperty('--audio-player-progress-handle');
+    roomStage?.style.removeProperty('--audio-player-volume-fill');
+}
   syncImportedBackgroundLayer();
   const chunks = [];
   let avatarRow = [];
+  const firstTrack = cfg?.musicPlaylist?.[0] || null;
+  let roomTrackInserted = false;
+
   const flushAvatarRow = () => {
     if (!avatarRow.length) return;
     chunks.push(`<div class="vp-import-section vp-import-avatar-row">${avatarRow.map(importedImageHtml).join('')}</div>`);
     avatarRow = [];
   };
+
   layout.sections.forEach(section => {
+    if (
+  firstTrack &&
+  !roomTrackInserted &&
+  section?.type === 'text' &&
+  String(section.text).trim().toLowerCase() === 'inner-tranquillity'
+) {
+
+  if (firstTrack.type === 'audio') {
+
+    chunks.push(`
+      <div class="vp-import-player">
+        <audio class="vp-page-player" preload="none" controls loop>
+          <source src="${firstTrack.url}" type="audio/mpeg">
+        </audio>
+      </div>
+    `);
+
+  } else if (firstTrack.type === 'youtube') {
+
+    chunks.push(`
+      <div class="vp-import-player">
+        <audio class="vp-page-player" preload="none" controls loop>
+          <source src="${firstTrack.url}" type="video/x-youtube">
+        </audio>
+      </div>
+    `);
+
+  }
+
+  roomTrackInserted = true;
+}
     if (importedAvatarSection(section)) {
       avatarRow.push(section);
       return;
     }
     flushAvatarRow();
+	if (
+    section?.type === 'image' &&
+    section.path &&
+    section.role === 'avatar-piece'
+) {
+    flushAvatarRow();
+
+    chunks.push(
+        `<div class="vp-import-avatar-piece">
+            ${importedImageHtml(section)}
+        </div>`
+    );
+
+    return;
+}
     if (section?.type === 'image' && section.path) {
       chunks.push(importedImageHtml(section));
       return;
@@ -461,10 +543,56 @@ function renderImportedRoomLayout(layout) {
   });
   flushAvatarRow();
   vpRoomLayout.innerHTML = chunks.join('');
-  vpRoomLayout.hidden = false;
-  syncImportedBackgroundLayer();
+
+const isInnerTranquillityPage =
+    chunks.join('').toLowerCase().includes('inner-tranquillity');
+
+if (
+    isInnerTranquillityPage &&
+    window.jQuery &&
+    $.fn.player
+) {
+
+    $('audio.vp-page-player').player({
+        audioWidth: 252,
+        audioHeight: 30
+    });
+
+document.querySelectorAll('.vp-import-player').forEach(wrapper => {
+
+    if (cfg?.backgroundTile && cfg?.backgroundPath) {
+        wrapper.style.background = 'transparent';
+        wrapper.style.border = 'none';
+    } else {
+        wrapper.style.background =
+            getComputedStyle(document.getElementById('room-stage'))
+            .getPropertyValue('--audio-player-bg')
+            .trim();
+    }
+
+});
+
+    setTimeout(() => {
+        if (cfg?.backgroundPath) {
+
+            document
+                .querySelectorAll('.vp-import-player .mejs__controls')
+                .forEach(el => el.style.background = 'transparent');
+
+            document
+                .querySelectorAll('.vp-import-player .mejs__time-total')
+                .forEach(el => el.style.background = 'transparent');
+
+            document
+                .querySelectorAll('.vp-import-player .mejs__horizontal-volume-total')
+                .forEach(el => el.style.background = 'transparent');
+        }
+    }, 100);
 }
 
+vpRoomLayout.hidden = false;
+syncImportedBackgroundLayer();
+}
 function syncImportedBackgroundLayer() {
   if (!vpRoomLayout || vpRoomLayout.hidden) return;
   if (cfg?.backgroundTile && cfg?.backgroundPath) {
@@ -492,26 +620,90 @@ function renderImportedMusicPlayer(playlist) {
   const setTrack = idx => {
     const track = tracks[Number(idx) || 0] || tracks[0];
     activeTrack = track;
+	if (vpMusicYoutube) {
+    vpMusicYoutube.hidden = true;
+    vpMusicYoutube.innerHTML = '';
+}
     const isLaunchTrack = track.type === 'youtube' || Boolean(track.embed_url);
     vpMusicAudio.hidden = isLaunchTrack;
     if (vpMusicLaunch) {
-      vpMusicLaunch.hidden = !isLaunchTrack;
-      vpMusicLaunch.textContent = track.provider === 'YouTube' || track.type === 'youtube' ? 'Launch YouTube Music' : 'Launch Music';
-    }
+    vpMusicLaunch.hidden = !isLaunchTrack;
+    vpMusicLaunch.textContent = 'Launch YouTube Pop-Up';
+}
+
+if (vpMusicEmbed) {
+  vpMusicEmbed.hidden = !isLaunchTrack;
+  vpMusicEmbed.textContent = 'Launch YouTube Embed';
+}
+
+
     if (isLaunchTrack) {
-      vpMusicAudio.pause();
-      vpMusicAudio.removeAttribute('src');
-      vpMusicAudio.load();
-      return;
+    vpMusicAudio.pause();
+    vpMusicAudio.removeAttribute('src');
+    vpMusicAudio.load();
+
+    if (vpMusicYoutube) {
+        vpMusicYoutube.hidden = true;
+        vpMusicYoutube.innerHTML = '';
     }
+
+    return;
+}
+
+    if (vpMusicYoutube) {
+      vpMusicYoutube.hidden = true;
+      vpMusicYoutube.innerHTML = '';
+    }
+
     vpMusicAudio.hidden = false;
     vpMusicAudio.src = mediaUrl(track.url);
     vpMusicAudio.load();
   };
   vpMusicSelect.onchange = () => setTrack(vpMusicSelect.value);
-  if (vpMusicLaunch) vpMusicLaunch.onclick = () => openImportedMusicModal(activeTrack);
-  setTrack(0);
-  vpMusicPlayer.hidden = false;
+if (vpMusicLaunch) {
+    vpMusicLaunch.onclick = () => {
+
+        if (vpMusicModal?.classList.contains('open')) {
+            closeImportedMusicModal();
+            vpMusicLaunch.textContent = 'Launch YouTube Pop-Up';
+            return;
+        }
+
+        openImportedMusicModal(activeTrack);
+        vpMusicLaunch.textContent = 'Close YouTube Pop-Up';
+    };
+}
+
+
+if (vpMusicEmbed) {
+    vpMusicEmbed.onclick = () => {
+
+        if (!activeTrack?.embed_url || !vpMusicYoutube) {
+            return;
+        }
+
+        // Hide if already visible
+        if (!vpMusicYoutube.hidden) {
+            vpMusicYoutube.hidden = true;
+            vpMusicYoutube.innerHTML = '';
+            vpMusicEmbed.textContent = 'Launch YouTube Embed';
+            return;
+        }
+
+        // Show embed
+        vpMusicYoutube.hidden = false;
+        vpMusicYoutube.innerHTML =
+            `<iframe src="${esc(activeTrack.embed_url)}"
+                allow="autoplay; encrypted-media"
+                allowfullscreen>
+             </iframe>`;
+
+        vpMusicEmbed.textContent = 'Hide YouTube Embed';
+    };
+}
+
+setTrack(0);
+vpMusicPlayer.hidden = false;
 }
 
 function openImportedMusicModal(track) {
@@ -531,6 +723,7 @@ function openImportedMusicModal(track) {
 function closeImportedMusicModal() {
   vpMusicModal?.classList.remove('open');
   if (vpMusicFrameWrap) vpMusicFrameWrap.innerHTML = '';
+  if (vpMusicLaunch) vpMusicLaunch.textContent = 'Launch YouTube Pop-Up';
   setImportedMusicMinimized(false);
 }
 
