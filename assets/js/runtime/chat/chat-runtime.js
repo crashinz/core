@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-F adds reply draft workflow ownership.
+ *      Build 000022-G adds non-game text composer send workflow ownership.
  *
  * Build:
- *      000022-F
+ *      000022-G
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -42,6 +42,9 @@
  *
  * Build 000022-F
  * - Added ChatReplyService ownership and diagnostics.
+ *
+ * Build 000022-G
+ * - Added ChatComposerService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -92,6 +95,12 @@ import {
 
 } from "./services/chat-reply-service.js";
 
+import {
+
+    ChatComposerService
+
+} from "./services/chat-composer-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -121,6 +130,11 @@ export class ChatRuntime extends CoreModule {
      * Reply draft runtime component.
      */
     #reply = null;
+
+    /**
+     * Composer send workflow runtime component.
+     */
+    #composer = null;
 
     /**
      * Message renderer runtime component.
@@ -204,6 +218,18 @@ export class ChatRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Chat Composer Service.
+     *
+     * @returns {ChatComposerService}
+     *         Composer send workflow runtime component.
+     */
+    get composer() {
+
+        return this.#composer;
+
+    }
+
+    /**
      * Returns the Chat Message Renderer.
      *
      * @returns {ChatMessageRenderer}
@@ -260,7 +286,7 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-F",
+                "000022-G",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
@@ -270,6 +296,9 @@ export class ChatRuntime extends CoreModule {
 
             reply:
                 this.#reply?.getDiagnostics() ?? null,
+
+            composer:
+                this.#composer?.getDiagnostics() ?? null,
 
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
@@ -299,6 +328,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createReply();
 
+        this.#createComposer();
+
         this.#createRenderer();
 
         this.#createEvents();
@@ -317,6 +348,8 @@ export class ChatRuntime extends CoreModule {
         this.#events?.destroy();
 
         this.#renderer?.destroy();
+
+        this.#composer?.destroy();
 
         this.#reply?.destroy();
 
@@ -369,6 +402,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#reply.initialize();
+
+    }
+
+    /**
+     * Creates the composer send workflow runtime component.
+     */
+    #createComposer() {
+
+        this.#composer =
+            new ChatComposerService(
+                this
+            );
+
+        this.#composer.initialize();
 
     }
 

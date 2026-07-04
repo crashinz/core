@@ -230,6 +230,7 @@ async function initializeAvatarRuntime() {
   configureChatMessageActions();
   configureChatUnread();
   configureChatReply();
+  configureChatComposer();
 
   return avatarRuntime;
 }
@@ -318,6 +319,22 @@ function configureChatReply() {
     },
     onReplyDraftChange() {
       renderReplyDraft();
+    },
+  });
+}
+
+function configureChatComposer() {
+  chatRuntime?.composer?.configure({
+    apiPost,
+    getConfig: () => cfg,
+    activeLinkPartnerId,
+    activeDmUserId,
+    addMessageToChannel,
+    renderMessage,
+    showDmFlight,
+    stopTypingNow,
+    alertError(error) {
+      alert(error.message || error);
     },
   });
 }
@@ -1202,6 +1219,10 @@ function chatUnread() {
 
 function chatReply() {
   return chatRuntime?.reply;
+}
+
+function chatComposer() {
+  return chatRuntime?.composer;
 }
 
 function channelMapFor(chatKey = activeChat) {
@@ -2843,27 +2864,7 @@ document.getElementById('composer').addEventListener('submit', e => {
     sendGameMessage(content).catch(err => alert(err.message || err));
     return;
   }
-  stopTypingNow();
-  const payload = appendReplyPayload({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, content, channel: activeChat });
-  const partnerId = activeLinkPartnerId();
-  const dmUserId = activeDmUserId();
-  if (partnerId) {
-    payload.channel = 'link';
-    payload.target_participant_id = partnerId;
-  } else if (dmUserId) {
-    payload.channel = 'dm';
-    payload.target_user_id = dmUserId;
-  }
-  apiPost('/api/messages.php', payload).then(msg => {
-    clearReplyDraft();
-    if (msg.channel === 'community') addMessageToChannel(msg, 'community', false);
-    else if (msg.channel === 'link') addMessageToChannel(msg, `link:${partnerId}`, false);
-    else if (msg.channel === 'dm') {
-      addMessageToChannel(msg, `dm:${dmUserId}`, false);
-      showDmFlight(msg);
-    }
-    else renderMessage(msg, true);
-  }).catch(alert);
+  chatComposer().sendTextMessage(content, activeChat);
 });
 
 function renderLatency(ms) {
