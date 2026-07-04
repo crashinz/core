@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-A introduces message/channel state ownership only.
+ *      Build 000022-B adds message rendering ownership.
  *
  * Build:
- *      000022-A
+ *      000022-B
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -27,6 +27,9 @@
  * Build 000022-A
  * - Introduced ChatRuntime foundation.
  * - Added ChatMessageStateService ownership and diagnostics.
+ *
+ * Build 000022-B
+ * - Added ChatMessageRenderer ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -47,6 +50,12 @@ import {
 
 } from "./services/chat-message-state-service.js";
 
+import {
+
+    ChatMessageRenderer
+
+} from "./renderers/chat-message-renderer.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -66,6 +75,11 @@ export class ChatRuntime extends CoreModule {
      * Message state runtime component.
      */
     #messages = null;
+
+    /**
+     * Message renderer runtime component.
+     */
+    #renderer = null;
 
     //--------------------------------------------------
     // Constructor
@@ -109,6 +123,18 @@ export class ChatRuntime extends CoreModule {
 
     }
 
+    /**
+     * Returns the Chat Message Renderer.
+     *
+     * @returns {ChatMessageRenderer}
+     *         Message renderer runtime component.
+     */
+    get renderer() {
+
+        return this.#renderer;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -130,10 +156,13 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-A",
+                "000022-B",
 
             messages:
-                this.#messages?.getDiagnostics() ?? null
+                this.#messages?.getDiagnostics() ?? null,
+
+            renderer:
+                this.#renderer?.getDiagnostics() ?? null
 
         });
 
@@ -150,12 +179,16 @@ export class ChatRuntime extends CoreModule {
 
         this.#createMessages();
 
+        this.#createRenderer();
+
     }
 
     /**
      * Called when the Chat Runtime is destroyed.
      */
     onDestroy() {
+
+        this.#renderer?.destroy();
 
         this.#messages?.destroy();
 
@@ -176,6 +209,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#messages.initialize();
+
+    }
+
+    /**
+     * Creates the message renderer runtime component.
+     */
+    #createRenderer() {
+
+        this.#renderer =
+            new ChatMessageRenderer(
+                this
+            );
+
+        this.#renderer.initialize();
 
     }
 

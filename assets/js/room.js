@@ -180,7 +180,6 @@ const GAME_CATALOG = {
 
 let gifSearchTimer = null;
 const gifDurationCache = new Map();
-let messagesPinnedToBottom = true;
 const loadedRoomEffectModules = new Map();
 let activeRoomEffectController = null;
 let activeRoomEffect = null;
@@ -227,8 +226,34 @@ async function initializeAvatarRuntime() {
   chatRuntimeCore.start();
 
   participants = avatarRuntime.state;
+  configureChatMessageRenderer();
 
   return avatarRuntime;
+}
+
+function configureChatMessageRenderer() {
+  chatRuntime?.renderer?.configure({
+    document,
+    window,
+    CSS,
+    messagesElement: messagesEl,
+    getConfig: () => cfg,
+    getParticipants: () => participants,
+    getActiveChat: () => activeChat,
+    esc,
+    mediaUrl,
+    isHttpUrl,
+    formatBytes,
+    fullTimestamp,
+    messageAvatarUrl,
+    participantRoleClass,
+    participantRoleLabel,
+    displayNameFor,
+    messageVisible,
+    gestureFromMessage,
+    openMessageActionMenu,
+    applyReaction,
+  });
 }
 
 function apiPost(url, body) {
@@ -823,38 +848,11 @@ function initImportedMusicDrag() {
 initImportedMusicDrag();
 
 function linkifiedTextHtml(text) {
-  const raw = String(text || '');
-  const parts = raw.split(/(https?:\/\/[^\s<>"']+)/gi);
-  return parts.map(part => {
-    if (!/^https?:\/\//i.test(part)) return esc(part).replace(/\n/g, '<br>');
-    const clean = part.replace(/[.,!?)]}]+$/g, '');
-    const suffix = part.slice(clean.length);
-    return `<a class="chat-text-link" href="${esc(clean)}" target="_blank" rel="noopener noreferrer">${esc(clean)}</a>${esc(suffix)}`;
-  }).join('');
+  return chatMessageRenderer().linkifiedTextHtml(text);
 }
 
 function urlPreviewHtml(preview) {
-  if (!preview || typeof preview !== 'object' || !isHttpUrl(preview.url)) return '';
-  const title = esc(preview.title || preview.provider || preview.host || preview.url);
-  const description = esc(preview.description || '');
-  const host = esc(preview.provider || preview.host || '');
-  const image = isHttpUrl(preview.image_url) ? esc(preview.image_url) : '';
-  if (preview.type === 'player' && isHttpUrl(preview.embed_url)) {
-    const providerClass = String(preview.provider || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    return `<div class="url-preview url-preview-player ${providerClass}">
-      <div class="url-preview-host">${host}</div>
-      <iframe src="${esc(preview.embed_url)}" loading="lazy" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>
-      ${title ? `<a class="url-preview-title" href="${esc(preview.url)}" target="_blank" rel="noopener noreferrer">${title}</a>` : ''}
-    </div>`;
-  }
-  return `<a class="url-preview url-preview-summary" href="${esc(preview.url)}" target="_blank" rel="noopener noreferrer">
-    ${image ? `<span class="url-preview-thumb"><img src="${image}" alt=""></span>` : ''}
-    <span class="url-preview-copy">
-      <span class="url-preview-host">${host}</span>
-      ${title ? `<span class="url-preview-title">${title}</span>` : ''}
-      ${description ? `<span class="url-preview-description">${description}</span>` : ''}
-    </span>
-  </a>`;
+  return chatMessageRenderer().urlPreviewHtml(preview);
 }
 
 function avatarUrl(p) {
@@ -1118,6 +1116,10 @@ function avatarStageSize(person) {
 
 function chatMessageState() {
   return chatRuntime?.messages;
+}
+
+function chatMessageRenderer() {
+  return chatRuntime?.renderer;
 }
 
 function channelMapFor(chatKey = activeChat) {
@@ -1986,41 +1988,28 @@ document.querySelectorAll('.chat-tab[data-chat-tab]').forEach(tab => {
 });
 
 function messagesNearBottom() {
-  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight <= 80;
+  return chatMessageRenderer().messagesNearBottom();
 }
 
 function shouldAutoScrollMessages() {
-  return messagesPinnedToBottom || messagesNearBottom();
+  return chatMessageRenderer().shouldAutoScrollMessages();
 }
 
 function scrollMessagesToBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  messagesPinnedToBottom = true;
+  chatMessageRenderer().scrollMessagesToBottom();
 }
 
 function bindMessageAutoScroll(row, shouldStick) {
-  if (!row || !shouldStick) return;
-  row.querySelectorAll('img, video, audio').forEach(media => {
-    const keepStuck = () => {
-      if (messagesPinnedToBottom || messagesNearBottom()) scrollMessagesToBottom();
-    };
-    media.addEventListener('load', keepStuck, { once: true });
-    media.addEventListener('loadedmetadata', keepStuck, { once: true });
-    media.addEventListener('canplay', keepStuck, { once: true });
-  });
+  chatMessageRenderer().bindMessageAutoScroll(row, shouldStick);
 }
 
 messagesEl.addEventListener('scroll', () => {
-  messagesPinnedToBottom = messagesNearBottom();
+  chatMessageRenderer()?.syncPinnedToBottom();
 });
 
 function renderActiveChat() {
   clearUnread(activeChat);
-  messagesEl.innerHTML = '';
-  chatMessageState()
-    .sortedMessagesForChannel(activeChat)
-    .forEach(msg => bindMessageAutoScroll(appendMessageEl(msg), true));
-  scrollMessagesToBottom();
+  chatMessageRenderer().renderActiveChat(activeChat);
   updateComposerPlaceholder();
   renderReplyDraft();
   document.querySelectorAll('.chat-tab').forEach(tab => {
@@ -2068,19 +2057,11 @@ function removeMessageFromChannels(messageId) {
 
 function animateRoomHistoryClear() {
   if (activeChat !== 'room') return;
-  const rows = [...messagesEl.children].reverse();
-  if (!rows.length) {
-    renderActiveChat();
-    return;
-  }
-  rows.forEach((row, index) => {
-    row.style.maxHeight = `${row.offsetHeight}px`;
-    row.style.animationDelay = `${index * 42}ms`;
-    row.classList.add('message-wipe-out');
+  chatMessageRenderer().animateRoomHistoryClear({
+    onRender() {
+      if (activeChat === 'room') renderActiveChat();
+    },
   });
-  window.setTimeout(() => {
-    if (activeChat === 'room') renderActiveChat();
-  }, rows.length * 42 + 520);
 }
 
 function handleRoomHistoryClear(payload = {}) {
@@ -2157,21 +2138,11 @@ function appendReplyPayload(payload) {
 }
 
 function replyPreviewHtml(msg) {
-  const reply = msg.reply_to;
-  if (!reply?.id) return '';
-  const author = esc(reply.display_name || 'Someone');
-  const preview = esc(reply.preview || reply.original_name || 'Message');
-  return `<button class="msg-reply-preview" type="button" data-reply-target="${esc(reply.id)}"><span>Reply to ${author}</span><strong>${preview}</strong></button>`;
+  return chatMessageRenderer().replyPreviewHtml(msg);
 }
 
 function jumpToMessage(messageId) {
-  const row = messagesEl.querySelector(`[data-message-id="${CSS.escape(String(messageId))}"]`);
-  if (!row) return;
-  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  row.classList.remove('message-reply-flash');
-  void row.offsetWidth;
-  row.classList.add('message-reply-flash');
-  window.setTimeout(() => row.classList.remove('message-reply-flash'), 1250);
+  chatMessageRenderer().jumpToMessage(messageId);
 }
 
 function gestureFromMessage(msg) {
@@ -2186,30 +2157,7 @@ function gestureFromMessage(msg) {
 }
 
 function messageBodyHtml(msg) {
-  const url = esc(mediaUrl(msg.content));
-  const name = esc(msg.original_name || 'Attachment');
-  const mime = String(msg.mime_type || '');
-  if (msg.message_type === 'gif') {
-    return `<a class="chat-attachment-image chat-gif" href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${name}"></a>`;
-  }
-  if (msg.message_type === 'gesture') {
-    const gesture = gestureFromMessage(msg);
-    if (!gesture) return esc(msg.original_name || 'Gesture');
-    const gif = esc(mediaUrl(gesture.gif_path || gesture.gif_url || ''));
-    const text = esc(gesture.text || gesture.name || msg.original_name || 'Gesture');
-    return `<div class="chat-gesture"><a class="chat-attachment-image chat-gif chat-gesture-gif" href="${gif}" target="_blank" rel="noopener"><img src="${gif}" alt="${text}"></a><div class="chat-gesture-text">${text}</div></div>`;
-  }
-  if (msg.message_type === 'voice_note') {
-    return `<div class="voice-note-player"><audio controls src="${url}"></audio></div>`;
-  }
-  if (msg.message_type === 'file') {
-    if (mime.startsWith('image/')) {
-      return `<a class="chat-attachment-image" href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${name}"></a>`;
-    }
-    const ext = (msg.original_name || 'file').split('.').pop().slice(0, 4).toUpperCase();
-    return `<a class="chat-file" href="${url}" target="_blank" rel="noopener" download><span class="chat-file-icon">${esc(ext || 'FILE')}</span><span><span class="chat-file-name">${name}</span><span class="chat-file-meta">${esc(msg.mime_type || 'Document')} · ${formatBytes(msg.file_size)}</span></span></a>`;
-  }
-  return `<div class="chat-text">${linkifiedTextHtml(msg.content)}</div>${urlPreviewHtml(msg.url_preview)}`;
+  return chatMessageRenderer().messageBodyHtml(msg);
 }
 
 function gifDelayCentiseconds(bytes, offset) {
@@ -2271,18 +2219,7 @@ function updateVisibleTimestamps() {
 }
 
 function renderReactions(msg) {
-  const reactions = Array.isArray(msg.reactions) ? msg.reactions : [];
-  if (!reactions.length) return '';
-  const groups = new Map();
-  reactions.forEach(r => {
-    if (!groups.has(r.emoji)) groups.set(r.emoji, []);
-    groups.get(r.emoji).push(r);
-  });
-  return `<div class="msg-reactions">${[...groups.entries()].map(([emoji, items]) => {
-    const own = items.some(item => Number(item.participant_id) === cfg.myParticipantId);
-    const avatars = items.map(item => `<img src="${esc(mediaUrl(item.avatar_url || cfg.avatarPresets.Default))}" alt="${esc(item.display_name || 'User')}" title="${esc(item.display_name || 'User')}">`).join('');
-    return `<button class="reaction-chip${own ? ' own' : ''}" type="button" data-msg-reaction="${esc(emoji)}"><span class="reaction-emoji">${esc(emoji)}</span><span class="reaction-avatars">${avatars}</span></button>`;
-  }).join('')}</div>`;
+  return chatMessageRenderer().renderReactions(msg);
 }
 
 function auraByKey(key) {
@@ -2797,49 +2734,7 @@ function applyRoomUpdate(update) {
 }
 
 function appendMessageEl(msg) {
-  if (!messageVisible(msg)) return null;
-  if (msg.system) {
-    const div = document.createElement('div');
-    div.className = 'chat-system';
-    div.innerHTML = `<span class="system-badge">${esc(msg.content)}</span>`;
-    messagesEl.appendChild(div);
-    return div;
-  }
-  const mine = msg.participant_id === cfg.myParticipantId;
-  const p = participants.get(msg.participant_id);
-  const author = p || msg;
-  const row = document.createElement('div');
-  row.className = 'message' + (mine ? ' me' : '') + (msg.is_deleted ? ' deleted' : '');
-  row.dataset.messageId = msg.id;
-  const canShowOriginal = cfg.canModerateMessages && msg.original_content && msg.original_content !== msg.content;
-  const timeValue = !msg.is_deleted && msg.edited_at ? msg.edited_at : msg.sent_at;
-  const timePrefix = !msg.is_deleted && msg.edited_at ? 'Edited at ' : '';
-  const flagTime = timeValue ? `<span class="msg-name-time" data-ts="${esc(timeValue)}" data-prefix="${esc(timePrefix)}">${esc(timePrefix)}${esc(fullTimestamp(timeValue))}</span>` : '';
-  const deletedMeta = msg.is_deleted && msg.deleted_at ? `<div class="msg-audit deleted-audit">Deleted at ${esc(fullTimestamp(msg.deleted_at))}</div>` : '';
-  const original = canShowOriginal ? `<details class="msg-original"><summary>Show original</summary><div>${esc(msg.original_content)}</div></details>` : '';
-  const body = msg.is_deleted && cfg.canModerateMessages ? `<div class="msg-deleted-body">${messageBodyHtml(msg)}</div>` : messageBodyHtml(msg);
-  const optionsButton = msg.channel === 'game' ? '' : '<button class="msg-options" type="button" aria-label="Message options">⋯</button>';
-  row.innerHTML = `<div class="bubble"><div class="msg-head"><div class="msg-name ${participantRoleClass(author)}" title="${esc(participantRoleLabel(author))}"><img src="${esc(messageAvatarUrl(msg, p))}" alt=""><span class="msg-name-copy"><span class="msg-name-text">${esc(p ? displayNameFor(p) : msg.display_name)}</span>${flagTime}</span></div>${optionsButton}</div>${replyPreviewHtml(msg)}<div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${renderReactions(msg)}</div></div>`;
-  row.querySelector('.msg-options')?.addEventListener('click', e => {
-    e.stopPropagation();
-    openMessageActionMenu(e.clientX, e.clientY, msg);
-  });
-  if (msg.channel !== 'game') {
-    row.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      openMessageActionMenu(e.clientX, e.clientY, msg);
-    });
-  }
-  row.querySelectorAll('.reaction-chip').forEach(btn => {
-    btn.addEventListener('click', () => applyReaction(msg.id, btn.dataset.msgReaction, activeChat));
-  });
-  row.querySelector('.msg-reply-preview')?.addEventListener('click', e => {
-    e.preventDefault();
-    jumpToMessage(e.currentTarget.dataset.replyTarget);
-  });
-  messagesEl.appendChild(row);
-  return row;
+  return chatMessageRenderer().appendMessage(msg);
 }
 
 function renderMessage(msg, live = false) {
