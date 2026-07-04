@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000022-D
+000022-E
 
 **Framework Phase**
 
-Chat Runtime Extraction - Message Action Ownership Complete
+Chat Runtime Extraction - Unread Orchestration Ownership Complete
 
 ---
 

@@ -229,6 +229,7 @@ async function initializeAvatarRuntime() {
   configureChatMessageRenderer();
   configureChatEventRouter();
   configureChatMessageActions();
+  configureChatUnread();
 
   return avatarRuntime;
 }
@@ -295,6 +296,13 @@ function configureChatMessageActions() {
     updateMessageInChannels,
     removeMessageFromChannel,
     showWarning,
+  });
+}
+
+function configureChatUnread() {
+  chatRuntime?.unread?.configure({
+    getConfig: () => cfg,
+    refreshUnreadBadges: updateTabBadges,
   });
 }
 
@@ -1172,6 +1180,10 @@ function chatMessageActions() {
   return chatRuntime?.actions;
 }
 
+function chatUnread() {
+  return chatRuntime?.unread;
+}
+
 function channelMapFor(chatKey = activeChat) {
   return chatMessageState().channelMapFor(chatKey);
 }
@@ -1999,7 +2011,7 @@ function renderDmTabs() {
 
 function updateTabBadges() {
   document.querySelectorAll('.chat-tab[data-chat-tab]').forEach(tab => {
-    const count = chatMessageState().unreadCountFor(tab.dataset.chatTab);
+    const count = chatUnread().unreadCountFor(tab.dataset.chatTab);
     const badge = tab.querySelector('.tab-badge');
     if (!badge) return;
     badge.hidden = count <= 0;
@@ -2008,8 +2020,7 @@ function updateTabBadges() {
 }
 
 function clearUnread(chatKey) {
-  chatMessageState().clearUnread(chatKey);
-  updateTabBadges();
+  chatUnread().clear(chatKey);
 }
 
 function switchChat(chatKey) {
@@ -2074,9 +2085,8 @@ function addMessageToChannel(msg, chatKey, live = false) {
       bindMessageAutoScroll(row, true);
     }
     clearUnread(chatKey);
-  } else if (live && msg.user_id !== cfg.myUserId && msg.participant_id !== cfg.myParticipantId) {
-    chatMessageState().incrementUnread(chatKey);
-    updateTabBadges();
+  } else {
+    chatUnread().recordInactiveLiveMessage(msg, chatKey, { live });
   }
   if (live && chatKey === 'room' && msg.participant_id) {
     showTyping(msg.participant_id, false);
@@ -2110,7 +2120,6 @@ function handleRoomHistoryClear(payload = {}) {
   seenRoomHistoryClears.add(clearId);
   chatMessageState().clearRoomMessages();
   clearUnread('room');
-  updateTabBadges();
   if (activeChat === 'room') animateRoomHistoryClear();
 }
 

@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-D adds outgoing message action workflow ownership.
+ *      Build 000022-E adds unread-count orchestration ownership.
  *
  * Build:
- *      000022-D
+ *      000022-E
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -36,6 +36,9 @@
  *
  * Build 000022-D
  * - Added ChatMessageActionService ownership and diagnostics.
+ *
+ * Build 000022-E
+ * - Added ChatUnreadService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -74,6 +77,12 @@ import {
 
 } from "./services/chat-message-action-service.js";
 
+import {
+
+    ChatUnreadService
+
+} from "./services/chat-unread-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -93,6 +102,11 @@ export class ChatRuntime extends CoreModule {
      * Message state runtime component.
      */
     #messages = null;
+
+    /**
+     * Unread orchestration runtime component.
+     */
+    #unread = null;
 
     /**
      * Message renderer runtime component.
@@ -148,6 +162,18 @@ export class ChatRuntime extends CoreModule {
     get messages() {
 
         return this.#messages;
+
+    }
+
+    /**
+     * Returns the Chat Unread Service.
+     *
+     * @returns {ChatUnreadService}
+     *         Unread orchestration runtime component.
+     */
+    get unread() {
+
+        return this.#unread;
 
     }
 
@@ -208,10 +234,13 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-D",
+                "000022-E",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
+
+            unread:
+                this.#unread?.getDiagnostics() ?? null,
 
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
@@ -237,6 +266,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createMessages();
 
+        this.#createUnread();
+
         this.#createRenderer();
 
         this.#createEvents();
@@ -255,6 +286,8 @@ export class ChatRuntime extends CoreModule {
         this.#events?.destroy();
 
         this.#renderer?.destroy();
+
+        this.#unread?.destroy();
 
         this.#messages?.destroy();
 
@@ -275,6 +308,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#messages.initialize();
+
+    }
+
+    /**
+     * Creates the unread orchestration runtime component.
+     */
+    #createUnread() {
+
+        this.#unread =
+            new ChatUnreadService(
+                this
+            );
+
+        this.#unread.initialize();
 
     }
 
