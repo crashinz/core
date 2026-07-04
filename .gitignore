@@ -41,6 +41,21 @@ assets/uploads/webcam/*
 !assets/uploads/webcam/.gitkeep
 
 # --------------------------------------------------
+# Chat Runtime Framework (Internal)
+#
+# These files remain private until the Avatar Runtime
+# migration and framework documentation are ready for
+# public release.
+# --------------------------------------------------
+
+# Internal framework documentation
+framework/**/*.md
+!framework/README.md
+framework/templates
+/*.md
+!README.md
+
+--------------------------------------------------
 # Node.js
 # --------------------------------------------------
 
@@ -69,3 +84,4 @@ yarn-error.log*
 
 Thumbs.db
 Desktop.ini
+framework/archive/design/Relationship_Synchronization.md

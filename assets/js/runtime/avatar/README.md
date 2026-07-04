@@ -1,0 +1,260 @@
+# Avatar Runtime
+
+The Avatar Runtime is the first runtime implementation of the Chat Runtime Framework.
+
+It owns all avatar-related runtime behavior while remaining isolated from application-level code.
+
+The Avatar Runtime is responsible for:
+
+- avatar relationships
+- member ordering
+- layout calculation
+- avatar rendering
+- avatar interaction
+
+The Avatar Runtime does not own:
+
+- networking
+- chat messages
+- authentication
+- moderation
+- room lifecycle
+- application routing
+
+Those responsibilities remain outside the runtime.
+
+---
+
+# Public Entry Point
+
+The Avatar Runtime exposes a single runtime module.
+
+```
+avatar-runtime.js
+```
+
+This module participates in the Core lifecycle through `RuntimeModule`.
+
+Application code SHALL interact with the Avatar Runtime through its registered runtime module.
+
+Internal implementation details SHALL remain private.
+
+---
+
+# Directory Structure
+
+```
+avatar/
+
+    avatar-runtime.js
+
+    services/
+
+        avatar-relationship-service.js
+
+        avatar-order-service.js
+
+        avatar-layout-service.js
+
+    render/
+
+        avatar-renderer.js
+
+    interaction/
+
+        avatar-drag-controller.js
+
+    internal/
+
+        relationship-graph.js
+
+        drag-state.js
+
+        layout-cache.js
+
+    models/
+
+    strategies/
+```
+
+---
+
+# Directory Responsibilities
+
+## services/
+
+Contains runtime business logic.
+
+Each service owns exactly one runtime responsibility.
+
+Examples:
+
+- relationships
+- ordering
+- layout
+
+Services do not manipulate the DOM directly.
+
+---
+
+## render/
+
+Contains rendering logic.
+
+Renderers apply runtime state to the user interface.
+
+Renderers do not calculate layout.
+
+Renderers do not modify relationship state.
+
+---
+
+## interaction/
+
+Contains user interaction logic.
+
+Examples include:
+
+- dragging
+- pointer interaction
+- gesture handling
+
+Interaction components request runtime changes.
+
+They do not own runtime state.
+
+---
+
+## internal/
+
+Contains implementation details that are not part of the runtime's public API.
+
+Examples include:
+
+- graph structures
+- runtime caches
+- temporary runtime state
+
+Application code MUST NOT depend on anything inside this directory.
+
+---
+
+## models/
+
+Contains runtime data models when required.
+
+Models represent runtime data.
+
+Models do not contain business logic.
+
+This directory intentionally begins empty.
+
+---
+
+## strategies/
+
+Contains interchangeable runtime algorithms.
+
+Examples may include:
+
+- layout strategies
+- animation strategies
+- formation strategies
+
+This directory intentionally begins empty.
+
+---
+
+# Ownership
+
+The Avatar Runtime owns avatar behavior.
+
+Each internal component owns one responsibility.
+
+Ownership SHALL NOT overlap.
+
+Examples:
+
+Relationship Service
+
+Owns:
+
+- linking
+- unlinking
+- validation
+
+Layout Service
+
+Owns:
+
+- positioning
+- spacing
+- layout calculation
+
+Renderer
+
+Owns:
+
+- DOM updates
+- visual synchronization
+
+Drag Controller
+
+Owns:
+
+- pointer interaction
+- drag lifecycle
+
+---
+
+# Runtime Philosophy
+
+The Avatar Runtime follows the principles defined by:
+
+- FRAMEWORK_SPECIFICATION.md
+- ENGINEERING_STANDARD.md
+- FRAMEWORK_DECISIONS.md
+
+In addition:
+
+- One Runtime — One Owner
+- Stable Public APIs
+- Progressive Extraction
+- Compatibility First
+- Preserve Proven Code
+
+---
+
+# Access Rules
+
+The Avatar Runtime exposes one public runtime module.
+
+Internal components SHALL NOT be accessed directly by application code.
+
+Future runtime expansion SHALL occur through the Avatar Runtime rather than bypassing it.
+
+---
+
+# Current Status
+
+Build:
+
+000021
+
+Status:
+
+Avatar Effects Ownership Complete
+
+The runtime infrastructure has been established.
+
+Behavior migration will occur incrementally in future builds.
+
+---
+
+# Future Development
+
+Future builds will progressively extract ownership from the upstream ChatSpace application.
+
+The long-term goal is for application code to coordinate runtime behavior rather than implement avatar behavior directly.
+
+This migration will occur incrementally while preserving compatibility with upstream ChatSpace.

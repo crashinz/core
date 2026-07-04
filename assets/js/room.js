@@ -22,9 +22,17 @@ function cacheBust(url) {
 
 let cfg = null;
 const vpMusicYoutube = document.getElementById('vp-music-youtube');
-const participants = new Map();
+let participants = new Map();
+let chatRuntimeCore = null;
+let chatRuntime = null;
+let avatarRuntime = null;
+let pollingRuntime = null;
 const dmUsers = new Map();
-const messages = new Map();
+const linkGroups = new Map();
+const groupPositions = new Map();
+let frameQueued = false;
+let pendingLayout = false;
+let layoutLocked = false;
 const roomLayout = document.querySelector('.room-layout');
 const mainEl = document.querySelector('.main');
 const roomStage = document.getElementById('room-stage');
@@ -101,6 +109,7 @@ const sessionLockEl = document.getElementById('session-lock');
 const sessionLockForm = document.getElementById('session-lock-form');
 const sessionLockPassword = document.getElementById('session-lock-password');
 const sessionLockError = document.getElementById('session-lock-error');
+let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastEventId = 0;
 let lastCommunityEventId = 0;
@@ -132,16 +141,6 @@ let latestVoiceParticipants = [];
 let lastVoiceStatusSignature = '';
 let lastVoiceSignalId = 0;
 const peers = new Map();
-const typingTimers = new Map();
-const speechTimers = new Map();
-const channelMessages = {
-  room: new Map(),
-  community: new Map(),
-  links: new Map(),
-  dms: new Map(),
-  games: new Map(),
-};
-const unreadCounts = new Map();
 const closedDmUserIds = new Set();
 const linkIcons = new Map();
 const stageLinkEls = new Map();
@@ -159,7 +158,6 @@ let memorySeenVersion = '';
 let pendingLinkIconTargetId = null;
 let pendingLinkChoice = null;
 const animatedDmMessageIds = new Set();
-let activeAvatarEffects = 0;
 let roomExitInProgress = false;
 let roomDeleteInProgress = false;
 let activeGame = null;
@@ -179,6 +177,7 @@ const GAME_CATALOG = {
   spaceinvasion: { name: 'Space Invasion', path: 'spaceinvasion', entry: 'spaceinvasion.html', icon: 'spaceinvasion', gameId: 6, seats: ['Player 1', 'Player 2'] },
   tetris: { name: 'Tetris Versus', path: 'tetris-versus', entry: 'tetris-versus.html', icon: 'tetris', gameId: 7, seats: ['Player 1', 'Player 2'] },
 };
+
 let gifSearchTimer = null;
 const gifDurationCache = new Map();
 let messagesPinnedToBottom = true;
@@ -205,6 +204,32 @@ const EMOJI_OPTIONS = [
   '💕','💞','💋','✨','🔥','🌙','⭐','🌸','🌹','🍒','🍓','☕','🍷','🎉','🎵','🎧','🎮','♟️','✅','👀',
   '👍','👎','👏','🙏','💅','👑','💬','🌐','✉️','➕','🔒','🔓','⚠️','💀','🫶','🫦','😌','😏','😉','😈'
 ];
+
+async function initializeAvatarRuntime() {
+  if (avatarRuntime) return avatarRuntime;
+
+  const [{ Core }, { ChatRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
+    import(appUrl('/assets/js/core/core.js')),
+    import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
+    import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
+    import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
+  ]);
+
+  chatRuntimeCore = new Core();
+  chatRuntime = new ChatRuntime();
+  pollingRuntime = new PollingRuntime();
+  avatarRuntime = new AvatarRuntime();
+
+  chatRuntimeCore.registerModule(chatRuntime);
+  chatRuntimeCore.registerModule(pollingRuntime);
+  chatRuntimeCore.registerModule(avatarRuntime);
+  chatRuntimeCore.initialize();
+  chatRuntimeCore.start();
+
+  participants = avatarRuntime.state;
+
+  return avatarRuntime;
+}
 
 function apiPost(url, body) {
   const payload = Object.assign({}, body || {}, { _csrf: CSRF_TOKEN });
@@ -861,20 +886,10 @@ function addAvatarContextListeners(el) {
 }
 
 function setAvatarImageSource(img, nextSrc, flip = false) {
-  if (!img || !nextSrc) return;
-  if (!flip) {
-    img.src = nextSrc;
-    return;
-  }
-  img.classList.remove('avatar-flipping');
-  void img.offsetWidth;
-  img.classList.add('avatar-flipping');
-  window.setTimeout(() => {
-    img.src = nextSrc;
-  }, 145);
-  window.setTimeout(() => {
-    img.classList.remove('avatar-flipping');
-  }, 330);
+  avatarRuntime?.renderer?.setAvatarImageSource(img, nextSrc, {
+    flip,
+    window,
+  });
 }
 
 function attachParticipantVideo(participantId, stream, own = false) {
@@ -884,25 +899,16 @@ function attachParticipantVideo(participantId, stream, own = false) {
     return;
   }
   pendingRemoteVideoStreams.delete(Number(participantId));
-  let video = person.webcamVideoEl;
-  if (!video) {
-    video = document.createElement('video');
-    video.className = 'avatar avatar-webcam-video';
-    video.dataset.participantId = person.id;
-    video.autoplay = true;
-    video.playsInline = true;
-    video.muted = own;
-    addAvatarContextListeners(video);
-    if (own) makeDraggable(video);
-    roomStage.insertBefore(video, person.labelEl || null);
-    person.webcamVideoEl = video;
-  }
-  if (video.srcObject !== stream) video.srcObject = stream;
-  video.muted = own;
-  video.classList.toggle('avatar-webcam-self', own);
-  video.play?.().catch(() => {});
-  person.webcam_enabled = true;
-  person.avatarEl?.classList.add('avatar-hidden-behind-webcam');
+  avatarRuntime?.renderer?.attachWebcam(person, stream, {
+    stage: roomStage,
+    document,
+    own,
+    addContextListeners: addAvatarContextListeners,
+    makeDraggable,
+  });
+  participants.update(participantId, {
+    webcam_enabled: true,
+  });
   positionAvatar(person);
 }
 
@@ -910,21 +916,14 @@ function detachParticipantVideo(participantId, flip = true) {
   const person = participants.get(Number(participantId));
   pendingRemoteVideoStreams.delete(Number(participantId));
   if (!person) return;
-  const video = person.webcamVideoEl;
-  person.webcamVideoEl = null;
-  person.webcam_enabled = false;
-  person.webcam_path = null;
-  person.avatarEl?.classList.remove('avatar-hidden-behind-webcam');
-  if (!video) return;
-  video.srcObject = null;
-  if (!flip) {
-    video.remove();
-    return;
-  }
-  video.classList.remove('avatar-flipping');
-  void video.offsetWidth;
-  video.classList.add('avatar-flipping');
-  window.setTimeout(() => video.remove(), 330);
+  participants.update(participantId, {
+    webcam_enabled: false,
+    webcam_path: null,
+  });
+  avatarRuntime?.renderer?.detachWebcam(person, {
+    flip,
+    window,
+  });
 }
 
 function applyWebcamState(participantId, enabled, webcamPath = null) {
@@ -988,11 +987,11 @@ function setPermissionUI() {
 }
 
 function allChannelMaps() {
-  const maps = [channelMessages.room, channelMessages.community];
-  channelMessages.links.forEach(map => maps.push(map));
-  channelMessages.dms.forEach(map => maps.push(map));
-  channelMessages.games.forEach(map => maps.push(map));
-  return maps;
+  return {
+    forEach(callback) {
+      chatMessageState().forEachChannelMessage(callback);
+    },
+  };
 }
 
 function applyUserRoleUpdate(update) {
@@ -1009,13 +1008,11 @@ function applyUserRoleUpdate(update) {
     renderParticipant(person);
     changedParticipants = true;
   });
-  allChannelMaps().forEach(map => {
-    map.forEach(msg => {
-      const msgUserId = Number(msg.user_id || participants.get(msg.participant_id)?.user_id || 0);
-      if (msgUserId !== userId && Number(msg.participant_id) !== participantId) return;
-      msg.role = nextRole;
-      if ('is_owner' in update) msg.is_owner = Boolean(update.is_owner);
-    });
+  allChannelMaps().forEach(msg => {
+    const msgUserId = Number(msg.user_id || participants.get(msg.participant_id)?.user_id || 0);
+    if (msgUserId !== userId && Number(msg.participant_id) !== participantId) return;
+    msg.role = nextRole;
+    if ('is_owner' in update) msg.is_owner = Boolean(update.is_owner);
   });
   if (userId === Number(cfg.myUserId) || participantId === Number(cfg.myParticipantId)) {
     cfg.myRole = nextRole;
@@ -1074,7 +1071,7 @@ function activeDmUserId() {
 }
 
 function linkKeyFor(a, b) {
-  return [Number(a), Number(b)].sort((x, y) => x - y).join(':');
+  return avatarRuntime?.relationships?.linkKeyFor(a, b) || [Number(a), Number(b)].sort((x, y) => x - y).join(':');
 }
 
 function linkIconUrl(iconName = 'plus') {
@@ -1087,7 +1084,7 @@ function linkIconUrl(iconName = 'plus') {
 
 function linkIconNameForStage(key) {
   const iconName = linkIcons.get(key) || 'plus';
-  return iconName === 'none' ? '' : iconName;
+  return (iconName === 'none' || iconName === 'plus') ? '' : iconName;
 }
 
 function linkIconNameForList(key) {
@@ -1096,59 +1093,39 @@ function linkIconNameForList(key) {
 }
 
 function linkPairGap(key) {
-  return linkIconNameForStage(key) ? 12 : 2;
+  return linkIconNameForStage(key) ? 12 : 0;
 }
 
 function normalizeLinkMode(mode) {
-  return mode === 'lap' ? 'lap' : 'normal';
+  return avatarRuntime?.relationships?.normalizeLinkMode(mode) || (mode === 'lap' ? 'lap' : 'normal');
 }
 
 function isLapLinkInitiator(person) {
-  return normalizeLinkMode(person?.link_mode) === 'lap' && Boolean(person?.linked_to);
+  return avatarRuntime?.relationships?.isLapLinkInitiator(person) || false;
 }
 
 function isLapLinkTarget(person) {
-  if (!person) return false;
-  for (const other of participants.values()) {
-    if (Number(other.linked_to) === Number(person.id) && normalizeLinkMode(other.link_mode) === 'lap') return true;
-  }
-  return false;
+  return avatarRuntime?.relationships?.isLapLinkTarget(person) || false;
 }
 
 function linkModeForPair(a, b) {
-  if (Number(a?.linked_to) === Number(b?.id)) return normalizeLinkMode(a.link_mode);
-  if (Number(b?.linked_to) === Number(a?.id)) return normalizeLinkMode(b.link_mode);
-  return 'normal';
+  return avatarRuntime?.relationships?.linkModeForPair(a, b) || 'normal';
 }
 
 function avatarStageSize(person) {
-  return isLapLinkInitiator(person) ? Math.round(AVATAR_STAGE_SIZE * .5) : AVATAR_STAGE_SIZE;
+  return avatarRuntime?.layout?.avatarStageSize(person, { baseSize: AVATAR_STAGE_SIZE }) || AVATAR_STAGE_SIZE;
+}
+
+function chatMessageState() {
+  return chatRuntime?.messages;
 }
 
 function channelMapFor(chatKey = activeChat) {
-  if (chatKey === 'room') return channelMessages.room;
-  if (chatKey === 'community') return channelMessages.community;
-  if (chatKey.startsWith('link:')) {
-    if (!channelMessages.links.has(chatKey)) channelMessages.links.set(chatKey, new Map());
-    return channelMessages.links.get(chatKey);
-  }
-  if (chatKey.startsWith('dm:')) {
-    if (!channelMessages.dms.has(chatKey)) channelMessages.dms.set(chatKey, new Map());
-    return channelMessages.dms.get(chatKey);
-  }
-  if (chatKey.startsWith('game:')) {
-    if (!channelMessages.games.has(chatKey)) channelMessages.games.set(chatKey, new Map());
-    return channelMessages.games.get(chatKey);
-  }
-  return channelMessages.room;
+  return chatMessageState().channelMapFor(chatKey);
 }
 
 function channelForApi(chatKey = activeChat) {
-  if (chatKey === 'room' || chatKey === 'community') return chatKey;
-  if (chatKey.startsWith('link:')) return 'link';
-  if (chatKey.startsWith('dm:')) return 'dm';
-  if (chatKey.startsWith('game:')) return 'game';
-  return 'room';
+  return chatMessageState().channelForApi(chatKey);
 }
 
 function linkPartnerIdFromKey(key) {
@@ -1240,90 +1217,13 @@ function preloadImage(src) {
   });
 }
 
-function avatarEffectParticleData(img, cols, rows) {
-  const fallback = ['#7c6af7', '#27d3c3', '#f04f8b', '#f5c46b'];
-  if (!img?.complete || !img.naturalWidth || !img.naturalHeight) return null;
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = cols;
-    canvas.height = rows;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0, cols, rows);
-    const pixels = ctx.getImageData(0, 0, cols, rows).data;
-    return index => {
-      const offset = index * 4;
-      const alpha = pixels[offset + 3];
-      if (alpha < 24) return fallback[index % fallback.length];
-      return `rgba(${pixels[offset]}, ${pixels[offset + 1]}, ${pixels[offset + 2]}, ${Math.max(0.45, alpha / 255)})`;
-    };
-  } catch {
-    return index => fallback[index % fallback.length];
-  }
-}
-
 function runAvatarPixelEffect(person, mode = 'in') {
-  if (!person?.avatarEl || !roomStage) return Promise.resolve();
-  const img = person.avatarEl;
-  const rect = {
-    left: img.offsetLeft,
-    top: img.offsetTop,
-    width: img.offsetWidth || 150,
-    height: img.offsetHeight || 150,
-  };
-  const cols = activeAvatarEffects > 8 ? 6 : 8;
-  const rows = activeAvatarEffects > 8 ? 6 : 8;
-  const pixelSize = Math.max(5, Math.ceil(rect.width / cols));
-  const colorAt = avatarEffectParticleData(img, cols, rows) || (index => ['#7c6af7', '#27d3c3', '#f04f8b', '#f5c46b'][index % 4]);
-  const overlay = document.createElement('div');
-  overlay.className = `avatar-pixel-layer ${mode === 'out' ? 'dust-out' : 'build-in'}`;
-  overlay.style.left = `${rect.left}px`;
-  overlay.style.top = `${rect.top}px`;
-  overlay.style.width = `${rect.width}px`;
-  overlay.style.height = `${rect.height}px`;
-  roomStage.appendChild(overlay);
-
-  activeAvatarEffects++;
-  const duration = mode === 'out' ? 780 : 880;
-  const maxDelay = mode === 'out' ? 300 : 360;
-  let index = 0;
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const particle = document.createElement('span');
-      const x = (col / cols) * rect.width;
-      const y = (row / rows) * rect.height;
-      const fromBottom = rows - row - 1;
-      const delay = mode === 'out'
-        ? row * (maxDelay / Math.max(1, rows - 1))
-        : fromBottom * (maxDelay / Math.max(1, rows - 1));
-      const sideways = (mode === 'out' ? 1 : -1) * (36 + Math.random() * 76) * (Math.random() > 0.42 ? 1 : -0.65);
-      const driftY = mode === 'out'
-        ? -18 + Math.random() * 54
-        : 40 + Math.random() * 60;
-      particle.style.left = `${x}px`;
-      particle.style.top = `${y}px`;
-      particle.style.width = `${pixelSize}px`;
-      particle.style.height = `${pixelSize}px`;
-      particle.style.background = colorAt(index);
-      particle.style.setProperty('--delay', `${delay}ms`);
-      particle.style.setProperty('--dx', `${sideways.toFixed(1)}px`);
-      particle.style.setProperty('--dy', `${driftY.toFixed(1)}px`);
-      overlay.appendChild(particle);
-      index++;
-    }
-  }
-  img.classList.remove('avatar-materialize', 'avatar-dusting');
-  void img.offsetWidth;
-  img.classList.add(mode === 'out' ? 'avatar-dusting' : 'avatar-materialize');
-  if (person.labelEl) person.labelEl.classList.toggle('avatar-name-hidden', mode === 'out');
-  return new Promise(resolve => {
-    window.setTimeout(() => {
-      overlay.remove();
-      img.classList.remove('avatar-materialize', 'avatar-dusting');
-      if (person.labelEl) person.labelEl.classList.remove('avatar-name-hidden');
-      activeAvatarEffects = Math.max(0, activeAvatarEffects - 1);
-      resolve();
-    }, duration + maxDelay + 90);
-  });
+  return avatarRuntime?.effects?.runPixelEffect(person, {
+    mode,
+    stage: roomStage,
+    document,
+    window,
+  }) || Promise.resolve();
 }
 
 async function renderParticipantWhenReady(p, options = {}) {
@@ -1337,74 +1237,46 @@ function renderParticipant(p, options = {}) {
   const existing = participants.get(p.id) || {};
   const hadImage = Boolean(existing.avatarEl);
   const wasWebcam = Boolean(existing.webcam_path || existing.webcam_enabled);
-  const merged = Object.assign(existing, p);
+  const merged = participants.merge(p);
   if (!merged.webcam_path && isWebcamAssetUrl(merged.avatar_url)) merged.avatar_url = null;
-  participants.set(p.id, merged);
 
-  let img = merged.avatarEl;
-  let label = merged.labelEl;
-  let auraEl = merged.auraEl;
-  if (!img) {
-    img = document.createElement('img');
-    img.className = 'avatar';
-    img.draggable = false;
-    img.dataset.participantId = p.id;
-    auraEl = document.createElement('div');
-    auraEl.className = 'avatar-aura-layer';
-    auraEl.dataset.participantId = p.id;
-    cleanupAuraLayer(auraEl);
-    label = document.createElement('div');
-    label.className = 'avatar-name';
-    roomStage.appendChild(img);
-    roomStage.appendChild(auraEl);
-    roomStage.appendChild(label);
-    merged.avatarEl = img;
-    merged.auraEl = auraEl;
-    merged.labelEl = label;
-    if (p.id === cfg.myParticipantId) makeDraggable(img);
-    addAvatarContextListeners(img);
-  }
   const nowWebcam = Boolean(merged.webcam_path || merged.webcam_enabled);
-  setAvatarImageSource(img, avatarUrl(merged), hadImage && wasWebcam !== nowWebcam);
+  avatarRuntime?.renderer?.syncParticipant(merged, {
+    stage: roomStage,
+    document,
+    window,
+    own: Number(p.id) === Number(cfg.myParticipantId),
+    makeDraggable,
+    addContextListeners: addAvatarContextListeners,
+    avatarSource: avatarUrl(merged),
+    displayName: displayNameFor(merged),
+    webcam: nowWebcam,
+    webcamEnabled: merged.webcam_enabled,
+    lapInitiator: isLapLinkInitiator(merged),
+    lapTarget: isLapLinkTarget(merged),
+    flipImage: hadImage && wasWebcam !== nowWebcam,
+  });
   refreshLinkClasses();
-  img.classList.toggle('webcam', Boolean(merged.webcam_path || merged.webcam_enabled));
-  img.classList.toggle('lap-avatar', isLapLinkInitiator(merged));
-  img.classList.toggle('lap-primary-avatar', isLapLinkTarget(merged));
-  label.textContent = displayNameFor(merged);
   positionAvatar(merged);
   applyParticipantAura(merged);
   const pendingVideo = pendingRemoteVideoStreams.get(Number(merged.id));
   if (pendingVideo) attachParticipantVideo(merged.id, pendingVideo, Number(merged.id) === Number(cfg.myParticipantId));
-  if (merged.webcamVideoEl && merged.webcam_enabled) merged.avatarEl?.classList.add('avatar-hidden-behind-webcam');
   if (options.animateJoin) runAvatarPixelEffect(merged, 'in');
   renderPeople();
   renderLinkTabs();
 }
 
 function removeStagePresence(person) {
-  cleanupAuraLayer(person.auraEl);
-  person.avatarEl?.remove();
-  person.auraEl?.remove();
-  person.labelEl?.remove();
-  person.typingEl?.remove();
-  person.speechEl?.remove();
-  person.webcamVideoEl?.remove();
-  person.avatarEl = null;
-  person.auraEl = null;
-  person.labelEl = null;
-  person.typingEl = null;
-  person.speechEl = null;
-  person.webcamVideoEl = null;
+  avatarRuntime?.renderer?.removeStagePresence(person, {
+    document,
+  });
 }
 
 function removeParticipant(participantId, options = {}) {
   const id = Number(participantId);
   const person = participants.get(id);
   if (!person) return Promise.resolve();
-  clearTimeout(typingTimers.get(id));
-  typingTimers.delete(id);
-  clearTimeout(speechTimers.get(id));
-  speechTimers.delete(id);
+  participants.clearParticipantTimers(id);
   pendingRemoteVideoStreams.delete(id);
   if (peers.has(id)) {
     peers.get(id).close();
@@ -1413,19 +1285,15 @@ function removeParticipant(participantId, options = {}) {
   const finish = () => {
     removeStagePresence(person);
     if (options.keepRecord) {
-      person.online = false;
-      person.webcam_path = null;
-      person.linked_to = null;
-      person.link_mode = 'normal';
+      participants.update(id, {
+        online: false,
+        webcam_path: null,
+      });
+      avatarRuntime?.relationships?.clearParticipant(id);
     } else {
       participants.delete(id);
     }
-    participants.forEach(p => {
-      if (p.linked_to === id) {
-        p.linked_to = null;
-        p.link_mode = 'normal';
-      }
-    });
+    avatarRuntime?.relationships?.unlinkFollowersOf(id);
     refreshLinkClasses();
     renderPeople();
     renderLinkTabs();
@@ -1463,108 +1331,44 @@ function positionAvatar(p) {
   const img = p.avatarEl;
   const label = p.labelEl;
   if (!img || !label) return;
+  
   const w = roomStage.clientWidth;
   const h = roomStage.clientHeight;
-  const aw = avatarStageSize(p);
-  const ah = avatarStageSize(p);
-  const x = Math.max(0, Math.min(w - aw, p.position_x * w));
-  const y = Math.max(0, Math.min(h - ah, p.position_y * h));
-  img.style.width = `${aw}px`;
-  img.style.height = `${ah}px`;
-  img.style.left = `${x}px`;
-  img.style.top = `${y}px`;
-  if (p.auraEl) {
-    p.auraEl.style.left = `${x}px`;
-    p.auraEl.style.top = `${y}px`;
-    p.auraEl.style.width = `${aw}px`;
-    p.auraEl.style.height = `${ah}px`;
-  }
-  if (p.webcamVideoEl) {
-    p.webcamVideoEl.style.width = `${aw}px`;
-    p.webcamVideoEl.style.height = `${ah}px`;
-    p.webcamVideoEl.style.left = `${x}px`;
-    p.webcamVideoEl.style.top = `${y}px`;
-  }
-  label.style.left = `${x + aw / 2}px`;
-  label.style.top = `${y + ah + 7}px`;
-  if (p.typingEl) {
-    p.typingEl.style.left = `${x + aw - 42}px`;
-    p.typingEl.style.top = `${y - 10}px`;
-  }
-  if (p.speechEl) {
-    const roomW = roomStage.clientWidth;
-    const roomH = roomStage.clientHeight;
-    const bubbleW = p.speechEl.offsetWidth || 200;
-    const bubbleH = p.speechEl.offsetHeight || 52;
-    const placeRight = x + aw + bubbleW + 16 < roomW;
-    const placeBelow = y + ah + bubbleH + 18 < roomH;
-    const clampX = value => Math.max(8, Math.min(value, roomW - bubbleW - 8));
-    const clampY = value => Math.max(8, Math.min(value, roomH - bubbleH - 8));
-    p.speechEl.classList.remove('br', 'bl', 'tr', 'tl');
-    if (placeBelow) {
-      p.speechEl.style.top = `${clampY(y + ah + 10)}px`;
-      if (placeRight) {
-        p.speechEl.style.left = `${clampX(x + aw - 28)}px`;
-        p.speechEl.classList.add('br');
-      } else {
-        p.speechEl.style.left = `${clampX(x - bubbleW + 28)}px`;
-        p.speechEl.classList.add('bl');
-      }
-    } else {
-      p.speechEl.style.top = `${clampY(y - bubbleH - 10)}px`;
-      if (placeRight) {
-        p.speechEl.style.left = `${clampX(x + aw - 28)}px`;
-        p.speechEl.classList.add('tr');
-      } else {
-        p.speechEl.style.left = `${clampX(x - bubbleW + 28)}px`;
-        p.speechEl.classList.add('tl');
-      }
-    }
-  }
+  const frame = avatarRuntime?.layout?.avatarFrame(p, {
+    stageWidth: w,
+    stageHeight: h,
+    baseSize: AVATAR_STAGE_SIZE,
+  }) || {
+    width: avatarStageSize(p),
+    height: avatarStageSize(p),
+    x: Math.max(0, Math.min(w - avatarStageSize(p), p.position_x * w)),
+    y: Math.max(0, Math.min(h - avatarStageSize(p), p.position_y * h)),
+  };
+  avatarRuntime?.renderer?.applyParticipantFrame(p, frame, {
+    stage: roomStage,
+  });
   updateStageLinkIcons();
 }
 
 function refreshLinkClasses() {
   participants.forEach(p => {
-    if (!p.avatarEl) return;
-    p.avatarEl.classList.toggle('linked', Boolean(p.linked_to) || [...participants.values()].some(other => other.linked_to === p.id));
+    avatarRuntime?.renderer?.syncLinkedClass(
+      p,
+      avatarRuntime?.relationships?.isLinked(p) || false
+    );
   });
   updateStageLinkIcons();
 }
 
 function pulseParticipantAvatar(participantId) {
   const person = participants.get(Number(participantId));
-  const el = person?.webcamVideoEl || person?.avatarEl;
-  if (!el) return;
-  el.classList.remove('avatar-pulse');
-  void el.offsetWidth;
-  el.classList.add('avatar-pulse');
-  window.setTimeout(() => {
-    el.classList.remove('avatar-pulse');
-  }, 1500);
+  avatarRuntime?.effects?.pulseParticipant(person, {
+    window,
+  });
 }
 
 function linkedPairs() {
-  const pairs = [];
-  const seen = new Set();
-  participants.forEach(p => {
-    let partner = null;
-    if (p.linked_to && participants.has(p.linked_to)) partner = participants.get(p.linked_to);
-    else {
-      for (const other of participants.values()) {
-        if (other.linked_to === p.id) {
-          partner = other;
-          break;
-        }
-      }
-    }
-    if (!partner) return;
-    const key = linkKeyFor(p.id, partner.id);
-    if (seen.has(key)) return;
-    seen.add(key);
-    pairs.push([key, p, partner]);
-  });
-  return pairs;
+  return avatarRuntime?.relationships?.linkedPairs() || [];
 }
 
 function updateStageLinkIcons() {
@@ -1720,14 +1524,23 @@ function saveParticipantPositions(list) {
   }).catch(console.warn);
 }
 
+function refreshRelationship(initiator, target, animate = true, persist = false) {
+  if (!initiator || !target) return;
+
+  snapLinkedPair(initiator, target, animate);
+
+  if (persist) {
+    saveParticipantPositions([initiator, target]);
+  }
+}
+
 function adjustLinkedPairForIcon(linkKey, animate = true, persist = false) {
   const pair = linkedPairs().find(([key]) => key === linkKey);
   if (!pair) return;
   const [, a, b] = pair;
-  const initiator = a.linked_to === b.id ? a : b;
+  const initiator = avatarRuntime?.relationships?.relationshipInitiator(a, b) || a;
   const target = initiator === a ? b : a;
-  snapLinkedPair(initiator, target, animate);
-  if (persist) saveParticipantPositions([initiator, target]);
+  refreshRelationship(initiator, target, animate, persist);
 }
 
 function snapLinkedPair(initiator, target, animate = true) {
@@ -1736,19 +1549,18 @@ function snapLinkedPair(initiator, target, animate = true) {
     snapLappedPair(initiator, target, animate);
     return;
   }
-  const avatarPx = AVATAR_STAGE_SIZE;
-  const gap = linkPairGap(linkKeyFor(initiator.id, target.id));
-  const rW = roomStage.clientWidth;
-  const rH = roomStage.clientHeight;
-  const initX = Math.max(avatarPx + gap, Math.min(initiator.position_x * rW, rW - avatarPx));
-  const targetX = initX - avatarPx - gap;
-  const y = Math.max(0, Math.min(initiator.position_y * rH, rH - avatarPx));
-  target.position_x = targetX / rW;
-  target.position_y = y / rH;
-  initiator.position_x = initX / rW;
-  initiator.position_y = y / rH;
-  positionAvatar(target);
-  positionAvatar(initiator);
+
+  const changed = avatarRuntime?.layout?.applyLinkedPairLayout({
+    initiator,
+    target,
+    stageWidth: roomStage.clientWidth,
+    stageHeight: roomStage.clientHeight,
+    avatarSize: AVATAR_STAGE_SIZE,
+    gap: linkPairGap(linkKeyFor(initiator.id, target.id)),
+  }) || [];
+
+  changed.forEach(positionAvatar);
+
   if (animate) {
     target.avatarEl.style.transition = 'left .35s ease, top .35s ease';
     initiator.avatarEl.style.transition = 'left .35s ease, top .35s ease';
@@ -1760,27 +1572,17 @@ function snapLinkedPair(initiator, target, animate = true) {
 }
 
 function snapLappedPair(initiator, target, animate = true) {
-  if (!initiator?.avatarEl || !target?.avatarEl) return;
-  const rW = roomStage.clientWidth;
-  const rH = roomStage.clientHeight;
-  const primarySize = AVATAR_STAGE_SIZE;
-  const lapSize = avatarStageSize(initiator);
-  const targetX = Math.max(0, Math.min(target.position_x * rW, rW - primarySize));
-  const targetY = Math.max(0, Math.min(target.position_y * rH, rH - primarySize));
-  const lapX = Math.max(0, Math.min(targetX + primarySize * .5, rW - lapSize));
-  const lapY = Math.max(0, Math.min(targetY + primarySize * (65 / 150), rH - lapSize));
-  initiator.position_x = lapX / rW;
-  initiator.position_y = lapY / rH;
-  positionAvatar(target);
-  positionAvatar(initiator);
-  if (animate) {
-    initiator.avatarEl.style.transition = 'left .35s ease, top .35s ease, width .25s ease, height .25s ease';
-    target.avatarEl.style.transition = 'left .35s ease, top .35s ease';
-    setTimeout(() => {
-      initiator.avatarEl.style.transition = '';
-      target.avatarEl.style.transition = '';
-    }, 380);
-  }
+  const changed = avatarRuntime?.layout?.applyLappedPairLayout({
+    initiator,
+    target,
+    stageWidth: roomStage.clientWidth,
+    stageHeight: roomStage.clientHeight,
+    primarySize: AVATAR_STAGE_SIZE,
+    lapSize: avatarStageSize(initiator),
+    locked: layoutLocked,
+  }) || [];
+
+  changed.forEach(positionAvatar);
 }
 
 function closeLinkChoiceModal() {
@@ -1811,12 +1613,8 @@ async function completePendingLinkChoice(mode) {
     return;
   }
   const linkMode = normalizeLinkMode(mode);
-  initiator.linked_to = target.id;
-  initiator.link_mode = linkMode;
-  target.linked_to = null;
-  target.link_mode = 'normal';
-  if (linkMode === 'normal') snapLinkedPair(initiator, target, true);
-  else snapLappedPair(initiator, target, true);
+  avatarRuntime?.relationships?.link(initiator.id, target.id, linkMode);
+  refreshRelationship(initiator, target, true);
   renderParticipant(target);
   renderParticipant(initiator);
   renderPeople();
@@ -1834,10 +1632,8 @@ async function completePendingLinkChoice(mode) {
       target_y: target.position_y,
     });
   } catch (err) {
-    initiator.linked_to = null;
-    initiator.link_mode = 'normal';
-    target.linked_to = null;
-    target.link_mode = 'normal';
+    avatarRuntime?.relationships?.clearParticipant(initiator.id);
+    avatarRuntime?.relationships?.clearParticipant(target.id);
     renderParticipant(initiator);
     renderParticipant(target);
     renderPeople();
@@ -1858,66 +1654,159 @@ function makeDraggable(img) {
     const p = participants.get(cfg.myParticipantId);
     if (!linkBrokenThisDrag && p?.linked_to) {
       linkBrokenThisDrag = true;
-      p.linked_to = null;
-      p.link_mode = 'normal';
+      avatarRuntime?.relationships?.clearParticipant(p.id);
       apiPost('/api/users.php', { action: 'unlink', session_id: cfg.sessionId, join_token: cfg.myJoinToken }).catch(console.warn);
       renderParticipant(p);
       renderLinkTabs();
     }
-    if (!linkBrokenThisDrag) {
-      participants.forEach(other => {
-        if (other.id === p.id || other.linked_to !== p.id || !other.avatarEl) return;
-        const offsetX = (other.position_x - p.position_x) * rect.width;
-        const offsetY = (other.position_y - p.position_y) * rect.height;
-        other.position_x = Math.max(0, Math.min(rect.width - other.avatarEl.offsetWidth, x + offsetX)) / rect.width;
-        other.position_y = Math.max(0, Math.min(rect.height - other.avatarEl.offsetHeight, y + offsetY)) / rect.height;
-        positionAvatar(other);
-      });
-    }
-    p.position_x = x / rect.width;
-    p.position_y = y / rect.height;
-    positionAvatar(p);
+
+const group = img._dragGroup || [p];
+
+const baseX = x / rect.width;
+const baseY = y / rect.height;
+
+const spacing = img.offsetWidth / rect.width;
+
+const changed = avatarRuntime?.layout?.applyDragGroupLayout({
+  group,
+  baseX,
+  baseY,
+  spacing,
+}) || [];
+
+changed.forEach(positionAvatar);
+
+let relationshipRefreshed = false;
+
+if (!linkBrokenThisDrag) {
+  participants.forEach(other => {
+    if (other.id === p.id || other.linked_to !== p.id) return;
+
+    relationshipRefreshed = true;
+    refreshRelationship(other, p, false, false);
+  });
+}
+
+if (!relationshipRefreshed) {
+  positionAvatar(p);
+}
   }
   img.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
+	
     dragging = true;
     linkBrokenThisDrag = false;
+
+    const id = p.id;
+    const group = [...linkGroups.values()]
+        .find(g => g.some(m => m.id === id));
+
+    img._dragGroup = group || [p];
+    img._dragOrigin = { x: e.clientX, y: e.clientY };
     offX = e.clientX - img.getBoundingClientRect().left;
     offY = e.clientY - img.getBoundingClientRect().top;
     img.setPointerCapture(e.pointerId);
     img.style.cursor = 'grabbing';
   });
-  img.addEventListener('pointermove', e => { if (dragging) move(e.clientX, e.clientY); });
-  img.addEventListener('pointerup', e => {
-    dragging = false;
-    img.style.cursor = 'grab';
-    const p = participants.get(cfg.myParticipantId);
-    if (!linkBrokenThisDrag && !p.linked_to) {
-      const myRect = img.getBoundingClientRect();
-      const myCenter = { x: myRect.left + myRect.width / 2, y: myRect.top + myRect.height / 2 };
-      let target = null;
-      participants.forEach(other => {
-        if (other.id === p.id || !other.avatarEl) return;
-        const r = other.avatarEl.getBoundingClientRect();
-        const cx = r.left + r.width / 2;
-        const cy = r.top + r.height / 2;
-        const dist = Math.hypot(myCenter.x - cx, myCenter.y - cy);
-        if (dist < 120 && !isUserBlocked(other.user_id)) target = other;
-      });
-      if (target) {
-        openLinkChoiceModal(p, target);
-        return;
-      }
-    }
-    const linkedFollowers = [...participants.values()].filter(other => other.linked_to === p.id);
+  img.addEventListener('pointermove', e => { if (!dragging || !img._dragGroup) return;
+
+const dx = e.clientX - img._dragOrigin.x;
+const dy = e.clientY - img._dragOrigin.y;
+
+img._dragOrigin = { x: e.clientX, y: e.clientY }; });
+img.addEventListener('pointerup', e => {
+  dragging = false;
+  img.style.cursor = 'grab';
+
+  const p = participants.get(cfg.myParticipantId);
+
+if (linkBrokenThisDrag) {
+  linkBrokenThisDrag = false;
+}
+
+  const myRect = img.getBoundingClientRect();
+  const myCenter = {
+    x: myRect.left + myRect.width / 2,
+    y: myRect.top + myRect.height / 2
+  };
+
+  let target = null;
+
+  participants.forEach(other => {
+    if (other.id === p.id || !other.avatarEl) return;
+
+    const r = other.avatarEl.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+
+    const dist = Math.hypot(myCenter.x - cx, myCenter.y - cy);
+
+    if (dist < 120 && !isUserBlocked(other.user_id)) {
+      target = other;
+  }
+  });
+
+const shouldOpenMenu = !!target;
+
+requestAnimationFrame(() => {
+  const pLatest = participants.get(cfg.myParticipantId);
+  if (!pLatest) return;
+
+  // ❌ DO NOT OPEN POPUP IF ALREADY LINKED
+  if (pLatest.linked_to) return;
+
+  // ❌ DO NOT OPEN IF DRAG WAS NOT VALID TARGET
+  if (!target) return;
+
+  const freshTarget = participants.get(target.id);
+  if (!freshTarget) return;
+
+  // 🧠 EXTRA SAFETY: prevent re-trigger on drag release spam
+  if (pLatest._suppressLinkPopup) return;
+
+  openLinkChoiceModal(pLatest, freshTarget);
+
+  // prevent instant re-trigger
+  pLatest._suppressLinkPopup = true;
+  setTimeout(() => {
+    pLatest._suppressLinkPopup = false;
+  }, 400);
+});
+    	
+    img._dragGroup = null;
+    img._dragOrigin = null;
+    
+    const linkedFollowers = avatarRuntime?.relationships?.followersOf(p.id) || [];
     if (linkedFollowers.length) saveParticipantPositions([p, ...linkedFollowers]);
     else apiPost('/api/users.php', { action: 'position', session_id: cfg.sessionId, join_token: cfg.myJoinToken, x: p.position_x, y: p.position_y }).catch(console.warn);
   });
 }
 
+function rebuildLinkGroups() {
+  linkGroups.clear();
+
+  avatarRuntime?.relationships?.rebuildLinkGroups().forEach((group, id) => {
+    linkGroups.set(id, group);
+  });
+}
+
 function renderPeople() {
   userListEl.innerHTML = '';
-  const people = [...participants.values()].sort((a,b) => a.display_name.localeCompare(b.display_name));
+
+  if (participants && participants.size > 0) {
+    rebuildLinkGroups();
+  }
+
+  if (!participants || participants.size === 0) {
+    console.warn("[renderPeople] no participants yet");
+    return;
+  }
+
+  const people = avatarRuntime?.order?.visibleParticipants(participants.values()) || [...participants.values()]
+    .filter(p => p && typeof p === 'object' && p.id)
+    .sort((a, b) =>
+      (a.display_name || '').localeCompare(b.display_name || '')
+    );
   document.getElementById('participant-count-label').textContent = `(${people.length})`;
   const rendered = new Set();
   const roleClass = participantRoleClass;
@@ -1926,46 +1815,53 @@ function renderPeople() {
     const game = gameForParticipant(p);
     const gameBadge = game ? `<span class="user-game-badge" title="${esc(gameName(game.game_type))}"><img src="${esc(gameIconUrl(game.game_type))}" alt=""></span>` : '';
     const nameIcon = game ? `<img class="person-game-name-icon" src="${esc(gameIconUrl(game.game_type))}" alt="" title="${esc(gameName(game.game_type))}">` : '';
-    return `<span class="user-avatar-wrap"><img src="${esc(avatarUrl(p))}" alt=""><span class="status-dot ${p.online ? 'on' : ''}"></span>${gameBadge}</span><div><strong class="person-name-line">${nameIcon}<span>${esc(displayNameFor(p))}</span></strong><div class="minor">${p.id === cfg.myParticipantId ? 'You' : (p.online ? 'Online' : 'Away')}</div></div>`;
+    return `<span class="user-avatar-wrap"><img src="${esc(avatarUrl(p) || '')}" alt=""><span class="status-dot ${p.online ? 'on' : ''}"></span>${gameBadge}</span><div><strong class="person-name-line">${nameIcon}<span>${esc(displayNameFor(p) || '')}</span></strong><div class="minor">${p.id === cfg.myParticipantId ? 'You' : (p.online ? 'Online' : 'Away')}</div></div>`;
   };
-  people.forEach(p => {
-    if (rendered.has(p.id)) return;
-    let partner = null;
-    if (p.linked_to && participants.has(p.linked_to) && !rendered.has(p.linked_to)) {
-      partner = participants.get(p.linked_to);
-    } else {
-      for (const other of people) {
-        if (other.linked_to === p.id && !rendered.has(other.id)) {
-          partner = other;
-          break;
-        }
-      }
-    }
-    if (partner) {
-      rendered.add(p.id);
-      rendered.add(partner.id);
-      const row = document.createElement('div');
-      row.className = 'person-row linked-row';
-      const left = p.linked_to ? partner : p;
-      const right = p.linked_to ? p : partner;
-      const linkKey = linkKeyFor(left.id, right.id);
-      const iconName = linkIconNameForList(linkKey);
-      const targetId = cfg.myParticipantId === right.id ? left.id : right.id;
-      const canEditIcon = cfg.myParticipantId === left.id || cfg.myParticipantId === right.id;
-      row.innerHTML = `<div class="linked-half ${roleClass(left)}" data-participant-id="${left.id}">${makePersonBits(left)}</div><button class="link-mark" type="button" data-link-target="${targetId}" data-link-key="${esc(linkKey)}" aria-label="Change link icon"${canEditIcon ? '' : ' disabled'}><img src="${esc(linkIconUrl(iconName))}" alt=""></button><div class="linked-half ${roleClass(right)}" data-participant-id="${right.id}">${makePersonBits(right)}</div>`;
-      if (canEditIcon) row.querySelector('.link-mark').addEventListener('click', () => openLinkIconModal(targetId));
-      row.querySelectorAll('.linked-half').forEach(half => {
-        half.addEventListener('click', () => pulseParticipantAvatar(half.dataset.participantId));
-        half.addEventListener('contextmenu', e => {
-          e.preventDefault();
-          e.stopPropagation();
-          const person = participants.get(Number(half.dataset.participantId));
-          if (person) openAvatarContextMenu(e.clientX, e.clientY, person);
-        });
-      });
-      userListEl.appendChild(row);
-      return;
-    }
+people.forEach(p => {
+  // optional but safe (prevents flicker states)
+  const name = p.display_name || '';
+
+  if (rendered.has(p.id)) return;
+
+  let partner = null;
+
+  partner = avatarRuntime?.relationships?.linkedPartner(p.id) || null;
+  if (partner && rendered.has(partner.id)) partner = null;
+if (partner) {
+
+  const group = new Set();
+
+  const add = (p) => {
+    if (!p) return;
+    group.add(p);
+  };
+
+  add(p);
+  add(partner);
+
+  const runtimeGroup = [...linkGroups.values()]
+    .find(candidate => candidate.some(member => Number(member.id) === Number(p.id)));
+
+  if (runtimeGroup) {
+    runtimeGroup.forEach(add);
+  }
+
+  const orderedGroup = avatarRuntime?.order?.orderLinkedGroup(group) || [...group];
+
+  const row = document.createElement('div');
+  row.className = 'person-row linked-row';
+
+  row.innerHTML = orderedGroup.map(member => `
+    <div class="linked-half"
+         data-participant-id="${member.id}"
+         style="touch-action:none; cursor:grab;">
+      ${makePersonBits(member)}
+    </div>
+  `).join('');
+
+  userListEl.appendChild(row);
+  return;
+}
     rendered.add(p.id);
     const row = document.createElement('div');
     row.className = `person-row ${roleClass(p)}`;
@@ -1998,13 +1894,7 @@ function closeLinkIconModal() {
 }
 
 function linkedPartner() {
-  const me = participants.get(cfg.myParticipantId);
-  if (!me) return null;
-  if (me.linked_to && participants.has(me.linked_to)) return participants.get(me.linked_to);
-  for (const other of participants.values()) {
-    if (other.linked_to === cfg.myParticipantId) return other;
-  }
-  return null;
+  return avatarRuntime?.relationships?.linkedPartner(cfg.myParticipantId) || null;
 }
 
 function renderLinkTabs() {
@@ -2067,7 +1957,7 @@ function renderDmTabs() {
 
 function updateTabBadges() {
   document.querySelectorAll('.chat-tab[data-chat-tab]').forEach(tab => {
-    const count = unreadCounts.get(tab.dataset.chatTab) || 0;
+    const count = chatMessageState().unreadCountFor(tab.dataset.chatTab);
     const badge = tab.querySelector('.tab-badge');
     if (!badge) return;
     badge.hidden = count <= 0;
@@ -2076,7 +1966,7 @@ function updateTabBadges() {
 }
 
 function clearUnread(chatKey) {
-  unreadCounts.delete(chatKey);
+  chatMessageState().clearUnread(chatKey);
   updateTabBadges();
 }
 
@@ -2127,9 +2017,8 @@ messagesEl.addEventListener('scroll', () => {
 function renderActiveChat() {
   clearUnread(activeChat);
   messagesEl.innerHTML = '';
-  const map = channelMapFor();
-  [...map.values()]
-    .sort(compareMessages)
+  chatMessageState()
+    .sortedMessagesForChannel(activeChat)
     .forEach(msg => bindMessageAutoScroll(appendMessageEl(msg), true));
   scrollMessagesToBottom();
   updateComposerPlaceholder();
@@ -2141,23 +2030,23 @@ function renderActiveChat() {
 
 function addMessageToChannel(msg, chatKey, live = false) {
   if (!messageVisible(msg)) return;
-  const map = channelMapFor(chatKey);
-  const existing = map.get(msg.id);
-  map.set(msg.id, Object.assign(existing || {}, msg));
+  const result = chatMessageState().addMessageToChannel(msg, chatKey);
+  const existing = result.existing;
+  const storedMessage = result.message || msg;
   if (existing && chatKey === activeChat) {
     renderActiveChat();
     return;
   }
   if (chatKey === activeChat) {
     const shouldStick = shouldAutoScrollMessages();
-    const row = appendMessageEl(msg);
+    const row = appendMessageEl(storedMessage);
     if (shouldStick) {
       scrollMessagesToBottom();
       bindMessageAutoScroll(row, true);
     }
     clearUnread(chatKey);
   } else if (live && msg.user_id !== cfg.myUserId && msg.participant_id !== cfg.myParticipantId) {
-    unreadCounts.set(chatKey, (unreadCounts.get(chatKey) || 0) + 1);
+    chatMessageState().incrementUnread(chatKey);
     updateTabBadges();
   }
   if (live && chatKey === 'room' && msg.participant_id) {
@@ -2168,17 +2057,12 @@ function addMessageToChannel(msg, chatKey, live = false) {
 }
 
 function updateMessageInChannels(messageId, changes) {
-  const id = Number(messageId);
-  const msg = channelMessages.room.get(id);
-  if (msg) Object.assign(msg, changes);
-  if (messages.has(id)) Object.assign(messages.get(id), changes);
+  chatMessageState().updateRoomMessage(messageId, changes);
   if (activeChat === 'room') renderActiveChat();
 }
 
 function removeMessageFromChannels(messageId) {
-  const id = Number(messageId);
-  channelMessages.room.delete(id);
-  messages.delete(id);
+  chatMessageState().removeRoomMessage(messageId);
   if (activeChat === 'room') renderActiveChat();
 }
 
@@ -2203,26 +2087,19 @@ function handleRoomHistoryClear(payload = {}) {
   const clearId = payload.clear_id || `${payload.cleared_at || Date.now()}`;
   if (seenRoomHistoryClears.has(clearId)) return;
   seenRoomHistoryClears.add(clearId);
-  channelMessages.room.clear();
-  messages.clear();
+  chatMessageState().clearRoomMessages();
   clearUnread('room');
   updateTabBadges();
   if (activeChat === 'room') animateRoomHistoryClear();
 }
 
 function updateMessageInChannel(chatKey, messageId, changes) {
-  const id = Number(messageId);
-  const map = channelMapFor(chatKey);
-  const msg = map.get(id);
-  if (msg) Object.assign(msg, changes);
-  if (chatKey === 'room' && messages.has(id)) Object.assign(messages.get(id), changes);
+  chatMessageState().updateMessageInChannel(chatKey, messageId, changes);
   if (chatKey === activeChat) renderActiveChat();
 }
 
 function removeMessageFromChannel(chatKey, messageId) {
-  const id = Number(messageId);
-  channelMapFor(chatKey).delete(id);
-  if (chatKey === 'room') messages.delete(id);
+  chatMessageState().removeMessageFromChannel(chatKey, messageId);
   if (chatKey === activeChat) renderActiveChat();
 }
 
@@ -2363,17 +2240,15 @@ async function gifLoopDurationMs(url) {
 }
 
 function parseServerDate(value) {
-  if (!value) return null;
-  return new Date(String(value).replace(' ', 'T') + (String(value).includes('Z') ? '' : 'Z'));
+  return chatMessageState().parseServerDate(value);
 }
 
 function messageSortMs(msg) {
-  const date = parseServerDate(msg?.sent_at || msg?.created_at || '');
-  return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+  return chatMessageState().messageSortMs(msg);
 }
 
 function compareMessages(a, b) {
-  return messageSortMs(a) - messageSortMs(b) || String(a.id).localeCompare(String(b.id));
+  return chatMessageState().compareMessages(a, b);
 }
 
 function fullTimestamp(value) {
@@ -2457,61 +2332,28 @@ async function loadAuraModule(aura) {
 }
 
 function cleanupAuraLayer(layer) {
-  if (!layer) return null;
-  const cleanup = layer._auraCleanup;
-  layer._auraCleanup = null;
-  if (cleanup) {
-    try { cleanup(); } catch {}
-  }
-  layer.replaceChildren();
-  layer.dataset.auraKey = '';
-  layer._auraMounted = false;
-  layer._auraLoadingKey = '';
-  const effect = document.createElement('div');
-  effect.className = 'avatar-aura-effect';
-  layer.appendChild(effect);
-  return effect;
-}
-
-function cleanupAuraRuntime(runtime) {
-  if (typeof runtime === 'number') {
-    clearInterval(runtime);
-    clearTimeout(runtime);
-    return;
-  }
-  if (typeof runtime === 'function') {
-    runtime();
-    return;
-  }
-  runtime?.destroy?.();
-  runtime?.cleanup?.();
+  return avatarRuntime?.renderer?.cleanupAuraLayer(layer, {
+    document,
+  }) || null;
 }
 
 async function applyAuraToLayer(layer, key) {
-  if (!layer) return;
-  const auraKey = key || '';
-  if (layer.dataset.auraKey === auraKey && (auraKey === '' || layer._auraMounted || layer._auraLoadingKey === auraKey)) return;
-  const effectLayer = cleanupAuraLayer(layer);
-  layer.dataset.auraKey = auraKey;
-  if (!auraKey) return;
-  layer._auraLoadingKey = auraKey;
-  const aura = auraByKey(auraKey) || { key: auraKey, label: auraKey, script: `/assets/auras/${encodeURIComponent(auraKey)}.js` };
-  try {
-    const module = await loadAuraModule(aura);
-    if (layer.dataset.auraKey !== auraKey || !effectLayer?.isConnected) return;
-    const runtime = module.render(effectLayer);
-    layer._auraCleanup = () => cleanupAuraRuntime(runtime);
-    layer._auraMounted = true;
-    layer._auraLoadingKey = '';
-  } catch (err) {
-    if (layer.dataset.auraKey === auraKey) cleanupAuraLayer(layer);
-    console.warn(err);
-  }
+  await avatarRuntime?.renderer?.applyAuraToLayer(layer, key, {
+    document,
+    auraByKey,
+    loadAuraModule,
+    onError: console.warn,
+  });
 }
 
 function applyParticipantAura(person) {
   if (!person?.auraEl) return;
-  applyAuraToLayer(person.auraEl, person.aura_effect || '').catch(console.warn);
+  avatarRuntime?.renderer?.applyParticipantAura(person, {
+    document,
+    auraByKey,
+    loadAuraModule,
+    onError: console.warn,
+  }).catch(console.warn);
 }
 
 function roomEffectByKey(key) {
@@ -3001,7 +2843,10 @@ function appendMessageEl(msg) {
 }
 
 function renderMessage(msg, live = false) {
-  messages.set(msg.id, msg);
+  if (!messageVisible(msg)) {
+    chatMessageState().addRoomMessage(msg);
+    return;
+  }
   addMessageToChannel(msg, 'room', live);
 }
 
@@ -3107,7 +2952,7 @@ async function poll() {
       const p = ev.payload || {};
       if (ev.type === 'message') renderMessage(p, true);
       if (ev.type === 'message_edit') {
-        const msg = messages.get(Number(p.message_id));
+        const msg = chatMessageState().getMessageForChat('room', p.message_id);
         const changes = { content: p.content, url_preview: p.url_preview || null, edited_at: p.edited_at || new Date().toISOString() };
         if (cfg.canModerateMessages && msg && !msg.original_content && msg.content !== p.content) changes.original_content = msg.content;
         updateMessageInChannels(p.message_id, changes);
@@ -3118,7 +2963,7 @@ async function poll() {
       }
       if (ev.type === 'room_history_clear') handleRoomHistoryClear(p);
       if (ev.type === 'reaction') {
-        const msg = messages.get(Number(p.message_id)) || channelMessages.room.get(Number(p.message_id));
+        const msg = chatMessageState().getMessageForChat('room', p.message_id);
         if (msg) {
           msg.reactions = Array.isArray(msg.reactions) ? msg.reactions.filter(r => Number(r.participant_id) !== Number(p.participant_id)) : [];
           if (!p.removed) msg.reactions.push({ participant_id: p.participant_id, user_id: p.user_id, emoji: p.emoji, display_name: p.display_name, avatar_url: p.avatar_url });
@@ -3143,10 +2988,39 @@ async function poll() {
       if (ev.type === 'position') {
         const person = participants.get(p.participant_id);
         if (person) {
-          person.position_x = p.position_x;
-          person.position_y = p.position_y;
-          positionAvatar(person);
+
+    avatarRuntime?.layout?.applyParticipantPosition(person, {
+      x: p.position_x,
+      y: p.position_y,
+    });
+
+    // If this participant belongs to a link,
+    // always reconcile the pair before rendering.
+	// fixed link movement avatar desync if using firefox
+
+    if (person.linked_to) {
+
+        const target = participants.get(person.linked_to);
+
+        if (target) {
+            refreshRelationship(person, target, false, false);
+            return;
         }
+    }
+
+    const relationshipFollowers =
+        avatarRuntime?.relationships?.followersOf(person.id) || [];
+
+    const initiator =
+        relationshipFollowers[0];
+
+    if (initiator) {
+        refreshRelationship(initiator, person, false, false);
+        return;
+    }
+
+    positionAvatar(person);
+}
       }
       if (ev.type === 'webcam') {
         applyWebcamState(p.participant_id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null);
@@ -3154,11 +3028,13 @@ async function poll() {
       if (ev.type === 'avatar') {
         const person = participants.get(p.participant_id);
         if (person) {
-          person.avatar_path = p.avatar_path;
-          person.avatar_url = p.avatar_url;
-          person.avatar_version = Date.now();
-          person.webcam_path = p.webcam_path || null;
-          person.webcam_enabled = Boolean(p.webcam_enabled || p.webcam_path);
+          participants.update(p.participant_id, {
+            avatar_path: p.avatar_path,
+            avatar_url: p.avatar_url,
+            avatar_version: Date.now(),
+            webcam_path: p.webcam_path || null,
+            webcam_enabled: Boolean(p.webcam_enabled || p.webcam_path),
+          });
           if (!person.webcam_enabled) detachParticipantVideo(person.id);
           renderParticipant(person);
         }
@@ -3175,10 +3051,11 @@ async function poll() {
       if (ev.type === 'presence_leave') {
         const person = participants.get(p.participant_id);
         if (person) {
-          person.online = false;
-          person.webcam_path = null;
-          person.linked_to = null;
-          person.link_mode = 'normal';
+          participants.update(p.participant_id, {
+            online: false,
+            webcam_path: null,
+          });
+          avatarRuntime?.relationships?.clearParticipant(person.id);
           removeParticipant(person.id);
           if (person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
         }
@@ -3186,21 +3063,27 @@ async function poll() {
       if (ev.type === 'link') {
         const person = participants.get(p.participant_id);
         if (person) {
-          person.linked_to = p.linked_to;
-          person.link_mode = normalizeLinkMode(p.link_mode);
+          avatarRuntime?.relationships?.setParticipantRelationship(
+            person.id,
+            p.linked_to,
+            p.link_mode
+          );
           if (p.initiator_position) {
-            person.position_x = p.initiator_position.x;
-            person.position_y = p.initiator_position.y;
+            avatarRuntime?.layout?.applyParticipantPosition(person, {
+              x: p.initiator_position.x,
+              y: p.initiator_position.y,
+            });
           }
           if (p.linked_to) {
             const target = participants.get(p.linked_to);
             if (target) {
-              if (p.linked_to) target.link_mode = 'normal';
               if (p.target_position) {
-                target.position_x = p.target_position.x;
-                target.position_y = p.target_position.y;
+                avatarRuntime?.layout?.applyParticipantPosition(target, {
+                  x: p.target_position.x,
+                  y: p.target_position.y,
+                });
               }
-              snapLinkedPair(person, target, true);
+              refreshRelationship(person, target, true);
             }
           }
           renderParticipant(person);
@@ -3222,8 +3105,7 @@ async function poll() {
         blockedUserIds.add(Number(p.blocked_user_id));
         participants.forEach(person => {
           if (Number(person.user_id) === Number(p.blocked_user_id) || person.linked_to && Number(participants.get(person.linked_to)?.user_id) === Number(p.blocked_user_id)) {
-            person.linked_to = null;
-            person.link_mode = 'normal';
+            avatarRuntime?.relationships?.clearParticipant(person.id);
             renderParticipant(person);
           }
         });
@@ -3297,7 +3179,7 @@ async function poll() {
       }
       if (ev.type === 'message_reaction') {
         const chatKey = chatKeyForMessagePayload(p);
-        const msg = channelMapFor(chatKey).get(Number(p.message_id));
+        const msg = chatMessageState().getChannelMessage(chatKey, p.message_id);
         if (msg) {
           msg.reactions = Array.isArray(msg.reactions) ? msg.reactions.filter(r => Number(r.participant_id) !== Number(p.participant_id)) : [];
           if (!p.removed) msg.reactions.push({ participant_id: p.participant_id, user_id: p.user_id, emoji: p.emoji, display_name: p.display_name, avatar_url: p.avatar_url });
@@ -3326,22 +3208,16 @@ function showTyping(participantId, active) {
   if (!p) return;
   if (isUserBlocked(p.user_id)) return;
   if (!active) {
-    if (p.typingEl) p.typingEl.remove();
-    p.typingEl = null;
-    clearTimeout(typingTimers.get(participantId));
-    typingTimers.delete(participantId);
+    avatarRuntime?.renderer?.syncTyping(p, false);
+    participants.clearTypingTimer(participantId);
     return;
   }
-  if (!p.typingEl) {
-    const el = document.createElement('div');
-    el.className = 'typing-bubble';
-    el.innerHTML = '<span></span><span></span><span></span>';
-    roomStage.appendChild(el);
-    p.typingEl = el;
-  }
+  avatarRuntime?.renderer?.syncTyping(p, true, {
+    stage: roomStage,
+    document,
+  });
   positionAvatar(p);
-  clearTimeout(typingTimers.get(participantId));
-  typingTimers.set(participantId, setTimeout(() => showTyping(participantId, false), 3500));
+  participants.setTypingTimer(participantId, setTimeout(() => showTyping(participantId, false), 3500));
 }
 
 function clearAvatarSpeech(participantId, person) {
@@ -3351,11 +3227,9 @@ function clearAvatarSpeech(participantId, person) {
   p.speechAudio = null;
   clearInterval(p.speechGifLoopTimer);
   p.speechGifLoopTimer = null;
-  p.speechEl.classList.remove('show');
-  setTimeout(() => {
-    if (p.speechEl) p.speechEl.remove();
-    p.speechEl = null;
-  }, 220);
+  avatarRuntime?.renderer?.clearSpeechBubble(p, {
+    window,
+  });
 }
 
 function showAvatarSpeech(participantId, msg) {
@@ -3366,32 +3240,29 @@ function showAvatarSpeech(participantId, msg) {
   const isGesture = msg?.message_type === 'gesture';
   const text = (isGif || isGesture) ? '' : messageSpeechText(msg || {});
   const gesture = gestureFromMessage(msg);
-  const token = (p.speechToken || 0) + 1;
-  p.speechToken = token;
-  if (!p.speechEl) {
-    const el = document.createElement('div');
-    el.className = 'chat-bubble';
-    roomStage.appendChild(el);
-    p.speechEl = el;
-  }
-  clearTimeout(speechTimers.get(participantId));
-  p.speechEl.classList.remove('show');
-  p.speechEl.classList.toggle('chat-bubble-gif', isGif || isGesture);
-  p.speechEl.classList.toggle('chat-bubble-gesture', isGesture);
-  p.speechEl.onclick = null;
+  const token = participants.nextSpeechToken(participantId);
+  avatarRuntime?.renderer?.ensureSpeechBubble(p, {
+    stage: roomStage,
+    document,
+  });
+  participants.clearSpeechTimer(participantId);
+  avatarRuntime?.renderer?.prepareSpeechBubble(p, {
+    gif: isGif || isGesture,
+    gesture: isGesture,
+  });
   let timerStarted = false;
   const scheduleHide = () => {
-    if (timerStarted || p.speechToken !== token) return;
+    if (timerStarted || !participants.hasSpeechToken(participantId, token)) return;
     timerStarted = true;
     if (isGesture && gesture && gesture.audio_path && !gesture.audio_is_silent) {
       const audio = new Audio(mediaUrl(gesture.audio_path));
       gifLoopDurationMs(gesture.gif_path).then(duration => {
-        if (p.speechToken !== token || !p.speechEl?.classList.contains('chat-bubble-gesture')) return;
+        if (!participants.hasSpeechToken(participantId, token) || !p.speechEl?.classList.contains('chat-bubble-gesture')) return;
         const img = p.speechEl.querySelector('img');
         if (!img || !Number.isFinite(duration) || duration < 250) return;
         clearInterval(p.speechGifLoopTimer);
         p.speechGifLoopTimer = setInterval(() => {
-          if (p.speechToken !== token || audio.ended || audio.paused || !p.speechEl?.isConnected) {
+          if (!participants.hasSpeechToken(participantId, token) || audio.ended || audio.paused || !p.speechEl?.isConnected) {
             clearInterval(p.speechGifLoopTimer);
             p.speechGifLoopTimer = null;
             return;
@@ -3402,58 +3273,53 @@ function showAvatarSpeech(participantId, msg) {
       audio.addEventListener('ended', () => {
         clearInterval(p.speechGifLoopTimer);
         p.speechGifLoopTimer = null;
-        if (p.speechToken === token) clearAvatarSpeech(participantId, p);
+        if (participants.hasSpeechToken(participantId, token)) clearAvatarSpeech(participantId, p);
       }, { once: true });
       audio.addEventListener('error', () => {
-        if (p.speechToken === token) {
+        if (participants.hasSpeechToken(participantId, token)) {
           clearInterval(p.speechGifLoopTimer);
           p.speechGifLoopTimer = null;
-          speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 4200));
+          participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 4200));
         }
       }, { once: true });
       p.speechAudio = audio;
       audio.play().catch(() => {
-        if (p.speechToken === token) speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 4200));
+        if (participants.hasSpeechToken(participantId, token)) participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 4200));
       });
     } else if (isGif || isGesture) {
-      speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 3200));
+      participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 3200));
       gifLoopDurationMs(isGesture ? gesture?.gif_path : msg.content).then(duration => {
-        if (p.speechToken === token && p.speechEl?.classList.contains('chat-bubble-gif')) {
-          clearTimeout(speechTimers.get(participantId));
-          speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), duration));
+        if (participants.hasSpeechToken(participantId, token) && p.speechEl?.classList.contains('chat-bubble-gif')) {
+          participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), duration));
         }
       });
     } else {
-      speechTimers.set(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 5200));
+      participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 5200));
     }
   };
   const reveal = () => {
-    if (p.speechToken !== token || !p.speechEl) return;
+    if (!participants.hasSpeechToken(participantId, token) || !p.speechEl) return;
     positionAvatar(p);
     requestAnimationFrame(() => {
-      if (p.speechToken !== token || !p.speechEl) return;
+      if (!participants.hasSpeechToken(participantId, token) || !p.speechEl) return;
       positionAvatar(p);
-      p.speechEl.classList.add('show');
+      avatarRuntime?.renderer?.showSpeechBubble(p);
       scheduleHide();
     });
   };
   if (isGif || isGesture) {
-    const img = document.createElement('img');
-    img.src = mediaUrl(isGesture ? gesture?.gif_path : msg.content);
-    img.alt = isGesture ? (gesture?.text || gesture?.name || 'Gesture') : (msg.original_name || 'GIF');
-    if (isGesture) {
-      const caption = document.createElement('div');
-      caption.className = 'chat-bubble-gesture-text';
-      caption.textContent = gesture?.text || gesture?.name || msg.original_name || '';
-      p.speechEl.replaceChildren(img, caption);
-      p.speechEl.onclick = () => {
+    const img = avatarRuntime?.renderer?.renderSpeechImage(p, {
+      document,
+      src: mediaUrl(isGesture ? gesture?.gif_path : msg.content),
+      alt: isGesture ? (gesture?.text || gesture?.name || 'Gesture') : (msg.original_name || 'GIF'),
+      gesture: isGesture,
+      caption: gesture?.text || gesture?.name || msg.original_name || '',
+      onclick: isGesture ? () => {
         p.speechAudio?.pause?.();
         p.speechAudio = null;
         clearAvatarSpeech(participantId, p);
-      };
-    } else {
-      p.speechEl.replaceChildren(img);
-    }
+      } : null,
+    });
     let revealed = false;
     const revealOnce = () => {
       if (revealed) return;
@@ -3466,7 +3332,7 @@ function showAvatarSpeech(participantId, msg) {
     if (img.complete) revealOnce();
     setTimeout(revealOnce, 900);
   } else {
-    p.speechEl.textContent = text.length > 180 ? `${text.slice(0, 177)}...` : text;
+    avatarRuntime?.renderer?.renderSpeechText(p, text);
     reveal();
   }
 }
@@ -3750,13 +3616,14 @@ async function refreshPresence() {
     (data.participants || []).forEach(p => {
       const existing = participants.get(p.id);
       if (existing) {
-        existing.online = p.online;
+        participants.update(p.id, {
+          online: p.online,
+        });
         if (p.online) applyWebcamState(existing.id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null);
         else if (existing.avatarEl) removeParticipant(existing.id, { keepRecord: true });
       }
     });
   } catch {}
-  setTimeout(refreshPresence, 5000);
 }
 
 function openAvatarContextMenu(x, y, participant) {
@@ -3765,7 +3632,7 @@ function openAvatarContextMenu(x, y, participant) {
   closeEmojiPicker();
   ctxMenuParticipantId = participant.id;
   const isOwn = participant.id === cfg.myParticipantId;
-  const isLinked = Boolean(participant.linked_to) || [...participants.values()].some(other => other.linked_to === participant.id);
+  const isLinked = avatarRuntime?.relationships?.isLinked(participant) || false;
   const isBlocked = isUserBlocked(participant.user_id);
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
@@ -4564,7 +4431,7 @@ async function applyReaction(messageId, emoji, chatKey = activeChat) {
 }
 
 function currentActiveMessage(messageId = msgActionTargetId, chatKey = msgActionTargetChat || activeChat) {
-  return channelMapFor(chatKey).get(Number(messageId)) || (chatKey === 'room' ? messages.get(Number(messageId)) : null);
+  return chatMessageState().getMessageForChat(chatKey, messageId);
 }
 
 document.querySelectorAll('[data-msg-reaction]').forEach(btn => {
@@ -4677,20 +4544,13 @@ document.getElementById('delete-message-confirm')?.addEventListener('click', asy
 
 function unlinkCurrentPartner() {
   const partnerId = activeLinkPartnerId() || linkedPartner()?.id;
-  const target = partnerId ? participants.get(partnerId) : null;
   const me = participants.get(cfg.myParticipantId);
   if (!me) return;
-  if (me.linked_to) me.linked_to = null;
-  me.link_mode = 'normal';
-  if (target && target.linked_to === cfg.myParticipantId) {
-    target.linked_to = null;
-    target.link_mode = 'normal';
+  avatarRuntime?.relationships?.unlinkParticipant(cfg.myParticipantId);
+  if (partnerId) {
+    avatarRuntime?.relationships?.clearParticipant(partnerId);
   }
   participants.forEach(p => {
-    if (p.linked_to === cfg.myParticipantId || p.id === cfg.myParticipantId) {
-      p.linked_to = null;
-      p.link_mode = 'normal';
-    }
     renderParticipant(p);
   });
   if (activeChat.startsWith('link:')) switchChat('room');
@@ -4710,7 +4570,7 @@ async function clearPrivateHistory(chatKey) {
   if (chatKey.startsWith('dm:')) payload.target_user_id = Number(chatKey.slice(3));
   if (chatKey.startsWith('link:')) payload.target_participant_id = Number(chatKey.slice(5));
   await apiPost('/api/private_history.php', payload);
-  channelMapFor(chatKey).clear();
+  chatMessageState().clearChannel(chatKey);
   clearUnread(chatKey);
   if (activeChat === chatKey) renderActiveChat();
 }
@@ -4788,10 +4648,10 @@ async function setBlockState(participant, blocked) {
   const action = blocked ? 'block_user' : 'unblock_user';
   if (blocked) {
     blockedUserIds.add(Number(participant.user_id));
+    const relationshipFollowers = avatarRuntime?.relationships?.followersOf(participant.id) || [];
     participants.forEach(p => {
-      if (p.id === participant.id || p.linked_to === participant.id || (p.id === cfg.myParticipantId && p.linked_to === participant.id)) {
-        p.linked_to = null;
-        p.link_mode = 'normal';
+      if (p.id === participant.id || relationshipFollowers.includes(p)) {
+        avatarRuntime?.relationships?.clearParticipant(p.id);
       }
     });
   } else {
@@ -4835,10 +4695,12 @@ avatarFileInput.addEventListener('change', async () => {
     previewUrl = URL.createObjectURL(preparedFile);
     const me = participants.get(cfg.myParticipantId);
     if (me) {
-      me.webcam_path = null;
-      me.avatar_path = previewUrl;
-      me.avatar_url = previewUrl;
-      me.avatar_version = Date.now();
+      participants.update(cfg.myParticipantId, {
+        webcam_path: null,
+        avatar_path: previewUrl,
+        avatar_url: previewUrl,
+        avatar_version: Date.now(),
+      });
       renderParticipant(me);
     }
     fd.append('avatar', preparedFile);
@@ -4846,10 +4708,12 @@ avatarFileInput.addEventListener('change', async () => {
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || 'Avatar upload failed');
     const updated = participants.get(cfg.myParticipantId);
-    updated.avatar_path = data.avatar_path;
-    updated.avatar_url = data.avatar_url;
-    updated.avatar_version = Date.now();
-    updated.webcam_path = null;
+    participants.update(cfg.myParticipantId, {
+      avatar_path: data.avatar_path,
+      avatar_url: data.avatar_url,
+      avatar_version: Date.now(),
+      webcam_path: null,
+    });
     renderParticipant(updated);
   } catch (err) {
     alert(err.message);
@@ -4877,8 +4741,10 @@ ctxToggleWebcam.addEventListener('click', async () => {
     });
     const me = participants.get(cfg.myParticipantId);
     if (me) {
-      me.webcam_enabled = true;
-      me.webcam_path = null;
+      participants.update(cfg.myParticipantId, {
+        webcam_enabled: true,
+        webcam_path: null,
+      });
       renderParticipant(me);
       attachParticipantVideo(cfg.myParticipantId, webcamStream, true);
     }
@@ -6068,8 +5934,13 @@ function renderVoiceList(list) {
 }
 
 async function bootRoom() {
+  await initializeAvatarRuntime();
+
   const roomId = document.body.dataset.roomId;
   cfg = await fetch(appUrl(`/api/room_config.php?id=${encodeURIComponent(roomId)}`)).then(r => r.json());
+console.log("[BOOT] cfg loaded:", cfg);
+console.log("cfg.participants", cfg.participants);
+console.log("participant count", cfg.participants?.length);
   if (cfg.error) throw new Error(cfg.error);
   renderImportedRoomLayout(cfg.importLayout);
   renderImportedMusicPlayer(cfg.musicPlaylist);
@@ -6080,6 +5951,7 @@ async function bootRoom() {
   Object.entries(cfg.linkIcons || {}).forEach(([key, icon]) => linkIcons.set(key, icon || 'plus'));
   await Promise.all((cfg.participants || []).map(p => renderParticipantWhenReady(p, { animateJoin: true }).catch(() => {
     renderParticipant(p, { animateJoin: true });
+  console.log("participants rendered");	
   })));
   (cfg.dmUsers || []).forEach(rememberDmUser);
   (cfg.messages || []).forEach(msg => addMessageToChannel(msg, 'room', false));
@@ -6100,25 +5972,54 @@ async function bootRoom() {
     addSystemMessage(`${cfg.activeRoomEffect.label || 'Room effect'} is currently active.`);
   }
   updateComposerState();
-  updateVoiceToggleButton();
+  updateVoiceToggleButton(); 
   checkLatency();
   poll();
   pollVoice();
   pollAppVersion();
-  setInterval(checkLatency, 5000);
-  setInterval(pollAppVersion, 60000);
-  setInterval(updateVisibleTimestamps, 30000);
+  pollingRuntime.registerJob({
+    id: 'latency-monitor',
+    run: checkLatency,
+    interval: 5000,
+  });
+  pollingRuntime.registerJob({
+    id: 'app-version-poll',
+    run: pollAppVersion,
+    interval: 60000,
+  });
+  pollingRuntime.registerJob({
+    id: 'visible-timestamp-update',
+    run: updateVisibleTimestamps,
+    interval: 30000,
+  });
   refreshPresence();
+  pollingRuntime.registerJob({
+    id: 'presence-refresh',
+    run: refreshPresence,
+    interval: 5000,
+  });
   loadGames();
 }
 
+function updateRoomLayout() {
+  console.warn("[SAFE FALLBACK] updateRoomLayout missing");
+}
+
 window.addEventListener('resize', () => {
-  participants.forEach(positionAvatar);
-  participants.forEach(p => {
-    if (!p.linked_to) return;
-    const target = participants.get(p.linked_to);
-    if (target) snapLinkedPair(p, target, false);
-  });
+
+layoutLocked = true;
+
+requestAnimationFrame(() => {
+    updateRoomLayout?.();
+    pendingLayout = true;
+
+    if (!frameQueued) {
+        frameQueued = true;
+        requestAnimationFrame(runFrameSync);
+    }
+
+    layoutLocked = false;
+});
 });
 initRoomBackgroundVideos(document);
 bootRoom().catch(err => {

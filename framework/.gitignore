@@ -1,0 +1,31 @@
+###############################################################################
+# Chat Runtime Framework
+#
+# Internal framework artifacts are not published until the framework
+# architecture and Avatar migration are complete.
+###############################################################################
+
+###############################################################################
+# Internal framework documentation
+###############################################################################
+
+docs/*.md
+specification/*.md
+#decisions/*.md
+references/*.md
+history/*.md
+roadmap/*.md
+templates/*.md
+decisions/*.md
+architecture/*.md
+
+###############################################################################
+
+###############################################################################
+# Chat Runtime Framework
+#
+# Internal framework artifacts are not published until the framework
+# architecture and Avatar migration are complete.
+###############################################################################
+
+###############################################################################
