@@ -27,8 +27,6 @@ let chatRuntimeCore = null;
 let chatRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
-const linkGroups = new Map();
-const groupPositions = new Map();
 let frameQueued = false;
 let pendingLayout = false;
 let layoutLocked = false;
@@ -136,7 +134,6 @@ let latestVoiceParticipants = [];
 let lastVoiceStatusSignature = '';
 let lastVoiceSignalId = 0;
 const peers = new Map();
-const linkIcons = new Map();
 const stageLinkEls = new Map();
 const blockedUserIds = new Set();
 let voiceNoteRecorder = null;
@@ -148,7 +145,6 @@ const APP_VERSION_CACHE_KEY = 'chatspace_seen_version';
 const SESSION_LOCK_PREFIX = 'chatspace_session_locked_';
 let memorySeenVersion = '';
 let pendingLinkIconTargetId = null;
-let pendingLinkChoice = null;
 const animatedDmMessageIds = new Set();
 let roomExitInProgress = false;
 let roomDeleteInProgress = false;
@@ -212,6 +208,7 @@ async function initializeAvatarRuntime() {
   chatRuntimeCore.start();
 
   participants = avatarRuntime.state;
+  configureAvatarCoordinator();
   configureChatMessageRenderer();
   configureChatPrivateChats();
   configureChatEventRouter();
@@ -226,6 +223,102 @@ async function initializeAvatarRuntime() {
   configureChatPoll();
 
   return avatarRuntime;
+}
+
+function configureAvatarCoordinator() {
+  avatarRuntime?.coordinator?.configure({
+    getConfig: () => cfg,
+    stageSize() {
+      return {
+        width: roomStage.clientWidth,
+        height: roomStage.clientHeight,
+      };
+    },
+    baseAvatarSize() {
+      return AVATAR_STAGE_SIZE;
+    },
+    isLayoutLocked() {
+      return layoutLocked;
+    },
+    positionAvatar,
+    renderParticipant,
+    renderPeople,
+    renderLinkTabs,
+    refreshLinkClasses,
+    updateStageLinkIcons,
+    closeLinkChoiceModal,
+    openLinkChoiceModal() {
+      linkChoiceModal?.classList.add('open');
+    },
+    animateLinkedPair(pair) {
+      pair.forEach(participant => {
+        if (participant?.avatarEl) {
+          participant.avatarEl.style.transition = 'left .35s ease, top .35s ease';
+        }
+      });
+      setTimeout(() => {
+        pair.forEach(participant => {
+          if (participant?.avatarEl) participant.avatarEl.style.transition = '';
+        });
+      }, 380);
+    },
+    onLinkUnavailable(participantId) {
+      if (activeChatKey() === `link:${participantId}`) switchChat('room');
+    },
+    onCurrentParticipantUnlinked() {
+      if (activeChatKey().startsWith('link:')) switchChat('room');
+    },
+    persistLink({ target, linkMode, initiator }) {
+      return apiPost('/api/users.php', {
+        action: 'link',
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+        target_participant_id: target.id,
+        link_mode: linkMode,
+        initiator_x: initiator.position_x,
+        initiator_y: initiator.position_y,
+        target_x: target.position_x,
+        target_y: target.position_y,
+      });
+    },
+    persistUnlink() {
+      return apiPost('/api/users.php', {
+        action: 'unlink',
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+      }).catch(console.warn);
+    },
+    persistPosition(participant) {
+      return apiPost('/api/users.php', {
+        action: 'position',
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+        x: participant.position_x,
+        y: participant.position_y,
+      }).catch(console.warn);
+    },
+    persistPositions(list) {
+      return apiPost('/api/users.php', {
+        action: 'position_pair',
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+        positions: list.map(p => ({ participant_id: p.id, x: p.position_x, y: p.position_y })),
+      }).catch(console.warn);
+    },
+    persistLinkIcon({ targetId, iconName }) {
+      return apiPost('/api/users.php', {
+        action: 'link_icon',
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+        target_participant_id: targetId,
+        icon_name: iconName,
+      });
+    },
+    showWarning,
+    alertError(error) {
+      alert(error.message || error);
+    },
+  });
 }
 
 function configureChatMessageRenderer() {
@@ -1263,17 +1356,15 @@ function linkIconUrl(iconName = 'plus') {
 }
 
 function linkIconNameForStage(key) {
-  const iconName = linkIcons.get(key) || 'plus';
-  return (iconName === 'none' || iconName === 'plus') ? '' : iconName;
+  return avatarRuntime?.coordinator?.linkIconNameForStage(key) || '';
 }
 
 function linkIconNameForList(key) {
-  const iconName = linkIcons.get(key) || 'plus';
-  return iconName === 'none' ? 'plus' : iconName;
+  return avatarRuntime?.coordinator?.linkIconNameForList(key) || 'plus';
 }
 
 function linkPairGap(key) {
-  return linkIconNameForStage(key) ? 12 : 0;
+  return avatarRuntime?.coordinator?.linkPairGap(key) || 0;
 }
 
 function normalizeLinkMode(mode) {
@@ -1491,11 +1582,11 @@ function removeParticipant(participantId, options = {}) {
         online: false,
         webcam_path: null,
       });
-      avatarRuntime?.relationships?.clearParticipant(id);
+      avatarRuntime?.coordinator?.clearParticipantRelationship(id);
     } else {
       participants.delete(id);
     }
-    avatarRuntime?.relationships?.unlinkFollowersOf(id);
+    avatarRuntime?.coordinator?.unlinkFollowersOf(id);
     refreshLinkClasses();
     renderPeople();
     renderLinkTabs();
@@ -1717,131 +1808,34 @@ function showDmFlight(payload) {
   }
 }
 
-function saveParticipantPositions(list) {
-  apiPost('/api/users.php', {
-    action: 'position_pair',
-    session_id: cfg.sessionId,
-    join_token: cfg.myJoinToken,
-    positions: list.map(p => ({ participant_id: p.id, x: p.position_x, y: p.position_y })),
-  }).catch(console.warn);
-}
-
 function refreshRelationship(initiator, target, animate = true, persist = false) {
-  if (!initiator || !target) return;
-
-  snapLinkedPair(initiator, target, animate);
-
-  if (persist) {
-    saveParticipantPositions([initiator, target]);
-  }
+  avatarRuntime?.coordinator?.refreshRelationship(initiator, target, { animate, persist });
 }
 
 function adjustLinkedPairForIcon(linkKey, animate = true, persist = false) {
-  const pair = linkedPairs().find(([key]) => key === linkKey);
-  if (!pair) return;
-  const [, a, b] = pair;
-  const initiator = avatarRuntime?.relationships?.relationshipInitiator(a, b) || a;
-  const target = initiator === a ? b : a;
-  refreshRelationship(initiator, target, animate, persist);
+  avatarRuntime?.coordinator?.adjustLinkedPairForIcon(linkKey, { animate, persist });
 }
 
 function snapLinkedPair(initiator, target, animate = true) {
-  if (!initiator?.avatarEl || !target?.avatarEl) return;
-  if (normalizeLinkMode(initiator.link_mode) === 'lap') {
-    snapLappedPair(initiator, target, animate);
-    return;
-  }
-
-  const changed = avatarRuntime?.layout?.applyLinkedPairLayout({
-    initiator,
-    target,
-    stageWidth: roomStage.clientWidth,
-    stageHeight: roomStage.clientHeight,
-    avatarSize: AVATAR_STAGE_SIZE,
-    gap: linkPairGap(linkKeyFor(initiator.id, target.id)),
-  }) || [];
-
-  changed.forEach(positionAvatar);
-
-  if (animate) {
-    target.avatarEl.style.transition = 'left .35s ease, top .35s ease';
-    initiator.avatarEl.style.transition = 'left .35s ease, top .35s ease';
-    setTimeout(() => {
-      target.avatarEl.style.transition = '';
-      initiator.avatarEl.style.transition = '';
-    }, 380);
-  }
+  refreshRelationship(initiator, target, animate, false);
 }
 
 function snapLappedPair(initiator, target, animate = true) {
-  const changed = avatarRuntime?.layout?.applyLappedPairLayout({
-    initiator,
-    target,
-    stageWidth: roomStage.clientWidth,
-    stageHeight: roomStage.clientHeight,
-    primarySize: AVATAR_STAGE_SIZE,
-    lapSize: avatarStageSize(initiator),
-    locked: layoutLocked,
-  }) || [];
-
-  changed.forEach(positionAvatar);
+  refreshRelationship(initiator, target, animate, false);
 }
 
 function closeLinkChoiceModal() {
   linkChoiceModal?.classList.remove('open');
-  pendingLinkChoice = null;
 }
 
 function openLinkChoiceModal(initiator, target) {
   if (!linkChoiceModal || !initiator || !target) return;
-  pendingLinkChoice = { initiatorId: Number(initiator.id), targetId: Number(target.id) };
+  avatarRuntime?.coordinator?.beginLinkChoice(initiator, target);
   linkChoiceModal.classList.add('open');
 }
 
 async function completePendingLinkChoice(mode) {
-  if (!pendingLinkChoice) return;
-  const initiator = participants.get(pendingLinkChoice.initiatorId);
-  const target = participants.get(pendingLinkChoice.targetId);
-  closeLinkChoiceModal();
-  if (!initiator || !target) return;
-  if (mode === 'cancel') {
-    await apiPost('/api/users.php', {
-      action: 'position',
-      session_id: cfg.sessionId,
-      join_token: cfg.myJoinToken,
-      x: initiator.position_x,
-      y: initiator.position_y,
-    }).catch(console.warn);
-    return;
-  }
-  const linkMode = normalizeLinkMode(mode);
-  avatarRuntime?.relationships?.link(initiator.id, target.id, linkMode);
-  refreshRelationship(initiator, target, true);
-  renderParticipant(target);
-  renderParticipant(initiator);
-  renderPeople();
-  renderLinkTabs();
-  try {
-    await apiPost('/api/users.php', {
-      action: 'link',
-      session_id: cfg.sessionId,
-      join_token: cfg.myJoinToken,
-      target_participant_id: target.id,
-      link_mode: linkMode,
-      initiator_x: initiator.position_x,
-      initiator_y: initiator.position_y,
-      target_x: target.position_x,
-      target_y: target.position_y,
-    });
-  } catch (err) {
-    avatarRuntime?.relationships?.clearParticipant(initiator.id);
-    avatarRuntime?.relationships?.clearParticipant(target.id);
-    renderParticipant(initiator);
-    renderParticipant(target);
-    renderPeople();
-    renderLinkTabs();
-    showWarning(err.message || 'You cannot link with this user.');
-  }
+  await avatarRuntime?.coordinator?.completePendingLinkChoice(mode);
 }
 
 function makeDraggable(img) {
@@ -1856,42 +1850,22 @@ function makeDraggable(img) {
     const p = participants.get(cfg.myParticipantId);
     if (!linkBrokenThisDrag && p?.linked_to) {
       linkBrokenThisDrag = true;
-      avatarRuntime?.relationships?.clearParticipant(p.id);
-      apiPost('/api/users.php', { action: 'unlink', session_id: cfg.sessionId, join_token: cfg.myJoinToken }).catch(console.warn);
-      renderParticipant(p);
-      renderLinkTabs();
+      avatarRuntime?.coordinator?.breakRelationshipForDrag(p);
     }
 
-const group = img._dragGroup || [p];
+    const group = img._dragGroup || [p];
+    const baseX = x / rect.width;
+    const baseY = y / rect.height;
+    const spacing = img.offsetWidth / rect.width;
 
-const baseX = x / rect.width;
-const baseY = y / rect.height;
-
-const spacing = img.offsetWidth / rect.width;
-
-const changed = avatarRuntime?.layout?.applyDragGroupLayout({
-  group,
-  baseX,
-  baseY,
-  spacing,
-}) || [];
-
-changed.forEach(positionAvatar);
-
-let relationshipRefreshed = false;
-
-if (!linkBrokenThisDrag) {
-  participants.forEach(other => {
-    if (other.id === p.id || other.linked_to !== p.id) return;
-
-    relationshipRefreshed = true;
-    refreshRelationship(other, p, false, false);
-  });
-}
-
-if (!relationshipRefreshed) {
-  positionAvatar(p);
-}
+    avatarRuntime?.coordinator?.applyDragGroupMove({
+      participant: p,
+      group,
+      baseX,
+      baseY,
+      spacing,
+      relationshipBroken: linkBrokenThisDrag,
+    });
   }
   img.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
@@ -1899,97 +1873,76 @@ if (!relationshipRefreshed) {
     dragging = true;
     linkBrokenThisDrag = false;
 
-    const id = p.id;
-    const group = [...linkGroups.values()]
-        .find(g => g.some(m => m.id === id));
-
-    img._dragGroup = group || [p];
+    const p = participants.get(cfg.myParticipantId);
+    const id = p?.id;
+    img._dragGroup = avatarRuntime?.coordinator?.linkedGroupForParticipant(id) || [p];
     img._dragOrigin = { x: e.clientX, y: e.clientY };
     offX = e.clientX - img.getBoundingClientRect().left;
     offY = e.clientY - img.getBoundingClientRect().top;
     img.setPointerCapture(e.pointerId);
     img.style.cursor = 'grabbing';
   });
-  img.addEventListener('pointermove', e => { if (!dragging || !img._dragGroup) return;
-
-const dx = e.clientX - img._dragOrigin.x;
-const dy = e.clientY - img._dragOrigin.y;
-
-img._dragOrigin = { x: e.clientX, y: e.clientY }; });
-img.addEventListener('pointerup', e => {
-  dragging = false;
-  img.style.cursor = 'grab';
-
-  const p = participants.get(cfg.myParticipantId);
-
-if (linkBrokenThisDrag) {
-  linkBrokenThisDrag = false;
-}
-
-  const myRect = img.getBoundingClientRect();
-  const myCenter = {
-    x: myRect.left + myRect.width / 2,
-    y: myRect.top + myRect.height / 2
-  };
-
-  let target = null;
-
-  participants.forEach(other => {
-    if (other.id === p.id || !other.avatarEl) return;
-
-    const r = other.avatarEl.getBoundingClientRect();
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-
-    const dist = Math.hypot(myCenter.x - cx, myCenter.y - cy);
-
-    if (dist < 120 && !isUserBlocked(other.user_id)) {
-      target = other;
-  }
+  img.addEventListener('pointermove', e => {
+    if (!dragging || !img._dragGroup) return;
+    img._dragOrigin = { x: e.clientX, y: e.clientY };
   });
+  img.addEventListener('pointerup', e => {
+    dragging = false;
+    img.style.cursor = 'grab';
 
-const shouldOpenMenu = !!target;
+    const p = participants.get(cfg.myParticipantId);
+    if (!p) {
+      img._dragGroup = null;
+      img._dragOrigin = null;
+      return;
+    }
 
-requestAnimationFrame(() => {
-  const pLatest = participants.get(cfg.myParticipantId);
-  if (!pLatest) return;
+    if (linkBrokenThisDrag) {
+      linkBrokenThisDrag = false;
+    }
 
-  // ❌ DO NOT OPEN POPUP IF ALREADY LINKED
-  if (pLatest.linked_to) return;
+    const myRect = img.getBoundingClientRect();
+    const myCenter = {
+      x: myRect.left + myRect.width / 2,
+      y: myRect.top + myRect.height / 2
+    };
 
-  // ❌ DO NOT OPEN IF DRAG WAS NOT VALID TARGET
-  if (!target) return;
+    let target = null;
 
-  const freshTarget = participants.get(target.id);
-  if (!freshTarget) return;
+    participants.forEach(other => {
+      if (other.id === p.id || !other.avatarEl) return;
 
-  // 🧠 EXTRA SAFETY: prevent re-trigger on drag release spam
-  if (pLatest._suppressLinkPopup) return;
+      const r = other.avatarEl.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
 
-  openLinkChoiceModal(pLatest, freshTarget);
+      const dist = Math.hypot(myCenter.x - cx, myCenter.y - cy);
 
-  // prevent instant re-trigger
-  pLatest._suppressLinkPopup = true;
-  setTimeout(() => {
-    pLatest._suppressLinkPopup = false;
-  }, 400);
-});
+      if (dist < 120 && !isUserBlocked(other.user_id)) {
+        target = other;
+      }
+    });
+
+    requestAnimationFrame(() => {
+      const pLatest = participants.get(cfg.myParticipantId);
+      if (!pLatest || !target) return;
+
+      const freshTarget = participants.get(target.id);
+      if (!freshTarget) return;
+
+      avatarRuntime?.coordinator?.requestLinkChoiceForDrag(pLatest, freshTarget);
+
+    });
     	
     img._dragGroup = null;
     img._dragOrigin = null;
     
-    const linkedFollowers = avatarRuntime?.relationships?.followersOf(p.id) || [];
-    if (linkedFollowers.length) saveParticipantPositions([p, ...linkedFollowers]);
-    else apiPost('/api/users.php', { action: 'position', session_id: cfg.sessionId, join_token: cfg.myJoinToken, x: p.position_x, y: p.position_y }).catch(console.warn);
+    avatarRuntime?.coordinator?.persistDragEnd(p);
   });
 }
 
 function rebuildLinkGroups() {
-  linkGroups.clear();
-
-  avatarRuntime?.relationships?.rebuildLinkGroups().forEach((group, id) => {
-    linkGroups.set(id, group);
-  });
+  avatarRuntime?.coordinator?.rebuildLinkGroups();
 }
 
 function renderPeople() {
@@ -2041,8 +1994,7 @@ if (partner) {
   add(p);
   add(partner);
 
-  const runtimeGroup = [...linkGroups.values()]
-    .find(candidate => candidate.some(member => Number(member.id) === Number(p.id)));
+  const runtimeGroup = avatarRuntime?.coordinator?.linkedGroupForParticipant(p.id);
 
   if (runtimeGroup) {
     runtimeGroup.forEach(add);
@@ -2083,7 +2035,7 @@ function openLinkIconModal(targetId) {
   pendingLinkIconTargetId = Number(targetId);
   if (!pendingLinkIconTargetId) return;
   const linkKey = linkKeyFor(cfg.myParticipantId, pendingLinkIconTargetId);
-  const current = linkIcons.get(linkKey) || 'plus';
+  const current = avatarRuntime?.coordinator?.linkIconName(linkKey) || 'plus';
   linkIconGrid.querySelectorAll('[data-link-icon]').forEach(btn => {
     btn.classList.toggle('selected', btn.dataset.linkIcon === current);
   });
@@ -3027,30 +2979,10 @@ function handleRoomPollEvent(ev) {
       y: p.position_y,
     });
 
-    // If this participant belongs to a link,
-    // always reconcile the pair before rendering.
-	// fixed link movement avatar desync if using firefox
-
-    if (person.linked_to) {
-
-        const target = participants.get(person.linked_to);
-
-        if (target) {
-            refreshRelationship(person, target, false, false);
-            return;
-        }
-    }
-
-    const relationshipFollowers =
-        avatarRuntime?.relationships?.followersOf(person.id) || [];
-
-    const initiator =
-        relationshipFollowers[0];
-
-    if (initiator) {
-        refreshRelationship(initiator, person, false, false);
-        return;
-    }
+    if (avatarRuntime?.coordinator?.refreshRelationshipsForParticipant(person, {
+      animate: false,
+      persist: false,
+    })) return;
 
     positionAvatar(person);
 }
@@ -3088,58 +3020,22 @@ function handleRoomPollEvent(ev) {
             online: false,
             webcam_path: null,
           });
-          avatarRuntime?.relationships?.clearParticipant(person.id);
+          avatarRuntime?.coordinator?.clearParticipantRelationship(person.id);
           removeParticipant(person.id);
           if (person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
         }
       }
       if (ev.type === 'link') {
-        const person = participants.get(p.participant_id);
-        if (person) {
-          avatarRuntime?.relationships?.setParticipantRelationship(
-            person.id,
-            p.linked_to,
-            p.link_mode
-          );
-          if (p.initiator_position) {
-            avatarRuntime?.layout?.applyParticipantPosition(person, {
-              x: p.initiator_position.x,
-              y: p.initiator_position.y,
-            });
-          }
-          if (p.linked_to) {
-            const target = participants.get(p.linked_to);
-            if (target) {
-              if (p.target_position) {
-                avatarRuntime?.layout?.applyParticipantPosition(target, {
-                  x: p.target_position.x,
-                  y: p.target_position.y,
-                });
-              }
-              refreshRelationship(person, target, true);
-            }
-          }
-          renderParticipant(person);
-          if (!p.linked_to && activeChatKey() === `link:${person.id}`) switchChat('room');
-        }
-        refreshLinkClasses();
-        renderPeople();
-        renderLinkTabs();
+        avatarRuntime?.coordinator?.reconcileRemoteLink(p);
       }
       if (ev.type === 'link_icon') {
-        if (p.link_key && p.icon_name) {
-          linkIcons.set(p.link_key, p.icon_name);
-          adjustLinkedPairForIcon(p.link_key, true, false);
-          renderPeople();
-          updateStageLinkIcons();
-        }
+        avatarRuntime?.coordinator?.reconcileRemoteLinkIcon(p);
       }
       if (ev.type === 'block' && Number(p.blocker_user_id) === cfg.myUserId) {
         blockedUserIds.add(Number(p.blocked_user_id));
         participants.forEach(person => {
           if (Number(person.user_id) === Number(p.blocked_user_id) || person.linked_to && Number(participants.get(person.linked_to)?.user_id) === Number(p.blocked_user_id)) {
-            avatarRuntime?.relationships?.clearParticipant(person.id);
-            renderParticipant(person);
+            avatarRuntime?.coordinator?.clearBlockedRelationship(person);
           }
         });
         renderActiveChat();
@@ -3447,23 +3343,8 @@ linkIconGrid?.querySelectorAll('[data-link-icon]').forEach(btn => {
     if (!pendingLinkIconTargetId) return;
     const targetId = pendingLinkIconTargetId;
     const iconName = btn.dataset.linkIcon || 'plus';
-    const linkKey = linkKeyFor(cfg.myParticipantId, targetId);
-    linkIcons.set(linkKey, iconName);
-    adjustLinkedPairForIcon(linkKey, true, true);
-    renderPeople();
-    updateStageLinkIcons();
     closeLinkIconModal();
-    try {
-      await apiPost('/api/users.php', {
-        action: 'link_icon',
-        session_id: cfg.sessionId,
-        join_token: cfg.myJoinToken,
-        target_participant_id: targetId,
-        icon_name: iconName,
-      });
-    } catch (err) {
-      alert(err.message || err);
-    }
+    await avatarRuntime?.coordinator?.applyLocalLinkIcon(targetId, iconName);
   });
 });
 
@@ -4382,19 +4263,10 @@ document.getElementById('delete-message-confirm')?.addEventListener('click', asy
 
 function unlinkCurrentPartner() {
   const partnerId = activeLinkPartnerId() || linkedPartner()?.id;
-  const me = participants.get(cfg.myParticipantId);
-  if (!me) return;
-  avatarRuntime?.relationships?.unlinkParticipant(cfg.myParticipantId);
-  if (partnerId) {
-    avatarRuntime?.relationships?.clearParticipant(partnerId);
-  }
-  participants.forEach(p => {
-    renderParticipant(p);
+  avatarRuntime?.coordinator?.unlinkCurrentParticipant({
+    participantId: cfg.myParticipantId,
+    partnerId,
   });
-  if (activeChatKey().startsWith('link:')) switchChat('room');
-  apiPost('/api/users.php', { action: 'unlink', session_id: cfg.sessionId, join_token: cfg.myJoinToken }).catch(console.warn);
-  renderPeople();
-  renderLinkTabs();
 }
 
 async function clearPrivateHistory(chatKey) {
@@ -4470,10 +4342,10 @@ async function setBlockState(participant, blocked) {
   const action = blocked ? 'block_user' : 'unblock_user';
   if (blocked) {
     blockedUserIds.add(Number(participant.user_id));
-    const relationshipFollowers = avatarRuntime?.relationships?.followersOf(participant.id) || [];
+    const relationshipFollowers = avatarRuntime?.coordinator?.unlinkFollowersOf(participant.id) || [];
     participants.forEach(p => {
       if (p.id === participant.id || relationshipFollowers.includes(p)) {
-        avatarRuntime?.relationships?.clearParticipant(p.id);
+        avatarRuntime?.coordinator?.clearBlockedRelationship(p);
       }
     });
   } else {
@@ -5708,7 +5580,7 @@ console.log("participant count", cfg.participants?.length);
   });
   restoreSessionLock();
   (cfg.blockedUserIds || []).forEach(id => blockedUserIds.add(Number(id)));
-  Object.entries(cfg.linkIcons || {}).forEach(([key, icon]) => linkIcons.set(key, icon || 'plus'));
+  avatarRuntime?.coordinator?.seedLinkIcons(cfg.linkIcons || {});
   await Promise.all((cfg.participants || []).map(p => renderParticipantWhenReady(p, { animateJoin: true }).catch(() => {
     renderParticipant(p, { animateJoin: true });
   console.log("participants rendered");	

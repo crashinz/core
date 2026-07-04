@@ -20,7 +20,7 @@
  *      does not directly implement avatar behavior.
  *
  * Build:
- *      000015
+ *      000023
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -50,6 +50,9 @@
  *
  * Build 000021
  * - Added Avatar Effects Runtime ownership and diagnostics.
+ *
+ * Build 000023
+ * - Added Avatar Coordinator relationship lifecycle ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -325,7 +328,10 @@ export class AvatarRuntime extends CoreModule {
                 this.#renderer?.getDiagnostics() ?? null,
 
             effects:
-                this.#effects?.getDiagnostics() ?? null
+                this.#effects?.getDiagnostics() ?? null,
+
+            coordinator:
+                this.#coordinator?.getDiagnostics() ?? null
 
         });
 
