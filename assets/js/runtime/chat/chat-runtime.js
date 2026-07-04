@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-I adds outgoing media message send workflow ownership.
+ *      Build 000022-J adds private chat lifecycle ownership.
  *
  * Build:
- *      000022-I
+ *      000022-J
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -51,6 +51,9 @@
  *
  * Build 000022-I
  * - Added ChatMediaSendService ownership and diagnostics.
+ *
+ * Build 000022-J
+ * - Added ChatPrivateChatService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -119,6 +122,12 @@ import {
 
 } from "./services/chat-media-send-service.js";
 
+import {
+
+    ChatPrivateChatService
+
+} from "./services/chat-private-chat-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -138,6 +147,11 @@ export class ChatRuntime extends CoreModule {
      * Message state runtime component.
      */
     #messages = null;
+
+    /**
+     * Private chat lifecycle runtime component.
+     */
+    #privateChats = null;
 
     /**
      * Unread orchestration runtime component.
@@ -218,6 +232,18 @@ export class ChatRuntime extends CoreModule {
     get messages() {
 
         return this.#messages;
+
+    }
+
+    /**
+     * Returns the Chat Private Chat Service.
+     *
+     * @returns {ChatPrivateChatService}
+     *         Private chat lifecycle runtime component.
+     */
+    get privateChats() {
+
+        return this.#privateChats;
 
     }
 
@@ -338,10 +364,13 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-I",
+                "000022-J",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
+
+            privateChats:
+                this.#privateChats?.getDiagnostics() ?? null,
 
             unread:
                 this.#unread?.getDiagnostics() ?? null,
@@ -382,6 +411,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createMessages();
 
+        this.#createPrivateChats();
+
         this.#createUnread();
 
         this.#createReply();
@@ -421,6 +452,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#unread?.destroy();
 
+        this.#privateChats?.destroy();
+
         this.#messages?.destroy();
 
     }
@@ -440,6 +473,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#messages.initialize();
+
+    }
+
+    /**
+     * Creates the private chat lifecycle runtime component.
+     */
+    #createPrivateChats() {
+
+        this.#privateChats =
+            new ChatPrivateChatService(
+                this
+            );
+
+        this.#privateChats.initialize();
 
     }
 

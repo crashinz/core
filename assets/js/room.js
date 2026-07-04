@@ -27,7 +27,6 @@ let chatRuntimeCore = null;
 let chatRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
-const dmUsers = new Map();
 const linkGroups = new Map();
 const groupPositions = new Map();
 let frameQueued = false;
@@ -140,7 +139,6 @@ let latestVoiceParticipants = [];
 let lastVoiceStatusSignature = '';
 let lastVoiceSignalId = 0;
 const peers = new Map();
-const closedDmUserIds = new Set();
 const linkIcons = new Map();
 const stageLinkEls = new Map();
 const blockedUserIds = new Set();
@@ -224,6 +222,7 @@ async function initializeAvatarRuntime() {
 
   participants = avatarRuntime.state;
   configureChatMessageRenderer();
+  configureChatPrivateChats();
   configureChatEventRouter();
   configureChatMessageActions();
   configureChatUnread();
@@ -260,6 +259,24 @@ function configureChatMessageRenderer() {
   });
 }
 
+function configureChatPrivateChats() {
+  chatRuntime?.privateChats?.configure({
+    apiPost,
+    getConfig: () => cfg,
+    getActiveChat: () => activeChat,
+    channelForApi,
+    clearUnread,
+    renderActiveChat,
+    renderLinkTabs,
+    switchChat,
+    showWarning,
+    isUserBlocked,
+    focusComposer() {
+      document.getElementById('chat-input')?.focus();
+    },
+  });
+}
+
 function configureChatEventRouter() {
   chatRuntime?.events?.configure({
     getConfig: () => cfg,
@@ -274,17 +291,7 @@ function configureChatEventRouter() {
     handleRoomHistoryClear,
     updateMessageInChannel,
     removeMessageFromChannel,
-    rememberDirectMessageUser(partnerUserId, payload) {
-      closedDmUserIds.delete(Number(partnerUserId));
-      if (!dmUsers.has(partnerUserId)) {
-        dmUsers.set(partnerUserId, {
-          id: partnerUserId,
-          display_name: payload.user_id === cfg.myUserId ? 'Friend' : payload.display_name,
-          avatar_url: payload.avatar_url,
-        });
-      }
-      renderLinkTabs();
-    },
+    rememberDirectMessageUser,
   });
 }
 
@@ -1183,13 +1190,11 @@ function showHostNotice(title, message, redirectToLobby = false) {
 }
 
 function activeLinkPartnerId() {
-  if (!activeChat.startsWith('link:')) return null;
-  return Number(activeChat.slice(5));
+  return chatPrivateChats().activeLinkPartnerId(activeChat);
 }
 
 function activeDmUserId() {
-  if (!activeChat.startsWith('dm:')) return null;
-  return Number(activeChat.slice(3));
+  return chatPrivateChats().activeDmUserId(activeChat);
 }
 
 function linkKeyFor(a, b) {
@@ -1242,6 +1247,10 @@ function chatMessageState() {
   return chatRuntime?.messages;
 }
 
+function chatPrivateChats() {
+  return chatRuntime?.privateChats;
+}
+
 function chatMessageRenderer() {
   return chatRuntime?.renderer;
 }
@@ -1283,15 +1292,11 @@ function channelForApi(chatKey = activeChat) {
 }
 
 function linkPartnerIdFromKey(key) {
-  const ids = String(key || '').split(':').map(Number).filter(Boolean);
-  return ids.find(id => id !== cfg.myParticipantId) || activeLinkPartnerId();
+  return chatPrivateChats().linkPartnerIdFromKey(key);
 }
 
 function dmPartnerIdFromPayload(payload) {
-  if (payload.partner_user_id) return Number(payload.partner_user_id);
-  if (payload.target_user_id && Number(payload.user_id) === cfg.myUserId) return Number(payload.target_user_id);
-  const ids = String(payload.dm_key || payload.link_key || '').split(':').slice(1).map(Number).filter(Boolean);
-  return ids.find(id => id !== cfg.myUserId) || null;
+  return chatPrivateChats().dmPartnerIdFromPayload(payload);
 }
 
 function chatKeyForMessagePayload(payload) {
@@ -1302,10 +1307,7 @@ function chatLabel(chatKey = activeChat) {
   if (chatKey === 'room') return 'Chat Room';
   if (chatKey === 'community') return 'Community Chat';
   if (chatKey.startsWith('dm:')) {
-    const userId = Number(chatKey.slice(3));
-    const user = dmUsers.get(userId);
-    if (isUserBlocked(userId)) return 'DM> Blocked';
-    return `DM> ${user ? user.display_name : 'Friend'}`;
+    return chatPrivateChats().dmLabel(chatKey);
   }
   if (chatKey.startsWith('game:')) {
     return activeGame ? `${gameName(activeGame.game_type)} Game` : 'Game';
@@ -1315,29 +1317,15 @@ function chatLabel(chatKey = activeChat) {
 }
 
 function rememberDmUser(user) {
-  const id = Number(user.id || user.user_id);
-  if (!id) return null;
-  const existing = dmUsers.get(id) || {};
-  const merged = Object.assign(existing, {
-    id,
-    display_name: user.display_name || existing.display_name || 'Friend',
-    avatar_url: user.avatar_url || existing.avatar_url || null,
-  });
-  dmUsers.set(id, merged);
-  return merged;
+  return chatPrivateChats().rememberDmUser(user);
 }
 
 function openDmWithUser(user) {
-  const dmUser = rememberDmUser(user);
-  if (!dmUser) return;
-  if (isUserBlocked(dmUser.id)) {
-    showWarning('You cannot DM this user.');
-    return;
-  }
-  closedDmUserIds.delete(Number(dmUser.id));
-  renderLinkTabs();
-  switchChat(`dm:${dmUser.id}`);
-  document.getElementById('chat-input')?.focus();
+  chatPrivateChats().openDmWithUser(user);
+}
+
+function rememberDirectMessageUser(partnerUserId, payload) {
+  chatPrivateChats().rememberIncomingDmUser(partnerUserId, payload);
 }
 
 function updateComposerPlaceholder() {
@@ -2085,15 +2073,14 @@ function renderGameTab(holder = document.getElementById('link-tabs')) {
 function renderDmTabs() {
   const holder = document.getElementById('link-tabs');
   if (!holder || !cfg) return;
-  for (const [userId, user] of dmUsers.entries()) {
-    if (closedDmUserIds.has(Number(userId))) continue;
-    const chatKey = `dm:${userId}`;
+  for (const user of chatPrivateChats().visibleDmUsers()) {
+    const chatKey = `dm:${user.id}`;
     if (holder.querySelector(`[data-chat-tab="${chatKey}"]`)) continue;
     const tab = document.createElement('button');
     tab.className = 'chat-tab';
     tab.type = 'button';
     tab.dataset.chatTab = chatKey;
-    tab.innerHTML = `<img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""><span>DM&gt; ${esc(isUserBlocked(userId) ? 'Blocked' : user.display_name)}</span><span class="tab-badge" hidden>0</span>`;
+    tab.innerHTML = `<img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""><span>DM&gt; ${esc(isUserBlocked(user.id) ? 'Blocked' : user.display_name)}</span><span class="tab-badge" hidden>0</span>`;
     tab.addEventListener('click', () => switchChat(chatKey));
     holder.appendChild(tab);
   }
@@ -4360,28 +4347,12 @@ function unlinkCurrentPartner() {
 }
 
 async function clearPrivateHistory(chatKey) {
-  if (!chatKey || (!chatKey.startsWith('dm:') && !chatKey.startsWith('link:'))) return;
-  const payload = {
-    action: 'clear',
-    session_id: cfg.sessionId,
-    join_token: cfg.myJoinToken,
-    channel: channelForApi(chatKey),
-  };
-  if (chatKey.startsWith('dm:')) payload.target_user_id = Number(chatKey.slice(3));
-  if (chatKey.startsWith('link:')) payload.target_participant_id = Number(chatKey.slice(5));
-  await apiPost('/api/private_history.php', payload);
-  chatMessageState().clearChannel(chatKey);
-  clearUnread(chatKey);
-  if (activeChat === chatKey) renderActiveChat();
+  await chatPrivateChats().clearPrivateHistory(chatKey);
 }
 
 function closeDmTab(chatKey) {
-  if (!chatKey?.startsWith('dm:')) return;
-  const userId = Number(chatKey.slice(3));
-  closedDmUserIds.add(userId);
-  clearUnread(chatKey);
+  if (!chatPrivateChats().closeDmTab(chatKey)) return;
   document.querySelector(`.chat-tab[data-chat-tab="${CSS.escape(chatKey)}"]`)?.remove();
-  if (activeChat === chatKey) switchChat('room');
 }
 
 document.getElementById('tab-clear-history')?.addEventListener('click', async () => {
