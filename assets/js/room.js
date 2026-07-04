@@ -134,7 +134,6 @@ let latestVoiceParticipants = [];
 let lastVoiceStatusSignature = '';
 let lastVoiceSignalId = 0;
 const peers = new Map();
-const stageLinkEls = new Map();
 const blockedUserIds = new Set();
 let voiceNoteRecorder = null;
 let voiceNoteChunks = [];
@@ -1359,26 +1358,6 @@ function linkKeyFor(a, b) {
   return avatarRuntime?.relationships?.linkKeyFor(a, b) || [Number(a), Number(b)].sort((x, y) => x - y).join(':');
 }
 
-function linkIconUrl(iconName = 'plus') {
-  const clean = String(iconName || 'plus').replace(/[^a-z0-9-]/g, '') || 'plus';
-  const catalog = Array.isArray(cfg?.linkIconCatalog) ? cfg.linkIconCatalog : [];
-  const item = catalog.find(icon => icon.icon_name === clean);
-  if (item?.file_path) return appUrl(item.file_path);
-  return appUrl(`/assets/images/cs-icons/${clean}.png`);
-}
-
-function linkIconNameForStage(key) {
-  return avatarRuntime?.coordinator?.linkIconNameForStage(key) || '';
-}
-
-function linkIconNameForList(key) {
-  return avatarRuntime?.coordinator?.linkIconNameForList(key) || 'plus';
-}
-
-function linkPairGap(key) {
-  return avatarRuntime?.coordinator?.linkPairGap(key) || 0;
-}
-
 function normalizeLinkMode(mode) {
   return avatarRuntime?.relationships?.normalizeLinkMode(mode) || (mode === 'lap' ? 'lap' : 'normal');
 }
@@ -1678,37 +1657,16 @@ function linkedPairs() {
 
 function updateStageLinkIcons() {
   if (!cfg) return;
-  const active = new Set();
-  linkedPairs().forEach(([key, a, b]) => {
-    if (!a.avatarEl || !b.avatarEl) return;
-    if (linkModeForPair(a, b) === 'lap') return;
-    const iconName = linkIconNameForStage(key);
-    if (!iconName) return;
-    active.add(key);
-    let el = stageLinkEls.get(key);
-    if (!el) {
-      el = document.createElement('div');
-      el.className = 'stage-link-icon';
-      el.innerHTML = '<img alt="">';
-      roomStage.appendChild(el);
-      stageLinkEls.set(key, el);
-    }
-    el.classList.remove('removing');
-    const img = el.querySelector('img');
-    if (img.getAttribute('src') !== linkIconUrl(iconName)) img.src = linkIconUrl(iconName);
-    const ax = a.avatarEl.offsetLeft + a.avatarEl.offsetWidth / 2;
-    const ay = a.avatarEl.offsetTop + a.avatarEl.offsetHeight / 2;
-    const bx = b.avatarEl.offsetLeft + b.avatarEl.offsetWidth / 2;
-    const by = b.avatarEl.offsetTop + b.avatarEl.offsetHeight / 2;
-    const size = el.offsetWidth || 44;
-    el.style.left = `${(ax + bx) / 2 - size / 2}px`;
-    el.style.top = `${(ay + by) / 2 - size / 2}px`;
-  });
-  stageLinkEls.forEach((el, key) => {
-    if (active.has(key)) return;
-    stageLinkEls.delete(key);
-    el.classList.add('removing');
-    setTimeout(() => el.remove(), 240);
+  avatarRuntime?.renderer?.syncStageLinkIcons(linkedPairs(), {
+    stage: roomStage,
+    document,
+    window,
+    appUrl,
+    linkIconCatalog: cfg.linkIconCatalog,
+    linkModeForPair,
+    linkIconNameForStage(key) {
+      return avatarRuntime?.coordinator?.linkIconNameForStage(key) || '';
+    },
   });
 }
 

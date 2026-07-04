@@ -197,6 +197,9 @@ Owns:
 
 - DOM updates
 - visual synchronization
+- avatar stage link icon presentation
+- avatar relationship presentation refreshes
+- renderer-owned relationship presentation element caches
 
 Drag Controller
 

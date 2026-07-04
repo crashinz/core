@@ -23,7 +23,7 @@
  *      relationship management, ordering, or layout calculation.
  *
  * Build:
- *      000020
+ *      000025
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -41,6 +41,10 @@
  * - Migrated webcam element presentation from room.js.
  * - Migrated aura layer presentation from room.js.
  * - Migrated typing and speech bubble presentation from room.js.
+ *
+ * Build 000025
+ * - Migrated stage link icon presentation from room.js.
+ * - Added renderer-owned stage link icon cache.
  ******************************************************************************/
 
 /**
@@ -80,6 +84,13 @@ export class AvatarRenderer {
      * Number of presentation operations performed.
      */
     #renderCount = 0;
+
+    /**
+     * Stage link icon elements keyed by relationship key.
+     *
+     * @type {Map<string, HTMLElement>}
+     */
+    #stageLinkIcons = new Map();
 
     //--------------------------------------------------
     // Constructor
@@ -123,6 +134,11 @@ export class AvatarRenderer {
      * Releases resources owned by the renderer.
      */
     destroy() {
+
+        this.clearStageLinkIcons({
+            removeImmediately:
+                true
+        });
 
         this.#renderCount = 0;
 
@@ -472,6 +488,133 @@ export class AvatarRenderer {
 
         this.#renderCount += 1;
         participant.avatarEl.classList.toggle("linked", Boolean(linked));
+
+    }
+
+    /**
+     * Synchronizes relationship link icon presentation on the avatar stage.
+     *
+     * @param {Array} linkedPairs
+     *        Relationship pairs in `[key, first, second]` form.
+     *
+     * @param {Object} options
+     *        Rendering dependencies.
+     *
+     * @returns {void}
+     */
+    syncStageLinkIcons(linkedPairs = [], options = {}) {
+
+        const stage =
+            options.stage;
+
+        if (!stage) return;
+
+        this.#renderCount += 1;
+
+        const documentRef =
+            options.document || stage.ownerDocument || document;
+
+        const active =
+            new Set();
+
+        const pairs =
+            Array.isArray(linkedPairs)
+                ? linkedPairs
+                : [];
+
+        pairs.forEach(pair => {
+
+            const [
+                key,
+                first,
+                second
+            ] = pair || [];
+
+            if (!key || !first?.avatarEl || !second?.avatarEl) {
+                return;
+            }
+
+            if (options.linkModeForPair?.(first, second) === "lap") {
+                return;
+            }
+
+            const iconName =
+                options.linkIconNameForStage?.(key) || "";
+
+            if (!iconName) {
+                return;
+            }
+
+            const relationshipKey =
+                String(key);
+
+            active.add(relationshipKey);
+
+            const element =
+                this.#stageLinkIconElement(
+                    relationshipKey,
+                    {
+                        stage,
+                        document:
+                            documentRef
+                    }
+                );
+
+            element.classList.remove("removing");
+
+            const image =
+                element.querySelector("img");
+
+            const iconUrl =
+                this.#relationshipIconUrl(
+                    iconName,
+                    options
+                );
+
+            if (image && image.getAttribute("src") !== iconUrl) {
+                image.src = iconUrl;
+            }
+
+            this.#positionStageLinkIcon(
+                element,
+                first.avatarEl,
+                second.avatarEl
+            );
+
+        });
+
+        Array.from(this.#stageLinkIcons.entries()).forEach(([key, element]) => {
+
+            if (active.has(key)) {
+                return;
+            }
+
+            this.#removeStageLinkIcon(
+                key,
+                element,
+                options
+            );
+
+        });
+
+    }
+
+    /**
+     * Clears all renderer-owned stage link icons.
+     *
+     * @param {Object} options
+     *
+     * @returns {void}
+     */
+    clearStageLinkIcons(options = {}) {
+
+        Array.from(this.#stageLinkIcons.entries()).forEach(([key, element]) => {
+            this.#removeStageLinkIcon(
+                key,
+                element,
+                options
+            );
+        });
 
     }
 
@@ -872,10 +1015,13 @@ export class AvatarRenderer {
                 "AvatarRenderer",
 
             build:
-                "000020",
+                "000025",
 
             renderCount:
-                this.#renderCount
+                this.#renderCount,
+
+            stageLinkIconCount:
+                this.#stageLinkIcons.size
 
         });
 
@@ -902,6 +1048,140 @@ export class AvatarRenderer {
         element.style.height = `${box.height}px`;
         element.style.left = `${box.left}px`;
         element.style.top = `${box.top}px`;
+
+    }
+
+    /**
+     * Returns an existing or newly-created stage link icon element.
+     *
+     * @param {string} key
+     * @param {Object} options
+     *
+     * @returns {HTMLElement}
+     */
+    #stageLinkIconElement(key, options = {}) {
+
+        let element =
+            this.#stageLinkIcons.get(key);
+
+        if (element) {
+            return element;
+        }
+
+        const documentRef =
+            options.document || document;
+
+        element =
+            documentRef.createElement("div");
+        element.className = "stage-link-icon";
+        element.innerHTML = "<img alt=\"\">";
+
+        options.stage?.appendChild(element);
+
+        this.#stageLinkIcons.set(
+            key,
+            element
+        );
+
+        return element;
+
+    }
+
+    /**
+     * Positions a stage link icon between two avatar elements.
+     *
+     * @param {HTMLElement} element
+     * @param {HTMLElement} firstAvatar
+     * @param {HTMLElement} secondAvatar
+     *
+     * @returns {void}
+     */
+    #positionStageLinkIcon(element, firstAvatar, secondAvatar) {
+
+        const firstX =
+            firstAvatar.offsetLeft + firstAvatar.offsetWidth / 2;
+
+        const firstY =
+            firstAvatar.offsetTop + firstAvatar.offsetHeight / 2;
+
+        const secondX =
+            secondAvatar.offsetLeft + secondAvatar.offsetWidth / 2;
+
+        const secondY =
+            secondAvatar.offsetTop + secondAvatar.offsetHeight / 2;
+
+        const size =
+            element.offsetWidth || 44;
+
+        element.style.left =
+            `${(firstX + secondX) / 2 - size / 2}px`;
+
+        element.style.top =
+            `${(firstY + secondY) / 2 - size / 2}px`;
+
+    }
+
+    /**
+     * Removes a stage link icon from renderer ownership.
+     *
+     * @param {string} key
+     * @param {HTMLElement} element
+     * @param {Object} options
+     *
+     * @returns {void}
+     */
+    #removeStageLinkIcon(key, element, options = {}) {
+
+        this.#stageLinkIcons.delete(key);
+
+        if (!element) {
+            return;
+        }
+
+        if (options.removeImmediately) {
+            element.remove();
+            return;
+        }
+
+        element.classList.add("removing");
+
+        const scheduler =
+            options.window || window;
+
+        scheduler.setTimeout(
+            () => element.remove(),
+            240
+        );
+
+    }
+
+    /**
+     * Resolves a relationship icon image URL.
+     *
+     * @param {string} iconName
+     * @param {Object} options
+     *
+     * @returns {string}
+     */
+    #relationshipIconUrl(iconName = "plus", options = {}) {
+
+        const clean =
+            String(iconName || "plus").replace(/[^a-z0-9-]/g, "") || "plus";
+
+        const catalog =
+            Array.isArray(options.linkIconCatalog)
+                ? options.linkIconCatalog
+                : [];
+
+        const item =
+            catalog.find(icon => icon.icon_name === clean);
+
+        if (item?.file_path) {
+            return options.appUrl?.(item.file_path) || item.file_path;
+        }
+
+        return options.appUrl?.(`/assets/images/cs-icons/${clean}.png`) ||
+            `/assets/images/cs-icons/${clean}.png`;
 
     }
 
