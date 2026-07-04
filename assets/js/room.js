@@ -122,7 +122,6 @@ let msgActionTargetChat = null;
 let tabCtxTargetChat = null;
 let pendingDeleteMessageId = null;
 let pendingDeleteChatKey = null;
-let replyDraft = null;
 let webcamStream = null;
 const pendingRemoteVideoStreams = new Map();
 const AVATAR_STAGE_SIZE = 150;
@@ -230,6 +229,7 @@ async function initializeAvatarRuntime() {
   configureChatEventRouter();
   configureChatMessageActions();
   configureChatUnread();
+  configureChatReply();
 
   return avatarRuntime;
 }
@@ -303,6 +303,22 @@ function configureChatUnread() {
   chatRuntime?.unread?.configure({
     getConfig: () => cfg,
     refreshUnreadBadges: updateTabBadges,
+  });
+}
+
+function configureChatReply() {
+  chatRuntime?.reply?.configure({
+    channelForApi,
+    messagePreviewText,
+    participantDisplayName(participantId) {
+      return participants.get(Number(participantId))?.display_name || null;
+    },
+    focusComposer() {
+      document.getElementById('chat-input')?.focus();
+    },
+    onReplyDraftChange() {
+      renderReplyDraft();
+    },
   });
 }
 
@@ -1182,6 +1198,10 @@ function chatMessageActions() {
 
 function chatUnread() {
   return chatRuntime?.unread;
+}
+
+function chatReply() {
+  return chatRuntime?.reply;
 }
 
 function channelMapFor(chatKey = activeChat) {
@@ -2155,35 +2175,30 @@ function messagePreviewText(msg) {
 
 function renderReplyDraft() {
   if (!replyDraftEl) return;
-  const valid = replyDraft && replyDraft.chatKey === activeChat;
-  replyDraftEl.hidden = !valid;
-  if (!valid) return;
-  if (replyDraftAuthorEl) replyDraftAuthorEl.textContent = `Replying to ${replyDraft.display_name || 'Someone'}`;
-  if (replyDraftPreviewEl) replyDraftPreviewEl.textContent = replyDraft.preview || 'Message';
+  const draft = chatReply().draftForChat(activeChat);
+  replyDraftEl.hidden = !draft;
+  if (!draft) return;
+  if (replyDraftAuthorEl) replyDraftAuthorEl.textContent = `Replying to ${draft.display_name || 'Someone'}`;
+  if (replyDraftPreviewEl) replyDraftPreviewEl.textContent = draft.preview || 'Message';
 }
 
 function clearReplyDraft() {
-  replyDraft = null;
-  renderReplyDraft();
+  chatReply().clearDraft();
 }
 
 function startReplyDraft(msg, chatKey = activeChat) {
-  if (!msg || msg.system || msg.is_deleted || chatKey.startsWith('game:')) return;
-  replyDraft = {
-    id: Number(msg.id),
-    chatKey,
-    display_name: msg.display_name || participants.get(Number(msg.participant_id))?.display_name || 'Someone',
-    preview: messagePreviewText(msg),
-  };
-  renderReplyDraft();
-  document.getElementById('chat-input')?.focus();
+  chatReply().startDraft(msg, chatKey);
 }
 
 function appendReplyPayload(payload) {
-  if (!replyDraft || replyDraft.chatKey !== activeChat) return payload;
-  payload.reply_to_id = replyDraft.id;
-  payload.reply_to_channel = channelForApi(replyDraft.chatKey);
-  return payload;
+  return chatReply().appendReplyPayload(payload, activeChat);
+}
+
+function appendReplyFormData(formData) {
+  const payload = appendReplyPayload({});
+  if (!payload.reply_to_id) return;
+  formData.append('reply_to_id', String(payload.reply_to_id));
+  formData.append('reply_to_channel', payload.reply_to_channel);
 }
 
 function replyPreviewHtml(msg) {
@@ -3307,10 +3322,7 @@ function uploadChatFile(file) {
   if (partnerId) formData.append('target_participant_id', String(partnerId));
   if (dmUserId) formData.append('target_user_id', String(dmUserId));
   if (activeChat.startsWith('game:')) formData.append('lobby_code', activeChat.slice(5));
-  if (replyDraft && replyDraft.chatKey === activeChat) {
-    formData.append('reply_to_id', String(replyDraft.id));
-    formData.append('reply_to_channel', channelForApi(replyDraft.chatKey));
-  }
+  appendReplyFormData(formData);
   formData.append('file', file);
   return apiUpload('/api/files.php', formData).then(msg => {
     clearReplyDraft();
@@ -3389,10 +3401,7 @@ async function startVoiceNote() {
     if (partnerId) formData.append('target_participant_id', String(partnerId));
     if (dmUserId) formData.append('target_user_id', String(dmUserId));
     if (activeChat.startsWith('game:')) formData.append('lobby_code', activeChat.slice(5));
-    if (replyDraft && replyDraft.chatKey === activeChat) {
-      formData.append('reply_to_id', String(replyDraft.id));
-      formData.append('reply_to_channel', channelForApi(replyDraft.chatKey));
-    }
+    appendReplyFormData(formData);
     formData.append('audio', blob, 'voice-note.webm');
     apiUpload('/api/files.php', formData)
       .then(msg => {

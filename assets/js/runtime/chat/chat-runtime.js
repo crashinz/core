@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-E adds unread-count orchestration ownership.
+ *      Build 000022-F adds reply draft workflow ownership.
  *
  * Build:
- *      000022-E
+ *      000022-F
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -39,6 +39,9 @@
  *
  * Build 000022-E
  * - Added ChatUnreadService ownership and diagnostics.
+ *
+ * Build 000022-F
+ * - Added ChatReplyService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -83,6 +86,12 @@ import {
 
 } from "./services/chat-unread-service.js";
 
+import {
+
+    ChatReplyService
+
+} from "./services/chat-reply-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -107,6 +116,11 @@ export class ChatRuntime extends CoreModule {
      * Unread orchestration runtime component.
      */
     #unread = null;
+
+    /**
+     * Reply draft runtime component.
+     */
+    #reply = null;
 
     /**
      * Message renderer runtime component.
@@ -178,6 +192,18 @@ export class ChatRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Chat Reply Service.
+     *
+     * @returns {ChatReplyService}
+     *         Reply draft runtime component.
+     */
+    get reply() {
+
+        return this.#reply;
+
+    }
+
+    /**
      * Returns the Chat Message Renderer.
      *
      * @returns {ChatMessageRenderer}
@@ -234,13 +260,16 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-E",
+                "000022-F",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
 
             unread:
                 this.#unread?.getDiagnostics() ?? null,
+
+            reply:
+                this.#reply?.getDiagnostics() ?? null,
 
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
@@ -268,6 +297,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createUnread();
 
+        this.#createReply();
+
         this.#createRenderer();
 
         this.#createEvents();
@@ -286,6 +317,8 @@ export class ChatRuntime extends CoreModule {
         this.#events?.destroy();
 
         this.#renderer?.destroy();
+
+        this.#reply?.destroy();
 
         this.#unread?.destroy();
 
@@ -322,6 +355,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#unread.initialize();
+
+    }
+
+    /**
+     * Creates the reply draft runtime component.
+     */
+    #createReply() {
+
+        this.#reply =
+            new ChatReplyService(
+                this
+            );
+
+        this.#reply.initialize();
 
     }
 
