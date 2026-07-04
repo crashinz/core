@@ -110,8 +110,6 @@ const sessionLockPassword = document.getElementById('session-lock-password');
 const sessionLockError = document.getElementById('session-lock-error');
 let bootstrapped = false;
 let textMenuMode = 'copy';
-let lastEventId = 0;
-let lastCommunityEventId = 0;
 let lastLatencyMs = null;
 let activeChat = 'room';
 let ctxMenuParticipantId = null;
@@ -225,6 +223,7 @@ async function initializeAvatarRuntime() {
   configureChatComposer();
   configureChatMediaSend();
   configureChatGameChat();
+  configureChatPoll();
 
   return avatarRuntime;
 }
@@ -392,6 +391,22 @@ function configureChatGameChat() {
     fetchGameChat(query) {
       return fetch(appUrl('/api/game_chat.php?' + query)).then(r => r.json());
     },
+    warnError(error) {
+      console.warn(error);
+    },
+  });
+}
+
+function configureChatPoll() {
+  chatRuntime?.poll?.configure({
+    getConfig: () => cfg,
+    shouldStop: () => roomExitInProgress,
+    pollInterval: 25,
+    fetchPoll(query) {
+      return fetch(appUrl('/api/poll.php?' + query)).then(r => r.json());
+    },
+    handleRoomEvent: handleRoomPollEvent,
+    handleCommunityEvent: handleCommunityPollEvent,
     warnError(error) {
       console.warn(error);
     },
@@ -1296,6 +1311,10 @@ function chatMediaSend() {
 
 function chatGameChat() {
   return chatRuntime?.gameChat;
+}
+
+function chatPoll() {
+  return chatRuntime?.poll;
 }
 
 function channelMapFor(chatKey = activeChat) {
@@ -2953,15 +2972,12 @@ async function checkLatency() {
   }
 }
 
-async function poll() {
-  if (roomExitInProgress) return;
-  try {
-    const qs = new URLSearchParams({ session_id: cfg.sessionId, last_event_id: lastEventId, last_community_event_id: lastCommunityEventId, join_token: cfg.myJoinToken });
-    const data = await fetch(appUrl('/api/poll.php?' + qs)).then(r => r.json());
-    (data.events || []).forEach(ev => {
-      lastEventId = Math.max(lastEventId, ev.id);
+function poll() {
+  chatPoll().start();
+}
+
+function handleRoomPollEvent(ev) {
       const p = ev.payload || {};
-      if (chatEventRouter().routeRoomEvent(ev)) return;
       if (ev.type === 'participant_join') {
         const alreadyKnown = participants.has(p.id);
         const hadStageAvatar = Boolean(participants.get(p.id)?.avatarEl);
@@ -3138,11 +3154,10 @@ async function poll() {
         }
         removeParticipant(p.target_participant_id);
       }
-    });
-    (data.community_events || []).forEach(ev => {
-      lastCommunityEventId = Math.max(lastCommunityEventId, ev.id);
+}
+
+function handleCommunityPollEvent(ev) {
       const p = ev.payload || {};
-      if (chatEventRouter().routeCommunityEvent(ev)) return;
       if (ev.type === 'link_typing') {
         const partnerId = p.participant_id;
         if (activeChat === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(p.participant_id, p.active);
@@ -3152,12 +3167,6 @@ async function poll() {
           setGameTyping(p.participant_id, Boolean(p.active));
         }
       }
-    });
-  } catch (err) {
-    console.warn(err);
-  } finally {
-    if (!roomExitInProgress) setTimeout(poll, 25);
-  }
 }
 
 function showTyping(participantId, active) {
@@ -5666,8 +5675,10 @@ console.log("participant count", cfg.participants?.length);
   if (cfg.error) throw new Error(cfg.error);
   renderImportedRoomLayout(cfg.importLayout);
   renderImportedMusicPlayer(cfg.musicPlaylist);
-  lastEventId = cfg.lastEventId || 0;
-  lastCommunityEventId = cfg.lastCommunityEventId || 0;
+  chatPoll().seed({
+    lastEventId: cfg.lastEventId,
+    lastCommunityEventId: cfg.lastCommunityEventId,
+  });
   restoreSessionLock();
   (cfg.blockedUserIds || []).forEach(id => blockedUserIds.add(Number(id)));
   Object.entries(cfg.linkIcons || {}).forEach(([key, icon]) => linkIcons.set(key, icon || 'plus'));

@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-K adds game chat integration ownership.
+ *      Build 000022-L adds main polling transport ownership.
  *
  * Build:
- *      000022-K
+ *      000022-L
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -57,6 +57,9 @@
  *
  * Build 000022-K
  * - Added ChatGameChatService ownership and diagnostics.
+ *
+ * Build 000022-L
+ * - Added ChatPollService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -137,6 +140,12 @@ import {
 
 } from "./services/chat-game-chat-service.js";
 
+import {
+
+    ChatPollService
+
+} from "./services/chat-poll-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -191,6 +200,11 @@ export class ChatRuntime extends CoreModule {
      * Game chat integration runtime component.
      */
     #gameChat = null;
+
+    /**
+     * Main polling transport runtime component.
+     */
+    #poll = null;
 
     /**
      * Message renderer runtime component.
@@ -334,6 +348,18 @@ export class ChatRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Chat Poll Service.
+     *
+     * @returns {ChatPollService}
+     *         Main polling transport runtime component.
+     */
+    get poll() {
+
+        return this.#poll;
+
+    }
+
+    /**
      * Returns the Chat Message Renderer.
      *
      * @returns {ChatMessageRenderer}
@@ -390,7 +416,7 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-K",
+                "000022-L",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
@@ -415,6 +441,9 @@ export class ChatRuntime extends CoreModule {
 
             gameChat:
                 this.#gameChat?.getDiagnostics() ?? null,
+
+            poll:
+                this.#poll?.getDiagnostics() ?? null,
 
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
@@ -458,6 +487,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createEvents();
 
+        this.#createPoll();
+
         this.#createActions();
 
     }
@@ -468,6 +499,8 @@ export class ChatRuntime extends CoreModule {
     onDestroy() {
 
         this.#actions?.destroy();
+
+        this.#poll?.destroy();
 
         this.#events?.destroy();
 
@@ -632,6 +665,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#events.initialize();
+
+    }
+
+    /**
+     * Creates the main polling transport runtime component.
+     */
+    #createPoll() {
+
+        this.#poll =
+            new ChatPollService(
+                this
+            );
+
+        this.#poll.initialize();
 
     }
 
