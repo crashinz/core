@@ -227,6 +227,7 @@ async function initializeAvatarRuntime() {
 
   participants = avatarRuntime.state;
   configureChatMessageRenderer();
+  configureChatEventRouter();
 
   return avatarRuntime;
 }
@@ -253,6 +254,34 @@ function configureChatMessageRenderer() {
     gestureFromMessage,
     openMessageActionMenu,
     applyReaction,
+  });
+}
+
+function configureChatEventRouter() {
+  chatRuntime?.events?.configure({
+    getConfig: () => cfg,
+    getActiveChat: () => activeChat,
+    activeLinkPartnerId,
+    linkPartnerIdFromKey,
+    dmPartnerIdFromPayload,
+    renderMessage,
+    addMessageToChannel,
+    updateMessageInChannels,
+    removeMessageFromChannels,
+    handleRoomHistoryClear,
+    updateMessageInChannel,
+    removeMessageFromChannel,
+    rememberDirectMessageUser(partnerUserId, payload) {
+      closedDmUserIds.delete(Number(partnerUserId));
+      if (!dmUsers.has(partnerUserId)) {
+        dmUsers.set(partnerUserId, {
+          id: partnerUserId,
+          display_name: payload.user_id === cfg.myUserId ? 'Friend' : payload.display_name,
+          avatar_url: payload.avatar_url,
+        });
+      }
+      renderLinkTabs();
+    },
   });
 }
 
@@ -1122,6 +1151,10 @@ function chatMessageRenderer() {
   return chatRuntime?.renderer;
 }
 
+function chatEventRouter() {
+  return chatRuntime?.events;
+}
+
 function channelMapFor(chatKey = activeChat) {
   return chatMessageState().channelMapFor(chatKey);
 }
@@ -1143,17 +1176,7 @@ function dmPartnerIdFromPayload(payload) {
 }
 
 function chatKeyForMessagePayload(payload) {
-  const channel = payload.channel || (payload.dm_key ? 'dm' : payload.link_key ? 'link' : 'community');
-  if (channel === 'community') return 'community';
-  if (channel === 'link') {
-    const partnerId = linkPartnerIdFromKey(payload.link_key);
-    return partnerId ? `link:${partnerId}` : activeChat;
-  }
-  if (channel === 'dm') {
-    const partnerUserId = dmPartnerIdFromPayload(payload);
-    return partnerUserId ? `dm:${partnerUserId}` : activeChat;
-  }
-  return 'room';
+  return chatEventRouter().chatKeyForMessagePayload(payload);
 }
 
 function chatLabel(chatKey = activeChat) {
@@ -2845,26 +2868,7 @@ async function poll() {
     (data.events || []).forEach(ev => {
       lastEventId = Math.max(lastEventId, ev.id);
       const p = ev.payload || {};
-      if (ev.type === 'message') renderMessage(p, true);
-      if (ev.type === 'message_edit') {
-        const msg = chatMessageState().getMessageForChat('room', p.message_id);
-        const changes = { content: p.content, url_preview: p.url_preview || null, edited_at: p.edited_at || new Date().toISOString() };
-        if (cfg.canModerateMessages && msg && !msg.original_content && msg.content !== p.content) changes.original_content = msg.content;
-        updateMessageInChannels(p.message_id, changes);
-      }
-      if (ev.type === 'message_delete') {
-        if (cfg.canModerateMessages) updateMessageInChannels(p.message_id, { is_deleted: true, deleted_at: p.deleted_at || new Date().toISOString() });
-        else removeMessageFromChannels(p.message_id);
-      }
-      if (ev.type === 'room_history_clear') handleRoomHistoryClear(p);
-      if (ev.type === 'reaction') {
-        const msg = chatMessageState().getMessageForChat('room', p.message_id);
-        if (msg) {
-          msg.reactions = Array.isArray(msg.reactions) ? msg.reactions.filter(r => Number(r.participant_id) !== Number(p.participant_id)) : [];
-          if (!p.removed) msg.reactions.push({ participant_id: p.participant_id, user_id: p.user_id, emoji: p.emoji, display_name: p.display_name, avatar_url: p.avatar_url });
-          updateMessageInChannels(p.message_id, { reactions: msg.reactions });
-        }
-      }
+      if (chatEventRouter().routeRoomEvent(ev)) return;
       if (ev.type === 'participant_join') {
         const alreadyKnown = participants.has(p.id);
         const hadStageAvatar = Boolean(participants.get(p.id)?.avatarEl);
@@ -3045,42 +3049,7 @@ async function poll() {
     (data.community_events || []).forEach(ev => {
       lastCommunityEventId = Math.max(lastCommunityEventId, ev.id);
       const p = ev.payload || {};
-      if (ev.type === 'community_message') addMessageToChannel(p, 'community', true);
-      if (ev.type === 'link_message') {
-        const partnerId = linkPartnerIdFromKey(p.link_key) || (p.participant_id === cfg.myParticipantId ? activeLinkPartnerId() : p.participant_id);
-        addMessageToChannel(p, `link:${partnerId}`, true);
-      }
-      if (ev.type === 'dm_message') {
-        const partnerUserId = p.user_id === cfg.myUserId ? p.target_user_id : p.user_id;
-        if (partnerUserId) {
-          closedDmUserIds.delete(Number(partnerUserId));
-          if (!dmUsers.has(partnerUserId)) {
-            dmUsers.set(partnerUserId, {
-              id: partnerUserId,
-              display_name: p.user_id === cfg.myUserId ? 'Friend' : p.display_name,
-              avatar_url: p.avatar_url,
-            });
-          }
-          renderLinkTabs();
-          addMessageToChannel(Object.assign({}, p, { partner_user_id: partnerUserId }), `dm:${partnerUserId}`, true);
-        }
-      }
-      if (ev.type === 'community_message_edit' || ev.type === 'link_message_edit' || ev.type === 'dm_message_edit') {
-        const chatKey = chatKeyForMessagePayload(p);
-        updateMessageInChannel(chatKey, p.message_id, { content: p.content, url_preview: p.url_preview || null, edited_at: p.edited_at || new Date().toISOString() });
-      }
-      if (ev.type === 'community_message_delete' || ev.type === 'link_message_delete' || ev.type === 'dm_message_delete') {
-        removeMessageFromChannel(chatKeyForMessagePayload(p), p.message_id);
-      }
-      if (ev.type === 'message_reaction') {
-        const chatKey = chatKeyForMessagePayload(p);
-        const msg = chatMessageState().getChannelMessage(chatKey, p.message_id);
-        if (msg) {
-          msg.reactions = Array.isArray(msg.reactions) ? msg.reactions.filter(r => Number(r.participant_id) !== Number(p.participant_id)) : [];
-          if (!p.removed) msg.reactions.push({ participant_id: p.participant_id, user_id: p.user_id, emoji: p.emoji, display_name: p.display_name, avatar_url: p.avatar_url });
-          updateMessageInChannel(chatKey, p.message_id, { reactions: msg.reactions });
-        }
-      }
+      if (chatEventRouter().routeCommunityEvent(ev)) return;
       if (ev.type === 'link_typing') {
         const partnerId = p.participant_id;
         if (activeChat === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(p.participant_id, p.active);

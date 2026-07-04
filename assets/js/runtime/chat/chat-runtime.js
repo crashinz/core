@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-B adds message rendering ownership.
+ *      Build 000022-C adds incoming chat event routing ownership.
  *
  * Build:
- *      000022-B
+ *      000022-C
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -30,6 +30,9 @@
  *
  * Build 000022-B
  * - Added ChatMessageRenderer ownership and diagnostics.
+ *
+ * Build 000022-C
+ * - Added ChatEventRouter ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -56,6 +59,12 @@ import {
 
 } from "./renderers/chat-message-renderer.js";
 
+import {
+
+    ChatEventRouter
+
+} from "./routing/chat-event-router.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -80,6 +89,11 @@ export class ChatRuntime extends CoreModule {
      * Message renderer runtime component.
      */
     #renderer = null;
+
+    /**
+     * Event router runtime component.
+     */
+    #events = null;
 
     //--------------------------------------------------
     // Constructor
@@ -135,6 +149,18 @@ export class ChatRuntime extends CoreModule {
 
     }
 
+    /**
+     * Returns the Chat Event Router.
+     *
+     * @returns {ChatEventRouter}
+     *         Event router runtime component.
+     */
+    get events() {
+
+        return this.#events;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -156,13 +182,16 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-B",
+                "000022-C",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
 
             renderer:
-                this.#renderer?.getDiagnostics() ?? null
+                this.#renderer?.getDiagnostics() ?? null,
+
+            events:
+                this.#events?.getDiagnostics() ?? null
 
         });
 
@@ -181,6 +210,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createRenderer();
 
+        this.#createEvents();
+
     }
 
     /**
@@ -189,6 +220,8 @@ export class ChatRuntime extends CoreModule {
     onDestroy() {
 
         this.#renderer?.destroy();
+
+        this.#events?.destroy();
 
         this.#messages?.destroy();
 
@@ -223,6 +256,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#renderer.initialize();
+
+    }
+
+    /**
+     * Creates the event router runtime component.
+     */
+    #createEvents() {
+
+        this.#events =
+            new ChatEventRouter(
+                this
+            );
+
+        this.#events.initialize();
 
     }
 
