@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-H adds non-game typing workflow ownership.
+ *      Build 000022-I adds outgoing media message send workflow ownership.
  *
  * Build:
- *      000022-H
+ *      000022-I
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -48,6 +48,9 @@
  *
  * Build 000022-H
  * - Added ChatTypingService ownership and diagnostics.
+ *
+ * Build 000022-I
+ * - Added ChatMediaSendService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -110,6 +113,12 @@ import {
 
 } from "./services/chat-typing-service.js";
 
+import {
+
+    ChatMediaSendService
+
+} from "./services/chat-media-send-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -149,6 +158,11 @@ export class ChatRuntime extends CoreModule {
      * Composer send workflow runtime component.
      */
     #composer = null;
+
+    /**
+     * Media send workflow runtime component.
+     */
+    #mediaSend = null;
 
     /**
      * Message renderer runtime component.
@@ -256,6 +270,18 @@ export class ChatRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Chat Media Send Service.
+     *
+     * @returns {ChatMediaSendService}
+     *         Media send workflow runtime component.
+     */
+    get mediaSend() {
+
+        return this.#mediaSend;
+
+    }
+
+    /**
      * Returns the Chat Message Renderer.
      *
      * @returns {ChatMessageRenderer}
@@ -312,7 +338,7 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-H",
+                "000022-I",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
@@ -328,6 +354,9 @@ export class ChatRuntime extends CoreModule {
 
             composer:
                 this.#composer?.getDiagnostics() ?? null,
+
+            mediaSend:
+                this.#mediaSend?.getDiagnostics() ?? null,
 
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
@@ -361,6 +390,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createComposer();
 
+        this.#createMediaSend();
+
         this.#createRenderer();
 
         this.#createEvents();
@@ -379,6 +410,8 @@ export class ChatRuntime extends CoreModule {
         this.#events?.destroy();
 
         this.#renderer?.destroy();
+
+        this.#mediaSend?.destroy();
 
         this.#composer?.destroy();
 
@@ -463,6 +496,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#composer.initialize();
+
+    }
+
+    /**
+     * Creates the media send workflow runtime component.
+     */
+    #createMediaSend() {
+
+        this.#mediaSend =
+            new ChatMediaSendService(
+                this
+            );
+
+        this.#mediaSend.initialize();
 
     }
 

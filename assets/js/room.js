@@ -230,6 +230,7 @@ async function initializeAvatarRuntime() {
   configureChatReply();
   configureChatTyping();
   configureChatComposer();
+  configureChatMediaSend();
 
   return avatarRuntime;
 }
@@ -350,6 +351,29 @@ function configureChatComposer() {
     renderMessage,
     showDmFlight,
     stopTypingNow,
+    alertError(error) {
+      alert(error.message || error);
+    },
+  });
+}
+
+function configureChatMediaSend() {
+  chatRuntime?.mediaSend?.configure({
+    apiPost,
+    apiUpload,
+    getConfig: () => cfg,
+    getActiveChat: () => activeChat,
+    channelForApi,
+    activeLinkPartnerId,
+    activeDmUserId,
+    addMessageToChannel,
+    renderMessage,
+    showDmFlight,
+    gameChatKey,
+    switchChat,
+    createFormData() {
+      return new FormData();
+    },
     alertError(error) {
       alert(error.message || error);
     },
@@ -1244,6 +1268,10 @@ function chatTyping() {
 
 function chatComposer() {
   return chatRuntime?.composer;
+}
+
+function chatMediaSend() {
+  return chatRuntime?.mediaSend;
 }
 
 function channelMapFor(chatKey = activeChat) {
@@ -3277,44 +3305,11 @@ document.getElementById('chat-input').addEventListener('keydown', e => {
 document.getElementById('reply-draft-cancel')?.addEventListener('click', clearReplyDraft);
 
 function addUploadedChatMessage(msg) {
-  if (msg.channel === 'community') {
-    addMessageToChannel(msg, 'community', false);
-    return;
-  }
-  if (msg.channel === 'link') {
-    const partnerId = activeLinkPartnerId();
-    addMessageToChannel(msg, partnerId ? `link:${partnerId}` : activeChat, false);
-    return;
-  }
-  if (msg.channel === 'dm') {
-    const dmUserId = Number(msg.partner_user_id || msg.target_user_id || activeDmUserId());
-    addMessageToChannel(msg, dmUserId ? `dm:${dmUserId}` : activeChat, false);
-    showDmFlight(msg);
-    return;
-  }
-  if (msg.channel === 'game') {
-    addMessageToChannel(msg, gameChatKey(msg.lobby_code), false);
-    return;
-  }
-  renderMessage(msg, true);
+  chatMediaSend().routeUploadedMessage(msg);
 }
 
 function uploadChatFile(file) {
-  const formData = new FormData();
-  formData.append('session_id', cfg.sessionId);
-  formData.append('join_token', cfg.myJoinToken);
-  formData.append('channel', channelForApi(activeChat));
-  const partnerId = activeLinkPartnerId();
-  const dmUserId = activeDmUserId();
-  if (partnerId) formData.append('target_participant_id', String(partnerId));
-  if (dmUserId) formData.append('target_user_id', String(dmUserId));
-  if (activeChat.startsWith('game:')) formData.append('lobby_code', activeChat.slice(5));
-  appendReplyFormData(formData);
-  formData.append('file', file);
-  return apiUpload('/api/files.php', formData).then(msg => {
-    clearReplyDraft();
-    addUploadedChatMessage(msg);
-  });
+  return chatMediaSend().sendFile(file, activeChat);
 }
 
 chatFileInput.addEventListener('change', () => {
@@ -3379,23 +3374,7 @@ async function startVoiceNote() {
     if (voiceNoteCancelled || !chunks.length) return;
     const type = chunks[0].type || 'audio/webm';
     const blob = new Blob(chunks, { type });
-    const formData = new FormData();
-    formData.append('session_id', cfg.sessionId);
-    formData.append('join_token', cfg.myJoinToken);
-    formData.append('channel', channelForApi(activeChat));
-    const partnerId = activeLinkPartnerId();
-    const dmUserId = activeDmUserId();
-    if (partnerId) formData.append('target_participant_id', String(partnerId));
-    if (dmUserId) formData.append('target_user_id', String(dmUserId));
-    if (activeChat.startsWith('game:')) formData.append('lobby_code', activeChat.slice(5));
-    appendReplyFormData(formData);
-    formData.append('audio', blob, 'voice-note.webm');
-    apiUpload('/api/files.php', formData)
-      .then(msg => {
-        clearReplyDraft();
-        addUploadedChatMessage(msg);
-      })
-      .catch(err => alert(err.message || err));
+    chatMediaSend().sendVoiceNote(blob, activeChat);
   });
   voiceNoteRecorder.start();
 }
@@ -3859,28 +3838,7 @@ mediaSearchInput?.addEventListener('input', e => {
 
 async function sendGif(result) {
   closeMediaPicker();
-  const payload = appendReplyPayload({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'gif', gif_url: result.url, title: result.title || 'GIF', channel: activeChat });
-  const partnerId = activeLinkPartnerId();
-  const dmUserId = activeDmUserId();
-  if (partnerId) {
-    payload.channel = 'link';
-    payload.target_participant_id = partnerId;
-  } else if (dmUserId) {
-    payload.channel = 'dm';
-    payload.target_user_id = dmUserId;
-  }
-  try {
-    const msg = await apiPost('/api/messages.php', payload);
-    clearReplyDraft();
-    if (msg.channel === 'community') addMessageToChannel(msg, 'community', false);
-    else if (msg.channel === 'link') addMessageToChannel(msg, `link:${partnerId}`, false);
-    else if (msg.channel === 'dm') {
-      addMessageToChannel(msg, `dm:${dmUserId}`, false);
-      showDmFlight(msg);
-    } else renderMessage(msg, true);
-  } catch (err) {
-    alert(err.message || err);
-  }
+  await chatMediaSend().sendGif(result, activeChat);
 }
 
 function currentGestureQuery() {
@@ -4160,15 +4118,7 @@ function toggleGestureAudio(gesture, btn) {
 
 async function sendGesture(gesture) {
   closeMediaPicker();
-  const payload = appendReplyPayload({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'gesture', gesture_id: gesture.id, channel: 'room' });
-  try {
-    const msg = await apiPost('/api/messages.php', payload);
-    clearReplyDraft();
-    switchChat('room');
-    renderMessage(msg, true);
-  } catch (err) {
-    alert(err.message || err);
-  }
+  await chatMediaSend().sendGesture(gesture, activeChat);
 }
 
 document.addEventListener('click', e => {
