@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-C adds incoming chat event routing ownership.
+ *      Build 000022-D adds outgoing message action workflow ownership.
  *
  * Build:
- *      000022-C
+ *      000022-D
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -33,6 +33,9 @@
  *
  * Build 000022-C
  * - Added ChatEventRouter ownership and diagnostics.
+ *
+ * Build 000022-D
+ * - Added ChatMessageActionService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -65,6 +68,12 @@ import {
 
 } from "./routing/chat-event-router.js";
 
+import {
+
+    ChatMessageActionService
+
+} from "./services/chat-message-action-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -94,6 +103,11 @@ export class ChatRuntime extends CoreModule {
      * Event router runtime component.
      */
     #events = null;
+
+    /**
+     * Message action runtime component.
+     */
+    #actions = null;
 
     //--------------------------------------------------
     // Constructor
@@ -161,6 +175,18 @@ export class ChatRuntime extends CoreModule {
 
     }
 
+    /**
+     * Returns the Chat Message Action Service.
+     *
+     * @returns {ChatMessageActionService}
+     *         Message action runtime component.
+     */
+    get actions() {
+
+        return this.#actions;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -182,7 +208,7 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-C",
+                "000022-D",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
@@ -191,7 +217,10 @@ export class ChatRuntime extends CoreModule {
                 this.#renderer?.getDiagnostics() ?? null,
 
             events:
-                this.#events?.getDiagnostics() ?? null
+                this.#events?.getDiagnostics() ?? null,
+
+            actions:
+                this.#actions?.getDiagnostics() ?? null
 
         });
 
@@ -212,6 +241,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createEvents();
 
+        this.#createActions();
+
     }
 
     /**
@@ -219,9 +250,11 @@ export class ChatRuntime extends CoreModule {
      */
     onDestroy() {
 
-        this.#renderer?.destroy();
+        this.#actions?.destroy();
 
         this.#events?.destroy();
+
+        this.#renderer?.destroy();
 
         this.#messages?.destroy();
 
@@ -270,6 +303,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#events.initialize();
+
+    }
+
+    /**
+     * Creates the message action runtime component.
+     */
+    #createActions() {
+
+        this.#actions =
+            new ChatMessageActionService(
+                this
+            );
+
+        this.#actions.initialize();
 
     }
 

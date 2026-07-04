@@ -228,6 +228,7 @@ async function initializeAvatarRuntime() {
   participants = avatarRuntime.state;
   configureChatMessageRenderer();
   configureChatEventRouter();
+  configureChatMessageActions();
 
   return avatarRuntime;
 }
@@ -282,6 +283,18 @@ function configureChatEventRouter() {
       }
       renderLinkTabs();
     },
+  });
+}
+
+function configureChatMessageActions() {
+  chatRuntime?.actions?.configure({
+    apiPost,
+    getConfig: () => cfg,
+    channelForApi,
+    updateMessageInChannel,
+    updateMessageInChannels,
+    removeMessageFromChannel,
+    showWarning,
   });
 }
 
@@ -1153,6 +1166,10 @@ function chatMessageRenderer() {
 
 function chatEventRouter() {
   return chatRuntime?.events;
+}
+
+function chatMessageActions() {
+  return chatRuntime?.actions;
 }
 
 function channelMapFor(chatKey = activeChat) {
@@ -4284,18 +4301,11 @@ document.getElementById('text-paste').addEventListener('click', async () => {
 });
 
 async function applyReaction(messageId, emoji, chatKey = activeChat) {
-  if (!messageId || !emoji) return;
-  await apiPost('/api/reactions.php', {
-    session_id: cfg.sessionId,
-    join_token: cfg.myJoinToken,
-    message_id: Number(messageId),
-    channel: channelForApi(chatKey),
-    emoji,
-  }).catch(err => showWarning(err.message || 'Reaction failed.'));
+  await chatMessageActions().applyReaction(messageId, emoji, chatKey);
 }
 
 function currentActiveMessage(messageId = msgActionTargetId, chatKey = msgActionTargetChat || activeChat) {
-  return chatMessageState().getMessageForChat(chatKey, messageId);
+  return chatMessageActions().currentMessage(messageId, chatKey);
 }
 
 document.querySelectorAll('[data-msg-reaction]').forEach(btn => {
@@ -4344,21 +4354,7 @@ function startInlineEdit(msg, chatKey = activeChat) {
 }
 
 async function saveInlineEdit(msg, input, chatKey = activeChat) {
-  const content = input.value.trim();
-  if (!content) return;
-  try {
-    const updated = await apiPost('/api/messages.php', {
-      action: 'edit',
-      session_id: cfg.sessionId,
-      join_token: cfg.myJoinToken,
-      message_id: msg.id,
-      channel: channelForApi(chatKey),
-      content,
-    });
-    updateMessageInChannel(chatKey, msg.id, { content, url_preview: updated.url_preview || null, edited_at: updated.edited_at || new Date().toISOString() });
-  } catch (err) {
-    showWarning(err.message || 'Could not edit message.');
-  }
+  await chatMessageActions().saveInlineEdit(msg, input.value, chatKey);
 }
 
 document.getElementById('msg-delete-action')?.addEventListener('click', async () => {
@@ -4388,22 +4384,7 @@ document.getElementById('delete-message-confirm')?.addEventListener('click', asy
     return;
   }
   closeDeleteMessageModal();
-  try {
-    const deleted = await apiPost('/api/messages.php', {
-      action: 'delete',
-      session_id: cfg.sessionId,
-      join_token: cfg.myJoinToken,
-      message_id: msg.id,
-      channel: channelForApi(chatKey),
-    });
-    if (chatKey === 'room' && cfg.canModerateMessages) {
-      updateMessageInChannels(msg.id, { is_deleted: true, deleted_at: deleted.deleted_at || new Date().toISOString() });
-    } else {
-      removeMessageFromChannel(chatKey, msg.id);
-    }
-  } catch (err) {
-    showWarning(err.message || 'Could not delete message.');
-  }
+  await chatMessageActions().deleteMessage(msg, chatKey);
 });
 
 function unlinkCurrentPartner() {
