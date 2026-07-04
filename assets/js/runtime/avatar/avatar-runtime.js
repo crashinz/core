@@ -20,7 +20,7 @@
  *      does not directly implement avatar behavior.
  *
  * Build:
- *      000023
+ *      000024
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -53,6 +53,9 @@
  *
  * Build 000023
  * - Added Avatar Coordinator relationship lifecycle ownership and diagnostics.
+ *
+ * Build 000024
+ * - Added Avatar Drag Controller ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -116,6 +119,12 @@ import {
 
 } from "./coordinators/avatar-coordinator.js";
 
+import {
+
+    AvatarDragController
+
+} from "./controllers/avatar-drag-controller.js";
+
 //--------------------------------------------------
 // Avatar Runtime
 //--------------------------------------------------
@@ -170,6 +179,11 @@ export class AvatarRuntime extends CoreModule {
      * Coordinator runtime component.
      */
     #coordinator = null;
+
+    /**
+     * Drag controller runtime component.
+     */
+    #drag = null;
 
     //--------------------------------------------------
     // Constructor
@@ -289,6 +303,18 @@ export class AvatarRuntime extends CoreModule {
 
     }
 
+    /**
+     * Returns the Avatar Drag Controller.
+     *
+     * @returns {AvatarDragController}
+     *         Drag controller runtime component.
+     */
+    get drag() {
+
+        return this.#drag;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -331,7 +357,10 @@ export class AvatarRuntime extends CoreModule {
                 this.#effects?.getDiagnostics() ?? null,
 
             coordinator:
-                this.#coordinator?.getDiagnostics() ?? null
+                this.#coordinator?.getDiagnostics() ?? null,
+
+            drag:
+                this.#drag?.getDiagnostics() ?? null
 
         });
 
@@ -363,6 +392,8 @@ export class AvatarRuntime extends CoreModule {
 
         this.#createCoordinator();
 
+        this.#createDrag();
+
     }
 
     /**
@@ -389,6 +420,8 @@ export class AvatarRuntime extends CoreModule {
      * Releases resources owned by the runtime.
      */
     onDestroy() {
+
+        this.#drag?.destroy();
 
         this.#coordinator?.destroy();
 
@@ -505,6 +538,20 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#coordinator.initialize();
+
+    }
+
+    /**
+     * Creates the Drag Controller runtime component.
+     */
+    #createDrag() {
+
+        this.#drag =
+            new AvatarDragController(
+                this
+            );
+
+        this.#drag.initialize();
 
     }
 

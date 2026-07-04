@@ -204,6 +204,15 @@ Owns:
 
 - pointer interaction
 - drag lifecycle
+- active drag state
+- drag-to-link target detection
+- drag completion sequencing
+
+Delegates:
+
+- relationship lifecycle sequencing to AvatarCoordinator
+- layout calculation to AvatarLayoutService through AvatarCoordinator
+- rendering synchronization to AvatarRenderer through AvatarCoordinator
 
 ---
 

@@ -209,6 +209,7 @@ async function initializeAvatarRuntime() {
 
   participants = avatarRuntime.state;
   configureAvatarCoordinator();
+  configureAvatarDragController();
   configureChatMessageRenderer();
   configureChatPrivateChats();
   configureChatEventRouter();
@@ -317,6 +318,17 @@ function configureAvatarCoordinator() {
     showWarning,
     alertError(error) {
       alert(error.message || error);
+    },
+  });
+}
+
+function configureAvatarDragController() {
+  avatarRuntime?.drag?.configure({
+    getConfig: () => cfg,
+    stageElement: () => roomStage,
+    isUserBlocked,
+    requestAnimationFrame(callback) {
+      return requestAnimationFrame(callback);
     },
   });
 }
@@ -1839,106 +1851,7 @@ async function completePendingLinkChoice(mode) {
 }
 
 function makeDraggable(img) {
-  let dragging = false;
-  let linkBrokenThisDrag = false;
-  let offX = 0;
-  let offY = 0;
-  function move(clientX, clientY) {
-    const rect = roomStage.getBoundingClientRect();
-    const x = Math.max(0, Math.min(rect.width - img.offsetWidth, clientX - rect.left - offX));
-    const y = Math.max(0, Math.min(rect.height - img.offsetHeight, clientY - rect.top - offY));
-    const p = participants.get(cfg.myParticipantId);
-    if (!linkBrokenThisDrag && p?.linked_to) {
-      linkBrokenThisDrag = true;
-      avatarRuntime?.coordinator?.breakRelationshipForDrag(p);
-    }
-
-    const group = img._dragGroup || [p];
-    const baseX = x / rect.width;
-    const baseY = y / rect.height;
-    const spacing = img.offsetWidth / rect.width;
-
-    avatarRuntime?.coordinator?.applyDragGroupMove({
-      participant: p,
-      group,
-      baseX,
-      baseY,
-      spacing,
-      relationshipBroken: linkBrokenThisDrag,
-    });
-  }
-  img.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-	
-    dragging = true;
-    linkBrokenThisDrag = false;
-
-    const p = participants.get(cfg.myParticipantId);
-    const id = p?.id;
-    img._dragGroup = avatarRuntime?.coordinator?.linkedGroupForParticipant(id) || [p];
-    img._dragOrigin = { x: e.clientX, y: e.clientY };
-    offX = e.clientX - img.getBoundingClientRect().left;
-    offY = e.clientY - img.getBoundingClientRect().top;
-    img.setPointerCapture(e.pointerId);
-    img.style.cursor = 'grabbing';
-  });
-  img.addEventListener('pointermove', e => {
-    if (!dragging || !img._dragGroup) return;
-    img._dragOrigin = { x: e.clientX, y: e.clientY };
-  });
-  img.addEventListener('pointerup', e => {
-    dragging = false;
-    img.style.cursor = 'grab';
-
-    const p = participants.get(cfg.myParticipantId);
-    if (!p) {
-      img._dragGroup = null;
-      img._dragOrigin = null;
-      return;
-    }
-
-    if (linkBrokenThisDrag) {
-      linkBrokenThisDrag = false;
-    }
-
-    const myRect = img.getBoundingClientRect();
-    const myCenter = {
-      x: myRect.left + myRect.width / 2,
-      y: myRect.top + myRect.height / 2
-    };
-
-    let target = null;
-
-    participants.forEach(other => {
-      if (other.id === p.id || !other.avatarEl) return;
-
-      const r = other.avatarEl.getBoundingClientRect();
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-
-      const dist = Math.hypot(myCenter.x - cx, myCenter.y - cy);
-
-      if (dist < 120 && !isUserBlocked(other.user_id)) {
-        target = other;
-      }
-    });
-
-    requestAnimationFrame(() => {
-      const pLatest = participants.get(cfg.myParticipantId);
-      if (!pLatest || !target) return;
-
-      const freshTarget = participants.get(target.id);
-      if (!freshTarget) return;
-
-      avatarRuntime?.coordinator?.requestLinkChoiceForDrag(pLatest, freshTarget);
-
-    });
-    	
-    img._dragGroup = null;
-    img._dragOrigin = null;
-    
-    avatarRuntime?.coordinator?.persistDragEnd(p);
-  });
+  avatarRuntime?.drag?.attachDraggable(img);
 }
 
 function rebuildLinkGroups() {
