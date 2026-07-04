@@ -144,8 +144,6 @@ const closedDmUserIds = new Set();
 const linkIcons = new Map();
 const stageLinkEls = new Map();
 const blockedUserIds = new Set();
-let typingActive = false;
-let typingStopTimer = null;
 let voiceNoteRecorder = null;
 let voiceNoteChunks = [];
 let voiceNoteStream = null;
@@ -230,6 +228,7 @@ async function initializeAvatarRuntime() {
   configureChatMessageActions();
   configureChatUnread();
   configureChatReply();
+  configureChatTyping();
   configureChatComposer();
 
   return avatarRuntime;
@@ -319,6 +318,24 @@ function configureChatReply() {
     },
     onReplyDraftChange() {
       renderReplyDraft();
+    },
+  });
+}
+
+function configureChatTyping() {
+  chatRuntime?.typing?.configure({
+    apiPost,
+    getConfig: () => cfg,
+    getActiveChat: () => activeChat,
+    getParticipants: () => participants,
+    activeLinkPartnerId,
+    isUserBlocked,
+    positionAvatar,
+    syncTyping(participant, active) {
+      return avatarRuntime?.renderer?.syncTyping(participant, active, {
+        stage: roomStage,
+        document,
+      });
     },
   });
 }
@@ -1219,6 +1236,10 @@ function chatUnread() {
 
 function chatReply() {
   return chatRuntime?.reply;
+}
+
+function chatTyping() {
+  return chatRuntime?.typing;
 }
 
 function chatComposer() {
@@ -3110,20 +3131,7 @@ async function poll() {
 }
 
 function showTyping(participantId, active) {
-  const p = participants.get(participantId);
-  if (!p) return;
-  if (isUserBlocked(p.user_id)) return;
-  if (!active) {
-    avatarRuntime?.renderer?.syncTyping(p, false);
-    participants.clearTypingTimer(participantId);
-    return;
-  }
-  avatarRuntime?.renderer?.syncTyping(p, true, {
-    stage: roomStage,
-    document,
-  });
-  positionAvatar(p);
-  participants.setTypingTimer(participantId, setTimeout(() => showTyping(participantId, false), 3500));
+  chatTyping().showTyping(participantId, active);
 }
 
 function clearAvatarSpeech(participantId, person) {
@@ -3244,23 +3252,11 @@ function showAvatarSpeech(participantId, msg) {
 }
 
 function sendTyping(active) {
-  if (activeChat === 'community') return Promise.resolve();
-  const payload = { session_id: cfg.sessionId, join_token: cfg.myJoinToken, active, channel: activeChat };
-  const partnerId = activeLinkPartnerId();
-  if (partnerId) {
-    payload.channel = 'link';
-    payload.target_participant_id = partnerId;
-  }
-  return apiPost('/api/typing.php', payload).catch(() => {});
+  return chatTyping().sendTyping(active, activeChat);
 }
 
 function stopTypingNow() {
-  clearTimeout(typingStopTimer);
-  if (typingActive) {
-    typingActive = false;
-    showTyping(cfg.myParticipantId, false);
-    sendTyping(false);
-  }
+  chatTyping().stopTypingNow();
 }
 
 document.getElementById('chat-input').addEventListener('input', () => {
@@ -3269,17 +3265,7 @@ document.getElementById('chat-input').addEventListener('input', () => {
     handleGameTypingInput();
     return;
   }
-  if (activeChat === 'community' || activeChat.startsWith('dm:')) {
-    stopTypingNow();
-    return;
-  }
-  if (!typingActive) {
-    typingActive = true;
-    showTyping(cfg.myParticipantId, true);
-    sendTyping(true);
-  }
-  clearTimeout(typingStopTimer);
-  typingStopTimer = setTimeout(stopTypingNow, 1400);
+  chatTyping().handleComposerInput(activeChat);
 });
 
 document.getElementById('chat-input').addEventListener('keydown', e => {

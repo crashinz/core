@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-G adds non-game text composer send workflow ownership.
+ *      Build 000022-H adds non-game typing workflow ownership.
  *
  * Build:
- *      000022-G
+ *      000022-H
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -45,6 +45,9 @@
  *
  * Build 000022-G
  * - Added ChatComposerService ownership and diagnostics.
+ *
+ * Build 000022-H
+ * - Added ChatTypingService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -101,6 +104,12 @@ import {
 
 } from "./services/chat-composer-service.js";
 
+import {
+
+    ChatTypingService
+
+} from "./services/chat-typing-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -130,6 +139,11 @@ export class ChatRuntime extends CoreModule {
      * Reply draft runtime component.
      */
     #reply = null;
+
+    /**
+     * Typing workflow runtime component.
+     */
+    #typing = null;
 
     /**
      * Composer send workflow runtime component.
@@ -218,6 +232,18 @@ export class ChatRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Chat Typing Service.
+     *
+     * @returns {ChatTypingService}
+     *         Typing workflow runtime component.
+     */
+    get typing() {
+
+        return this.#typing;
+
+    }
+
+    /**
      * Returns the Chat Composer Service.
      *
      * @returns {ChatComposerService}
@@ -286,7 +312,7 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-G",
+                "000022-H",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
@@ -296,6 +322,9 @@ export class ChatRuntime extends CoreModule {
 
             reply:
                 this.#reply?.getDiagnostics() ?? null,
+
+            typing:
+                this.#typing?.getDiagnostics() ?? null,
 
             composer:
                 this.#composer?.getDiagnostics() ?? null,
@@ -328,6 +357,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createReply();
 
+        this.#createTyping();
+
         this.#createComposer();
 
         this.#createRenderer();
@@ -350,6 +381,8 @@ export class ChatRuntime extends CoreModule {
         this.#renderer?.destroy();
 
         this.#composer?.destroy();
+
+        this.#typing?.destroy();
 
         this.#reply?.destroy();
 
@@ -402,6 +435,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#reply.initialize();
+
+    }
+
+    /**
+     * Creates the typing workflow runtime component.
+     */
+    #createTyping() {
+
+        this.#typing =
+            new ChatTypingService(
+                this
+            );
+
+        this.#typing.initialize();
 
     }
 
