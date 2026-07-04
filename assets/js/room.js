@@ -111,7 +111,6 @@ const sessionLockError = document.getElementById('session-lock-error');
 let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastLatencyMs = null;
-let activeChat = 'room';
 let ctxMenuParticipantId = null;
 let hostModalTargetParticipantId = null;
 let msgActionTargetId = null;
@@ -218,6 +217,7 @@ async function initializeAvatarRuntime() {
   configureChatEventRouter();
   configureChatMessageActions();
   configureChatUnread();
+  configureChatNavigation();
   configureChatReply();
   configureChatTyping();
   configureChatComposer();
@@ -236,7 +236,7 @@ function configureChatMessageRenderer() {
     messagesElement: messagesEl,
     getConfig: () => cfg,
     getParticipants: () => participants,
-    getActiveChat: () => activeChat,
+    getActiveChat: () => activeChatKey(),
     esc,
     mediaUrl,
     isHttpUrl,
@@ -257,7 +257,7 @@ function configureChatPrivateChats() {
   chatRuntime?.privateChats?.configure({
     apiPost,
     getConfig: () => cfg,
-    getActiveChat: () => activeChat,
+    getActiveChat: () => activeChatKey(),
     channelForApi,
     clearUnread,
     renderActiveChat,
@@ -274,7 +274,7 @@ function configureChatPrivateChats() {
 function configureChatEventRouter() {
   chatRuntime?.events?.configure({
     getConfig: () => cfg,
-    getActiveChat: () => activeChat,
+    getActiveChat: () => activeChatKey(),
     activeLinkPartnerId,
     linkPartnerIdFromKey,
     dmPartnerIdFromPayload,
@@ -308,6 +308,33 @@ function configureChatUnread() {
   });
 }
 
+function configureChatNavigation() {
+  chatRuntime?.navigation?.configure({
+    clearUnread,
+    stopTypingNow,
+    stopGameTypingNow,
+    clearReplyDraft,
+    setGameLayerVisibility,
+    renderMessagesForChat(chatKey) {
+      chatMessageRenderer().renderActiveChat(chatKey);
+    },
+    updateComposerPlaceholder,
+    renderReplyDraft,
+    syncActiveTabs(chatKey) {
+      document.querySelectorAll('.chat-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.chatTab === chatKey);
+      });
+    },
+    isLinkChatAvailable(chatKey) {
+      const partnerId = Number(String(chatKey || '').slice(5));
+      return Boolean(partnerId && participants.has(partnerId) && linkedPartner()?.id === partnerId);
+    },
+    isGameChatAvailable(chatKey) {
+      return Boolean(activeGame && chatKey === gameChatKey(activeGame.lobby_code));
+    },
+  });
+}
+
 function configureChatReply() {
   chatRuntime?.reply?.configure({
     channelForApi,
@@ -328,7 +355,7 @@ function configureChatTyping() {
   chatRuntime?.typing?.configure({
     apiPost,
     getConfig: () => cfg,
-    getActiveChat: () => activeChat,
+    getActiveChat: () => activeChatKey(),
     getParticipants: () => participants,
     activeLinkPartnerId,
     isUserBlocked,
@@ -363,7 +390,7 @@ function configureChatMediaSend() {
     apiPost,
     apiUpload,
     getConfig: () => cfg,
-    getActiveChat: () => activeChat,
+    getActiveChat: () => activeChatKey(),
     channelForApi,
     activeLinkPartnerId,
     activeDmUserId,
@@ -1216,11 +1243,11 @@ function showHostNotice(title, message, redirectToLobby = false) {
 }
 
 function activeLinkPartnerId() {
-  return chatPrivateChats().activeLinkPartnerId(activeChat);
+  return chatPrivateChats().activeLinkPartnerId(activeChatKey());
 }
 
 function activeDmUserId() {
-  return chatPrivateChats().activeDmUserId(activeChat);
+  return chatPrivateChats().activeDmUserId(activeChatKey());
 }
 
 function linkKeyFor(a, b) {
@@ -1313,15 +1340,23 @@ function chatGameChat() {
   return chatRuntime?.gameChat;
 }
 
+function chatNavigation() {
+  return chatRuntime?.navigation;
+}
+
 function chatPoll() {
   return chatRuntime?.poll;
 }
 
-function channelMapFor(chatKey = activeChat) {
+function activeChatKey() {
+  return chatNavigation()?.activeChat() || 'room';
+}
+
+function channelMapFor(chatKey = activeChatKey()) {
   return chatMessageState().channelMapFor(chatKey);
 }
 
-function channelForApi(chatKey = activeChat) {
+function channelForApi(chatKey = activeChatKey()) {
   return chatMessageState().channelForApi(chatKey);
 }
 
@@ -1337,7 +1372,7 @@ function chatKeyForMessagePayload(payload) {
   return chatEventRouter().chatKeyForMessagePayload(payload);
 }
 
-function chatLabel(chatKey = activeChat) {
+function chatLabel(chatKey = activeChatKey()) {
   if (chatKey === 'room') return 'Chat Room';
   if (chatKey === 'community') return 'Community Chat';
   if (chatKey.startsWith('dm:')) {
@@ -1365,6 +1400,7 @@ function rememberDirectMessageUser(partnerUserId, payload) {
 function updateComposerPlaceholder() {
   const input = document.getElementById('chat-input');
   if (!input) return;
+  const activeChat = activeChatKey();
   if (activeChat === 'room') input.placeholder = `Message ${cfg.roomName || 'room'}`;
   else input.placeholder = `Message ${chatLabel(activeChat)}`;
 }
@@ -2070,7 +2106,7 @@ function renderLinkTabs() {
   renderGameTab(holder);
   const partner = linkedPartner();
   if (!partner) {
-    if (activeChat.startsWith('link:')) switchChat('room');
+    if (activeChatKey().startsWith('link:')) switchChat('room');
     renderDmTabs();
     updateTabBadges();
     return;
@@ -2085,13 +2121,13 @@ function renderLinkTabs() {
   renderDmTabs();
   updateTabBadges();
   document.querySelectorAll('.chat-tab').forEach(item => {
-    item.classList.toggle('active', item.dataset.chatTab === activeChat);
+    item.classList.toggle('active', item.dataset.chatTab === activeChatKey());
   });
 }
 
 function renderGameTab(holder = document.getElementById('link-tabs')) {
   if (!holder || !activeGame) {
-    if (activeChat.startsWith('game:')) switchChat('room');
+    if (activeChatKey().startsWith('game:')) switchChat('room');
     return;
   }
   const chatKey = `game:${activeGame.lobby_code}`;
@@ -2135,14 +2171,7 @@ function clearUnread(chatKey) {
 }
 
 function switchChat(chatKey) {
-  clearUnread(chatKey);
-  if (chatKey === activeChat) return;
-  stopTypingNow();
-  stopGameTypingNow();
-  clearReplyDraft();
-  activeChat = chatKey;
-  setGameLayerVisibility();
-  renderActiveChat();
+  chatNavigation().switchChat(chatKey);
 }
 
 document.querySelectorAll('.chat-tab[data-chat-tab]').forEach(tab => {
@@ -2170,17 +2199,12 @@ messagesEl.addEventListener('scroll', () => {
 });
 
 function renderActiveChat() {
-  clearUnread(activeChat);
-  chatMessageRenderer().renderActiveChat(activeChat);
-  updateComposerPlaceholder();
-  renderReplyDraft();
-  document.querySelectorAll('.chat-tab').forEach(tab => {
-    tab.classList.toggle('active', tab.dataset.chatTab === activeChat);
-  });
+  chatNavigation().renderActiveChat();
 }
 
 function addMessageToChannel(msg, chatKey, live = false) {
   if (!messageVisible(msg)) return;
+  const activeChat = activeChatKey();
   const result = chatMessageState().addMessageToChannel(msg, chatKey);
   const existing = result.existing;
   const storedMessage = result.message || msg;
@@ -2208,19 +2232,19 @@ function addMessageToChannel(msg, chatKey, live = false) {
 
 function updateMessageInChannels(messageId, changes) {
   chatMessageState().updateRoomMessage(messageId, changes);
-  if (activeChat === 'room') renderActiveChat();
+  if (activeChatKey() === 'room') renderActiveChat();
 }
 
 function removeMessageFromChannels(messageId) {
   chatMessageState().removeRoomMessage(messageId);
-  if (activeChat === 'room') renderActiveChat();
+  if (activeChatKey() === 'room') renderActiveChat();
 }
 
 function animateRoomHistoryClear() {
-  if (activeChat !== 'room') return;
+  if (activeChatKey() !== 'room') return;
   chatMessageRenderer().animateRoomHistoryClear({
     onRender() {
-      if (activeChat === 'room') renderActiveChat();
+      if (activeChatKey() === 'room') renderActiveChat();
     },
   });
 }
@@ -2231,17 +2255,17 @@ function handleRoomHistoryClear(payload = {}) {
   seenRoomHistoryClears.add(clearId);
   chatMessageState().clearRoomMessages();
   clearUnread('room');
-  if (activeChat === 'room') animateRoomHistoryClear();
+  if (activeChatKey() === 'room') animateRoomHistoryClear();
 }
 
 function updateMessageInChannel(chatKey, messageId, changes) {
   chatMessageState().updateMessageInChannel(chatKey, messageId, changes);
-  if (chatKey === activeChat) renderActiveChat();
+  if (chatKey === activeChatKey()) renderActiveChat();
 }
 
 function removeMessageFromChannel(chatKey, messageId) {
   chatMessageState().removeMessageFromChannel(chatKey, messageId);
-  if (chatKey === activeChat) renderActiveChat();
+  if (chatKey === activeChatKey()) renderActiveChat();
 }
 
 function formatBytes(bytes) {
@@ -2266,7 +2290,7 @@ function messagePreviewText(msg) {
 
 function renderReplyDraft() {
   if (!replyDraftEl) return;
-  const draft = chatReply().draftForChat(activeChat);
+  const draft = chatReply().draftForChat(activeChatKey());
   replyDraftEl.hidden = !draft;
   if (!draft) return;
   if (replyDraftAuthorEl) replyDraftAuthorEl.textContent = `Replying to ${draft.display_name || 'Someone'}`;
@@ -2277,12 +2301,12 @@ function clearReplyDraft() {
   chatReply().clearDraft();
 }
 
-function startReplyDraft(msg, chatKey = activeChat) {
+function startReplyDraft(msg, chatKey = activeChatKey()) {
   chatReply().startDraft(msg, chatKey);
 }
 
 function appendReplyPayload(payload) {
-  return chatReply().appendReplyPayload(payload, activeChat);
+  return chatReply().appendReplyPayload(payload, activeChatKey());
 }
 
 function appendReplyFormData(formData) {
@@ -2929,6 +2953,7 @@ document.getElementById('composer').addEventListener('submit', e => {
   if (!content) return;
   input.value = '';
   updateComposerState();
+  const activeChat = activeChatKey();
   if (activeChat.startsWith('game:')) {
     stopGameTypingNow();
     sendGameMessage(content).catch(err => alert(err.message || err));
@@ -3095,7 +3120,7 @@ function handleRoomPollEvent(ev) {
             }
           }
           renderParticipant(person);
-          if (!p.linked_to && activeChat === `link:${person.id}`) switchChat('room');
+          if (!p.linked_to && activeChatKey() === `link:${person.id}`) switchChat('room');
         }
         refreshLinkClasses();
         renderPeople();
@@ -3160,7 +3185,7 @@ function handleCommunityPollEvent(ev) {
       const p = ev.payload || {};
       if (ev.type === 'link_typing') {
         const partnerId = p.participant_id;
-        if (activeChat === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(p.participant_id, p.active);
+        if (activeChatKey() === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(p.participant_id, p.active);
       }
       if (ev.type === 'game_typing' && activeGame?.lobby_code === p.lobby_code) {
         if (Number(p.participant_id) !== Number(cfg.myParticipantId)) {
@@ -3291,7 +3316,7 @@ function showAvatarSpeech(participantId, msg) {
 }
 
 function sendTyping(active) {
-  return chatTyping().sendTyping(active, activeChat);
+  return chatTyping().sendTyping(active, activeChatKey());
 }
 
 function stopTypingNow() {
@@ -3300,6 +3325,7 @@ function stopTypingNow() {
 
 document.getElementById('chat-input').addEventListener('input', () => {
   updateComposerState();
+  const activeChat = activeChatKey();
   if (activeChat.startsWith('game:')) {
     handleGameTypingInput();
     return;
@@ -3320,7 +3346,7 @@ function addUploadedChatMessage(msg) {
 }
 
 function uploadChatFile(file) {
-  return chatMediaSend().sendFile(file, activeChat);
+  return chatMediaSend().sendFile(file, activeChatKey());
 }
 
 chatFileInput.addEventListener('change', () => {
@@ -3385,7 +3411,7 @@ async function startVoiceNote() {
     if (voiceNoteCancelled || !chunks.length) return;
     const type = chunks[0].type || 'audio/webm';
     const blob = new Blob(chunks, { type });
-    chatMediaSend().sendVoiceNote(blob, activeChat);
+    chatMediaSend().sendVoiceNote(blob, activeChatKey());
   });
   voiceNoteRecorder.start();
 }
@@ -3588,6 +3614,7 @@ function openMessageActionMenu(x, y, msg) {
   closeRoomMenu();
   closeRoomActionMenu();
   msgActionTargetId = Number(msg.id);
+  const activeChat = activeChatKey();
   msgActionTargetChat = activeChat;
   const mine = Number(msg.participant_id) === cfg.myParticipantId;
   const editable = mine && (msg.message_type || 'text') === 'text';
@@ -3849,7 +3876,7 @@ mediaSearchInput?.addEventListener('input', e => {
 
 async function sendGif(result) {
   closeMediaPicker();
-  await chatMediaSend().sendGif(result, activeChat);
+  await chatMediaSend().sendGif(result, activeChatKey());
 }
 
 function currentGestureQuery() {
@@ -4129,7 +4156,7 @@ function toggleGestureAudio(gesture, btn) {
 
 async function sendGesture(gesture) {
   closeMediaPicker();
-  await chatMediaSend().sendGesture(gesture, activeChat);
+  await chatMediaSend().sendGesture(gesture, activeChatKey());
 }
 
 document.addEventListener('click', e => {
@@ -4266,25 +4293,25 @@ document.getElementById('text-paste').addEventListener('click', async () => {
   try { if (textMenuMode === 'input') await pasteIntoInput(); } finally { closeTextContextMenu(); }
 });
 
-async function applyReaction(messageId, emoji, chatKey = activeChat) {
+async function applyReaction(messageId, emoji, chatKey = activeChatKey()) {
   await chatMessageActions().applyReaction(messageId, emoji, chatKey);
 }
 
-function currentActiveMessage(messageId = msgActionTargetId, chatKey = msgActionTargetChat || activeChat) {
+function currentActiveMessage(messageId = msgActionTargetId, chatKey = msgActionTargetChat || activeChatKey()) {
   return chatMessageActions().currentMessage(messageId, chatKey);
 }
 
 document.querySelectorAll('[data-msg-reaction]').forEach(btn => {
   btn.addEventListener('click', async () => {
     const messageId = msgActionTargetId;
-    const chatKey = msgActionTargetChat || activeChat;
+    const chatKey = msgActionTargetChat || activeChatKey();
     closeMessageActionMenu();
     await applyReaction(messageId, btn.dataset.msgReaction, chatKey);
   });
 });
 
 document.getElementById('msg-reply-action')?.addEventListener('click', () => {
-  const chatKey = msgActionTargetChat || activeChat;
+  const chatKey = msgActionTargetChat || activeChatKey();
   const msg = currentActiveMessage(msgActionTargetId, chatKey);
   closeMessageActionMenu();
   if (!msg) return;
@@ -4292,14 +4319,14 @@ document.getElementById('msg-reply-action')?.addEventListener('click', () => {
 });
 
 document.getElementById('msg-edit-action')?.addEventListener('click', async () => {
-  const chatKey = msgActionTargetChat || activeChat;
+  const chatKey = msgActionTargetChat || activeChatKey();
   const msg = currentActiveMessage(msgActionTargetId, chatKey);
   closeMessageActionMenu();
   if (!msg) return;
   startInlineEdit(msg, chatKey);
 });
 
-function startInlineEdit(msg, chatKey = activeChat) {
+function startInlineEdit(msg, chatKey = activeChatKey()) {
   const row = messagesEl.querySelector(`[data-message-id="${CSS.escape(String(msg.id))}"]`);
   const contentEl = row?.querySelector('.msg-content');
   if (!row || !contentEl) return;
@@ -4319,12 +4346,12 @@ function startInlineEdit(msg, chatKey = activeChat) {
   });
 }
 
-async function saveInlineEdit(msg, input, chatKey = activeChat) {
+async function saveInlineEdit(msg, input, chatKey = activeChatKey()) {
   await chatMessageActions().saveInlineEdit(msg, input.value, chatKey);
 }
 
 document.getElementById('msg-delete-action')?.addEventListener('click', async () => {
-  const chatKey = msgActionTargetChat || activeChat;
+  const chatKey = msgActionTargetChat || activeChatKey();
   const msg = currentActiveMessage(msgActionTargetId, chatKey);
   closeMessageActionMenu();
   if (!msg) return;
@@ -4343,7 +4370,7 @@ document.getElementById('delete-message-close')?.addEventListener('click', close
 document.getElementById('delete-message-cancel')?.addEventListener('click', closeDeleteMessageModal);
 
 document.getElementById('delete-message-confirm')?.addEventListener('click', async () => {
-  const chatKey = pendingDeleteChatKey || activeChat;
+  const chatKey = pendingDeleteChatKey || activeChatKey();
   const msg = currentActiveMessage(pendingDeleteMessageId, chatKey);
   if (!msg) {
     closeDeleteMessageModal();
@@ -4364,7 +4391,7 @@ function unlinkCurrentPartner() {
   participants.forEach(p => {
     renderParticipant(p);
   });
-  if (activeChat.startsWith('link:')) switchChat('room');
+  if (activeChatKey().startsWith('link:')) switchChat('room');
   apiPost('/api/users.php', { action: 'unlink', session_id: cfg.sessionId, join_token: cfg.myJoinToken }).catch(console.warn);
   renderPeople();
   renderLinkTabs();
@@ -4683,7 +4710,7 @@ function gameSeatRole(type, seat) {
 
 function setGameLayerVisibility() {
   if (!gameStage) return;
-  gameStage.hidden = !(activeGame && activeChat === gameChatKey(activeGame.lobby_code));
+  gameStage.hidden = !(activeGame && activeChatKey() === gameChatKey(activeGame.lobby_code));
 }
 
 async function openGame(a) {
@@ -4720,7 +4747,7 @@ function hideGameOverlay() {
   activeGame = null;
   if (gameFrame) gameFrame.src = 'about:blank';
   if (gameStage) gameStage.hidden = true;
-  if (activeChat.startsWith('game:')) switchChat('room');
+  if (activeChatKey().startsWith('game:')) switchChat('room');
   renderLinkTabs();
 }
 

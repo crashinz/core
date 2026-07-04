@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-L adds main polling transport ownership.
+ *      Build 000022-M adds active chat/channel navigation ownership.
  *
  * Build:
- *      000022-L
+ *      000022-M
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -60,6 +60,9 @@
  *
  * Build 000022-L
  * - Added ChatPollService ownership and diagnostics.
+ *
+ * Build 000022-M
+ * - Added ChatChannelNavigationService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -146,6 +149,12 @@ import {
 
 } from "./services/chat-poll-service.js";
 
+import {
+
+    ChatChannelNavigationService
+
+} from "./services/chat-channel-navigation-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -200,6 +209,11 @@ export class ChatRuntime extends CoreModule {
      * Game chat integration runtime component.
      */
     #gameChat = null;
+
+    /**
+     * Channel navigation runtime component.
+     */
+    #navigation = null;
 
     /**
      * Main polling transport runtime component.
@@ -348,6 +362,18 @@ export class ChatRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Chat Channel Navigation Service.
+     *
+     * @returns {ChatChannelNavigationService}
+     *         Channel navigation runtime component.
+     */
+    get navigation() {
+
+        return this.#navigation;
+
+    }
+
+    /**
      * Returns the Chat Poll Service.
      *
      * @returns {ChatPollService}
@@ -416,7 +442,7 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-L",
+                "000022-M",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
@@ -441,6 +467,9 @@ export class ChatRuntime extends CoreModule {
 
             gameChat:
                 this.#gameChat?.getDiagnostics() ?? null,
+
+            navigation:
+                this.#navigation?.getDiagnostics() ?? null,
 
             poll:
                 this.#poll?.getDiagnostics() ?? null,
@@ -483,6 +512,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createGameChat();
 
+        this.#createNavigation();
+
         this.#createRenderer();
 
         this.#createEvents();
@@ -505,6 +536,8 @@ export class ChatRuntime extends CoreModule {
         this.#events?.destroy();
 
         this.#renderer?.destroy();
+
+        this.#navigation?.destroy();
 
         this.#gameChat?.destroy();
 
@@ -637,6 +670,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#gameChat.initialize();
+
+    }
+
+    /**
+     * Creates the channel navigation runtime component.
+     */
+    #createNavigation() {
+
+        this.#navigation =
+            new ChatChannelNavigationService(
+                this
+            );
+
+        this.#navigation.initialize();
 
     }
 
