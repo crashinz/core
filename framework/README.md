@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000022-J
+000022-K
 
 **Framework Phase**
 
-Chat Runtime Extraction - Private Chat Lifecycle Ownership Complete
+Chat Runtime Extraction - Game Chat Integration Ownership Complete
 
 ---
 

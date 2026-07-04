@@ -16,10 +16,10 @@
  *      ChatRuntime coordinates chat-specific runtime components while
  *      participating in the framework module lifecycle.
  *
- *      Build 000022-J adds private chat lifecycle ownership.
+ *      Build 000022-K adds game chat integration ownership.
  *
  * Build:
- *      000022-J
+ *      000022-K
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -54,6 +54,9 @@
  *
  * Build 000022-J
  * - Added ChatPrivateChatService ownership and diagnostics.
+ *
+ * Build 000022-K
+ * - Added ChatGameChatService ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -128,6 +131,12 @@ import {
 
 } from "./services/chat-private-chat-service.js";
 
+import {
+
+    ChatGameChatService
+
+} from "./services/chat-game-chat-service.js";
+
 //--------------------------------------------------
 // Chat Runtime
 //--------------------------------------------------
@@ -177,6 +186,11 @@ export class ChatRuntime extends CoreModule {
      * Media send workflow runtime component.
      */
     #mediaSend = null;
+
+    /**
+     * Game chat integration runtime component.
+     */
+    #gameChat = null;
 
     /**
      * Message renderer runtime component.
@@ -308,6 +322,18 @@ export class ChatRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Chat Game Chat Service.
+     *
+     * @returns {ChatGameChatService}
+     *         Game chat integration runtime component.
+     */
+    get gameChat() {
+
+        return this.#gameChat;
+
+    }
+
+    /**
      * Returns the Chat Message Renderer.
      *
      * @returns {ChatMessageRenderer}
@@ -364,7 +390,7 @@ export class ChatRuntime extends CoreModule {
                 this.name,
 
             build:
-                "000022-J",
+                "000022-K",
 
             messages:
                 this.#messages?.getDiagnostics() ?? null,
@@ -386,6 +412,9 @@ export class ChatRuntime extends CoreModule {
 
             mediaSend:
                 this.#mediaSend?.getDiagnostics() ?? null,
+
+            gameChat:
+                this.#gameChat?.getDiagnostics() ?? null,
 
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
@@ -423,6 +452,8 @@ export class ChatRuntime extends CoreModule {
 
         this.#createMediaSend();
 
+        this.#createGameChat();
+
         this.#createRenderer();
 
         this.#createEvents();
@@ -441,6 +472,8 @@ export class ChatRuntime extends CoreModule {
         this.#events?.destroy();
 
         this.#renderer?.destroy();
+
+        this.#gameChat?.destroy();
 
         this.#mediaSend?.destroy();
 
@@ -557,6 +590,20 @@ export class ChatRuntime extends CoreModule {
             );
 
         this.#mediaSend.initialize();
+
+    }
+
+    /**
+     * Creates the game chat integration runtime component.
+     */
+    #createGameChat() {
+
+        this.#gameChat =
+            new ChatGameChatService(
+                this
+            );
+
+        this.#gameChat.initialize();
 
     }
 

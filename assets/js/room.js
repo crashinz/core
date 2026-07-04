@@ -157,13 +157,7 @@ let roomExitInProgress = false;
 let roomDeleteInProgress = false;
 let activeGame = null;
 const activeGames = new Map();
-const gameChatLastIds = new Map();
-const gameTypingIds = new Set();
-const gameTypingTimers = new Map();
 const seenRoomHistoryClears = new Set();
-let gameChatPollTimer = null;
-let gameTypingActive = false;
-let gameTypingStopTimer = null;
 
 const GAME_CATALOG = {
   chess: { name: 'Chess', path: 'chess', entry: 'index.html', icon: 'chess', gameId: 2, seats: ['White', 'Black'] },
@@ -230,6 +224,7 @@ async function initializeAvatarRuntime() {
   configureChatTyping();
   configureChatComposer();
   configureChatMediaSend();
+  configureChatGameChat();
 
   return avatarRuntime;
 }
@@ -383,6 +378,22 @@ function configureChatMediaSend() {
     },
     alertError(error) {
       alert(error.message || error);
+    },
+  });
+}
+
+function configureChatGameChat() {
+  chatRuntime?.gameChat?.configure({
+    apiPost,
+    getConfig: () => cfg,
+    getActiveGame: () => activeGame,
+    addMessageToChannel,
+    renderGameStagePlayers: updateGameStagePlayers,
+    fetchGameChat(query) {
+      return fetch(appUrl('/api/game_chat.php?' + query)).then(r => r.json());
+    },
+    warnError(error) {
+      console.warn(error);
     },
   });
 }
@@ -1281,6 +1292,10 @@ function chatComposer() {
 
 function chatMediaSend() {
   return chatRuntime?.mediaSend;
+}
+
+function chatGameChat() {
+  return chatRuntime?.gameChat;
 }
 
 function channelMapFor(chatKey = activeChat) {
@@ -4717,7 +4732,7 @@ async function closeGame(lobbyCode = activeGame?.lobby_code, notifyServer = true
 }
 
 function gameChatKey(lobbyCode = activeGame?.lobby_code) {
-  return lobbyCode ? `game:${lobbyCode}` : 'game:';
+  return chatGameChat().chatKey(lobbyCode);
 }
 
 function updateGameStagePlayers() {
@@ -4738,108 +4753,44 @@ function updateGameStagePlayers() {
       sub.textContent = player ? gameSeatRole(activeGame.game_type, player.seat || (label === 'Player 1' ? 1 : 2)) : `${label} open`;
     }
     card.dataset.participantId = player?.participant_id || '';
-    card.classList.toggle('typing', player && gameTypingIds.has(Number(player.participant_id)));
+    card.classList.toggle('typing', player && chatGameChat().isTyping(player.participant_id));
   });
 }
 
 function addGameMessageToChannel(msg, live = false) {
-  if (!activeGame || msg.lobby_code !== activeGame.lobby_code) return;
-  addMessageToChannel(msg, gameChatKey(msg.lobby_code), live);
+  chatGameChat().addMessage(msg, live);
 }
 
 async function sendGameMessage(content) {
-  if (!activeGame) return;
-  const msg = await apiPost('/api/game_chat.php', {
-    action: 'message',
-    session_id: cfg.sessionId,
-    join_token: cfg.myJoinToken,
-    lobby_code: activeGame.lobby_code,
-    content,
-  });
-  addGameMessageToChannel(msg, false);
+  return chatGameChat().sendMessage(content);
 }
 
 function stopGameChatPolling() {
-  clearTimeout(gameChatPollTimer);
-  gameChatPollTimer = null;
-  gameTypingTimers.forEach(timer => clearTimeout(timer));
-  gameTypingTimers.clear();
-  gameTypingIds.clear();
-  updateGameStagePlayers();
+  chatGameChat().reset();
 }
 
 function setGameTyping(participantId, active) {
-  const id = Number(participantId);
-  clearTimeout(gameTypingTimers.get(id));
-  gameTypingTimers.delete(id);
-  if (active) {
-    gameTypingIds.add(id);
-    gameTypingTimers.set(id, setTimeout(() => setGameTyping(id, false), 3500));
-  } else {
-    gameTypingIds.delete(id);
-  }
-  updateGameStagePlayers();
+  chatGameChat().setTyping(participantId, active);
 }
 
 async function pollGameChat() {
-  if (!activeGame) return;
-  const lobby = activeGame.lobby_code;
-  const last = gameChatLastIds.get(lobby) || 0;
-  try {
-    const qs = new URLSearchParams({
-      session_id: cfg.sessionId,
-      join_token: cfg.myJoinToken,
-      lobby_code: lobby,
-      since_id: String(last),
-    });
-    const data = await fetch(appUrl('/api/game_chat.php?' + qs)).then(r => r.json());
-    if (data.error) throw new Error(data.error);
-    (data.messages || []).forEach(msg => {
-      gameChatLastIds.set(lobby, Math.max(gameChatLastIds.get(lobby) || 0, Number(msg.id)));
-      addGameMessageToChannel(msg, true);
-    });
-    if ((data.typing || []).length) {
-      (data.typing || []).forEach(id => setGameTyping(id, true));
-    }
-  } catch (err) {
-    console.warn(err);
-  } finally {
-    if (activeGame?.lobby_code === lobby) gameChatPollTimer = setTimeout(pollGameChat, 900);
-  }
+  return chatGameChat().poll();
 }
 
 function startGameChatPolling() {
-  stopGameChatPolling();
-  pollGameChat();
+  chatGameChat().startPolling();
 }
 
 function sendGameTyping(active) {
-  if (!activeGame) return Promise.resolve();
-  return apiPost('/api/game_chat.php', {
-    action: 'typing',
-    session_id: cfg.sessionId,
-    join_token: cfg.myJoinToken,
-    lobby_code: activeGame.lobby_code,
-    active,
-  }).catch(() => {});
+  return chatGameChat().sendTyping(active);
 }
 
 function stopGameTypingNow() {
-  clearTimeout(gameTypingStopTimer);
-  if (gameTypingActive) {
-    gameTypingActive = false;
-    sendGameTyping(false);
-  }
+  chatGameChat().stopTypingNow();
 }
 
 function handleGameTypingInput() {
-  if (!activeGame) return;
-  if (!gameTypingActive) {
-    gameTypingActive = true;
-    sendGameTyping(true);
-  }
-  clearTimeout(gameTypingStopTimer);
-  gameTypingStopTimer = setTimeout(stopGameTypingNow, 1200);
+  chatGameChat().handleTypingInput();
 }
 
 document.getElementById('game-close').addEventListener('click', () => {
