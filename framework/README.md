@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000026
+000027
 
 **Framework Phase**
 
-RoomRuntime Foundation - Non-Chat Event Routing Ownership Complete
+VoiceRuntime - Voice/WebRTC Media Signaling Ownership Complete
 
 ---
 
@@ -147,6 +147,9 @@ assets/
 
         room/
             Room Runtime.
+
+        voice/
+            Voice Runtime.
 
         presence/
             Future Presence Runtime.

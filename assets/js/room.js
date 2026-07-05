@@ -26,6 +26,7 @@ let participants = new Map();
 let chatRuntimeCore = null;
 let chatRuntime = null;
 let roomRuntime = null;
+let voiceRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
 let frameQueued = false;
@@ -120,21 +121,6 @@ let pendingDeleteChatKey = null;
 let webcamStream = null;
 const pendingRemoteVideoStreams = new Map();
 const AVATAR_STAGE_SIZE = 150;
-let voiceStream = null;
-let voiceJoined = false;
-let voicePollTimer = null;
-let voiceMuted = false;
-let voiceDeafened = false;
-let voiceSpeaking = false;
-let selectedVoiceOutputDeviceId = '';
-let voiceAnalyserTimer = null;
-let voiceAudioContext = null;
-let voiceAnalyser = null;
-let voiceMicSource = null;
-let latestVoiceParticipants = [];
-let lastVoiceStatusSignature = '';
-let lastVoiceSignalId = 0;
-const peers = new Map();
 const blockedUserIds = new Set();
 let voiceNoteRecorder = null;
 let voiceNoteChunks = [];
@@ -189,10 +175,11 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
+    import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
   ]);
@@ -200,11 +187,13 @@ async function initializeAvatarRuntime() {
   chatRuntimeCore = new Core();
   chatRuntime = new ChatRuntime();
   roomRuntime = new RoomRuntime();
+  voiceRuntime = new VoiceRuntime();
   pollingRuntime = new PollingRuntime();
   avatarRuntime = new AvatarRuntime();
 
   chatRuntimeCore.registerModule(chatRuntime);
   chatRuntimeCore.registerModule(roomRuntime);
+  chatRuntimeCore.registerModule(voiceRuntime);
   chatRuntimeCore.registerModule(pollingRuntime);
   chatRuntimeCore.registerModule(avatarRuntime);
   chatRuntimeCore.initialize();
@@ -225,6 +214,7 @@ async function initializeAvatarRuntime() {
   configureChatMediaSend();
   configureChatGameChat();
   configureRoomEventRouter();
+  configureVoiceRuntime();
   configureChatPoll();
 
   return avatarRuntime;
@@ -679,6 +669,82 @@ function configureRoomEventRouter() {
       if (Number(payload.participant_id) !== Number(cfg.myParticipantId)) {
         setGameTyping(payload.participant_id, Boolean(payload.active));
       }
+    },
+  });
+}
+
+function configureVoiceRuntime() {
+  voiceRuntime?.media?.configure({
+    window,
+    navigator,
+    HTMLMediaElement,
+    setTimeout: window.setTimeout.bind(window),
+    clearTimeout: window.clearTimeout.bind(window),
+    setInterval: window.setInterval.bind(window),
+    clearInterval: window.clearInterval.bind(window),
+    apiPost,
+    getConfig: () => cfg,
+    getParticipants: () => participants,
+    getWebcamStream: () => webcamStream,
+    updateToggleButton: updateVoiceToggleButton,
+    renderVoiceList,
+    attachParticipantVideo,
+    detachParticipantVideo,
+    canPopulateDevices() {
+      return Boolean(voiceInputDevice && voiceOutputDevice);
+    },
+    getInputDeviceId() {
+      return voiceInputDevice?.value || '';
+    },
+    getOutputDeviceId() {
+      return voiceOutputDevice?.value || '';
+    },
+    setInputDeviceOptions(html) {
+      if (voiceInputDevice) voiceInputDevice.innerHTML = html;
+    },
+    setOutputDeviceOptions(html) {
+      if (voiceOutputDevice) voiceOutputDevice.innerHTML = html;
+    },
+    setOutputDeviceDisabled(disabled) {
+      if (voiceOutputDevice) voiceOutputDevice.disabled = Boolean(disabled);
+    },
+    restoreInputDevice(deviceId) {
+      if (deviceId && voiceInputDevice && Array.from(voiceInputDevice.options).some(option => option.value === deviceId)) {
+        voiceInputDevice.value = deviceId;
+      }
+    },
+    restoreOutputDevice(deviceId) {
+      if (deviceId && voiceOutputDevice && Array.from(voiceOutputDevice.options).some(option => option.value === deviceId)) {
+        voiceOutputDevice.value = deviceId;
+      }
+    },
+    deviceOption,
+    setDeviceStatus: setVoiceDeviceStatus,
+    closeDeviceModal: closeVoiceDeviceModal,
+    getAudioElements() {
+      return Array.from(document.querySelectorAll('audio[id^="voice-audio-"]'));
+    },
+    getOrCreateAudioElement(participantId) {
+      let audio = document.getElementById(`voice-audio-${participantId}`);
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = `voice-audio-${participantId}`;
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+      }
+      return audio;
+    },
+    removeAudioElement(participantId) {
+      document.getElementById(`voice-audio-${participantId}`)?.remove();
+    },
+    removeAllAudioElements() {
+      document.querySelectorAll('audio[id^="voice-audio-"]').forEach(audio => audio.remove());
+    },
+    fetchMediaSignals(query) {
+      return fetch(appUrl('/api/media_signal.php?' + query)).then(r => r.json());
+    },
+    warn(error) {
+      console.warn(error);
     },
   });
 }
@@ -1721,10 +1787,7 @@ function removeParticipant(participantId, options = {}) {
   if (!person) return Promise.resolve();
   participants.clearParticipantTimers(id);
   pendingRemoteVideoStreams.delete(id);
-  if (peers.has(id)) {
-    peers.get(id).close();
-    peers.delete(id);
-  }
+  voiceRuntime?.media?.closePeer(id);
   const finish = () => {
     removeStagePresence(person);
     if (options.keepRecord) {
@@ -5018,98 +5081,29 @@ document.getElementById('friend-search').addEventListener('input', () => {
 function updateVoiceToggleButton() {
   const btn = document.getElementById('voice-toggle');
   if (!btn) return;
-  btn.textContent = voiceJoined ? 'Leave Voice' : 'Join Voice';
-  btn.classList.toggle('active', voiceJoined);
+  const joined = Boolean(voiceRuntime?.media?.isJoined());
+  btn.textContent = joined ? 'Leave Voice' : 'Join Voice';
+  btn.classList.toggle('active', joined);
 }
 
 function restartVoicePoll(delay = 0) {
-  clearTimeout(voicePollTimer);
-  voicePollTimer = setTimeout(pollVoice, delay);
-}
-
-function setRemoteAudioDeafened() {
-  document.querySelectorAll('audio[id^="voice-audio-"]').forEach(audio => {
-    audio.muted = voiceDeafened;
-  });
+  voiceRuntime?.media?.startPolling(delay);
 }
 
 function syncVoiceStatus(force = false) {
-  if (!voiceJoined) return Promise.resolve();
-  const signature = `${voiceMuted ? 1 : 0}:${voiceDeafened ? 1 : 0}:${voiceSpeaking ? 1 : 0}`;
-  if (!force && signature === lastVoiceStatusSignature) return Promise.resolve();
-  lastVoiceStatusSignature = signature;
-  return apiPost('/api/media_signal.php', {
-    action: 'status',
-    media: 'voice',
-    session_id: cfg.sessionId,
-    participant_id: cfg.myParticipantId,
-    join_token: cfg.myJoinToken,
-    muted: voiceMuted,
-    deafened: voiceDeafened,
-    speaking: voiceSpeaking,
-  }).catch(() => {});
+  return voiceRuntime?.media?.syncStatus(force) ?? Promise.resolve();
 }
 
 function renderCurrentVoiceList() {
-  renderVoiceList(latestVoiceParticipants);
+  voiceRuntime?.media?.renderCurrentVoiceList();
 }
 
 function setVoiceMuted(muted) {
-  voiceMuted = Boolean(muted);
-  if (voiceStream) voiceStream.getAudioTracks().forEach(track => { track.enabled = !voiceMuted; });
-  if (voiceMuted && voiceSpeaking) voiceSpeaking = false;
-  renderCurrentVoiceList();
-  syncVoiceStatus(true);
+  voiceRuntime?.media?.setMuted(muted);
 }
 
 function setVoiceDeafened(deafened) {
-  voiceDeafened = Boolean(deafened);
-  setRemoteAudioDeafened();
-  renderCurrentVoiceList();
-  syncVoiceStatus(true);
-}
-
-function stopVoiceAnalyser() {
-  clearInterval(voiceAnalyserTimer);
-  voiceAnalyserTimer = null;
-  try { voiceMicSource?.disconnect(); } catch {}
-  voiceMicSource = null;
-  voiceAnalyser = null;
-  if (voiceAudioContext) {
-    voiceAudioContext.close().catch(() => {});
-    voiceAudioContext = null;
-  }
-}
-
-function startVoiceAnalyser() {
-  stopVoiceAnalyser();
-  if (!voiceStream) return;
-  try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) return;
-    voiceAudioContext = new AudioContextClass();
-    voiceAnalyser = voiceAudioContext.createAnalyser();
-    voiceAnalyser.fftSize = 512;
-    voiceMicSource = voiceAudioContext.createMediaStreamSource(voiceStream);
-    voiceMicSource.connect(voiceAnalyser);
-    const samples = new Uint8Array(voiceAnalyser.fftSize);
-    voiceAnalyserTimer = setInterval(() => {
-      if (!voiceAnalyser) return;
-      voiceAnalyser.getByteTimeDomainData(samples);
-      let sum = 0;
-      for (let i = 0; i < samples.length; i++) {
-        const v = (samples[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / samples.length);
-      const speaking = Boolean(!voiceMuted && rms > 0.045);
-      if (speaking !== voiceSpeaking) {
-        voiceSpeaking = speaking;
-        renderCurrentVoiceList();
-        syncVoiceStatus();
-      }
-    }, 140);
-  } catch {}
+  voiceRuntime?.media?.setDeafened(deafened);
 }
 
 function setVoiceDeviceStatus(message, state = '') {
@@ -5124,32 +5118,7 @@ function deviceOption(device, fallback) {
 }
 
 async function populateVoiceDevices() {
-  if (!voiceInputDevice || !voiceOutputDevice) return;
-  setVoiceDeviceStatus('Loading audio devices...', 'working');
-  if (!navigator.mediaDevices?.enumerateDevices) {
-    voiceInputDevice.innerHTML = '<option value="">Default microphone</option>';
-    voiceOutputDevice.innerHTML = '<option value="">Default speaker</option>';
-    voiceOutputDevice.disabled = true;
-    setVoiceDeviceStatus('Your browser does not expose selectable audio devices.', 'error');
-    return;
-  }
-  const previousInput = voiceInputDevice.value;
-  const previousOutput = voiceOutputDevice.value || selectedVoiceOutputDeviceId;
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const inputs = devices.filter(device => device.kind === 'audioinput');
-  const outputs = devices.filter(device => device.kind === 'audiooutput');
-  voiceInputDevice.innerHTML = [
-    '<option value="">Default microphone</option>',
-    ...inputs.map((device, index) => deviceOption(device, `Microphone ${index + 1}`)),
-  ].join('');
-  voiceOutputDevice.innerHTML = [
-    '<option value="">Default speaker</option>',
-    ...outputs.map((device, index) => deviceOption(device, `Speaker ${index + 1}`)),
-  ].join('');
-  if (previousInput && Array.from(voiceInputDevice.options).some(option => option.value === previousInput)) voiceInputDevice.value = previousInput;
-  if (previousOutput && Array.from(voiceOutputDevice.options).some(option => option.value === previousOutput)) voiceOutputDevice.value = previousOutput;
-  voiceOutputDevice.disabled = typeof HTMLMediaElement === 'undefined' || !('setSinkId' in HTMLMediaElement.prototype);
-  setVoiceDeviceStatus(voiceOutputDevice.disabled ? 'Speaker selection is not supported by this browser.' : '', voiceOutputDevice.disabled ? 'working' : '');
+  return voiceRuntime?.media?.populateDevices();
 }
 
 async function openVoiceDeviceModal() {
@@ -5169,91 +5138,31 @@ function closeVoiceDeviceModal() {
 }
 
 async function applyAudioOutput(audio) {
-  if (!audio || typeof audio.setSinkId !== 'function') return;
-  try {
-    await audio.setSinkId(selectedVoiceOutputDeviceId || '');
-  } catch (err) {
-    console.warn(err);
-  }
-}
-
-function selectedVoiceAudioConstraints() {
-  const deviceId = voiceInputDevice?.value || '';
-  if (!deviceId) return true;
-  return { deviceId: { exact: deviceId } };
+  return voiceRuntime?.media?.applyAudioOutput(audio);
 }
 
 function mediaActive() {
-  return Boolean(voiceJoined || webcamStream);
+  return Boolean(voiceRuntime?.media?.mediaActive());
 }
 
 function shouldPollMediaFast() {
-  return mediaActive() || [...participants.values()].some(person => Boolean(person.webcam_enabled || person.webcam_path));
-}
-
-function localMediaTracks() {
-  return [
-    ...(voiceStream ? voiceStream.getAudioTracks() : []),
-    ...(webcamStream ? webcamStream.getVideoTracks() : []),
-  ].filter(track => track.readyState !== 'ended');
-}
-
-function syncPeerLocalTracks(pc) {
-  if (!pc) return;
-  const desired = localMediaTracks();
-  for (const track of desired) {
-    const sender = pc.getSenders().find(item => item.track?.kind === track.kind);
-    if (sender) {
-      if (sender.track !== track) sender.replaceTrack(track).catch(() => {});
-    } else {
-      const stream = track.kind === 'video' ? webcamStream : voiceStream;
-      if (stream) pc.addTrack(track, stream);
-    }
-  }
-  pc.getSenders().forEach(sender => {
-    if (!sender.track) return;
-    if (!desired.some(track => track.kind === sender.track.kind)) pc.removeTrack(sender);
-  });
-}
-
-async function makePeerOffer(participantId, pc = peers.get(Number(participantId))) {
-  if (!pc || pc.__makingOffer || pc.signalingState !== 'stable') return;
-  pc.__makingOffer = true;
-  try {
-    syncPeerLocalTracks(pc);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await sendSignal(participantId, 'offer', pc.localDescription);
-  } catch (err) {
-    console.warn(err);
-  } finally {
-    pc.__makingOffer = false;
-  }
+  return Boolean(voiceRuntime?.media?.shouldPollFast());
 }
 
 async function connectMediaPeer(participantId) {
-  const id = Number(participantId);
-  if (!id || id === Number(cfg.myParticipantId) || !mediaActive()) return;
-  const pc = await getPeer(id, false);
-  await makePeerOffer(id, pc);
+  return voiceRuntime?.media?.connectMediaPeer(participantId);
 }
 
 function connectMediaPeers() {
-  if (!mediaActive()) return;
-  participants.forEach(person => {
-    if (Number(person.id) !== Number(cfg.myParticipantId)) connectMediaPeer(person.id);
-  });
+  voiceRuntime?.media?.connectMediaPeers();
 }
 
 function renegotiateMediaPeers() {
-  peers.forEach((pc, id) => {
-    syncPeerLocalTracks(pc);
-    makePeerOffer(id, pc);
-  });
+  voiceRuntime?.media?.renegotiateMediaPeers();
 }
 
 document.getElementById('voice-toggle').addEventListener('click', async () => {
-  if (voiceJoined) await leaveVoice();
+  if (voiceRuntime?.media?.isJoined()) await leaveVoice();
   else await openVoiceDeviceModal();
 });
 
@@ -5267,156 +5176,15 @@ document.getElementById('voice-device-close')?.addEventListener('click', closeVo
 document.getElementById('voice-device-cancel')?.addEventListener('click', closeVoiceDeviceModal);
 
 async function joinVoice() {
-  if (voiceJoined) return;
-  try {
-    selectedVoiceOutputDeviceId = voiceOutputDevice?.value || '';
-    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: selectedVoiceAudioConstraints(), video: false });
-    voiceMuted = false;
-    voiceDeafened = false;
-    voiceSpeaking = false;
-    voiceJoined = true;
-    updateVoiceToggleButton();
-    await apiPost('/api/media_signal.php', { action: 'join', media: 'voice', session_id: cfg.sessionId, participant_id: cfg.myParticipantId, join_token: cfg.myJoinToken });
-    await syncVoiceStatus(true);
-    startVoiceAnalyser();
-    document.querySelectorAll('audio[id^="voice-audio-"]').forEach(applyAudioOutput);
-    connectMediaPeers();
-    restartVoicePoll(0);
-    closeVoiceDeviceModal();
-    populateVoiceDevices().catch(() => {});
-  } catch (err) {
-    voiceJoined = false;
-    updateVoiceToggleButton();
-    if (voiceStream) voiceStream.getTracks().forEach(t => t.stop());
-    voiceStream = null;
-    setVoiceDeviceStatus(err.message || 'Could not join voice chat.', 'error');
-  }
+  return voiceRuntime?.media?.join();
 }
 
 async function leaveVoice() {
-  if (!voiceJoined) return;
-  voiceJoined = false;
-  voiceMuted = false;
-  voiceDeafened = false;
-  voiceSpeaking = false;
-  lastVoiceStatusSignature = '';
-  stopVoiceAnalyser();
-  updateVoiceToggleButton();
-  document.querySelectorAll('audio[id^="voice-audio-"]').forEach(audio => audio.remove());
-  if (voiceStream) voiceStream.getTracks().forEach(t => t.stop());
-  voiceStream = null;
-  if (webcamStream) renegotiateMediaPeers();
-  else {
-    for (const pc of peers.values()) pc.close();
-    peers.clear();
-  }
-  await apiPost('/api/media_signal.php', { action: 'leave', media: 'voice', session_id: cfg.sessionId, participant_id: cfg.myParticipantId, join_token: cfg.myJoinToken }).catch(() => {});
-  latestVoiceParticipants = latestVoiceParticipants.filter(v => Number(v.id) !== Number(cfg.myParticipantId));
-  renderVoiceList(latestVoiceParticipants);
-  restartVoicePoll(0);
-}
-
-async function getPeer(id, polite = false) {
-  if (peers.has(id)) {
-    const existing = peers.get(id);
-    if (polite) existing.__polite = true;
-    syncPeerLocalTracks(existing);
-    return existing;
-  }
-  const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-  pc.__polite = polite;
-  peers.set(id, pc);
-  syncPeerLocalTracks(pc);
-  pc.ontrack = e => {
-    const track = e.track;
-    if (track.kind === 'video') {
-      const stream = e.streams?.[0] || new MediaStream([track]);
-      attachParticipantVideo(id, stream);
-      track.addEventListener('ended', () => detachParticipantVideo(id));
-      return;
-    }
-    if (track.kind === 'audio' && voiceJoined) {
-      let audio = document.getElementById(`voice-audio-${id}`);
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.id = `voice-audio-${id}`;
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-      }
-      audio.muted = voiceDeafened;
-      audio.srcObject = e.streams?.[0] || new MediaStream([track]);
-      applyAudioOutput(audio);
-    }
-  };
-  pc.onicecandidate = e => {
-    if (e.candidate) sendSignal(id, 'ice', e.candidate);
-  };
-  pc.onnegotiationneeded = async () => {
-    if (polite) return;
-    await makePeerOffer(id, pc);
-  };
-  return pc;
-}
-
-function mediaSignalData(data) {
-  if (!data || typeof data !== 'object') return data;
-  return Object.assign({}, data, { chatspace_media: webcamStream ? 'video' : 'voice' });
-}
-
-function sendSignal(toId, type, data) {
-  const payload = mediaSignalData(data);
-  return apiPost('/api/media_signal.php', { action: 'signal', media: payload?.chatspace_media === 'video' ? 'webcam' : 'voice', session_id: cfg.sessionId, participant_id: cfg.myParticipantId, to_id: toId, join_token: cfg.myJoinToken, type, data: payload });
+  return voiceRuntime?.media?.leave();
 }
 
 async function pollVoice() {
-  try {
-    const qs = new URLSearchParams({ media: 'all', session_id: cfg.sessionId, participant_id: cfg.myParticipantId, after: lastVoiceSignalId, join_token: cfg.myJoinToken });
-    const data = await fetch(appUrl('/api/media_signal.php?' + qs)).then(r => r.json());
-    renderVoiceList(data.voice_participants || []);
-    for (const sig of data.signals || []) {
-      lastVoiceSignalId = Math.max(lastVoiceSignalId, sig.id);
-      const from = sig.from_participant_id;
-      if (!from || from === cfg.myParticipantId) continue;
-      const remote = participants.get(Number(from));
-      const remoteHasWebcam = Boolean(remote?.webcam_enabled || remote?.webcam_path);
-      const signalHasVideo = sig.data?.chatspace_media === 'video';
-      const shouldHandleMedia = Boolean(voiceJoined || webcamStream || remoteHasWebcam || signalHasVideo);
-      if (!shouldHandleMedia && sig.type !== 'leave') continue;
-      if (sig.type === 'leave') {
-        document.getElementById(`voice-audio-${from}`)?.remove();
-        if (peers.has(from) && !remoteHasWebcam) {
-          detachParticipantVideo(from);
-          peers.get(from).close();
-          peers.delete(from);
-        }
-        continue;
-      }
-      const pc = await getPeer(from, sig.type === 'offer');
-      if (sig.type === 'join') {
-        if (!voiceJoined && !webcamStream) continue;
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await sendSignal(from, 'offer', pc.localDescription);
-      }
-      if (sig.type === 'offer') {
-        syncPeerLocalTracks(pc);
-        const offerCollision = pc.__makingOffer || pc.signalingState !== 'stable';
-        if (offerCollision) {
-          if (!pc.__polite) continue;
-          await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
-        }
-        await pc.setRemoteDescription(sig.data);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await sendSignal(from, 'answer', pc.localDescription);
-      }
-      if (sig.type === 'answer') await pc.setRemoteDescription(sig.data);
-      if (sig.type === 'ice') await pc.addIceCandidate(sig.data).catch(() => {});
-    }
-  } catch (err) {
-    console.warn(err);
-  }
-  restartVoicePoll(shouldPollMediaFast() ? 800 : 2000);
+  return voiceRuntime?.media?.poll();
 }
 
 function voiceControlIcon(kind) {
@@ -5426,20 +5194,23 @@ function voiceControlIcon(kind) {
   return '<span class="voice-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"></path><path d="M4 13v5a2 2 0 0 0 2 2h2v-7H4Z"></path><path d="M20 13v5a2 2 0 0 1-2 2h-2v-7h4Z"></path></svg></span>';
 }
 
-function renderVoiceList(list) {
-  latestVoiceParticipants = Array.isArray(list) ? list : [];
-  if (voiceSideSection) voiceSideSection.classList.toggle('has-voice', latestVoiceParticipants.length > 0);
-  if (voiceTitleEl) voiceTitleEl.hidden = latestVoiceParticipants.length === 0;
-  if (voiceListEl) voiceListEl.hidden = latestVoiceParticipants.length === 0;
-  if (voiceCountLabel) voiceCountLabel.textContent = latestVoiceParticipants.length ? `(${latestVoiceParticipants.length})` : '';
+function renderVoiceList(list, state = voiceRuntime?.media?.getState() || {}) {
+  const voiceParticipants = Array.isArray(list) ? list : [];
+  const mutedSelf = Boolean(state.muted);
+  const deafenedSelf = Boolean(state.deafened);
+  const speakingSelf = Boolean(state.speaking);
+  if (voiceSideSection) voiceSideSection.classList.toggle('has-voice', voiceParticipants.length > 0);
+  if (voiceTitleEl) voiceTitleEl.hidden = voiceParticipants.length === 0;
+  if (voiceListEl) voiceListEl.hidden = voiceParticipants.length === 0;
+  if (voiceCountLabel) voiceCountLabel.textContent = voiceParticipants.length ? `(${voiceParticipants.length})` : '';
   voiceListEl.innerHTML = '';
-  latestVoiceParticipants.forEach(v => {
+  voiceParticipants.forEach(v => {
     const known = participants.get(Number(v.id));
     const person = Object.assign({}, known || {}, v);
     const own = Number(person.id) === Number(cfg.myParticipantId);
-    const muted = own ? voiceMuted : Boolean(person.muted);
-    const deafened = own ? voiceDeafened : Boolean(person.deafened);
-    const speaking = own ? voiceSpeaking : Boolean(person.speaking);
+    const muted = own ? mutedSelf : Boolean(person.muted);
+    const deafened = own ? deafenedSelf : Boolean(person.deafened);
+    const speaking = own ? speakingSelf : Boolean(person.speaking);
     const row = document.createElement('div');
     row.className = `voice-card person-row ${participantRoleClass(person)}${speaking ? ' speaking' : ''}`;
     row.dataset.participantId = person.id;
@@ -5450,8 +5221,8 @@ function renderVoiceList(list) {
       : `${muted ? `<span class="voice-status-icon active" title="Mic muted">${voiceControlIcon('mic')}</span>` : ''}
          ${deafened ? `<span class="voice-status-icon active" title="Deafened">${voiceControlIcon('headphones')}</span>` : ''}`;
     row.innerHTML = `<span class="user-avatar-wrap"><img src="${esc(avatarUrl(person))}" alt=""><span class="voice-speaking-dot${speaking ? ' speaking' : ''}"></span></span><div><strong class="person-name-line"><span>${esc(displayNameFor(person))}</span></strong><div class="minor">${own ? 'You' : statusText}</div></div><div class="voice-card-actions">${controls}</div>`;
-    row.querySelector('[data-voice-mute]')?.addEventListener('click', () => setVoiceMuted(!voiceMuted));
-    row.querySelector('[data-voice-deafen]')?.addEventListener('click', () => setVoiceDeafened(!voiceDeafened));
+    row.querySelector('[data-voice-mute]')?.addEventListener('click', () => setVoiceMuted(!mutedSelf));
+    row.querySelector('[data-voice-deafen]')?.addEventListener('click', () => setVoiceDeafened(!deafenedSelf));
     voiceListEl.appendChild(row);
   });
 }
