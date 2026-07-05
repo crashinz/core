@@ -27,6 +27,7 @@ let chatRuntimeCore = null;
 let chatRuntime = null;
 let roomRuntime = null;
 let voiceRuntime = null;
+let gameRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
 let frameQueued = false;
@@ -134,17 +135,7 @@ let pendingLinkIconTargetId = null;
 const animatedDmMessageIds = new Set();
 let roomExitInProgress = false;
 let roomDeleteInProgress = false;
-let activeGame = null;
-const activeGames = new Map();
 const seenRoomHistoryClears = new Set();
-
-const GAME_CATALOG = {
-  chess: { name: 'Chess', path: 'chess', entry: 'index.html', icon: 'chess', gameId: 2, seats: ['White', 'Black'] },
-  checkers: { name: 'Checkers', path: 'checkers', entry: 'index.html', icon: 'checkers', gameId: 3, seats: ['Red', 'White'] },
-  backgammon: { name: 'Backgammon', path: 'backgammon', entry: 'backgammon.html', icon: 'backgammon', gameId: 5, seats: ['White', 'Black'] },
-  spaceinvasion: { name: 'Space Invasion', path: 'spaceinvasion', entry: 'spaceinvasion.html', icon: 'spaceinvasion', gameId: 6, seats: ['Player 1', 'Player 2'] },
-  tetris: { name: 'Tetris Versus', path: 'tetris-versus', entry: 'tetris-versus.html', icon: 'tetris', gameId: 7, seats: ['Player 1', 'Player 2'] },
-};
 
 let gifSearchTimer = null;
 const gifDurationCache = new Map();
@@ -175,11 +166,12 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
+    import(appUrl('/assets/js/runtime/game/game-runtime.js')),
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
   ]);
@@ -188,12 +180,14 @@ async function initializeAvatarRuntime() {
   chatRuntime = new ChatRuntime();
   roomRuntime = new RoomRuntime();
   voiceRuntime = new VoiceRuntime();
+  gameRuntime = new GameRuntime();
   pollingRuntime = new PollingRuntime();
   avatarRuntime = new AvatarRuntime();
 
   chatRuntimeCore.registerModule(chatRuntime);
   chatRuntimeCore.registerModule(roomRuntime);
   chatRuntimeCore.registerModule(voiceRuntime);
+  chatRuntimeCore.registerModule(gameRuntime);
   chatRuntimeCore.registerModule(pollingRuntime);
   chatRuntimeCore.registerModule(avatarRuntime);
   chatRuntimeCore.initialize();
@@ -215,6 +209,7 @@ async function initializeAvatarRuntime() {
   configureChatGameChat();
   configureRoomEventRouter();
   configureVoiceRuntime();
+  configureGameRuntime();
   configureChatPoll();
 
   return avatarRuntime;
@@ -429,6 +424,7 @@ function configureChatNavigation() {
       return Boolean(partnerId && participants.has(partnerId) && linkedPartner()?.id === partnerId);
     },
     isGameChatAvailable(chatKey) {
+      const activeGame = gameRuntime?.lifecycle?.getActiveGame();
       return Boolean(activeGame && chatKey === gameChatKey(activeGame.lobby_code));
     },
   });
@@ -511,7 +507,7 @@ function configureChatGameChat() {
   chatRuntime?.gameChat?.configure({
     apiPost,
     getConfig: () => cfg,
-    getActiveGame: () => activeGame,
+    getActiveGame: () => gameRuntime?.lifecycle?.getActiveGame(),
     addMessageToChannel,
     renderGameStagePlayers: updateGameStagePlayers,
     fetchGameChat(query) {
@@ -622,8 +618,8 @@ function configureRoomEventRouter() {
       participants.forEach(renderParticipant);
       renderActiveChat();
     },
-    onGameEvent() {
-      loadGames();
+    onGameEvent(payload, event) {
+      gameRuntime?.lifecycle?.refreshFromRoomEvent(payload, event);
     },
     onRoomUpdate(payload) {
       applyRoomUpdate(payload);
@@ -665,7 +661,7 @@ function configureRoomEventRouter() {
       if (activeChatKey() === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(payload.participant_id, payload.active);
     },
     onGameTyping(payload) {
-      if (activeGame?.lobby_code !== payload.lobby_code) return;
+      if (gameRuntime?.lifecycle?.getActiveGame()?.lobby_code !== payload.lobby_code) return;
       if (Number(payload.participant_id) !== Number(cfg.myParticipantId)) {
         setGameTyping(payload.participant_id, Boolean(payload.active));
       }
@@ -744,6 +740,59 @@ function configureVoiceRuntime() {
       return fetch(appUrl('/api/media_signal.php?' + query)).then(r => r.json());
     },
     warn(error) {
+      console.warn(error);
+    },
+  });
+}
+
+function configureGameRuntime() {
+  gameRuntime?.lifecycle?.configure({
+    document,
+    apiPost,
+    appUrl,
+    mediaUrl,
+    esc,
+    getConfig: () => cfg,
+    getCsrfToken: () => CSRF_TOKEN,
+    activeChatKey,
+    gameChatKey,
+    switchChat,
+    startGameChatPolling,
+    stopGameChatPolling,
+    stopGameTypingNow,
+    renderPeople,
+    renderLinkTabs,
+    isGameTyping(participantId) {
+      return chatGameChat().isTyping(participantId);
+    },
+    fetchGames(query) {
+      return fetch(appUrl('/api/games.php?' + query)).then(r => r.json());
+    },
+    getGameListElement() {
+      return gameListEl;
+    },
+    getGameStageElement() {
+      return gameStage;
+    },
+    getGameFrameElement() {
+      return gameFrame;
+    },
+    getStageTitleElement() {
+      return document.getElementById('game-stage-title');
+    },
+    getStageIconElement() {
+      return document.getElementById('game-stage-icon');
+    },
+    getPlayerOneElement() {
+      return document.getElementById('game-player-one');
+    },
+    getPlayerTwoElement() {
+      return document.getElementById('game-player-two');
+    },
+    origin() {
+      return window.location.origin;
+    },
+    warnError(error) {
       console.warn(error);
     },
   });
@@ -1686,6 +1735,7 @@ function chatLabel(chatKey = activeChatKey()) {
     return chatPrivateChats().dmLabel(chatKey);
   }
   if (chatKey.startsWith('game:')) {
+    const activeGame = gameRuntime?.lifecycle?.getActiveGame();
     return activeGame ? `${gameName(activeGame.game_type)} Game` : 'Game';
   }
   const partner = participants.get(Number(chatKey.slice(5)));
@@ -2058,9 +2108,8 @@ function renderPeople() {
   document.getElementById('participant-count-label').textContent = `(${people.length})`;
   const rendered = new Set();
   const roleClass = participantRoleClass;
-  const gameForParticipant = p => [...activeGames.values()].find(game => (game.players || []).some(player => Number(player.participant_id) === Number(p.id)));
   const makePersonBits = p => {
-    const game = gameForParticipant(p);
+    const game = gameRuntime?.lifecycle?.gameForParticipant(p.id);
     const gameBadge = game ? `<span class="user-game-badge" title="${esc(gameName(game.game_type))}"><img src="${esc(gameIconUrl(game.game_type))}" alt=""></span>` : '';
     const nameIcon = game ? `<img class="person-game-name-icon" src="${esc(gameIconUrl(game.game_type))}" alt="" title="${esc(gameName(game.game_type))}">` : '';
     return `<span class="user-avatar-wrap"><img src="${esc(avatarUrl(p) || '')}" alt=""><span class="status-dot ${p.online ? 'on' : ''}"></span>${gameBadge}</span><div><strong class="person-name-line">${nameIcon}<span>${esc(displayNameFor(p) || '')}</span></strong><div class="minor">${p.id === cfg.myParticipantId ? 'You' : (p.online ? 'Online' : 'Away')}</div></div>`;
@@ -2171,6 +2220,7 @@ function renderLinkTabs() {
 }
 
 function renderGameTab(holder = document.getElementById('link-tabs')) {
+  const activeGame = gameRuntime?.lifecycle?.getActiveGame();
   if (!holder || !activeGame) {
     if (activeChatKey().startsWith('game:')) switchChat('room');
     return;
@@ -4477,148 +4527,51 @@ document.getElementById('vertical-divider')?.addEventListener('pointerdown', e =
 });
 
 async function loadGames() {
-  const qs = new URLSearchParams({ session_id: cfg.sessionId, participant_id: cfg.myParticipantId, join_token: cfg.myJoinToken });
-  const data = await fetch(appUrl('/api/games.php?' + qs)).then(r => r.json()).catch(() => ({ games: [] }));
-  gameListEl.innerHTML = '';
-  activeGames.clear();
-  gameListEl.hidden = !(data.games || []).length;
-  (data.games || []).forEach(a => {
-    activeGames.set(a.lobby_code, a);
-    const row = document.createElement('div');
-    row.className = `game-row${activeGame?.lobby_code === a.lobby_code ? ' active' : ''}`;
-    const inGame = (a.players || []).some(player => Number(player.participant_id) === Number(cfg.myParticipantId));
-    const players = (a.players || []).map(player => `<img src="${esc(mediaUrl(player.avatar_url))}" alt="${esc(player.display_name)}" title="${esc(player.display_name)}">`).join('');
-    const action = inGame ? '<span class="game-row-state">In-game</span>' : '<button class="btn">Open</button>';
-    row.innerHTML = `<div class="game-row-main"><strong class="game-row-title"><img src="${esc(gameIconUrl(a.game_type))}" alt="">${esc(gameName(a.game_type))}</strong><div class="minor">Started by ${esc(a.started_by_name)}</div><div class="game-row-players">${players || '<span class="minor">Waiting for players</span>'}</div></div>${action}`;
-    row.querySelector('button')?.addEventListener('click', () => openGame(a));
-    if (inGame) row.addEventListener('click', () => openGame(a));
-    gameListEl.appendChild(row);
-  });
-  if (activeGame && activeGames.has(activeGame.lobby_code)) {
-    activeGame = Object.assign(activeGame, activeGames.get(activeGame.lobby_code));
-    updateGameStagePlayers();
-    setGameLayerVisibility();
-  } else if (activeGame) {
-    hideGameOverlay();
-  }
-  renderPeople();
-  renderLinkTabs();
+  return gameRuntime?.lifecycle?.loadGames();
 }
 
 function gameName(type) {
-  return GAME_CATALOG[type]?.name || type;
+  return gameRuntime?.lifecycle?.gameName(type) || type;
 }
 
 function gamePath(type) {
-  return GAME_CATALOG[type]?.path || type;
+  return gameRuntime?.lifecycle?.gamePath(type) || type;
 }
 
 function gameIconUrl(type) {
-  return appUrl(`/assets/images/${GAME_CATALOG[type]?.icon || gamePath(type)}-icon.png`);
+  return gameRuntime?.lifecycle?.gameIconUrl(type) || '';
 }
 
 function gameFrameUrl(game) {
-  const meta = GAME_CATALOG[game.game_type] || { path: game.game_type, entry: 'index.html', gameId: 0 };
-  const mySeat = (game.players || []).find(player => Number(player.participant_id) === Number(cfg.myParticipantId))?.seat || 1;
-  const qs = new URLSearchParams({
-    lobby: game.lobby_code,
-    user: String(cfg.myParticipantId),
-    player: String(mySeat),
-    game: String(meta.gameId || 0),
-    embedded: '1',
-    csrf: CSRF_TOKEN,
-  });
-  return appUrl(`/games/${meta.path}/${meta.entry}?${qs}`);
+  return gameRuntime?.lifecycle?.gameFrameUrl(game) || '';
 }
 
 function gameSeatRole(type, seat) {
-  const labels = GAME_CATALOG[type]?.seats || [];
-  return labels[Number(seat) - 1] || `Player ${seat}`;
+  return gameRuntime?.lifecycle?.gameSeatRole(type, seat) || `Player ${seat}`;
 }
 
 function setGameLayerVisibility() {
-  if (!gameStage) return;
-  gameStage.hidden = !(activeGame && activeChatKey() === gameChatKey(activeGame.lobby_code));
+  gameRuntime?.lifecycle?.setLayerVisibility();
 }
 
 async function openGame(a) {
-  activeGame = Object.assign({}, a);
-  try {
-    await apiPost('/api/games.php', {
-      action: 'join',
-      session_id: cfg.sessionId,
-      participant_id: cfg.myParticipantId,
-      join_token: cfg.myJoinToken,
-      lobby_code: a.lobby_code,
-    });
-    await loadGames();
-    activeGame = Object.assign(activeGame || {}, activeGames.get(a.lobby_code) || a);
-  } catch (err) {
-    console.warn(err);
-  }
-  document.getElementById('game-stage-title').textContent = gameName(activeGame.game_type);
-  const stageIcon = document.getElementById('game-stage-icon');
-  if (stageIcon) {
-    stageIcon.src = gameIconUrl(activeGame.game_type);
-    stageIcon.hidden = false;
-  }
-  gameFrame.src = gameFrameUrl(activeGame);
-  updateGameStagePlayers();
-  renderLinkTabs();
-  switchChat(`game:${activeGame.lobby_code}`);
-  startGameChatPolling();
+  return gameRuntime?.lifecycle?.openGame(a);
 }
 
 function hideGameOverlay() {
-  stopGameChatPolling();
-  stopGameTypingNow();
-  activeGame = null;
-  if (gameFrame) gameFrame.src = 'about:blank';
-  if (gameStage) gameStage.hidden = true;
-  if (activeChatKey().startsWith('game:')) switchChat('room');
-  renderLinkTabs();
+  gameRuntime?.lifecycle?.hideGameOverlay();
 }
 
-async function closeGame(lobbyCode = activeGame?.lobby_code, notifyServer = true) {
-  if (lobbyCode) {
-    if (notifyServer) {
-      await apiPost('/api/games.php', {
-        action: 'close',
-        session_id: cfg.sessionId,
-        participant_id: cfg.myParticipantId,
-        join_token: cfg.myJoinToken,
-        lobby_code: lobbyCode,
-      }).catch(console.warn);
-    }
-  }
-  hideGameOverlay();
-  await loadGames();
+async function closeGame(lobbyCode = gameRuntime?.lifecycle?.getActiveGame()?.lobby_code, notifyServer = true) {
+  return gameRuntime?.lifecycle?.closeGame(lobbyCode, notifyServer);
 }
 
-function gameChatKey(lobbyCode = activeGame?.lobby_code) {
+function gameChatKey(lobbyCode = gameRuntime?.lifecycle?.getActiveGame()?.lobby_code) {
   return chatGameChat().chatKey(lobbyCode);
 }
 
 function updateGameStagePlayers() {
-  if (!activeGame) return;
-  const bySeat = new Map((activeGame.players || []).map(player => [Number(player.seat), player]));
-  [
-    [document.getElementById('game-player-one'), bySeat.get(1), 'Player 1'],
-    [document.getElementById('game-player-two'), bySeat.get(2), 'Player 2'],
-  ].forEach(([card, player, label]) => {
-    if (!card) return;
-    const img = card.querySelector('img');
-    const name = card.querySelector('strong');
-    const sub = card.querySelector('.minor');
-    if (img) img.src = mediaUrl(player?.avatar_url || appUrl('/assets/images/baghead.png'));
-    if (name) name.textContent = player?.display_name || 'Waiting';
-    if (sub) {
-      sub.className = `minor game-player-role${player && Number(player.participant_id) === Number(cfg.myParticipantId) ? ' is-you' : ''}`;
-      sub.textContent = player ? gameSeatRole(activeGame.game_type, player.seat || (label === 'Player 1' ? 1 : 2)) : `${label} open`;
-    }
-    card.dataset.participantId = player?.participant_id || '';
-    card.classList.toggle('typing', player && chatGameChat().isTyping(player.participant_id));
-  });
+  gameRuntime?.lifecycle?.updateStagePlayers();
 }
 
 function addGameMessageToChannel(msg, live = false) {
@@ -4662,11 +4615,11 @@ document.getElementById('game-close').addEventListener('click', () => {
 });
 
 document.getElementById('game-rematch')?.addEventListener('click', () => {
-  gameFrame?.contentWindow?.postMessage({ type: 'game_control', action: 'rematch' }, window.location.origin);
+  gameRuntime?.lifecycle?.sendStageControl('rematch');
 });
 
 document.getElementById('game-resign')?.addEventListener('click', () => {
-  gameFrame?.contentWindow?.postMessage({ type: 'game_control', action: 'resign' }, window.location.origin);
+  gameRuntime?.lifecycle?.sendStageControl('resign');
 });
 
 window.addEventListener('message', e => {
@@ -4968,9 +4921,7 @@ document.getElementById('host-notice-understand')?.addEventListener('click', e =
 document.querySelectorAll('[data-game]').forEach(btn => {
   btn.addEventListener('click', async () => {
     closeGameStartMenu();
-    const data = await apiPost('/api/games.php', { action: 'start', session_id: cfg.sessionId, participant_id: cfg.myParticipantId, join_token: cfg.myJoinToken, game_type: btn.dataset.game });
-    await loadGames();
-    openGame({ game_type: btn.dataset.game, lobby_code: data.lobby_code, started_by_name: 'You' });
+    await gameRuntime?.lifecycle?.startGame(btn.dataset.game);
   });
 });
 

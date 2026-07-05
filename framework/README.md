@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000027
+000028
 
 **Framework Phase**
 
-VoiceRuntime - Voice/WebRTC Media Signaling Ownership Complete
+GameRuntime - Game Lifecycle and Stage Presentation Ownership Complete
 
 ---
 
@@ -150,6 +150,9 @@ assets/
 
         voice/
             Voice Runtime.
+
+        game/
+            Game Runtime.
 
         presence/
             Future Presence Runtime.
