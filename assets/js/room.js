@@ -29,6 +29,7 @@ let roomRuntime = null;
 let voiceRuntime = null;
 let gameRuntime = null;
 let roomEffectsRuntime = null;
+let importedRoomRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
 let frameQueued = false;
@@ -164,13 +165,14 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
     import(appUrl('/assets/js/runtime/game/game-runtime.js')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
+    import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js')),
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
   ]);
@@ -181,6 +183,7 @@ async function initializeAvatarRuntime() {
   voiceRuntime = new VoiceRuntime();
   gameRuntime = new GameRuntime();
   roomEffectsRuntime = new RoomEffectsRuntime();
+  importedRoomRuntime = new ImportedRoomRuntime();
   pollingRuntime = new PollingRuntime();
   avatarRuntime = new AvatarRuntime();
 
@@ -189,6 +192,7 @@ async function initializeAvatarRuntime() {
   chatRuntimeCore.registerModule(voiceRuntime);
   chatRuntimeCore.registerModule(gameRuntime);
   chatRuntimeCore.registerModule(roomEffectsRuntime);
+  chatRuntimeCore.registerModule(importedRoomRuntime);
   chatRuntimeCore.registerModule(pollingRuntime);
   chatRuntimeCore.registerModule(avatarRuntime);
   chatRuntimeCore.initialize();
@@ -212,6 +216,7 @@ async function initializeAvatarRuntime() {
   configureVoiceRuntime();
   configureGameRuntime();
   configureRoomEffectsRuntime();
+  configureImportedRoomRuntime();
   configureChatPoll();
 
   return avatarRuntime;
@@ -826,6 +831,65 @@ function configureRoomEffectsRuntime() {
   });
 }
 
+function configureImportedRoomRuntime() {
+  const context = {
+    document,
+    window,
+    esc,
+    mediaUrl,
+    isHttpUrl,
+    getConfig: () => cfg,
+    getLayoutElement() {
+      return vpRoomLayout;
+    },
+    getStageElement() {
+      return roomStage;
+    },
+    getMusicPlayerElement() {
+      return vpMusicPlayer;
+    },
+    getMusicSelectElement() {
+      return vpMusicSelect;
+    },
+    getMusicAudioElement() {
+      return vpMusicAudio;
+    },
+    getMusicLaunchElement() {
+      return vpMusicLaunch;
+    },
+    getMusicEmbedElement() {
+      return vpMusicEmbed;
+    },
+    getMusicYoutubeElement() {
+      return vpMusicYoutube;
+    },
+    getMusicModalElement() {
+      return vpMusicModal;
+    },
+    getMusicModalTitleElement() {
+      return vpMusicModalTitle;
+    },
+    getMusicModalCloseElement() {
+      return vpMusicModalClose;
+    },
+    getMusicModalMinimizeElement() {
+      return vpMusicModalMinimize;
+    },
+    getMusicDragHandleElement() {
+      return vpMusicDragHandle;
+    },
+    getMusicModalBoxElement() {
+      return vpMusicModalBox;
+    },
+    getMusicFrameWrapElement() {
+      return vpMusicFrameWrap;
+    },
+  };
+
+  importedRoomRuntime?.layout?.configure(context);
+  importedRoomRuntime?.music?.configure(context);
+}
+
 function configureChatPoll() {
   chatRuntime?.poll?.configure({
     getConfig: () => cfg,
@@ -1034,408 +1098,33 @@ function isHttpUrl(value) {
   return /^https?:\/\//i.test(String(value || ''));
 }
 
-function safeCssColor(value, fallback = '') {
-  const color = String(value || '').trim();
-  if (/^#[0-9a-f]{3,8}$/i.test(color)) return color;
-  if (/^(?:rgb|rgba|hsl|hsla)\([0-9.%\s,+-]+\)$/i.test(color)) return color;
-  if (/^[a-z]{3,24}$/i.test(color)) return color;
-  return fallback;
-}
-
-function safeCssSize(value) {
-  const size = String(value || '').trim();
-  return /^[0-9.]+(?:px|pt|em|rem|%)$/i.test(size) ? size : '';
-}
-
-function importedImageHtml(section) {
-  const roleClass = section.role ? ` vp-import-${String(section.role).replace(/[^a-z0-9_-]+/gi, '-')}` : '';
-  const headerClass = section.role === 'header' ? ' vp-import-header' : '';
-  return `<figure class="vp-import-section vp-import-image${headerClass}${roleClass}"><img src="${esc(mediaUrl(section.path))}" alt="${esc(section.alt || '')}"></figure>`;
-}
-
-function importedAvatarSection(section) {
-  return section?.type === 'image'
-      && section.path
-      && ['avatar-left', 'avatar-right'].includes(section.role);
-}
-
 function renderImportedRoomLayout(layout) {
-  if (!vpRoomLayout) return;
-  if (!layout || !Array.isArray(layout.sections) || !layout.sections.length) {
-    vpRoomLayout.hidden = true;
-    vpRoomLayout.innerHTML = '';
-    roomStage?.style.removeProperty('--vp-import-bg');
-    roomStage?.style.removeProperty('--vp-import-bg-image');
-    roomStage?.style.removeProperty('--vp-import-text');
-    vpRoomLayout.classList.remove('has-import-background');
-    return;
-  }
-  const bg = safeCssColor(layout.background_color, '#000000');
-  if (bg) roomStage?.style.setProperty('--vp-import-bg', bg);
-  const textColor = safeCssColor(layout.text_color);
-  if (textColor) roomStage?.style.setProperty('--vp-import-text', textColor);
-  else roomStage?.style.removeProperty('--vp-import-text');
-  const playerBg = safeCssColor(layout.audio_player_bg);
-const playerText = safeCssColor(layout.audio_player_text_buttons);
-
-if (playerBg) {
-    roomStage?.style.setProperty('--audio-player-bg', playerBg);
-    roomStage?.style.setProperty('--audio-player-track-bg', playerBg);
-    roomStage?.style.setProperty('--audio-player-progress-bg', playerBg);
-    roomStage?.style.setProperty('--audio-player-volume-track', playerBg);
-} else {
-    roomStage?.style.removeProperty('--audio-player-bg');
-    roomStage?.style.removeProperty('--audio-player-track-bg');
-    roomStage?.style.removeProperty('--audio-player-progress-bg');
-    roomStage?.style.removeProperty('--audio-player-volume-track');
+  importedRoomRuntime?.layout?.render(layout);
 }
 
-if (playerText) {
-    roomStage?.style.setProperty('--audio-player-text-buttons', playerText);
-    roomStage?.style.setProperty('--audio-player-icon-color', playerText);
-    roomStage?.style.setProperty('--audio-player-progress', playerText);
-    roomStage?.style.setProperty('--audio-player-progress-handle', playerText);
-    roomStage?.style.setProperty('--audio-player-volume-fill', playerText);
-} else {
-    roomStage?.style.removeProperty('--audio-player-text-buttons');
-    roomStage?.style.removeProperty('--audio-player-icon-color');
-    roomStage?.style.removeProperty('--audio-player-progress');
-    roomStage?.style.removeProperty('--audio-player-progress-handle');
-    roomStage?.style.removeProperty('--audio-player-volume-fill');
-}
-  syncImportedBackgroundLayer();
-  const chunks = [];
-  let avatarRow = [];
-  const firstTrack = cfg?.musicPlaylist?.[0] || null;
-  let roomTrackInserted = false;
-
-  const flushAvatarRow = () => {
-    if (!avatarRow.length) return;
-    chunks.push(`<div class="vp-import-section vp-import-avatar-row">${avatarRow.map(importedImageHtml).join('')}</div>`);
-    avatarRow = [];
-  };
-
-  layout.sections.forEach(section => {
-    if (
-  firstTrack &&
-  !roomTrackInserted &&
-  section?.type === 'text' &&
-  String(section.text).trim().toLowerCase() === 'inner-tranquillity'
-) {
-
-  if (firstTrack.type === 'audio') {
-
-    chunks.push(`
-      <div class="vp-import-player">
-        <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${firstTrack.url}" type="audio/mpeg">
-        </audio>
-      </div>
-    `);
-
-  } else if (firstTrack.type === 'youtube') {
-
-    chunks.push(`
-      <div class="vp-import-player">
-        <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${firstTrack.url}" type="video/x-youtube">
-        </audio>
-      </div>
-    `);
-
-  }
-
-  roomTrackInserted = true;
-}
-    if (importedAvatarSection(section)) {
-      avatarRow.push(section);
-      return;
-    }
-    flushAvatarRow();
-	if (
-    section?.type === 'image' &&
-    section.path &&
-    section.role === 'avatar-piece'
-) {
-    flushAvatarRow();
-
-    chunks.push(
-        `<div class="vp-import-avatar-piece">
-            ${importedImageHtml(section)}
-        </div>`
-    );
-
-    return;
-}
-    if (section?.type === 'image' && section.path) {
-      chunks.push(importedImageHtml(section));
-      return;
-    }
-    if (section?.type === 'text' && section.text) {
-      const style = section.style || {};
-      const inline = [
-        safeCssColor(style.color) ? `color:${safeCssColor(style.color)}` : '',
-        safeCssSize(style.font_size) ? `font-size:${safeCssSize(style.font_size)}` : '',
-        ['left', 'center', 'right'].includes(style.text_align) ? `text-align:${style.text_align}` : '',
-      ].filter(Boolean).join(';');
-      chunks.push(`<div class="vp-import-section vp-import-text"${inline ? ` style="${esc(inline)}"` : ''}>${esc(section.text).replace(/\n/g, '<br>')}</div>`);
-    }
-  });
-  flushAvatarRow();
-  vpRoomLayout.innerHTML = chunks.join('');
-
-const isInnerTranquillityPage =
-    chunks.join('').toLowerCase().includes('inner-tranquillity');
-
-if (
-    isInnerTranquillityPage &&
-    window.jQuery &&
-    $.fn.player
-) {
-
-    $('audio.vp-page-player').player({
-        audioWidth: 252,
-        audioHeight: 30
-    });
-
-document.querySelectorAll('.vp-import-player').forEach(wrapper => {
-
-    if (cfg?.backgroundTile && cfg?.backgroundPath) {
-        wrapper.style.background = 'transparent';
-        wrapper.style.border = 'none';
-    } else {
-        wrapper.style.background =
-            getComputedStyle(document.getElementById('room-stage'))
-            .getPropertyValue('--audio-player-bg')
-            .trim();
-    }
-
-});
-
-    setTimeout(() => {
-        if (cfg?.backgroundPath) {
-
-            document
-                .querySelectorAll('.vp-import-player .mejs__controls')
-                .forEach(el => el.style.background = 'transparent');
-
-            document
-                .querySelectorAll('.vp-import-player .mejs__time-total')
-                .forEach(el => el.style.background = 'transparent');
-
-            document
-                .querySelectorAll('.vp-import-player .mejs__horizontal-volume-total')
-                .forEach(el => el.style.background = 'transparent');
-        }
-    }, 100);
-}
-
-vpRoomLayout.hidden = false;
-syncImportedBackgroundLayer();
-}
 function syncImportedBackgroundLayer() {
-  if (!vpRoomLayout || vpRoomLayout.hidden) return;
-  if (cfg?.backgroundTile && cfg?.backgroundPath) {
-    roomStage?.style.setProperty('--vp-import-bg-image', `url("${mediaUrl(cfg.backgroundPath)}")`);
-    vpRoomLayout.classList.add('has-import-background');
-  } else {
-    roomStage?.style.removeProperty('--vp-import-bg-image');
-    vpRoomLayout.classList.remove('has-import-background');
-  }
+  importedRoomRuntime?.layout?.syncBackgroundLayer();
 }
 
 function renderImportedMusicPlayer(playlist) {
-  if (!vpMusicPlayer || !vpMusicAudio || !vpMusicSelect) return;
-  const tracks = Array.isArray(playlist) ? playlist.filter(track => track && track.url) : [];
-  if (!tracks.length) {
-    vpMusicPlayer.hidden = true;
-    vpMusicAudio.removeAttribute('src');
-    vpMusicSelect.innerHTML = '';
-    if (vpMusicLaunch) vpMusicLaunch.hidden = true;
-    return;
-  }
-  vpMusicSelect.innerHTML = tracks.map((track, idx) => `<option value="${idx}">${esc(track.label || `Audio ${idx + 1}`)}</option>`).join('');
-  vpMusicSelect.hidden = tracks.length < 2;
-  let activeTrack = tracks[0];
-  const setTrack = idx => {
-    const track = tracks[Number(idx) || 0] || tracks[0];
-    activeTrack = track;
-	if (vpMusicYoutube) {
-    vpMusicYoutube.hidden = true;
-    vpMusicYoutube.innerHTML = '';
-}
-    const isLaunchTrack = track.type === 'youtube' || Boolean(track.embed_url);
-    vpMusicAudio.hidden = isLaunchTrack;
-    if (vpMusicLaunch) {
-    vpMusicLaunch.hidden = !isLaunchTrack;
-    vpMusicLaunch.textContent = 'Launch YouTube Pop-Up';
-}
-
-if (vpMusicEmbed) {
-  vpMusicEmbed.hidden = !isLaunchTrack;
-  vpMusicEmbed.textContent = 'Launch YouTube Embed';
-}
-
-
-    if (isLaunchTrack) {
-    vpMusicAudio.pause();
-    vpMusicAudio.removeAttribute('src');
-    vpMusicAudio.load();
-
-    if (vpMusicYoutube) {
-        vpMusicYoutube.hidden = true;
-        vpMusicYoutube.innerHTML = '';
-    }
-
-    return;
-}
-
-    if (vpMusicYoutube) {
-      vpMusicYoutube.hidden = true;
-      vpMusicYoutube.innerHTML = '';
-    }
-
-    vpMusicAudio.hidden = false;
-    vpMusicAudio.src = mediaUrl(track.url);
-    vpMusicAudio.load();
-  };
-  vpMusicSelect.onchange = () => setTrack(vpMusicSelect.value);
-if (vpMusicLaunch) {
-    vpMusicLaunch.onclick = () => {
-
-        if (vpMusicModal?.classList.contains('open')) {
-            closeImportedMusicModal();
-            vpMusicLaunch.textContent = 'Launch YouTube Pop-Up';
-            return;
-        }
-
-        openImportedMusicModal(activeTrack);
-        vpMusicLaunch.textContent = 'Close YouTube Pop-Up';
-    };
-}
-
-
-if (vpMusicEmbed) {
-    vpMusicEmbed.onclick = () => {
-
-        if (!activeTrack?.embed_url || !vpMusicYoutube) {
-            return;
-        }
-
-        // Hide if already visible
-        if (!vpMusicYoutube.hidden) {
-            vpMusicYoutube.hidden = true;
-            vpMusicYoutube.innerHTML = '';
-            vpMusicEmbed.textContent = 'Launch YouTube Embed';
-            return;
-        }
-
-        // Show embed
-        vpMusicYoutube.hidden = false;
-        vpMusicYoutube.innerHTML =
-            `<iframe src="${esc(activeTrack.embed_url)}"
-                allow="autoplay; encrypted-media"
-                allowfullscreen>
-             </iframe>`;
-
-        vpMusicEmbed.textContent = 'Hide YouTube Embed';
-    };
-}
-
-setTrack(0);
-vpMusicPlayer.hidden = false;
+  importedRoomRuntime?.music?.renderPlayer(playlist);
 }
 
 function openImportedMusicModal(track) {
-  if (!track || !vpMusicModal || !vpMusicFrameWrap) return;
-  const embedUrl = track.embed_url || '';
-  if (vpMusicModalTitle) vpMusicModalTitle.textContent = track.label || 'Room Music';
-  if (embedUrl && isHttpUrl(embedUrl)) {
-    vpMusicFrameWrap.innerHTML = `<iframe src="${esc(embedUrl)}" title="${esc(track.label || 'Room Music')}" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
-  } else {
-    vpMusicFrameWrap.innerHTML = `<a class="btn btn-primary" href="${esc(track.url)}" target="_blank" rel="noopener noreferrer">Open Music</a>`;
-  }
-  vpMusicModal.classList.add('open');
-  setImportedMusicMinimized(false);
-  clampImportedMusicModal();
+  importedRoomRuntime?.music?.openModal(track);
 }
 
 function closeImportedMusicModal() {
-  vpMusicModal?.classList.remove('open');
-  if (vpMusicFrameWrap) vpMusicFrameWrap.innerHTML = '';
-  if (vpMusicLaunch) vpMusicLaunch.textContent = 'Launch YouTube Pop-Up';
-  setImportedMusicMinimized(false);
+  importedRoomRuntime?.music?.closeModal();
 }
 
-vpMusicModalClose?.addEventListener('click', closeImportedMusicModal);
-vpMusicModalMinimize?.addEventListener('click', () => {
-  setImportedMusicMinimized(!vpMusicModalBox?.classList.contains('minimized'));
-});
-
 function setImportedMusicMinimized(minimized) {
-  if (!vpMusicModalBox) return;
-  vpMusicModalBox.classList.toggle('minimized', Boolean(minimized));
-  if (vpMusicModalMinimize) {
-    vpMusicModalMinimize.textContent = minimized ? '+' : '−';
-    vpMusicModalMinimize.setAttribute('aria-label', minimized ? 'Restore' : 'Minimize');
-  }
-  requestAnimationFrame(clampImportedMusicModal);
+  importedRoomRuntime?.music?.setMinimized(minimized);
 }
 
 function clampImportedMusicModal() {
-  if (!vpMusicModalBox || !vpMusicModal?.classList.contains('open')) return;
-  const rect = vpMusicModalBox.getBoundingClientRect();
-  const halfW = rect.width / 2;
-  const halfH = rect.height / 2;
-  const centerX = rect.left + halfW;
-  const centerY = rect.top + halfH;
-  const x = Math.max(halfW + 8, Math.min(window.innerWidth - halfW - 8, centerX));
-  const y = Math.max(halfH + 8, Math.min(window.innerHeight - halfH - 8, centerY));
-  vpMusicModalBox.style.setProperty('--vp-music-left', `${x}px`);
-  vpMusicModalBox.style.setProperty('--vp-music-top', `${y}px`);
+  importedRoomRuntime?.music?.clampModal();
 }
-
-function initImportedMusicDrag() {
-  if (!vpMusicDragHandle || !vpMusicModalBox) return;
-  let dragging = false;
-  let startX = 0;
-  let startY = 0;
-  let startCenterX = 0;
-  let startCenterY = 0;
-  const move = event => {
-    if (!dragging) return;
-    const rect = vpMusicModalBox.getBoundingClientRect();
-    const halfW = rect.width / 2;
-    const halfH = rect.height / 2;
-    const x = Math.max(halfW + 8, Math.min(window.innerWidth - halfW - 8, startCenterX + event.clientX - startX));
-    const y = Math.max(halfH + 8, Math.min(window.innerHeight - halfH - 8, startCenterY + event.clientY - startY));
-    vpMusicModalBox.style.setProperty('--vp-music-left', `${x}px`);
-    vpMusicModalBox.style.setProperty('--vp-music-top', `${y}px`);
-  };
-  const stop = event => {
-    if (!dragging) return;
-    dragging = false;
-    vpMusicModalBox.classList.remove('is-dragging');
-    vpMusicDragHandle.releasePointerCapture?.(event.pointerId);
-  };
-  vpMusicDragHandle.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || event.target.closest('button')) return;
-    const rect = vpMusicModalBox.getBoundingClientRect();
-    dragging = true;
-    startX = event.clientX;
-    startY = event.clientY;
-    startCenterX = rect.left + rect.width / 2;
-    startCenterY = rect.top + rect.height / 2;
-    vpMusicModalBox.classList.add('is-dragging');
-    vpMusicDragHandle.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
-  });
-  vpMusicDragHandle.addEventListener('pointermove', move);
-  vpMusicDragHandle.addEventListener('pointerup', stop);
-  vpMusicDragHandle.addEventListener('pointercancel', stop);
-  window.addEventListener('resize', clampImportedMusicModal);
-}
-initImportedMusicDrag();
 
 function linkifiedTextHtml(text) {
   return chatMessageRenderer().linkifiedTextHtml(text);

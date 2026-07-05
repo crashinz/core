@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000029
+000030
 
 **Framework Phase**
 
-RoomEffectsRuntime - Room-Wide Environmental Effects Ownership Complete
+ImportedRoomRuntime - Imported Room Layout and Music Ownership Complete
 
 ---
 
@@ -156,6 +156,9 @@ assets/
 
         room-effects/
             Room Effects Runtime.
+
+        imported-room/
+            Imported Room Runtime.
 
         presence/
             Future Presence Runtime.
