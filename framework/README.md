@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000028
+000029
 
 **Framework Phase**
 
-GameRuntime - Game Lifecycle and Stage Presentation Ownership Complete
+RoomEffectsRuntime - Room-Wide Environmental Effects Ownership Complete
 
 ---
 
@@ -153,6 +153,9 @@ assets/
 
         game/
             Game Runtime.
+
+        room-effects/
+            Room Effects Runtime.
 
         presence/
             Future Presence Runtime.

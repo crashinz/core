@@ -28,6 +28,7 @@ let chatRuntime = null;
 let roomRuntime = null;
 let voiceRuntime = null;
 let gameRuntime = null;
+let roomEffectsRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
 let frameQueued = false;
@@ -139,9 +140,6 @@ const seenRoomHistoryClears = new Set();
 
 let gifSearchTimer = null;
 const gifDurationCache = new Map();
-const loadedRoomEffectModules = new Map();
-let activeRoomEffectController = null;
-let activeRoomEffect = null;
 const loadedAuraModules = new Map();
 let auraLoadChain = Promise.resolve();
 let auraCatalog = [];
@@ -166,12 +164,13 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
     import(appUrl('/assets/js/runtime/game/game-runtime.js')),
+    import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
   ]);
@@ -181,6 +180,7 @@ async function initializeAvatarRuntime() {
   roomRuntime = new RoomRuntime();
   voiceRuntime = new VoiceRuntime();
   gameRuntime = new GameRuntime();
+  roomEffectsRuntime = new RoomEffectsRuntime();
   pollingRuntime = new PollingRuntime();
   avatarRuntime = new AvatarRuntime();
 
@@ -188,6 +188,7 @@ async function initializeAvatarRuntime() {
   chatRuntimeCore.registerModule(roomRuntime);
   chatRuntimeCore.registerModule(voiceRuntime);
   chatRuntimeCore.registerModule(gameRuntime);
+  chatRuntimeCore.registerModule(roomEffectsRuntime);
   chatRuntimeCore.registerModule(pollingRuntime);
   chatRuntimeCore.registerModule(avatarRuntime);
   chatRuntimeCore.initialize();
@@ -210,6 +211,7 @@ async function initializeAvatarRuntime() {
   configureRoomEventRouter();
   configureVoiceRuntime();
   configureGameRuntime();
+  configureRoomEffectsRuntime();
   configureChatPoll();
 
   return avatarRuntime;
@@ -628,9 +630,7 @@ function configureRoomEventRouter() {
       handleRoomDeleted(payload);
     },
     onRoomEffect(payload) {
-      cfg.activeRoomEffect = payload.active ? payload : null;
-      applyRoomEffect(payload, true);
-      renderRoomEffectsModal();
+      roomEffectsRuntime?.effects?.handleRoomEffect(payload);
     },
     onHostWarning(payload) {
       if (Number(payload.target_user_id) === cfg.myUserId) {
@@ -794,6 +794,34 @@ function configureGameRuntime() {
     },
     warnError(error) {
       console.warn(error);
+    },
+  });
+}
+
+function configureRoomEffectsRuntime() {
+  roomEffectsRuntime?.effects?.configure({
+    document,
+    window,
+    CSS,
+    appUrl,
+    mediaUrl,
+    cacheBust,
+    getConfig: () => cfg,
+    getParticipants: () => participants,
+    getRoomStage() {
+      return roomStage;
+    },
+    setRoomEffectsState(effects, current) {
+      cfg.roomEffects = effects || [];
+      cfg.activeRoomEffect = current || null;
+    },
+    setActiveRoomEffect(effect) {
+      cfg.activeRoomEffect = effect?.active ? effect : null;
+    },
+    renderRoomEffectsModal,
+    addSystemMessage,
+    fetchEffectsState(query) {
+      return fetch(appUrl('/api/room_admin.php?' + query)).then(r => r.json());
     },
   });
 }
@@ -2568,112 +2596,23 @@ function applyParticipantAura(person) {
 }
 
 function roomEffectByKey(key) {
-  return (cfg.roomEffects || []).find(effect => effect.key === key) || null;
+  return roomEffectsRuntime?.effects?.effectByKey(key) || null;
 }
 
 async function loadRoomEffectModule(effect) {
-  if (!effect?.script) throw new Error('Room effect script missing.');
-  const src = appUrl(effect.script);
-  if (loadedRoomEffectModules.has(src)) return loadedRoomEffectModules.get(src);
-  await new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[data-room-effect-src="${CSS.escape(src)}"]`);
-    if (existing) {
-      if (existing.dataset.loaded === '1') resolve();
-      else existing.addEventListener('load', resolve, { once: true });
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = cacheBust(src);
-    script.async = true;
-    script.dataset.roomEffectSrc = src;
-    script.addEventListener('load', () => {
-      script.dataset.loaded = '1';
-      resolve();
-    }, { once: true });
-    script.addEventListener('error', () => reject(new Error(`Could not load ${effect.label || effect.key}.`)), { once: true });
-    document.head.appendChild(script);
-  });
-  const module = window.ChatSpaceRoomEffects?.[effect.key];
-  if (!module) throw new Error(`${effect.label || effect.key} did not register itself.`);
-  loadedRoomEffectModules.set(src, module);
-  return module;
-}
-
-function roomEffectContext(effect) {
-  const disposers = [];
-  return {
-    appUrl,
-    mediaUrl,
-    roomStage,
-    participants,
-    getParticipant: id => participants.get(Number(id)),
-    getAvatars: () => [...participants.values()].filter(p => p.avatarEl || p.webcamVideoEl).map(p => ({ participant: p, element: p.webcamVideoEl || p.avatarEl })),
-    addStageListener: (type, handler, options) => {
-      roomStage.addEventListener(type, handler, options);
-      disposers.push(() => roomStage.removeEventListener(type, handler, options));
-    },
-    addWindowListener: (type, handler, options) => {
-      window.addEventListener(type, handler, options);
-      disposers.push(() => window.removeEventListener(type, handler, options));
-    },
-    onSystemMessage: text => addSystemMessage(text),
-    effect,
-    cleanup: () => disposers.splice(0).forEach(dispose => dispose()),
-  };
+  return roomEffectsRuntime?.effects?.loadModule(effect);
 }
 
 function cleanupRoomEffectVisuals() {
-  activeRoomEffectController?.destroy?.();
-  activeRoomEffectController = null;
-  document.body.classList.remove('has-room-effect');
-  roomStage?.querySelectorAll('.room-effect-layer').forEach(layer => layer.remove());
-  if (roomStage) {
-    [...roomStage.classList].forEach(className => {
-      if (className.startsWith('effect-')) roomStage.classList.remove(className);
-    });
-  }
+  roomEffectsRuntime?.effects?.cleanup();
 }
 
 async function applyRoomEffect(effectPayload, announce = false) {
-  cleanupRoomEffectVisuals();
-  activeRoomEffect = effectPayload?.active ? effectPayload : null;
-  if (!activeRoomEffect) {
-    if (announce) {
-      if (effectPayload?.expired) addSystemMessage(`${effectPayload?.label || 'Room effect'} ended.`);
-      else addSystemMessage(`${effectPayload?.stopped_by_name || 'Someone'} stopped ${effectPayload?.label || 'Room Effect'}.`);
-    }
-    return;
-  }
-  const effect = Object.assign({}, roomEffectByKey(activeRoomEffect.effect_key) || {}, activeRoomEffect);
-  try {
-    const module = await loadRoomEffectModule(effect);
-    if (!activeRoomEffect || activeRoomEffect.effect_key !== effect.effect_key) return;
-    document.body.classList.add('has-room-effect');
-    const context = roomEffectContext(effect);
-    const controller = module.mount(context) || {};
-    activeRoomEffectController = {
-      destroy() {
-        controller.destroy?.();
-        context.cleanup?.();
-      },
-    };
-    if (announce) {
-      const by = effect.changed_by_name || effect.started_by_name || 'Someone';
-      addSystemMessage(`${by} started ${effect.label}.`);
-    }
-  } catch (err) {
-    cleanupRoomEffectVisuals();
-    addSystemMessage(err.message || 'Room effect could not start.');
-  }
+  await roomEffectsRuntime?.effects?.apply(effectPayload, announce);
 }
 
 async function loadRoomEffectsState() {
-  const qs = new URLSearchParams({ action: 'effects', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
-  const data = await fetch(appUrl('/api/room_admin.php?' + qs)).then(r => r.json());
-  if (data.error) throw new Error(data.error);
-  cfg.roomEffects = data.effects || [];
-  cfg.activeRoomEffect = data.current || null;
-  return data;
+  return roomEffectsRuntime?.effects?.loadState();
 }
 
 function renderRoomEffectsModal() {
