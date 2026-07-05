@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000022-K
+000026
 
 **Framework Phase**
 
-Chat Runtime Extraction - Game Chat Integration Ownership Complete
+RoomRuntime Foundation - Non-Chat Event Routing Ownership Complete
 
 ---
 
@@ -143,7 +143,10 @@ assets/
             Avatar Runtime.
 
         chat/
-            Future Chat Runtime.
+            Chat Runtime.
+
+        room/
+            Room Runtime.
 
         presence/
             Future Presence Runtime.

@@ -25,6 +25,7 @@ const vpMusicYoutube = document.getElementById('vp-music-youtube');
 let participants = new Map();
 let chatRuntimeCore = null;
 let chatRuntime = null;
+let roomRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
 let frameQueued = false;
@@ -188,19 +189,22 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
+    import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
   ]);
 
   chatRuntimeCore = new Core();
   chatRuntime = new ChatRuntime();
+  roomRuntime = new RoomRuntime();
   pollingRuntime = new PollingRuntime();
   avatarRuntime = new AvatarRuntime();
 
   chatRuntimeCore.registerModule(chatRuntime);
+  chatRuntimeCore.registerModule(roomRuntime);
   chatRuntimeCore.registerModule(pollingRuntime);
   chatRuntimeCore.registerModule(avatarRuntime);
   chatRuntimeCore.initialize();
@@ -220,6 +224,7 @@ async function initializeAvatarRuntime() {
   configureChatComposer();
   configureChatMediaSend();
   configureChatGameChat();
+  configureRoomEventRouter();
   configureChatPoll();
 
   return avatarRuntime;
@@ -528,6 +533,156 @@ function configureChatGameChat() {
   });
 }
 
+function configureRoomEventRouter() {
+  roomRuntime?.events?.configure({
+    onParticipantJoin(payload) {
+      const alreadyKnown = participants.has(payload.id);
+      const hadStageAvatar = Boolean(participants.get(payload.id)?.avatarEl);
+      renderParticipantWhenReady(Object.assign({ online: true }, payload), { animateJoin: !hadStageAvatar }).catch(() => {
+        renderParticipant(Object.assign({ online: true }, payload), { animateJoin: !hadStageAvatar });
+      });
+      if (webcamStream && Number(payload.id) !== Number(cfg.myParticipantId)) connectMediaPeer(payload.id);
+      if (!alreadyKnown && payload.id !== cfg.myParticipantId) addSystemMessage(`${payload.display_name} joined the room.`);
+    },
+    onParticipantLeave(payload) {
+      const leavingId = payload.participant_id || payload.id;
+      const person = participants.get(Number(leavingId));
+      if (person && person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
+      removeParticipant(leavingId);
+    },
+    onParticipantPosition(payload) {
+      const person = participants.get(payload.participant_id);
+      if (!person) return;
+
+      avatarRuntime?.layout?.applyParticipantPosition(person, {
+        x: payload.position_x,
+        y: payload.position_y,
+      });
+
+      if (avatarRuntime?.coordinator?.refreshRelationshipsForParticipant(person, {
+        animate: false,
+        persist: false,
+      })) return;
+
+      positionAvatar(person);
+    },
+    onParticipantWebcam(payload) {
+      applyWebcamState(payload.participant_id, Boolean(payload.webcam_enabled || payload.webcam_path), payload.webcam_path || null);
+    },
+    onParticipantAvatar(payload) {
+      const person = participants.get(payload.participant_id);
+      if (!person) return;
+
+      participants.update(payload.participant_id, {
+        avatar_path: payload.avatar_path,
+        avatar_url: payload.avatar_url,
+        avatar_version: Date.now(),
+        webcam_path: payload.webcam_path || null,
+        webcam_enabled: Boolean(payload.webcam_enabled || payload.webcam_path),
+      });
+      if (!person.webcam_enabled) detachParticipantVideo(person.id);
+      renderParticipant(person);
+    },
+    onParticipantAura(payload) {
+      participants.forEach(person => {
+        if (Number(person.user_id) !== Number(payload.user_id) && Number(person.id) !== Number(payload.participant_id)) return;
+        person.aura_effect = payload.aura_effect || null;
+        applyParticipantAura(person);
+      });
+    },
+    onUserRoleUpdate(payload) {
+      applyUserRoleUpdate(payload);
+    },
+    onTyping(payload) {
+      showTyping(payload.participant_id, payload.active);
+    },
+    onPresenceLeave(payload) {
+      const person = participants.get(payload.participant_id);
+      if (!person) return;
+
+      participants.update(payload.participant_id, {
+        online: false,
+        webcam_path: null,
+      });
+      avatarRuntime?.coordinator?.clearParticipantRelationship(person.id);
+      removeParticipant(person.id);
+      if (person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
+    },
+    onRemoteLink(payload) {
+      avatarRuntime?.coordinator?.reconcileRemoteLink(payload);
+    },
+    onRemoteLinkIcon(payload) {
+      avatarRuntime?.coordinator?.reconcileRemoteLinkIcon(payload);
+    },
+    onBlock(payload) {
+      if (Number(payload.blocker_user_id) !== cfg.myUserId) return;
+
+      blockedUserIds.add(Number(payload.blocked_user_id));
+      participants.forEach(person => {
+        if (Number(person.user_id) === Number(payload.blocked_user_id) || person.linked_to && Number(participants.get(person.linked_to)?.user_id) === Number(payload.blocked_user_id)) {
+          avatarRuntime?.coordinator?.clearBlockedRelationship(person);
+        }
+      });
+      renderActiveChat();
+    },
+    onUnblock(payload) {
+      if (Number(payload.blocker_user_id) !== cfg.myUserId) return;
+
+      blockedUserIds.delete(Number(payload.blocked_user_id));
+      participants.forEach(renderParticipant);
+      renderActiveChat();
+    },
+    onGameEvent() {
+      loadGames();
+    },
+    onRoomUpdate(payload) {
+      applyRoomUpdate(payload);
+    },
+    onRoomDeleted(payload) {
+      handleRoomDeleted(payload);
+    },
+    onRoomEffect(payload) {
+      cfg.activeRoomEffect = payload.active ? payload : null;
+      applyRoomEffect(payload, true);
+      renderRoomEffectsModal();
+    },
+    onHostWarning(payload) {
+      if (Number(payload.target_user_id) === cfg.myUserId) {
+        showHostNotice('Warning', payload.message || 'You have received a warning.');
+      }
+    },
+    onHostEjection(payload) {
+      if (Number(payload.target_user_id) === cfg.myUserId) {
+        const msg = payload.permanent
+          ? 'You have been permanently ejected from the room.'
+          : `You have been ejected from the room for ${payload.duration_minutes} minutes.`;
+        showHostNotice('Room Ejection', msg, true);
+      }
+      removeParticipant(payload.target_participant_id);
+    },
+    onCommunityEjection(payload) {
+      if (Number(payload.target_user_id) === cfg.myUserId) {
+        const msg = payload.permanent
+          ? 'You have been permanently ejected from the community.'
+          : `You have been ejected from the community until ${new Date(String(payload.expires_at).replace(' ', 'T') + 'Z').toLocaleString()}.`;
+        showHostNotice('Community Ejection', msg, true);
+        document.getElementById('host-notice-understand').dataset.redirectUrl = appUrl('/community_ejected.php');
+      }
+      removeParticipant(payload.target_participant_id);
+    },
+    onLinkTyping(payload) {
+      const partnerId = payload.participant_id;
+      if (activeChatKey() === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(payload.participant_id, payload.active);
+    },
+    onGameTyping(payload) {
+      if (activeGame?.lobby_code !== payload.lobby_code) return;
+      if (Number(payload.participant_id) !== Number(cfg.myParticipantId)) {
+        setGameTyping(payload.participant_id, Boolean(payload.active));
+      }
+    },
+  });
+}
+
 function configureChatPoll() {
   chatRuntime?.poll?.configure({
     getConfig: () => cfg,
@@ -536,8 +691,12 @@ function configureChatPoll() {
     fetchPoll(query) {
       return fetch(appUrl('/api/poll.php?' + query)).then(r => r.json());
     },
-    handleRoomEvent: handleRoomPollEvent,
-    handleCommunityEvent: handleCommunityPollEvent,
+    handleRoomEvent(event) {
+      roomRuntime?.events?.routeRoomEvent(event);
+    },
+    handleCommunityEvent(event) {
+      roomRuntime?.events?.routeCommunityEvent(event);
+    },
     warnError(error) {
       console.warn(error);
     },
@@ -2822,143 +2981,6 @@ async function checkLatency() {
 
 function poll() {
   chatPoll().start();
-}
-
-function handleRoomPollEvent(ev) {
-      const p = ev.payload || {};
-      if (ev.type === 'participant_join') {
-        const alreadyKnown = participants.has(p.id);
-        const hadStageAvatar = Boolean(participants.get(p.id)?.avatarEl);
-        renderParticipantWhenReady(Object.assign({ online: true }, p), { animateJoin: !hadStageAvatar }).catch(() => {
-          renderParticipant(Object.assign({ online: true }, p), { animateJoin: !hadStageAvatar });
-        });
-        if (webcamStream && Number(p.id) !== Number(cfg.myParticipantId)) connectMediaPeer(p.id);
-        if (!alreadyKnown && p.id !== cfg.myParticipantId) addSystemMessage(`${p.display_name} joined the room.`);
-      }
-      if (ev.type === 'participant_leave') {
-        const leavingId = p.participant_id || p.id;
-        const person = participants.get(Number(leavingId));
-        if (person && person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
-        removeParticipant(leavingId);
-      }
-      if (ev.type === 'position') {
-        const person = participants.get(p.participant_id);
-        if (person) {
-
-    avatarRuntime?.layout?.applyParticipantPosition(person, {
-      x: p.position_x,
-      y: p.position_y,
-    });
-
-    if (avatarRuntime?.coordinator?.refreshRelationshipsForParticipant(person, {
-      animate: false,
-      persist: false,
-    })) return;
-
-    positionAvatar(person);
-}
-      }
-      if (ev.type === 'webcam') {
-        applyWebcamState(p.participant_id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null);
-      }
-      if (ev.type === 'avatar') {
-        const person = participants.get(p.participant_id);
-        if (person) {
-          participants.update(p.participant_id, {
-            avatar_path: p.avatar_path,
-            avatar_url: p.avatar_url,
-            avatar_version: Date.now(),
-            webcam_path: p.webcam_path || null,
-            webcam_enabled: Boolean(p.webcam_enabled || p.webcam_path),
-          });
-          if (!person.webcam_enabled) detachParticipantVideo(person.id);
-          renderParticipant(person);
-        }
-      }
-      if (ev.type === 'aura') {
-        participants.forEach(person => {
-          if (Number(person.user_id) !== Number(p.user_id) && Number(person.id) !== Number(p.participant_id)) return;
-          person.aura_effect = p.aura_effect || null;
-          applyParticipantAura(person);
-        });
-      }
-      if (ev.type === 'user_role_update') applyUserRoleUpdate(p);
-      if (ev.type === 'typing') showTyping(p.participant_id, p.active);
-      if (ev.type === 'presence_leave') {
-        const person = participants.get(p.participant_id);
-        if (person) {
-          participants.update(p.participant_id, {
-            online: false,
-            webcam_path: null,
-          });
-          avatarRuntime?.coordinator?.clearParticipantRelationship(person.id);
-          removeParticipant(person.id);
-          if (person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
-        }
-      }
-      if (ev.type === 'link') {
-        avatarRuntime?.coordinator?.reconcileRemoteLink(p);
-      }
-      if (ev.type === 'link_icon') {
-        avatarRuntime?.coordinator?.reconcileRemoteLinkIcon(p);
-      }
-      if (ev.type === 'block' && Number(p.blocker_user_id) === cfg.myUserId) {
-        blockedUserIds.add(Number(p.blocked_user_id));
-        participants.forEach(person => {
-          if (Number(person.user_id) === Number(p.blocked_user_id) || person.linked_to && Number(participants.get(person.linked_to)?.user_id) === Number(p.blocked_user_id)) {
-            avatarRuntime?.coordinator?.clearBlockedRelationship(person);
-          }
-        });
-        renderActiveChat();
-      }
-      if (ev.type === 'unblock' && Number(p.blocker_user_id) === cfg.myUserId) {
-        blockedUserIds.delete(Number(p.blocked_user_id));
-        participants.forEach(renderParticipant);
-        renderActiveChat();
-      }
-      if (ev.type === 'game_start' || ev.type === 'game_end' || ev.type === 'game_update') loadGames();
-      if (ev.type === 'room_update') applyRoomUpdate(p);
-      if (ev.type === 'room_deleted') handleRoomDeleted(p);
-      if (ev.type === 'room_effect') {
-        cfg.activeRoomEffect = p.active ? p : null;
-        applyRoomEffect(p, true);
-        renderRoomEffectsModal();
-      }
-      if (ev.type === 'host_warning' && Number(p.target_user_id) === cfg.myUserId) {
-        showHostNotice('Warning', p.message || 'You have received a warning.');
-      }
-      if (ev.type === 'host_ejection') {
-        if (Number(p.target_user_id) === cfg.myUserId) {
-          const msg = p.permanent
-            ? 'You have been permanently ejected from the room.'
-            : `You have been ejected from the room for ${p.duration_minutes} minutes.`;
-          showHostNotice('Room Ejection', msg, true);
-        }
-        removeParticipant(p.target_participant_id);
-      }
-      if (ev.type === 'community_ejection') {
-        if (Number(p.target_user_id) === cfg.myUserId) {
-          const msg = p.permanent
-            ? 'You have been permanently ejected from the community.'
-            : `You have been ejected from the community until ${new Date(String(p.expires_at).replace(' ', 'T') + 'Z').toLocaleString()}.`;
-          showHostNotice('Community Ejection', msg, true);
-          document.getElementById('host-notice-understand').dataset.redirectUrl = appUrl('/community_ejected.php');
-        }
-        removeParticipant(p.target_participant_id);
-      }
-}
-
-function handleCommunityPollEvent(ev) {
-      const p = ev.payload || {};
-      if (ev.type === 'link_typing') {
-        const partnerId = p.participant_id;
-        if (activeChatKey() === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(p.participant_id, p.active);
-      }
-      if (ev.type === 'game_typing' && activeGame?.lobby_code === p.lobby_code) {
-        if (Number(p.participant_id) !== Number(cfg.myParticipantId)) {
-          setGameTyping(p.participant_id, Boolean(p.active));
-        }
-      }
 }
 
 function showTyping(participantId, active) {
