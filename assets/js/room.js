@@ -1385,10 +1385,6 @@ function chatMessageRenderer() {
   return chatRuntime?.renderer;
 }
 
-function chatEventRouter() {
-  return chatRuntime?.events;
-}
-
 function chatMessageActions() {
   return chatRuntime?.actions;
 }
@@ -1429,10 +1425,6 @@ function activeChatKey() {
   return chatNavigation()?.activeChat() || 'room';
 }
 
-function channelMapFor(chatKey = activeChatKey()) {
-  return chatMessageState().channelMapFor(chatKey);
-}
-
 function channelForApi(chatKey = activeChatKey()) {
   return chatMessageState().channelForApi(chatKey);
 }
@@ -1443,10 +1435,6 @@ function linkPartnerIdFromKey(key) {
 
 function dmPartnerIdFromPayload(payload) {
   return chatPrivateChats().dmPartnerIdFromPayload(payload);
-}
-
-function chatKeyForMessagePayload(payload) {
-  return chatEventRouter().chatKeyForMessagePayload(payload);
 }
 
 function chatLabel(chatKey = activeChatKey()) {
@@ -2217,14 +2205,6 @@ function renderReactions(msg) {
   return chatMessageRenderer().renderReactions(msg);
 }
 
-function auraByKey(key) {
-  return avatarRuntime?.aura?.auraByKey(key) || null;
-}
-
-async function loadAuraModule(aura) {
-  return avatarRuntime?.aura?.loadModule(aura);
-}
-
 function cleanupAuraLayer(layer) {
   return avatarRuntime?.aura?.cleanupLayer(layer) || null;
 }
@@ -2255,10 +2235,6 @@ function renderRoomEffectsModal() {
     current.innerHTML = '<span class="minor">No room effect is active.</span>';
     if (stop) stop.hidden = true;
   }
-}
-
-async function loadAuraCatalog() {
-  return avatarRuntime?.aura?.loadCatalog() || [];
 }
 
 function renderAuraOptions() {
@@ -4076,16 +4052,8 @@ document.getElementById('vertical-divider')?.addEventListener('pointerdown', e =
   window.addEventListener('blur', onUp);
 });
 
-async function loadGames() {
-  return gameRuntime?.lifecycle?.loadGames();
-}
-
 function gameName(type) {
   return gameRuntime?.lifecycle?.gameName(type) || type;
-}
-
-function gamePath(type) {
-  return gameRuntime?.lifecycle?.gamePath(type) || type;
 }
 
 function gameIconUrl(type) {
@@ -4108,10 +4076,6 @@ async function openGame(a) {
   return gameRuntime?.lifecycle?.openGame(a);
 }
 
-function hideGameOverlay() {
-  gameRuntime?.lifecycle?.hideGameOverlay();
-}
-
 async function closeGame(lobbyCode = gameRuntime?.lifecycle?.getActiveGame()?.lobby_code, notifyServer = true) {
   return gameRuntime?.lifecycle?.closeGame(lobbyCode, notifyServer);
 }
@@ -4122,10 +4086,6 @@ function gameChatKey(lobbyCode = gameRuntime?.lifecycle?.getActiveGame()?.lobby_
 
 function updateGameStagePlayers() {
   gameRuntime?.lifecycle?.updateStagePlayers();
-}
-
-function addGameMessageToChannel(msg, live = false) {
-  chatGameChat().addMessage(msg, live);
 }
 
 async function sendGameMessage(content) {
@@ -4140,16 +4100,8 @@ function setGameTyping(participantId, active) {
   chatGameChat().setTyping(participantId, active);
 }
 
-async function pollGameChat() {
-  return chatGameChat().poll();
-}
-
 function startGameChatPolling() {
   chatGameChat().startPolling();
-}
-
-function sendGameTyping(active) {
-  return chatGameChat().sendTyping(active);
 }
 
 function stopGameTypingNow() {
@@ -4791,7 +4743,7 @@ async function bootRoom() {
     run: refreshPresence,
     interval: 5000,
   });
-  loadGames();
+  gameRuntime?.lifecycle?.loadGames();
 }
 
 function updateRoomLayout() {
