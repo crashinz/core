@@ -20,7 +20,7 @@
  *      does not directly implement avatar behavior.
  *
  * Build:
- *      000024
+ *      000033
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -56,6 +56,12 @@
  *
  * Build 000024
  * - Added Avatar Drag Controller ownership and diagnostics.
+ *
+ * Build 000032
+ * - Added rendered avatar geometry ownership through AvatarRenderer.
+ *
+ * Build 000033
+ * - Added Avatar Aura Service ownership and diagnostics.
  ******************************************************************************/
 
 /**
@@ -100,6 +106,12 @@ import {
     AvatarLayoutService
 
 } from "./services/avatar-layout-service.js";
+
+import {
+
+    AvatarAuraService
+
+} from "./services/avatar-aura-service.js";
 
 import {
 
@@ -169,6 +181,11 @@ export class AvatarRuntime extends CoreModule {
      * Renderer runtime component.
      */
     #renderer = null;
+
+    /**
+     * Aura workflow runtime component.
+     */
+    #aura = null;
 
     /**
      * Effects runtime component.
@@ -280,6 +297,18 @@ export class AvatarRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Avatar Aura Service.
+     *
+     * @returns {AvatarAuraService}
+     *         Aura workflow runtime component.
+     */
+    get aura() {
+
+        return this.#aura;
+
+    }
+
+    /**
      * Returns the Avatar Effects Runtime.
      *
      * @returns {AvatarEffectsRuntime}
@@ -353,6 +382,9 @@ export class AvatarRuntime extends CoreModule {
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
 
+            aura:
+                this.#aura?.getDiagnostics() ?? null,
+
             effects:
                 this.#effects?.getDiagnostics() ?? null,
 
@@ -387,6 +419,8 @@ export class AvatarRuntime extends CoreModule {
         this.#createLayout();
 
         this.#createRenderer();
+
+        this.#createAura();
 
         this.#createEffects();
 
@@ -426,6 +460,8 @@ export class AvatarRuntime extends CoreModule {
         this.#coordinator?.destroy();
 
         this.#effects?.destroy();
+
+        this.#aura?.destroy();
 
         this.#renderer?.destroy();
 
@@ -510,6 +546,20 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#renderer.initialize();
+
+    }
+
+    /**
+     * Creates the Aura runtime component.
+     */
+    #createAura() {
+
+        this.#aura =
+            new AvatarAuraService(
+                this
+            );
+
+        this.#aura.initialize();
 
     }
 

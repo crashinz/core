@@ -1,6 +1,6 @@
 # Imported Room Runtime
 
-**Build:** 000031
+**Build:** 000033
 **Owner:** ImportedRoomRuntime
 **Status:** Runtime Owned - Behavioral Verification Pending
 
@@ -16,8 +16,8 @@ ImportedRoomRuntime owns:
 - imported room music-player rendering
 - imported website music-player integration
 - imported room music-player compatibility logic
-- domain-specific imported website player behavior, including
-  inner-tranquillity.net compatibility logic
+- imported website compatibility routing
+- domain-specific imported website compatibility implementations
 - imported website page-level player compatibility diagnostics
 - imported room diagnostics
 
@@ -36,9 +36,10 @@ ImportedRoomRuntime does not own:
 - `ImportedRoomLayoutRenderer` owns imported room layout presentation.
 - `ImportedRoomMusicService` owns imported room music-player behavior,
   modal lifecycle, inline embed presentation, and diagnostics.
-- `ImportedRoomWebsitePlayerService` owns page-level imported website player
-  compatibility, including inner-tranquillity.net MediaElement initialization
-  and scoped page-level player presentation compatibility.
+- `ImportedRoomWebsiteCompatibilityService` owns page-level imported website
+  compatibility routing and page-level player HTML.
+- `InnerTranquillityCompatibility` owns inner-tranquillity.net MediaElement
+  initialization and scoped page-level player presentation compatibility.
 
 ## Host Boundary
 
@@ -56,13 +57,13 @@ assignment, room update callbacks, and runtime configuration wiring.
 - `ImportedRoomRuntime.music.closeModal()`
 - `ImportedRoomRuntime.music.setMinimized(minimized)`
 - `ImportedRoomRuntime.music.clampModal()`
-- `ImportedRoomRuntime.websitePlayer.configure(context)`
-- `ImportedRoomRuntime.websitePlayer.inlinePlayerHtml(track)`
-- `ImportedRoomRuntime.websitePlayer.applyCompatibility(options)`
+- `ImportedRoomRuntime.websiteCompatibility.configure(context)`
+- `ImportedRoomRuntime.websiteCompatibility.inlinePlayerHtml(track)`
+- `ImportedRoomRuntime.websiteCompatibility.applyCompatibility(options)`
 - `ImportedRoomRuntime.getDiagnostics()`
 
 ## Behavioral Verification
 
 Browser, PHP runtime, imported website runtime, music-player runtime,
 deployment environment, and multiplayer verification remain pending external
-validation and do not block Engineering Completion for Build 000030.
+validation and do not block Engineering Completion for Build 000033.

@@ -141,10 +141,6 @@ const seenRoomHistoryClears = new Set();
 
 let gifSearchTimer = null;
 const gifDurationCache = new Map();
-const loadedAuraModules = new Map();
-let auraLoadChain = Promise.resolve();
-let auraCatalog = [];
-let selectedAuraKey = null;
 let activeMediaTab = 'gifs';
 let gesturePage = 1;
 let gestureHasMore = false;
@@ -201,6 +197,7 @@ async function initializeAvatarRuntime() {
   participants = avatarRuntime.state;
   configureAvatarCoordinator();
   configureAvatarDragController();
+  configureAvatarAura();
   configureChatMessageRenderer();
   configureChatPrivateChats();
   configureChatEventRouter();
@@ -322,9 +319,30 @@ function configureAvatarDragController() {
   avatarRuntime?.drag?.configure({
     getConfig: () => cfg,
     stageElement: () => roomStage,
+    baseAvatarSize() {
+      return AVATAR_STAGE_SIZE;
+    },
     isUserBlocked,
     requestAnimationFrame(callback) {
       return requestAnimationFrame(callback);
+    },
+  });
+}
+
+function configureAvatarAura() {
+  avatarRuntime?.aura?.configure({
+    document,
+    window,
+    appUrl,
+    cacheBust,
+    apiPost,
+    getConfig: () => cfg,
+    getParticipants: () => participants,
+    fetchJson(path) {
+      return fetch(appUrl(path)).then(r => r.json());
+    },
+    onError(error) {
+      console.warn(error);
     },
   });
 }
@@ -1366,7 +1384,21 @@ function linkModeForPair(a, b) {
 }
 
 function avatarStageSize(person) {
-  return avatarRuntime?.layout?.avatarStageSize(person, { baseSize: AVATAR_STAGE_SIZE }) || AVATAR_STAGE_SIZE;
+  return avatarRuntime?.layout?.avatarStageSize(person, {
+    baseSize: AVATAR_STAGE_SIZE,
+    dimensions: avatarRenderedDimensions(person),
+  }) || AVATAR_STAGE_SIZE;
+}
+
+function avatarRenderedDimensions(person) {
+  return avatarRuntime?.renderer?.renderedAvatarDimensions(person, {
+    fallbackSize: AVATAR_STAGE_SIZE,
+    visualMaxSize: 200,
+    lapInitiator: isLapLinkInitiator(person),
+  }) || {
+    width: AVATAR_STAGE_SIZE,
+    height: AVATAR_STAGE_SIZE,
+  };
 }
 
 function chatMessageState() {
@@ -1607,15 +1639,17 @@ function positionAvatar(p) {
   
   const w = roomStage.clientWidth;
   const h = roomStage.clientHeight;
+  const dimensions = avatarRenderedDimensions(p);
   const frame = avatarRuntime?.layout?.avatarFrame(p, {
     stageWidth: w,
     stageHeight: h,
     baseSize: AVATAR_STAGE_SIZE,
+    dimensions,
   }) || {
-    width: avatarStageSize(p),
-    height: avatarStageSize(p),
-    x: Math.max(0, Math.min(w - avatarStageSize(p), p.position_x * w)),
-    y: Math.max(0, Math.min(h - avatarStageSize(p), p.position_y * h)),
+    width: dimensions.width,
+    height: dimensions.height,
+    x: Math.max(0, Math.min(w - dimensions.width, p.position_x * w)),
+    y: Math.max(0, Math.min(h - dimensions.height, p.position_y * h)),
   };
   avatarRuntime?.renderer?.applyParticipantFrame(p, frame, {
     stage: roomStage,
@@ -1675,11 +1709,10 @@ function dmFlightPointForUser(userId) {
     || stagePointFromElement([...roomStage.querySelectorAll('.avatar')].find(el => Number(el.dataset.participantId) === Number(person?.id)));
   if (elementPoint) return elementPoint;
   if (person && Number.isFinite(Number(person.position_x)) && Number.isFinite(Number(person.position_y))) {
-    const avatarWidth = AVATAR_STAGE_SIZE;
-    const avatarHeight = AVATAR_STAGE_SIZE;
+    const dimensions = avatarRenderedDimensions(person);
     return {
-      x: Math.max(0, Math.min(roomStage.clientWidth, Number(person.position_x) * roomStage.clientWidth + avatarWidth / 2)),
-      y: Math.max(0, Math.min(roomStage.clientHeight, Number(person.position_y) * roomStage.clientHeight + avatarHeight / 2)),
+      x: Math.max(0, Math.min(roomStage.clientWidth, Number(person.position_x) * roomStage.clientWidth + dimensions.width / 2)),
+      y: Math.max(0, Math.min(roomStage.clientHeight, Number(person.position_y) * roomStage.clientHeight + dimensions.height / 2)),
     };
   }
   return null;
@@ -2214,74 +2247,23 @@ function renderReactions(msg) {
 }
 
 function auraByKey(key) {
-  return auraCatalog.find(aura => aura.key === key) || null;
+  return avatarRuntime?.aura?.auraByKey(key) || null;
 }
 
 async function loadAuraModule(aura) {
-  if (!aura?.script) throw new Error('Aura script missing.');
-  const src = appUrl(aura.script);
-  if (loadedAuraModules.has(src)) return loadedAuraModules.get(src);
-  const load = auraLoadChain.catch(() => {}).then(() => new Promise((resolve, reject) => {
-    const previousModule = window.module;
-    const previousExports = window.exports;
-    const moduleShim = { exports: {} };
-    const restore = () => {
-      if (previousModule === undefined) delete window.module;
-      else window.module = previousModule;
-      if (previousExports === undefined) delete window.exports;
-      else window.exports = previousExports;
-    };
-    const script = document.createElement('script');
-    window.module = moduleShim;
-    window.exports = moduleShim.exports;
-    script.src = cacheBust(src);
-    script.async = false;
-    script.dataset.auraSrc = src;
-    script.addEventListener('load', () => {
-      const exported = moduleShim.exports;
-      restore();
-      script.remove();
-      if (!exported?.render) {
-        reject(new Error(`${aura.label || aura.key} did not expose an aura renderer.`));
-        return;
-      }
-      loadedAuraModules.set(src, exported);
-      resolve(exported);
-    }, { once: true });
-    script.addEventListener('error', () => {
-      restore();
-      script.remove();
-      reject(new Error(`Could not load ${aura.label || aura.key}.`));
-    }, { once: true });
-    document.head.appendChild(script);
-  }));
-  auraLoadChain = load.catch(() => {});
-  return load;
+  return avatarRuntime?.aura?.loadModule(aura);
 }
 
 function cleanupAuraLayer(layer) {
-  return avatarRuntime?.renderer?.cleanupAuraLayer(layer, {
-    document,
-  }) || null;
+  return avatarRuntime?.aura?.cleanupLayer(layer) || null;
 }
 
 async function applyAuraToLayer(layer, key) {
-  await avatarRuntime?.renderer?.applyAuraToLayer(layer, key, {
-    document,
-    auraByKey,
-    loadAuraModule,
-    onError: console.warn,
-  });
+  await avatarRuntime?.aura?.applyToLayer(layer, key);
 }
 
 function applyParticipantAura(person) {
-  if (!person?.auraEl) return;
-  avatarRuntime?.renderer?.applyParticipantAura(person, {
-    document,
-    auraByKey,
-    loadAuraModule,
-    onError: console.warn,
-  }).catch(console.warn);
+  avatarRuntime?.aura?.applyParticipantAura(person).catch(console.warn);
 }
 
 function roomEffectByKey(key) {
@@ -2325,17 +2307,13 @@ function renderRoomEffectsModal() {
 }
 
 async function loadAuraCatalog() {
-  if (auraCatalog.length) return auraCatalog;
-  const qs = new URLSearchParams({ session_id: cfg.sessionId, join_token: cfg.myJoinToken });
-  const data = await fetch(appUrl('/api/auras.php?' + qs)).then(r => r.json());
-  if (data.error) throw new Error(data.error);
-  auraCatalog = data.auras || [];
-  return auraCatalog;
+  return avatarRuntime?.aura?.loadCatalog() || [];
 }
 
 function renderAuraOptions() {
   if (!auraOptionsEl) return;
-  const items = [{ key: '', label: 'None' }, ...auraCatalog];
+  const selectedAuraKey = avatarRuntime?.aura?.selectedKey() || '';
+  const items = [{ key: '', label: 'None' }, ...(avatarRuntime?.aura?.catalog() || [])];
   auraOptionsEl.innerHTML = items.map(aura => `
     <button class="aura-option${(selectedAuraKey || '') === aura.key ? ' selected' : ''}" type="button" data-aura-key="${esc(aura.key)}">
       <span class="aura-option-thumb">${aura.key ? '<span class="aura-mini-spark">✦</span>' : '<span class="aura-none">None</span>'}</span>
@@ -2345,11 +2323,11 @@ function renderAuraOptions() {
 }
 
 async function previewAura(key) {
-  selectedAuraKey = key || '';
+  avatarRuntime?.aura?.setSelectedKey(key || '');
   renderAuraOptions();
   const me = participants.get(cfg.myParticipantId);
   if (auraPreviewAvatar && me) auraPreviewAvatar.src = avatarUrl(me);
-  await applyAuraToLayer(auraPreviewLayer, selectedAuraKey);
+  await applyAuraToLayer(auraPreviewLayer, avatarRuntime?.aura?.selectedKey() || '');
 }
 
 async function openAuraModal() {
@@ -2357,12 +2335,11 @@ async function openAuraModal() {
   const me = participants.get(cfg.myParticipantId);
   if (!me) return;
   try {
-    await loadAuraCatalog();
-    selectedAuraKey = me.aura_effect || '';
+    await avatarRuntime?.aura?.prepareSelection(me);
     renderAuraOptions();
     if (auraPreviewAvatar) auraPreviewAvatar.src = avatarUrl(me);
     auraModal?.classList.add('open');
-    await applyAuraToLayer(auraPreviewLayer, selectedAuraKey);
+    await applyAuraToLayer(auraPreviewLayer, avatarRuntime?.aura?.selectedKey() || '');
   } catch (err) {
     showWarning(err.message || 'Could not load auras.');
   }
@@ -2374,14 +2351,8 @@ function closeAuraModal() {
 }
 
 async function setCurrentAura() {
-  const auraKey = selectedAuraKey || '';
   try {
-    await apiPost('/api/auras.php', { session_id: cfg.sessionId, join_token: cfg.myJoinToken, aura_key: auraKey });
-    participants.forEach(person => {
-      if (Number(person.user_id) !== Number(cfg.myUserId)) return;
-      person.aura_effect = auraKey || null;
-      applyParticipantAura(person);
-    });
+    await avatarRuntime?.aura?.setCurrentAura();
     closeAuraModal();
   } catch (err) {
     showWarning(err.message || 'Could not set aura.');

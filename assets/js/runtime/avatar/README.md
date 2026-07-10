@@ -11,6 +11,7 @@ The Avatar Runtime is responsible for:
 - layout calculation
 - avatar rendering
 - avatar interaction
+- aura workflow
 
 The Avatar Runtime does not own:
 
@@ -55,6 +56,8 @@ avatar/
         avatar-order-service.js
 
         avatar-layout-service.js
+
+        avatar-aura-service.js
 
     render/
 
@@ -217,6 +220,22 @@ Delegates:
 - layout calculation to AvatarLayoutService through AvatarCoordinator
 - rendering synchronization to AvatarRenderer through AvatarCoordinator
 
+Aura Service
+
+Owns:
+
+- aura catalog state
+- aura module loading and cache ownership
+- current aura selection state
+- aura API workflow
+- participant aura application coordination
+- aura diagnostics
+
+Delegates:
+
+- visual aura layer rendering to AvatarRenderer
+- host modal presentation to room.js
+
 ---
 
 # Runtime Philosophy
@@ -251,11 +270,16 @@ Future runtime expansion SHALL occur through the Avatar Runtime rather than bypa
 
 Build:
 
-000021
+000033
 
 Status:
 
-Avatar Effects Ownership Complete
+Avatar Aura Service Complete
+
+Build 000033 adds AvatarAuraService as the authoritative owner of aura catalog
+state, aura module loading/cache ownership, current aura selection state, aura
+API workflow, participant aura application coordination, and diagnostics.
+AvatarRenderer remains the owner of aura visual presentation.
 
 The runtime infrastructure has been established.
 

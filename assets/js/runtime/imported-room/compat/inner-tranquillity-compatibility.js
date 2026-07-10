@@ -2,122 +2,61 @@
  * Chat Runtime Framework for ChatSpace
  * ---------------------------------------------------------------------------
  * File:
- *      imported-room-website-player-service.js
+ *      inner-tranquillity-compatibility.js
  *
  * Layer:
- *      Runtime Service
+ *      Runtime Compatibility
  *
  * Owner:
  *      Imported Room Runtime
  *
  * Purpose:
- *      Owns imported website page-level music-player compatibility behavior.
+ *      Owns inner-tranquillity.net imported website page-level player
+ *      compatibility behavior.
  *
  * Build:
- *      000031
+ *      000033
  *
  * ---------------------------------------------------------------------------
  * Build History
  * ---------------------------------------------------------------------------
- * Build 000031
- * - Introduced ImportedRoomWebsitePlayerService.
- * - Transferred page-level imported website player compatibility ownership
- *   from ImportedRoomMusicService.
+ * Build 000033
+ * - Introduced InnerTranquillityCompatibility.
+ * - Isolated inner-tranquillity.net player behavior from the generic imported
+ *   website compatibility service.
  ******************************************************************************/
 
 /**
- * @file imported-room-website-player-service.js
+ * @file inner-tranquillity-compatibility.js
  *
- * Defines imported website page-level music-player compatibility behavior.
+ * Defines inner-tranquillity.net imported website compatibility behavior.
  */
 
-//
-// No imports required.
-//
-
 //--------------------------------------------------
-// Imported Room Website Player Service
+// Inner Tranquillity Compatibility
 //--------------------------------------------------
 
 /**
- * Owns imported website page-level music-player compatibility.
+ * Owns inner-tranquillity.net page-level player compatibility behavior.
  */
-export class ImportedRoomWebsitePlayerService {
+export class InnerTranquillityCompatibility {
 
     //--------------------------------------------------
     // Private Fields
     //--------------------------------------------------
 
-    #runtime;
-
     #context = null;
 
-    #lastCompatibilityApplied = false;
+    #lastApplied = false;
 
     #lastPlayerCount = 0;
-
-    #lastDomain = "";
-
-    //--------------------------------------------------
-    // Constructor
-    //--------------------------------------------------
-
-    /**
-     * Creates the Imported Room Website Player Service.
-     *
-     * @param {ImportedRoomRuntime} runtime
-     *        Owning Imported Room Runtime.
-     */
-    constructor(runtime) {
-
-        this.#runtime = runtime;
-
-    }
 
     //--------------------------------------------------
     // Public Lifecycle
     //--------------------------------------------------
 
     /**
-     * Initializes the service.
-     */
-    initialize() {
-
-    }
-
-    /**
-     * Releases imported website player compatibility state.
-     */
-    destroy() {
-
-        this.#context = null;
-        this.#lastCompatibilityApplied = false;
-        this.#lastPlayerCount = 0;
-        this.#lastDomain = "";
-
-    }
-
-    //--------------------------------------------------
-    // Public Getters
-    //--------------------------------------------------
-
-    /**
-     * Returns the owning Imported Room Runtime.
-     *
-     * @returns {ImportedRoomRuntime}
-     */
-    get runtime() {
-
-        return this.#runtime;
-
-    }
-
-    //--------------------------------------------------
-    // Public Configuration
-    //--------------------------------------------------
-
-    /**
-     * Configures DOM shell callbacks and helpers.
+     * Configures browser dependencies.
      *
      * @param {Object} context
      */
@@ -127,65 +66,47 @@ export class ImportedRoomWebsitePlayerService {
 
     }
 
-    //--------------------------------------------------
-    // Public Presentation
-    //--------------------------------------------------
-
     /**
-     * Returns imported website page-level player HTML.
-     *
-     * @param {Object} track
-     *
-     * @returns {string}
+     * Releases compatibility state.
      */
-    inlinePlayerHtml(track) {
+    destroy() {
 
-        if (!track?.url) return "";
-
-        if (track.type === "audio") {
-
-            return `
-      <div class="vp-import-player">
-        <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${track.url}" type="audio/mpeg">
-        </audio>
-      </div>
-    `;
-
-        }
-
-        if (track.type === "youtube") {
-
-            return `
-      <div class="vp-import-player">
-        <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${track.url}" type="video/x-youtube">
-        </audio>
-      </div>
-    `;
-
-        }
-
-        return "";
+        this.#context = null;
+        this.#lastApplied = false;
+        this.#lastPlayerCount = 0;
 
     }
 
+    //--------------------------------------------------
+    // Public Compatibility API
+    //--------------------------------------------------
+
     /**
-     * Applies imported website player compatibility behavior.
+     * Returns whether this implementation applies to the options.
      *
      * @param {Object} options
      *
      * @returns {boolean}
      */
-    applyCompatibility(options = {}) {
+    matches(options = {}) {
 
-        this.#lastCompatibilityApplied =
+        return Boolean(options.innerTranquillity);
+
+    }
+
+    /**
+     * Applies inner-tranquillity.net player compatibility behavior.
+     *
+     * @param {Object} options
+     *
+     * @returns {boolean}
+     */
+    apply(options = {}) {
+
+        this.#lastApplied =
             false;
 
-        this.#lastDomain =
-            options.innerTranquillity ? "inner-tranquillity.net" : "";
-
-        if (!options.innerTranquillity) return false;
+        if (!this.matches(options)) return false;
 
         const windowRef =
             this.#window();
@@ -214,7 +135,7 @@ export class ImportedRoomWebsitePlayerService {
             100
         );
 
-        this.#lastCompatibilityApplied =
+        this.#lastApplied =
             true;
 
         return true;
@@ -226,7 +147,7 @@ export class ImportedRoomWebsitePlayerService {
     //--------------------------------------------------
 
     /**
-     * Returns imported website player diagnostics.
+     * Returns compatibility diagnostics.
      *
      * @returns {Object}
      */
@@ -238,19 +159,16 @@ export class ImportedRoomWebsitePlayerService {
                 "ImportedRoomRuntime",
 
             build:
-                "000031",
-
-            configured:
-                Boolean(this.#context),
-
-            compatibilityApplied:
-                this.#lastCompatibilityApplied,
-
-            playerCount:
-                this.#lastPlayerCount,
+                "000033",
 
             domain:
-                this.#lastDomain
+                "inner-tranquillity.net",
+
+            applied:
+                this.#lastApplied,
+
+            playerCount:
+                this.#lastPlayerCount
 
         });
 
@@ -359,4 +277,4 @@ export class ImportedRoomWebsitePlayerService {
 
 }
 
-export default ImportedRoomWebsitePlayerService;
+export default InnerTranquillityCompatibility;

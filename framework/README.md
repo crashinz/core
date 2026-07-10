@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000031
+000033
 
 **Framework Phase**
 
-ImportedRoomWebsitePlayerService - Imported Website Player Compatibility Ownership Complete
+AvatarAuraService Complete
 
 ---
 

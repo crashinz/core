@@ -18,7 +18,7 @@
  *      AvatarRenderer.
  *
  * Build:
- *      000018
+ *      000032
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -32,6 +32,10 @@
  * - Added avatar frame calculation.
  * - Added linked-pair and lap-pair layout ownership.
  * - Added drag group layout ownership.
+ *
+ * Build 000032
+ * - Updated avatar frame and relationship geometry to consume rendered
+ *   avatar dimensions.
  ******************************************************************************/
 
 /**
@@ -118,7 +122,16 @@ export class AvatarLayoutService {
      *
      * @returns {number}
      */
-    avatarStageSize(participant, { baseSize }) {
+    avatarStageSize(participant, { baseSize, dimensions = null }) {
+
+        if (dimensions) {
+
+            return Math.max(
+                Number(dimensions.width || 0),
+                Number(dimensions.height || 0)
+            ) || baseSize;
+
+        }
 
         return this.#relationships.isLapLinkInitiator(participant)
             ? Math.round(baseSize * 0.5)
@@ -137,13 +150,21 @@ export class AvatarLayoutService {
      *
      * @returns {Object}
      */
-    avatarFrame(participant, { stageWidth, stageHeight, baseSize }) {
+    avatarFrame(participant, { stageWidth, stageHeight, baseSize, dimensions = null }) {
+
+        const rendered =
+            dimensions || {
+                width:
+                    this.avatarStageSize(participant, { baseSize }),
+                height:
+                    this.avatarStageSize(participant, { baseSize })
+            };
 
         const width =
-            this.avatarStageSize(participant, { baseSize });
+            Number(rendered.width || baseSize);
 
         const height =
-            this.avatarStageSize(participant, { baseSize });
+            Number(rendered.height || baseSize);
 
         const x =
             Math.max(
@@ -185,7 +206,8 @@ export class AvatarLayoutService {
      * @param {Object} options.target
      * @param {number} options.stageWidth
      * @param {number} options.stageHeight
-     * @param {number} options.avatarSize
+     * @param {Object} options.initiatorDimensions
+     * @param {Object} options.targetDimensions
      * @param {number} options.gap
      *
      * @returns {Object[]}
@@ -195,13 +217,26 @@ export class AvatarLayoutService {
         target,
         stageWidth,
         stageHeight,
-        avatarSize,
+        initiatorDimensions,
+        targetDimensions,
         gap
     }) {
 
         if (!initiator || !target) {
             return [];
         }
+
+        const targetWidth =
+            Number(targetDimensions?.width || 0);
+
+        const targetHeight =
+            Number(targetDimensions?.height || 0);
+
+        const initiatorWidth =
+            Number(initiatorDimensions?.width || targetWidth);
+
+        const initiatorHeight =
+            Number(initiatorDimensions?.height || targetHeight);
 
         const targetX =
             Number(target.position_x) * stageWidth;
@@ -210,22 +245,22 @@ export class AvatarLayoutService {
             Number(target.position_y) * stageHeight;
 
         const initiatorX =
-            targetX + avatarSize + gap;
+            targetX + targetWidth + gap;
 
         const relationshipLeft =
             Math.min(targetX, initiatorX);
 
         const relationshipRight =
             Math.max(
-                targetX + avatarSize,
-                initiatorX + avatarSize
+                targetX + targetWidth,
+                initiatorX + initiatorWidth
             );
 
         const relationshipTop =
             y;
 
         const relationshipBottom =
-            y + avatarSize;
+            y + Math.max(targetHeight, initiatorHeight);
 
         let translateX = 0;
         let translateY = 0;
@@ -271,8 +306,8 @@ export class AvatarLayoutService {
      * @param {Object} options.target
      * @param {number} options.stageWidth
      * @param {number} options.stageHeight
-     * @param {number} options.primarySize
-     * @param {number} options.lapSize
+     * @param {Object} options.primaryDimensions
+     * @param {Object} options.lapDimensions
      * @param {boolean} [options.locked=false]
      *
      * @returns {Object[]}
@@ -282,8 +317,8 @@ export class AvatarLayoutService {
         target,
         stageWidth,
         stageHeight,
-        primarySize,
-        lapSize,
+        primaryDimensions,
+        lapDimensions,
         locked = false
     }) {
 
@@ -291,11 +326,23 @@ export class AvatarLayoutService {
             return [];
         }
 
+        const primaryWidth =
+            Number(primaryDimensions?.width || 0);
+
+        const primaryHeight =
+            Number(primaryDimensions?.height || primaryWidth);
+
+        const lapWidth =
+            Number(lapDimensions?.width || 0);
+
+        const lapHeight =
+            Number(lapDimensions?.height || lapWidth);
+
         const lapHorizontalOffset =
-            primarySize * 0.5;
+            primaryWidth * 0.5;
 
         const lapVerticalOffset =
-            primarySize * (65 / 150);
+            primaryHeight * (65 / 150);
 
         const targetX =
             Number(target.position_x) * stageWidth;
@@ -305,14 +352,14 @@ export class AvatarLayoutService {
 
         const groupWidth =
             Math.max(
-                primarySize,
-                lapHorizontalOffset + lapSize
+                primaryWidth,
+                lapHorizontalOffset + lapWidth
             );
 
         const groupHeight =
             Math.max(
-                primarySize,
-                lapVerticalOffset + lapSize
+                primaryHeight,
+                lapVerticalOffset + lapHeight
             );
 
         const baseX =

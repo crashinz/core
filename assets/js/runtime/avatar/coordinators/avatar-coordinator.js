@@ -20,7 +20,7 @@
  *      networking, and ChatRuntime behavior with their documented owners.
  *
  * Build:
- *      000023
+ *      000032
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -34,6 +34,10 @@
  * - Transferred avatar relationship lifecycle sequencing from room.js.
  * - Added linked group cache ownership.
  * - Added relationship lifecycle persistence callback coordination.
+ *
+ * Build 000032
+ * - Routed relationship layout through authoritative rendered avatar
+ *   dimensions.
  ******************************************************************************/
 
 /**
@@ -51,7 +55,8 @@
 //--------------------------------------------------
 
 const DEFAULT_AVATAR_SIZE = 150;
-const DEFAULT_LINK_GAP = 12;
+const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
+const DEFAULT_LINK_GAP = 0;
 const LINK_CHOICE_SUPPRESS_MS = 400;
 
 //--------------------------------------------------
@@ -1152,8 +1157,11 @@ export class AvatarCoordinator {
         const stageSize =
             this.#stageSize();
 
-        const avatarSize =
-            this.#baseAvatarSize();
+        const initiatorDimensions =
+            this.#renderedDimensions(initiator);
+
+        const targetDimensions =
+            this.#renderedDimensions(target);
 
         const changed =
             this.#layout.applyLinkedPairLayout({
@@ -1161,7 +1169,8 @@ export class AvatarCoordinator {
                 target,
                 stageWidth: stageSize.width,
                 stageHeight: stageSize.height,
-                avatarSize,
+                initiatorDimensions,
+                targetDimensions,
                 gap: this.linkPairGap(
                     this.#relationships.linkKeyFor(
                         initiator.id,
@@ -1204,10 +1213,10 @@ export class AvatarCoordinator {
                 target,
                 stageWidth: stageSize.width,
                 stageHeight: stageSize.height,
-                primarySize: this.#baseAvatarSize(),
-                lapSize: this.#layout.avatarStageSize(initiator, {
-                    baseSize: this.#baseAvatarSize()
-                }),
+                primaryDimensions:
+                    this.#renderedDimensions(target),
+                lapDimensions:
+                    this.#renderedDimensions(initiator),
                 locked: Boolean(this.#context?.isLayoutLocked?.())
             });
 
@@ -1249,6 +1258,34 @@ export class AvatarCoordinator {
     #baseAvatarSize() {
 
         return Number(this.#context?.baseAvatarSize?.() || DEFAULT_AVATAR_SIZE);
+
+    }
+
+    /**
+     * Returns authoritative rendered avatar dimensions.
+     *
+     * @param {Object} participant
+     *
+     * @returns {Object}
+     */
+    #renderedDimensions(participant) {
+
+        return this.#runtime.renderer?.renderedAvatarDimensions(
+            participant,
+            {
+                fallbackSize:
+                    this.#baseAvatarSize(),
+                visualMaxSize:
+                    DEFAULT_AVATAR_VISUAL_MAX_SIZE,
+                lapInitiator:
+                    this.#relationships.isLapLinkInitiator(participant)
+            }
+        ) || {
+            width:
+                this.#baseAvatarSize(),
+            height:
+                this.#baseAvatarSize()
+        };
 
     }
 

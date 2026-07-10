@@ -15,7 +15,7 @@
  *      diagnostics.
  *
  * Build:
- *      000031
+ *      000033
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -26,6 +26,9 @@
  * Build 000031
  * - Delegated page-level imported website player compatibility to
  *   ImportedRoomWebsitePlayerService.
+ * Build 000033
+ * - Delegated page-level imported website compatibility to
+ *   ImportedRoomWebsiteCompatibilityService.
  ******************************************************************************/
 
 /**
@@ -53,7 +56,7 @@ export class ImportedRoomMusicService {
 
     #runtime;
 
-    #websitePlayer;
+    #websiteCompatibility;
 
     #context = null;
 
@@ -81,13 +84,13 @@ export class ImportedRoomMusicService {
      * @param {ImportedRoomRuntime} runtime
      *        Owning Imported Room Runtime.
      *
-     * @param {ImportedRoomWebsitePlayerService} websitePlayer
-     *        Runtime-owned imported website page-level player service.
+     * @param {ImportedRoomWebsiteCompatibilityService} websiteCompatibility
+     *        Runtime-owned imported website compatibility service.
      */
-    constructor(runtime, websitePlayer) {
+    constructor(runtime, websiteCompatibility) {
 
         this.#runtime = runtime;
-        this.#websitePlayer = websitePlayer;
+        this.#websiteCompatibility = websiteCompatibility;
 
     }
 
@@ -143,7 +146,7 @@ export class ImportedRoomMusicService {
 
         this.#clearBindings();
         this.#context = context;
-        this.#websitePlayer?.configure(context);
+        this.#websiteCompatibility?.configure(context);
         this.#bindModalControls();
         this.#initDrag();
 
@@ -331,7 +334,7 @@ export class ImportedRoomMusicService {
      */
     inlinePlayerHtml(track) {
 
-        return this.#websitePlayer?.inlinePlayerHtml(
+        return this.#websiteCompatibility?.inlinePlayerHtml(
             track
         ) || "";
 
@@ -345,7 +348,7 @@ export class ImportedRoomMusicService {
     applyInlinePlayerCompatibility(options = {}) {
 
         this.#inlineCompatibilityApplied =
-            Boolean(this.#websitePlayer?.applyCompatibility(
+            Boolean(this.#websiteCompatibility?.applyCompatibility(
                 options
             ));
 
@@ -550,7 +553,7 @@ export class ImportedRoomMusicService {
                 "ImportedRoomRuntime",
 
             build:
-                "000031",
+                "000033",
 
             configured:
                 Boolean(this.#context),
@@ -570,8 +573,8 @@ export class ImportedRoomMusicService {
             inlineCompatibilityApplied:
                 this.#inlineCompatibilityApplied,
 
-            websitePlayer:
-                this.#websitePlayer?.getDiagnostics() ?? null
+            websiteCompatibility:
+                this.#websiteCompatibility?.getDiagnostics() ?? null
 
         });
 

@@ -20,7 +20,7 @@
  *      AvatarLayoutService through the coordinator.
  *
  * Build:
- *      000024
+ *      000032
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -28,6 +28,10 @@
  * Build 000024
  * - Introduced AvatarDragController.
  * - Transferred avatar drag/input lifecycle ownership from room.js.
+ *
+ * Build 000032
+ * - Updated drag bounds and spacing to consume authoritative rendered avatar
+ *   dimensions.
  ******************************************************************************/
 
 /**
@@ -45,6 +49,8 @@
 //--------------------------------------------------
 
 const DEFAULT_LINK_TARGET_DISTANCE = 120;
+const DEFAULT_AVATAR_FALLBACK_SIZE = 150;
+const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
 
 //--------------------------------------------------
 // Avatar Drag Controller
@@ -467,6 +473,9 @@ export class AvatarDragController {
             return;
         }
 
+        const dimensions =
+            this.#renderedDimensions(participant);
+
         const rect =
             stage.getBoundingClientRect();
 
@@ -474,7 +483,7 @@ export class AvatarDragController {
             Math.max(
                 0,
                 Math.min(
-                    rect.width - element.offsetWidth,
+                    rect.width - dimensions.width,
                     clientX - rect.left - state.offsetX
                 )
             );
@@ -483,7 +492,7 @@ export class AvatarDragController {
             Math.max(
                 0,
                 Math.min(
-                    rect.height - element.offsetHeight,
+                    rect.height - dimensions.height,
                     clientY - rect.top - state.offsetY
                 )
             );
@@ -514,7 +523,7 @@ export class AvatarDragController {
 
             spacing:
                 rect.width
-                    ? element.offsetWidth / rect.width
+                    ? dimensions.width / rect.width
                     : 0,
 
             relationshipBroken:
@@ -546,6 +555,34 @@ export class AvatarDragController {
     #stageElement() {
 
         return this.#context?.stageElement?.() || null;
+
+    }
+
+    /**
+     * Returns authoritative rendered avatar dimensions.
+     *
+     * @param {Object} participant
+     *
+     * @returns {Object}
+     */
+    #renderedDimensions(participant) {
+
+        return this.#runtime.renderer?.renderedAvatarDimensions(
+            participant,
+            {
+                fallbackSize:
+                    Number(this.#context?.baseAvatarSize?.() || DEFAULT_AVATAR_FALLBACK_SIZE),
+                visualMaxSize:
+                    DEFAULT_AVATAR_VISUAL_MAX_SIZE,
+                lapInitiator:
+                    this.#runtime.relationships?.isLapLinkInitiator(participant) || false
+            }
+        ) || {
+            width:
+                DEFAULT_AVATAR_FALLBACK_SIZE,
+            height:
+                DEFAULT_AVATAR_FALLBACK_SIZE
+        };
 
     }
 

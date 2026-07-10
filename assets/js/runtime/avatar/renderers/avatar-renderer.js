@@ -23,7 +23,7 @@
  *      relationship management, ordering, or layout calculation.
  *
  * Build:
- *      000025
+ *      000032
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -45,6 +45,9 @@
  * Build 000025
  * - Migrated stage link icon presentation from room.js.
  * - Added renderer-owned stage link icon cache.
+ *
+ * Build 000032
+ * - Added authoritative rendered avatar dimensions API.
  ******************************************************************************/
 
 /**
@@ -56,6 +59,13 @@
 //
 // No imports required.
 //
+
+//--------------------------------------------------
+// Constants
+//--------------------------------------------------
+
+const DEFAULT_AVATAR_FALLBACK_SIZE = 150;
+const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
 
 //--------------------------------------------------
 // Avatar Renderer
@@ -273,6 +283,71 @@ export class AvatarRenderer {
         }
 
         return participant;
+
+    }
+
+    /**
+     * Returns authoritative rendered dimensions for an avatar participant.
+     *
+     * @param {Object} participant
+     *        Participant whose avatar dimensions are requested.
+     *
+     * @param {Object} options
+     *        Dimension options.
+     *
+     * @returns {Object}
+     *          Rendered width and height.
+     */
+    renderedAvatarDimensions(participant, options = {}) {
+
+        const fallbackSize =
+            Number(options.fallbackSize || DEFAULT_AVATAR_FALLBACK_SIZE);
+
+        const visualMaxSize =
+            Number(options.visualMaxSize || DEFAULT_AVATAR_VISUAL_MAX_SIZE);
+
+        const lapMaxSize =
+            Number(options.lapMaxSize || Math.round(fallbackSize * 0.5));
+
+        const image =
+            participant?.avatarEl || null;
+
+        const naturalWidth =
+            Number(image?.naturalWidth) ||
+            Number(image?.videoWidth) ||
+            fallbackSize;
+
+        const naturalHeight =
+            Number(image?.naturalHeight) ||
+            Number(image?.videoHeight) ||
+            fallbackSize;
+
+        const maxSide =
+            options.lapInitiator
+                ? lapMaxSize
+                : visualMaxSize;
+
+        const scale =
+            Math.min(
+                1,
+                maxSide / Math.max(naturalWidth, naturalHeight, 1)
+            );
+
+        return Object.freeze({
+
+            width:
+                Math.max(
+                    1,
+                    Math.round(naturalWidth * scale)
+                ),
+
+            height:
+                Math.max(
+                    1,
+                    Math.round(naturalHeight * scale)
+                )
+
+        });
 
     }
 
@@ -1015,7 +1090,7 @@ export class AvatarRenderer {
                 "AvatarRenderer",
 
             build:
-                "000025",
+                "000032",
 
             renderCount:
                 this.#renderCount,
