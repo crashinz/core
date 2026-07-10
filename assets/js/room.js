@@ -1116,34 +1116,6 @@ function isHttpUrl(value) {
   return /^https?:\/\//i.test(String(value || ''));
 }
 
-function renderImportedRoomLayout(layout) {
-  importedRoomRuntime?.layout?.render(layout);
-}
-
-function syncImportedBackgroundLayer() {
-  importedRoomRuntime?.layout?.syncBackgroundLayer();
-}
-
-function renderImportedMusicPlayer(playlist) {
-  importedRoomRuntime?.music?.renderPlayer(playlist);
-}
-
-function openImportedMusicModal(track) {
-  importedRoomRuntime?.music?.openModal(track);
-}
-
-function closeImportedMusicModal() {
-  importedRoomRuntime?.music?.closeModal();
-}
-
-function setImportedMusicMinimized(minimized) {
-  importedRoomRuntime?.music?.setMinimized(minimized);
-}
-
-function clampImportedMusicModal() {
-  importedRoomRuntime?.music?.clampModal();
-}
-
 function linkifiedTextHtml(text) {
   return chatMessageRenderer().linkifiedTextHtml(text);
 }
@@ -2592,16 +2564,16 @@ function applyRoomUpdate(update) {
     cfg.backgroundThumbPath = update.background_thumb_path || null;
     cfg.backgroundTile = Boolean(update.background_tile);
     applyRoomBackground(update.background_path, update.background_mime, cfg.backgroundTile);
-    syncImportedBackgroundLayer();
+    importedRoomRuntime?.layout?.syncBackgroundLayer();
     setRoomEditPreview(update.background_path, update.background_mime, update.background_thumb_path || '');
   }
   if ('import_layout' in update) {
     cfg.importLayout = update.import_layout || null;
-    renderImportedRoomLayout(cfg.importLayout);
+    importedRoomRuntime?.layout?.render(cfg.importLayout);
   }
   if ('music_playlist' in update) {
     cfg.musicPlaylist = update.music_playlist || [];
-    renderImportedMusicPlayer(cfg.musicPlaylist);
+    importedRoomRuntime?.music?.renderPlayer(cfg.musicPlaylist);
   }
 }
 
@@ -4782,8 +4754,8 @@ async function bootRoom() {
   const roomId = document.body.dataset.roomId;
   cfg = await fetch(appUrl(`/api/room_config.php?id=${encodeURIComponent(roomId)}`)).then(r => r.json());
   if (cfg.error) throw new Error(cfg.error);
-  renderImportedRoomLayout(cfg.importLayout);
-  renderImportedMusicPlayer(cfg.musicPlaylist);
+  importedRoomRuntime?.layout?.render(cfg.importLayout);
+  importedRoomRuntime?.music?.renderPlayer(cfg.musicPlaylist);
   chatPoll().seed({
     lastEventId: cfg.lastEventId,
     lastCommunityEventId: cfg.lastCommunityEventId,
