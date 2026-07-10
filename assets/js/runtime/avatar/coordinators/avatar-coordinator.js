@@ -20,7 +20,7 @@
  *      networking, and ChatRuntime behavior with their documented owners.
  *
  * Build:
- *      000035
+ *      000036
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -45,6 +45,10 @@
  *
  * Build 000035
  * - Delegated relationship geometry strategy selection to AvatarLayoutService.
+ *
+ * Build 000036
+ * - Added authoritative relationship refresh scheduling, reason diagnostics,
+ *   and resize/rendered-size stability orchestration.
  ******************************************************************************/
 
 /**
@@ -130,6 +134,55 @@ export class AvatarCoordinator {
      */
     #lifecycleOperationCount = 0;
 
+    /**
+     * Count of relationship refresh operations.
+     *
+     * @type {number}
+     */
+    #relationshipRefreshCount = 0;
+
+    /**
+     * Relationship refresh counts by reason.
+     *
+     * @type {Map<string, number>}
+     */
+    #relationshipRefreshReasonCounts = new Map();
+
+    /**
+     * Last relationship refresh diagnostic state.
+     *
+     * @type {Object|null}
+     */
+    #lastRelationshipRefresh = null;
+
+    /**
+     * Pending scheduled relationship refresh frame handle.
+     *
+     * @type {*}
+     */
+    #scheduledRelationshipRefresh = null;
+
+    /**
+     * Participant ids queued for relationship refresh.
+     *
+     * @type {Set<number>}
+     */
+    #scheduledRelationshipRefreshParticipantIds = new Set();
+
+    /**
+     * Reasons queued for the scheduled relationship refresh.
+     *
+     * @type {Set<string>}
+     */
+    #scheduledRelationshipRefreshReasons = new Set();
+
+    /**
+     * Whether the next scheduled refresh should refresh every relationship.
+     *
+     * @type {boolean}
+     */
+    #scheduledRelationshipRefreshAll = false;
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -167,6 +220,10 @@ export class AvatarCoordinator {
         this.#linkIcons.clear();
         this.#pendingLinkChoice = null;
         this.#suppressedLinkChoiceParticipantIds.clear();
+        this.#scheduledRelationshipRefresh = null;
+        this.#scheduledRelationshipRefreshAll = false;
+        this.#scheduledRelationshipRefreshParticipantIds.clear();
+        this.#scheduledRelationshipRefreshReasons.clear();
 
     }
 
@@ -506,7 +563,8 @@ export class AvatarCoordinator {
 
         const {
             animate = true,
-            persist = false
+            persist = false,
+            reason = "manual"
         } = options;
 
         const changed =
@@ -524,6 +582,15 @@ export class AvatarCoordinator {
         }
 
         this.#lifecycleOperationCount += 1;
+        this.#recordRelationshipRefresh({
+            reason,
+            pairCount: 1,
+            changedCount: changed.length,
+            participantIds: [
+                initiator.id,
+                target.id
+            ]
+        });
 
         return changed;
 
@@ -640,6 +707,9 @@ export class AvatarCoordinator {
             return null;
         }
 
+        const previousPartnerId =
+            Number(person.linked_to || 0);
+
         this.#relationships.setParticipantRelationship(
             person.id,
             payload.linked_to,
@@ -672,7 +742,8 @@ export class AvatarCoordinator {
                     target,
                     {
                         animate: true,
-                        persist: false
+                        persist: false,
+                        reason: "remote-link"
                     }
                 );
 
@@ -683,6 +754,8 @@ export class AvatarCoordinator {
         this.#context?.renderParticipant?.(person);
 
         if (!payload.linked_to) {
+            this.clearScheduledRelationshipRefresh(person.id);
+            this.clearScheduledRelationshipRefresh(previousPartnerId);
             this.#context?.onLinkUnavailable?.(person.id);
         }
 
@@ -715,7 +788,8 @@ export class AvatarCoordinator {
             payload.link_key,
             {
                 animate: true,
-                persist: false
+                persist: false,
+                reason: "remote-link-icon"
             }
         );
 
@@ -741,37 +815,130 @@ export class AvatarCoordinator {
             return false;
         }
 
-        if (participant.linked_to) {
+        const pairs =
+            this.#relationshipPairsForParticipant(participant);
 
-            const target =
-                this.#participant(participant.linked_to);
-
-            if (target) {
-                this.refreshRelationship(
-                    participant,
-                    target,
-                    options
-                );
-
-                return true;
-            }
-
+        if (!pairs.length) {
+            return false;
         }
 
-        const initiator =
-            this.#relationships.followersOf(participant.id)[0];
-
-        if (initiator) {
+        pairs.forEach(([initiator, target]) => {
             this.refreshRelationship(
                 initiator,
-                participant,
-                options
+                target,
+                {
+                    ...options,
+                    reason:
+                        options.reason || "participant"
+                }
             );
+        });
 
+        return true;
+
+    }
+
+    /**
+     * Refreshes all currently linked relationships.
+     *
+     * @param {Object} options
+     *
+     * @returns {Object[]}
+     */
+    refreshAllRelationships(options = {}) {
+
+        const changed = [];
+
+        this.#relationships.linkedPairs()
+            .forEach(([, first, second]) => {
+                const initiator =
+                    this.#relationships.relationshipInitiator(
+                        first,
+                        second
+                    ) || first;
+
+                const target =
+                    initiator === first
+                        ? second
+                        : first;
+
+                changed.push(
+                    ...this.refreshRelationship(
+                        initiator,
+                        target,
+                        {
+                            ...options,
+                            reason:
+                                options.reason || "all"
+                        }
+                    )
+                );
+            });
+
+        return changed;
+
+    }
+
+    /**
+     * Schedules a coalesced relationship refresh.
+     *
+     * @param {Object} options
+     *
+     * @returns {boolean}
+     */
+    scheduleRelationshipRefresh(options = {}) {
+
+        const {
+            participant = null,
+            participantId = null,
+            all = false,
+            reason = "scheduled"
+        } = options;
+
+        if (all) {
+            this.#scheduledRelationshipRefreshAll = true;
+        } else {
+            const id =
+                Number(
+                    participant?.id ??
+                    participantId
+                );
+
+            if (Number.isFinite(id) && id > 0) {
+                this.#scheduledRelationshipRefreshParticipantIds.add(id);
+            }
+        }
+
+        this.#scheduledRelationshipRefreshReasons.add(
+            String(reason || "scheduled")
+        );
+
+        if (this.#scheduledRelationshipRefresh) {
             return true;
         }
 
-        return false;
+        this.#scheduledRelationshipRefresh =
+            this.#scheduleRefreshFrame(() => {
+                this.#flushScheduledRelationshipRefresh();
+            });
+
+        return true;
+
+    }
+
+    /**
+     * Clears pending relationship refresh state for a participant.
+     *
+     * @param {number|string} participantId
+     */
+    clearScheduledRelationshipRefresh(participantId) {
+
+        const id =
+            Number(participantId);
+
+        if (Number.isFinite(id)) {
+            this.#scheduledRelationshipRefreshParticipantIds.delete(id);
+        }
 
     }
 
@@ -789,6 +956,7 @@ export class AvatarCoordinator {
         }
 
         this.#relationships.clearParticipant(participant.id);
+        this.clearScheduledRelationshipRefresh(participant.id);
         this.#context?.persistUnlink?.();
         this.#context?.renderParticipant?.(participant);
         this.#context?.renderLinkTabs?.();
@@ -857,7 +1025,8 @@ export class AvatarCoordinator {
                     participant,
                     {
                         animate: false,
-                        persist: false
+                        persist: false,
+                        reason: "drag-move"
                     }
                 );
 
@@ -927,6 +1096,15 @@ export class AvatarCoordinator {
             return;
         }
 
+        this.refreshRelationshipsForParticipant(
+            participant,
+            {
+                animate: false,
+                persist: false,
+                reason: "drag-completion"
+            }
+        );
+
         const linkedFollowers =
             this.#relationships.followersOf(participant.id);
 
@@ -976,6 +1154,10 @@ export class AvatarCoordinator {
             return false;
         }
 
+        changed.forEach(participant => {
+            this.clearScheduledRelationshipRefresh(participant.id);
+        });
+
         this.#renderParticipants(changed);
         this.#context?.onCurrentParticipantUnlinked?.();
         this.#context?.persistUnlink?.();
@@ -999,6 +1181,7 @@ export class AvatarCoordinator {
             this.#relationships.clearParticipant(participantId);
 
         if (participant) {
+            this.clearScheduledRelationshipRefresh(participant.id);
             this.#lifecycleOperationCount += 1;
         }
 
@@ -1019,6 +1202,9 @@ export class AvatarCoordinator {
             this.#relationships.unlinkFollowersOf(participantId);
 
         if (changed.length) {
+            changed.forEach(participant => {
+                this.clearScheduledRelationshipRefresh(participant.id);
+            });
             this.#lifecycleOperationCount += 1;
         }
 
@@ -1043,6 +1229,7 @@ export class AvatarCoordinator {
             this.#relationships.clearParticipant(participant.id);
 
         if (changed) {
+            this.clearScheduledRelationshipRefresh(participant.id);
             this.#context?.renderParticipant?.(changed);
             this.#lifecycleOperationCount += 1;
         }
@@ -1064,7 +1251,7 @@ export class AvatarCoordinator {
                 "AvatarRuntime",
 
             build:
-                "000023",
+                "000036",
 
             configured:
                 Boolean(this.#context),
@@ -1079,7 +1266,27 @@ export class AvatarCoordinator {
                 this.#linkIcons.size,
 
             lifecycleOperationCount:
-                this.#lifecycleOperationCount
+                this.#lifecycleOperationCount,
+
+            relationshipRefreshCount:
+                this.#relationshipRefreshCount,
+
+            relationshipRefreshReasons:
+                Object.fromEntries(
+                    this.#relationshipRefreshReasonCounts.entries()
+                ),
+
+            lastRelationshipRefresh:
+                this.#lastRelationshipRefresh,
+
+            scheduledRelationshipRefresh:
+                Boolean(this.#scheduledRelationshipRefresh),
+
+            scheduledRelationshipRefreshParticipantCount:
+                this.#scheduledRelationshipRefreshParticipantIds.size,
+
+            scheduledRelationshipRefreshAll:
+                this.#scheduledRelationshipRefreshAll
 
         });
 
@@ -1136,6 +1343,163 @@ export class AvatarCoordinator {
     #participant(participantId) {
 
         return this.#participants.get(participantId) || null;
+
+    }
+
+    /**
+     * Returns relationship pairs affected by a participant.
+     *
+     * @param {Object} participant
+     *
+     * @returns {Object[][]}
+     */
+    #relationshipPairsForParticipant(participant) {
+
+        const pairs = [];
+        const seen = new Set();
+
+        const addPair = (initiator, target) => {
+            if (!initiator || !target) return;
+
+            const key =
+                this.#relationships.linkKeyFor(
+                    initiator.id,
+                    target.id
+                );
+
+            if (seen.has(key)) return;
+
+            seen.add(key);
+            pairs.push([
+                initiator,
+                target
+            ]);
+        };
+
+        if (participant.linked_to) {
+            addPair(
+                participant,
+                this.#participant(participant.linked_to)
+            );
+        }
+
+        this.#relationships.followersOf(participant.id)
+            .forEach(initiator => {
+                addPair(
+                    initiator,
+                    participant
+                );
+            });
+
+        return pairs;
+
+    }
+
+    /**
+     * Schedules refresh work on the host animation frame when available.
+     *
+     * @param {Function} callback
+     *
+     * @returns {*}
+     */
+    #scheduleRefreshFrame(callback) {
+
+        const scheduler =
+            this.#context?.requestRelationshipRefreshFrame ||
+            this.#context?.requestAnimationFrame ||
+            globalThis?.requestAnimationFrame;
+
+        if (typeof scheduler === "function") {
+            return scheduler(callback);
+        }
+
+        return setTimeout(callback, 0);
+
+    }
+
+    /**
+     * Flushes the currently scheduled relationship refresh.
+     */
+    #flushScheduledRelationshipRefresh() {
+
+        const all =
+            this.#scheduledRelationshipRefreshAll;
+
+        const participantIds =
+            Array.from(
+                this.#scheduledRelationshipRefreshParticipantIds
+            );
+
+        const reason =
+            Array.from(
+                this.#scheduledRelationshipRefreshReasons
+            ).join("+") || "scheduled";
+
+        this.#scheduledRelationshipRefresh = null;
+        this.#scheduledRelationshipRefreshAll = false;
+        this.#scheduledRelationshipRefreshParticipantIds.clear();
+        this.#scheduledRelationshipRefreshReasons.clear();
+
+        if (all) {
+            this.refreshAllRelationships({
+                animate: false,
+                persist: false,
+                reason
+            });
+            return;
+        }
+
+        participantIds.forEach(participantId => {
+            const participant =
+                this.#participant(participantId);
+
+            if (participant) {
+                this.refreshRelationshipsForParticipant(
+                    participant,
+                    {
+                        animate: false,
+                        persist: false,
+                        reason
+                    }
+                );
+            }
+        });
+
+    }
+
+    /**
+     * Records relationship refresh diagnostics.
+     *
+     * @param {Object} details
+     */
+    #recordRelationshipRefresh(details = {}) {
+
+        const reason =
+            String(details.reason || "unspecified");
+
+        this.#relationshipRefreshCount += 1;
+        this.#relationshipRefreshReasonCounts.set(
+            reason,
+            (
+                this.#relationshipRefreshReasonCounts.get(reason) ||
+                0
+            ) + 1
+        );
+
+        this.#lastRelationshipRefresh = Object.freeze({
+            reason,
+            pairCount:
+                Number(details.pairCount || 0),
+            changedCount:
+                Number(details.changedCount || 0),
+            participantIds:
+                Array.from(details.participantIds || [])
+                    .map(id => Number(id))
+                    .filter(id => Number.isFinite(id)),
+            layout:
+                this.#layout.getDiagnostics?.().lastRelationshipStrategy ||
+                null
+        });
 
     }
 

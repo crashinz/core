@@ -276,16 +276,23 @@ Future runtime expansion SHALL occur through the Avatar Runtime rather than bypa
 
 Build:
 
-000033
+000036
 
 Status:
 
-Avatar Aura Service Complete
+Relationship Stability and Resize Certification Complete
 
-Build 000033 adds AvatarAuraService as the authoritative owner of aura catalog
-state, aura module loading/cache ownership, current aura selection state, aura
-API workflow, participant aura application coordination, and diagnostics.
-AvatarRenderer remains the owner of aura visual presentation.
+Build 000036 certifies AvatarCoordinator as the authoritative relationship
+refresh orchestrator for geometry-changing events. Browser resize, stage
+resize, rendered avatar image/dimension changes, remote relationship
+reconciliation, drag completion, webcam frame changes, and participant
+lifecycle cleanup now route through AvatarCoordinator before AvatarLayoutService
+executes relationship geometry.
+
+AvatarRenderer remains the owner of authoritative rendered avatar dimensions
+and notifies host composition when image loading changes those dimensions.
+AvatarLayoutService remains the owner of relationship geometry strategies,
+anchor metadata consumption, bounds, and clamping.
 
 The runtime infrastructure has been established.
 

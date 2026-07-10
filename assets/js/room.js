@@ -234,6 +234,9 @@ function configureAvatarCoordinator() {
     isLayoutLocked() {
       return layoutLocked;
     },
+    requestRelationshipRefreshFrame(callback) {
+      return requestAnimationFrame(callback);
+    },
     positionAvatar,
     renderParticipant,
     renderPeople,
@@ -573,6 +576,7 @@ function configureRoomEventRouter() {
       if (avatarRuntime?.coordinator?.refreshRelationshipsForParticipant(person, {
         animate: false,
         persist: false,
+        reason: 'remote-position',
       })) return;
 
       positionAvatar(person);
@@ -1171,6 +1175,10 @@ function attachParticipantVideo(participantId, stream, own = false) {
     webcam_enabled: true,
   });
   positionAvatar(person);
+  avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+    participant: person,
+    reason: 'webcam-frame-change',
+  });
 }
 
 function detachParticipantVideo(participantId, flip = true) {
@@ -1184,6 +1192,10 @@ function detachParticipantVideo(participantId, flip = true) {
   avatarRuntime?.renderer?.detachWebcam(person, {
     flip,
     window,
+  });
+  avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+    participant: person,
+    reason: 'webcam-frame-change',
   });
 }
 
@@ -1517,6 +1529,14 @@ function renderParticipant(p, options = {}) {
     lapInitiator: isLapLinkInitiator(merged),
     lapTarget: isLapLinkTarget(merged),
     flipImage: hadImage && wasWebcam !== nowWebcam,
+    fallbackSize: AVATAR_STAGE_SIZE,
+    visualMaxSize: 200,
+    onRenderedSizeChange(participant, detail = {}) {
+      avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+        participant,
+        reason: detail.reason || 'rendered-size-change',
+      });
+    },
   });
   refreshLinkClasses();
   positionAvatar(merged);
@@ -1550,6 +1570,7 @@ function removeParticipant(participantId, options = {}) {
       });
       avatarRuntime?.coordinator?.clearParticipantRelationship(id);
     } else {
+      avatarRuntime?.coordinator?.clearParticipantRelationship(id);
       participants.delete(id);
     }
     avatarRuntime?.coordinator?.unlinkFollowersOf(id);
@@ -3949,6 +3970,10 @@ function applyDividerDrag(clientY) {
   pct = Math.max(18, Math.min(78, pct));
   setRoomHeight(pct);
   participants.forEach(positionAvatar);
+  avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+    all: true,
+    reason: 'stage-resize',
+  });
 }
 
 function setSidebarWidth(px) {
@@ -3968,6 +3993,10 @@ function applyVerticalDividerDrag(clientX) {
   width = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, width));
   setSidebarWidth(width);
   participants.forEach(positionAvatar);
+  avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+    all: true,
+    reason: 'stage-resize',
+  });
 }
 
 document.getElementById('horizontal-divider')?.addEventListener('pointerdown', e => {
@@ -4713,6 +4742,11 @@ requestAnimationFrame(() => {
         frameQueued = true;
         requestAnimationFrame(runFrameSync);
     }
+
+    avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+        all: true,
+        reason: 'browser-resize',
+    });
 
     layoutLocked = false;
 });

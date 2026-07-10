@@ -23,7 +23,7 @@
  *      relationship management, ordering, or layout calculation.
  *
  * Build:
- *      000032
+ *      000036
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -48,6 +48,10 @@
  *
  * Build 000032
  * - Added authoritative rendered avatar dimensions API.
+ *
+ * Build 000036
+ * - Added rendered-size change notification for relationship refresh
+ *   orchestration.
  ******************************************************************************/
 
 /**
@@ -261,6 +265,22 @@ export class AvatarRenderer {
             options.addContextListeners?.(image);
         }
 
+        const previousSource =
+            image.getAttribute("src") || "";
+
+        const previousDimensions =
+            this.renderedAvatarDimensions(
+                participant,
+                {
+                    fallbackSize:
+                        options.fallbackSize,
+                    visualMaxSize:
+                        options.visualMaxSize,
+                    lapInitiator:
+                        options.lapInitiator
+                }
+            );
+
         this.setAvatarImageSource(
             image,
             options.avatarSource,
@@ -268,6 +288,27 @@ export class AvatarRenderer {
                 flip:
                     Boolean(options.flipImage),
 
+                window:
+                    options.window
+            }
+        );
+
+        this.#notifyRenderedSizeAfterImageLoad(
+            participant,
+            image,
+            {
+                previousSource,
+                previousDimensions,
+                nextSource:
+                    options.avatarSource,
+                fallbackSize:
+                    options.fallbackSize,
+                visualMaxSize:
+                    options.visualMaxSize,
+                lapInitiator:
+                    options.lapInitiator,
+                onRenderedSizeChange:
+                    options.onRenderedSizeChange,
                 window:
                     options.window
             }
@@ -1123,6 +1164,98 @@ export class AvatarRenderer {
         element.style.height = `${box.height}px`;
         element.style.left = `${box.left}px`;
         element.style.top = `${box.top}px`;
+
+    }
+
+    /**
+     * Notifies the host when avatar image loading changes rendered dimensions.
+     *
+     * @param {Object} participant
+     * @param {HTMLImageElement} image
+     * @param {Object} options
+     */
+    #notifyRenderedSizeAfterImageLoad(participant, image, options = {}) {
+
+        if (
+            !participant ||
+            !image ||
+            typeof options.onRenderedSizeChange !== "function"
+        ) {
+            return;
+        }
+
+        const nextSource =
+            String(options.nextSource || "");
+
+        if (!nextSource || String(options.previousSource || "") === nextSource) {
+            return;
+        }
+
+        const previousDimensions =
+            options.previousDimensions || {};
+
+        let notified = false;
+
+        const notify = () => {
+            if (notified) return;
+
+            const nextDimensions =
+                this.renderedAvatarDimensions(
+                    participant,
+                    {
+                        fallbackSize:
+                            options.fallbackSize,
+                        visualMaxSize:
+                            options.visualMaxSize,
+                        lapInitiator:
+                            options.lapInitiator
+                    }
+                );
+
+            if (
+                Number(previousDimensions.width) === Number(nextDimensions.width) &&
+                Number(previousDimensions.height) === Number(nextDimensions.height)
+            ) {
+                return;
+            }
+
+            notified = true;
+
+            options.onRenderedSizeChange(
+                participant,
+                Object.freeze({
+                    reason:
+                        "avatar-image-load",
+                    previousDimensions:
+                        Object.freeze({
+                            width:
+                                Number(previousDimensions.width || 0),
+                            height:
+                                Number(previousDimensions.height || 0)
+                        }),
+                    nextDimensions
+                })
+            );
+        };
+
+        image.addEventListener(
+            "load",
+            notify,
+            {
+                once:
+                    true
+            }
+        );
+
+        const scheduler =
+            options.window || globalThis;
+
+        if (image.complete) {
+            scheduler.setTimeout?.(
+                notify,
+                0
+            );
+        }
 
     }
 
