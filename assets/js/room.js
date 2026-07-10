@@ -1078,13 +1078,7 @@ function setSessionLocked(locked) {
 }
 
 function lockSession() {
-  closeContextMenu();
-  closeTextContextMenu();
-  closeMessageActionMenu();
-  closeTabContextMenu();
-  closeRoomMenu();
-  closeEmojiPicker();
-  closeAttachMenu();
+  closeFloatingShells(['roomAction', 'game']);
   setSessionLocked(true);
 }
 
@@ -2908,7 +2902,7 @@ async function leaveRoomWithLocalExit(href, afterLeave) {
   closeRoomMenu();
   closeContextMenu();
   closeTextContextMenu();
-  closeEmojiPicker();
+  closeMediaPicker();
   stopTypingNow();
   const me = participants.get(cfg?.myParticipantId);
   if (me) {
@@ -2956,7 +2950,7 @@ async function refreshPresence() {
 function openAvatarContextMenu(x, y, participant) {
   closeTextContextMenu();
   closeRoomMenu();
-  closeEmojiPicker();
+  closeMediaPicker();
   ctxMenuParticipantId = participant.id;
   const isOwn = participant.id === cfg.myParticipantId;
   const isLinked = avatarRuntime?.relationships?.isLinked(participant) || false;
@@ -3011,13 +3005,7 @@ function closeTabContextMenu() {
 
 function openTabContextMenu(x, y, chatKey) {
   if (!tabCtxMenu || (!chatKey.startsWith('dm:') && !chatKey.startsWith('link:'))) return;
-  closeContextMenu();
-  closeTextContextMenu();
-  closeMessageActionMenu();
-  closeRoomMenu();
-  closeRoomActionMenu();
-  closeEmojiPicker();
-  closeAttachMenu();
+  closeFloatingShells(['tab', 'game']);
   tabCtxTargetChat = chatKey;
   document.getElementById('tab-close-dm').style.display = chatKey.startsWith('dm:') ? 'block' : 'none';
   document.getElementById('tab-unlink').style.display = chatKey.startsWith('link:') ? 'block' : 'none';
@@ -3027,11 +3015,7 @@ function openTabContextMenu(x, y, chatKey) {
 
 function openMessageActionMenu(x, y, msg) {
   if (!msgActionMenu || msg.system || msg.is_deleted) return;
-  closeContextMenu();
-  closeTextContextMenu();
-  closeTabContextMenu();
-  closeRoomMenu();
-  closeRoomActionMenu();
+  closeFloatingShells(['message', 'game', 'media', 'attach']);
   msgActionTargetId = Number(msg.id);
   const activeChat = activeChatKey();
   msgActionTargetChat = activeChat;
@@ -3056,10 +3040,6 @@ function closeMediaPicker() {
   if (mediaPicker) mediaPicker.hidden = true;
 }
 
-function closeEmojiPicker() {
-  closeMediaPicker();
-}
-
 function closeAttachMenu() {
   attachMenu.hidden = true;
 }
@@ -3068,15 +3048,21 @@ function closeGameStartMenu() {
   if (gameStartMenu) gameStartMenu.hidden = true;
 }
 
+function closeFloatingShells(except = []) {
+  const skip = new Set(except);
+  if (!skip.has('context')) closeContextMenu();
+  if (!skip.has('text')) closeTextContextMenu();
+  if (!skip.has('message')) closeMessageActionMenu();
+  if (!skip.has('tab')) closeTabContextMenu();
+  if (!skip.has('room')) closeRoomMenu();
+  if (!skip.has('roomAction')) closeRoomActionMenu();
+  if (!skip.has('game')) closeGameStartMenu();
+  if (!skip.has('media')) closeMediaPicker();
+  if (!skip.has('attach')) closeAttachMenu();
+}
+
 function openEmojiPicker() {
-  closeContextMenu();
-  closeTextContextMenu();
-  closeTabContextMenu();
-  closeRoomMenu();
-  closeRoomActionMenu();
-  closeGameStartMenu();
-  closeAttachMenu();
-  closeMediaPicker();
+  closeFloatingShells(['message']);
   gesturePaletteLoaded = false;
   const btn = document.getElementById('emoji-btn');
   const r = btn.getBoundingClientRect();
@@ -3090,13 +3076,7 @@ function openEmojiPicker() {
 }
 
 function openRoomMenu() {
-  closeContextMenu();
-  closeTextContextMenu();
-  closeTabContextMenu();
-  closeRoomActionMenu();
-  closeGameStartMenu();
-  closeAttachMenu();
-  closeMediaPicker();
+  closeFloatingShells(['message', 'room']);
   const btn = document.getElementById('room-menu-btn');
   const r = btn.getBoundingClientRect();
   roomMenu.classList.add('visible');
@@ -3107,13 +3087,7 @@ function openRoomMenu() {
 
 function openRoomActionMenu() {
   if (!roomActionMenu) return;
-  closeContextMenu();
-  closeTextContextMenu();
-  closeTabContextMenu();
-  closeRoomMenu();
-  closeGameStartMenu();
-  closeAttachMenu();
-  closeMediaPicker();
+  closeFloatingShells(['message', 'roomAction']);
   const btn = document.getElementById('room-action-btn');
   const r = btn.getBoundingClientRect();
   document.getElementById('room-action-edit').style.display = cfg.canEditRoom ? 'block' : 'none';
@@ -3152,26 +3126,13 @@ document.getElementById('emoji-btn').addEventListener('click', e => {
 
 document.getElementById('attach-btn').addEventListener('click', e => {
   e.stopPropagation();
-  closeContextMenu();
-  closeTextContextMenu();
-  closeTabContextMenu();
-  closeRoomMenu();
-  closeRoomActionMenu();
-  closeGameStartMenu();
-  closeEmojiPicker();
-  closeMediaPicker();
+  closeFloatingShells(['message', 'attach']);
   attachMenu.hidden = !attachMenu.hidden;
 });
 
 document.getElementById('game-start-btn')?.addEventListener('click', e => {
   e.stopPropagation();
-  closeContextMenu();
-  closeTextContextMenu();
-  closeTabContextMenu();
-  closeRoomMenu();
-  closeRoomActionMenu();
-  closeMediaPicker();
-  closeAttachMenu();
+  closeFloatingShells(['message', 'game']);
   if (gameStartMenu) gameStartMenu.hidden = !gameStartMenu.hidden;
 });
 
@@ -3588,14 +3549,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    closeContextMenu();
-    closeTextContextMenu();
-    closeMessageActionMenu();
-    closeTabContextMenu();
-    closeRoomMenu();
-    closeRoomActionMenu();
-    closeMediaPicker();
-    closeAttachMenu();
+    closeFloatingShells(['game']);
     closeLinkIconModal();
     document.getElementById('host-warn-modal')?.classList.remove('open');
     document.getElementById('host-kick-modal')?.classList.remove('open');
