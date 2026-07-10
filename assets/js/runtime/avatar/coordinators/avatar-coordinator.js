@@ -38,6 +38,10 @@
  * Build 000032
  * - Routed relationship layout through authoritative rendered avatar
  *   dimensions.
+ *
+ * Build 000034
+ * - Routed lap layout selection through AvatarRelationshipService capability
+ *   checks.
  ******************************************************************************/
 
 /**
@@ -1147,7 +1151,7 @@ export class AvatarCoordinator {
             return [];
         }
 
-        if (this.#relationships.normalizeLinkMode(initiator.link_mode) === "lap") {
+        if (this.#relationships.isLapMode(initiator.link_mode)) {
             return this.#snapLappedPair(
                 initiator,
                 target

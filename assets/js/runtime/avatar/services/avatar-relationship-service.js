@@ -19,7 +19,7 @@
  *      documented owners.
  *
  * Build:
- *      000017
+ *      000034
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -33,6 +33,11 @@
  * - Added relationship graph ownership.
  * - Added relationship creation, removal, and query APIs.
  * - Redirected legacy room.js relationship state ownership.
+ *
+ * Build 000034
+ * - Added relationship capability registry ownership.
+ * - Added relationship metadata contract normalization.
+ * - Added legacy directed-edge relationship metadata translation.
  ******************************************************************************/
 
 /**
@@ -41,9 +46,124 @@
  * Defines the Avatar Relationship Service.
  */
 
-//
-// No imports required.
-//
+//--------------------------------------------------
+// Relationship Capability Model
+//--------------------------------------------------
+
+const RELATIONSHIP_METADATA_SCHEMA_VERSION = 1;
+
+const RELATIONSHIP_CAPABILITIES = Object.freeze({
+
+    normal:
+        Object.freeze({
+            id: "normal",
+            mode: "normal",
+            label: "Normal Link",
+            layout: "side-by-side",
+            legacyMode: "normal",
+            supported: true,
+            participantLimit: 2,
+            roles:
+                Object.freeze([
+                    "initiator",
+                    "target"
+                ]),
+            defaults:
+                Object.freeze({
+                    orientation: "right",
+                    movement: "group",
+                    drag: "breakable",
+                    rendering: "stage-link-icon",
+                    static: true,
+                    animated: false
+                }),
+            supports:
+                Object.freeze({
+                    anchors: false,
+                    perMemberAnchors: false,
+                    ordering: false,
+                    relationshipOptions: false,
+                    multiplayerReconciliation: true,
+                    persistence: true
+                })
+        }),
+
+    lap:
+        Object.freeze({
+            id: "lap",
+            mode: "lap",
+            label: "Lap",
+            layout: "lap",
+            legacyMode: "lap",
+            supported: true,
+            participantLimit: 2,
+            roles:
+                Object.freeze([
+                    "initiator",
+                    "target"
+                ]),
+            defaults:
+                Object.freeze({
+                    orientation: "bottom-right",
+                    movement: "group",
+                    drag: "breakable",
+                    rendering: "lap-pair",
+                    static: true,
+                    animated: false
+                }),
+            supports:
+                Object.freeze({
+                    anchors: true,
+                    perMemberAnchors: true,
+                    ordering: false,
+                    relationshipOptions: false,
+                    multiplayerReconciliation: true,
+                    persistence: true
+                })
+        })
+
+});
+
+const RELATIONSHIP_METADATA_CONTRACT = Object.freeze({
+    schemaVersion: RELATIONSHIP_METADATA_SCHEMA_VERSION,
+    groupId: null,
+    mode: "normal",
+    capability: "normal",
+    members:
+        Object.freeze([]),
+    orientation: "right",
+    order:
+        Object.freeze([]),
+    anchors:
+        Object.freeze({
+            relationship: null,
+            members:
+                Object.freeze({}),
+            mode:
+                Object.freeze({})
+        }),
+    options:
+        Object.freeze({}),
+    movement: "group",
+    drag: "breakable",
+    rendering: "stage-link-icon",
+    persistence:
+        Object.freeze({
+            supported: true,
+            legacyDirectedEdge: true,
+            futureMetadata: false
+        }),
+    reconciliation:
+        Object.freeze({
+            supported: true,
+            eventPayload: "link"
+        }),
+    behavior:
+        Object.freeze({
+            static: true,
+            animated: false
+        })
+});
 
 //--------------------------------------------------
 // Avatar Relationship Service
@@ -106,6 +226,61 @@ export class AvatarRelationshipService {
     //--------------------------------------------------
 
     /**
+     * Returns every supported relationship capability.
+     *
+     * @returns {Object[]}
+     */
+    relationshipCapabilities() {
+
+        return Object.freeze(
+            Object.values(RELATIONSHIP_CAPABILITIES)
+        );
+
+    }
+
+    /**
+     * Returns the relationship metadata contract shape.
+     *
+     * @returns {Object}
+     */
+    relationshipMetadataContract() {
+
+        return RELATIONSHIP_METADATA_CONTRACT;
+
+    }
+
+    /**
+     * Returns whether a relationship mode is currently supported.
+     *
+     * @param {string|null|undefined} mode
+     *        Relationship mode.
+     *
+     * @returns {boolean}
+     */
+    isSupportedRelationshipMode(mode) {
+
+        return Object.prototype.hasOwnProperty.call(
+            RELATIONSHIP_CAPABILITIES,
+            String(mode || "")
+        );
+
+    }
+
+    /**
+     * Returns the relationship capability for a mode.
+     *
+     * @param {string|null|undefined} mode
+     *        Relationship mode.
+     *
+     * @returns {Object}
+     */
+    relationshipCapability(mode) {
+
+        return RELATIONSHIP_CAPABILITIES[this.normalizeLinkMode(mode)];
+
+    }
+
+    /**
      * Returns the canonical relationship mode.
      *
      * @param {string|null|undefined} mode
@@ -115,9 +290,192 @@ export class AvatarRelationshipService {
      */
     normalizeLinkMode(mode) {
 
-        return mode === "lap"
-            ? "lap"
+        const candidate =
+            String(mode || "normal");
+
+        return Object.prototype.hasOwnProperty.call(
+            RELATIONSHIP_CAPABILITIES,
+            candidate
+        )
+            ? candidate
             : "normal";
+
+    }
+
+    /**
+     * Normalizes relationship metadata for current and future capabilities.
+     *
+     * Missing metadata returns the certified current fallback behavior.
+     *
+     * @param {Object} metadata
+     *        Relationship metadata supplied by a future owner.
+     *
+     * @param {Object} fallback
+     *        Legacy relationship fallback context.
+     *
+     * @returns {Object}
+     */
+    normalizeRelationshipMetadata(metadata = {}, fallback = {}) {
+
+        const source =
+            metadata || {};
+
+        const fallbackSource =
+            fallback || {};
+
+        const mode =
+            this.normalizeLinkMode(source.mode || fallbackSource.mode);
+
+        const capability =
+            this.relationshipCapability(mode);
+
+        const members =
+            this.#normalizeRelationshipMembers(
+                source.members || fallbackSource.members || [],
+                capability
+            );
+
+        return Object.freeze({
+
+            schemaVersion:
+                RELATIONSHIP_METADATA_SCHEMA_VERSION,
+
+            groupId:
+                source.groupId || fallbackSource.groupId || null,
+
+            mode,
+
+            capability:
+                capability.id,
+
+            members:
+                Object.freeze(members),
+
+            orientation:
+                source.orientation ||
+                fallbackSource.orientation ||
+                capability.defaults.orientation,
+
+            order:
+                Object.freeze(
+                    Array.isArray(source.order)
+                        ? source.order.slice()
+                        : members.map(member => member.participantId)
+                ),
+
+            anchors:
+                this.#normalizeAnchors(source.anchors),
+
+            options:
+                Object.freeze({
+                    ...(source.options || {})
+                }),
+
+            movement:
+                source.movement ||
+                capability.defaults.movement,
+
+            drag:
+                source.drag ||
+                capability.defaults.drag,
+
+            rendering:
+                source.rendering ||
+                capability.defaults.rendering,
+
+            persistence:
+                Object.freeze({
+                    supported:
+                        Boolean(capability.supports.persistence),
+                    legacyDirectedEdge:
+                        true,
+                    futureMetadata:
+                        false
+                }),
+
+            reconciliation:
+                Object.freeze({
+                    supported:
+                        Boolean(capability.supports.multiplayerReconciliation),
+                    eventPayload:
+                        "link"
+                }),
+
+            behavior:
+                Object.freeze({
+                    static:
+                        Boolean(capability.defaults.static),
+                    animated:
+                        Boolean(capability.defaults.animated)
+                })
+
+        });
+
+    }
+
+    /**
+     * Returns metadata translated from the current directed-edge model.
+     *
+     * @param {Object} firstParticipant
+     * @param {Object} secondParticipant
+     *
+     * @returns {Object}
+     */
+    relationshipMetadataForPair(firstParticipant, secondParticipant) {
+
+        const initiator =
+            this.relationshipInitiator(firstParticipant, secondParticipant) ||
+            firstParticipant;
+
+        const target =
+            initiator === firstParticipant
+                ? secondParticipant
+                : firstParticipant;
+
+        const mode =
+            this.linkModeForPair(firstParticipant, secondParticipant);
+
+        return this.normalizeRelationshipMetadata(
+            {},
+            {
+                groupId:
+                    this.linkKeyFor(firstParticipant?.id, secondParticipant?.id),
+                mode,
+                members:
+                    [
+                        {
+                            participantId:
+                                Number(initiator?.id),
+                            role:
+                                "initiator",
+                            order:
+                                0
+                        },
+                        {
+                            participantId:
+                                Number(target?.id),
+                            role:
+                                "target",
+                            order:
+                                1
+                        }
+                    ]
+            }
+        );
+
+    }
+
+    /**
+     * Returns whether the relationship mode uses lap geometry.
+     *
+     * @param {string|null|undefined} mode
+     *        Relationship mode.
+     *
+     * @returns {boolean}
+     */
+    isLapMode(mode) {
+
+        return this.relationshipCapability(mode).layout === "lap";
 
     }
 
@@ -149,7 +507,7 @@ export class AvatarRelationshipService {
      */
     isLapLinkInitiator(participant) {
 
-        return this.normalizeLinkMode(participant?.link_mode) === "lap" &&
+        return this.isLapMode(participant?.link_mode) &&
             Boolean(participant?.linked_to);
 
     }
@@ -171,7 +529,7 @@ export class AvatarRelationshipService {
 
             if (
                 Number(other.linked_to) === Number(participant.id) &&
-                this.normalizeLinkMode(other.link_mode) === "lap"
+                this.isLapMode(other.link_mode)
             ) {
                 return true;
             }
@@ -607,6 +965,17 @@ export class AvatarRelationshipService {
 
         return Object.freeze({
 
+            metadataSchemaVersion:
+                RELATIONSHIP_METADATA_SCHEMA_VERSION,
+
+            capabilityModes:
+                Object.freeze(
+                    Object.keys(RELATIONSHIP_CAPABILITIES)
+                ),
+
+            capabilities:
+                this.relationshipCapabilities(),
+
             pairCount:
                 pairs.length,
 
@@ -622,7 +991,10 @@ export class AvatarRelationshipService {
                         ]),
 
                     mode:
-                        this.linkModeForPair(first, second)
+                        this.linkModeForPair(first, second),
+
+                    metadata:
+                        this.relationshipMetadataForPair(first, second)
 
                 }))
 
@@ -659,6 +1031,80 @@ export class AvatarRelationshipService {
     #participant(participantId) {
 
         return this.#participants.get(participantId) || null;
+
+    }
+
+    /**
+     * Normalizes relationship member metadata.
+     *
+     * @param {Object[]} members
+     * @param {Object} capability
+     *
+     * @returns {Object[]}
+     */
+    #normalizeRelationshipMembers(members, capability) {
+
+        const roles =
+            capability.roles || [];
+
+        return Array.from(members || [])
+            .slice(0, capability.participantLimit || 2)
+            .map((member, index) => Object.freeze({
+
+                participantId:
+                    Number(member?.participantId || 0),
+
+                role:
+                    roles.includes(member?.role)
+                        ? member.role
+                        : roles[index] || "member",
+
+                order:
+                    Number.isFinite(Number(member?.order))
+                        ? Number(member.order)
+                        : index,
+
+                anchor:
+                    member?.anchor || null,
+
+                options:
+                    Object.freeze({
+                        ...(member?.options || {})
+                    })
+
+            }))
+            .filter(member => member.participantId > 0);
+
+    }
+
+    /**
+     * Normalizes optional relationship anchor metadata.
+     *
+     * @param {Object|null|undefined} anchors
+     *
+     * @returns {Object}
+     */
+    #normalizeAnchors(anchors) {
+
+        const source =
+            anchors || {};
+
+        return Object.freeze({
+
+            relationship:
+                source.relationship || null,
+
+            members:
+                Object.freeze({
+                    ...(source.members || {})
+                }),
+
+            mode:
+                Object.freeze({
+                    ...(source.mode || {})
+                })
+
+        });
 
     }
 

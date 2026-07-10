@@ -185,6 +185,9 @@ Owns:
 - linking
 - unlinking
 - validation
+- relationship capabilities
+- relationship metadata contract normalization
+- legacy directed-edge metadata translation
 
 Layout Service
 
