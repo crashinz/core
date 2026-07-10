@@ -38,6 +38,9 @@
  * - Added relationship capability registry ownership.
  * - Added relationship metadata contract normalization.
  * - Added legacy directed-edge relationship metadata translation.
+ *
+ * Build 000035
+ * - Added relationship geometry strategy declarations.
  ******************************************************************************/
 
 /**
@@ -60,6 +63,7 @@ const RELATIONSHIP_CAPABILITIES = Object.freeze({
             mode: "normal",
             label: "Normal Link",
             layout: "side-by-side",
+            geometryStrategy: "sideBySide",
             legacyMode: "normal",
             supported: true,
             participantLimit: 2,
@@ -94,6 +98,7 @@ const RELATIONSHIP_CAPABILITIES = Object.freeze({
             mode: "lap",
             label: "Lap",
             layout: "lap",
+            geometryStrategy: "anchorPair",
             legacyMode: "lap",
             supported: true,
             participantLimit: 2,
@@ -129,6 +134,8 @@ const RELATIONSHIP_METADATA_CONTRACT = Object.freeze({
     groupId: null,
     mode: "normal",
     capability: "normal",
+    geometryStrategy: "sideBySide",
+    metadataSource: "fallback",
     members:
         Object.freeze([]),
     orientation: "right",
@@ -329,6 +336,9 @@ export class AvatarRelationshipService {
         const capability =
             this.relationshipCapability(mode);
 
+        const hasSourceMetadata =
+            Object.keys(source).length > 0;
+
         const members =
             this.#normalizeRelationshipMembers(
                 source.members || fallbackSource.members || [],
@@ -347,6 +357,16 @@ export class AvatarRelationshipService {
 
             capability:
                 capability.id,
+
+            geometryStrategy:
+                source.geometryStrategy ||
+                fallbackSource.geometryStrategy ||
+                capability.geometryStrategy,
+
+            metadataSource:
+                source.metadataSource ||
+                fallbackSource.metadataSource ||
+                (hasSourceMetadata ? "metadata" : "fallback"),
 
             members:
                 Object.freeze(members),

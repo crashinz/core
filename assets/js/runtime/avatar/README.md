@@ -196,6 +196,9 @@ Owns:
 - positioning
 - spacing
 - layout calculation
+- relationship geometry strategy execution
+- relationship anchor metadata consumption
+- relationship bounds and clamping
 
 Renderer
 

@@ -20,7 +20,7 @@
  *      networking, and ChatRuntime behavior with their documented owners.
  *
  * Build:
- *      000032
+ *      000035
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -42,6 +42,9 @@
  * Build 000034
  * - Routed lap layout selection through AvatarRelationshipService capability
  *   checks.
+ *
+ * Build 000035
+ * - Delegated relationship geometry strategy selection to AvatarLayoutService.
  ******************************************************************************/
 
 /**
@@ -1151,15 +1154,14 @@ export class AvatarCoordinator {
             return [];
         }
 
-        if (this.#relationships.isLapMode(initiator.link_mode)) {
-            return this.#snapLappedPair(
+        const stageSize =
+            this.#stageSize();
+
+        const metadata =
+            this.#relationships.relationshipMetadataForPair(
                 initiator,
                 target
             );
-        }
-
-        const stageSize =
-            this.#stageSize();
 
         const initiatorDimensions =
             this.#renderedDimensions(initiator);
@@ -1168,65 +1170,33 @@ export class AvatarCoordinator {
             this.#renderedDimensions(target);
 
         const changed =
-            this.#layout.applyLinkedPairLayout({
+            this.#layout.applyRelationshipLayout({
                 initiator,
                 target,
                 stageWidth: stageSize.width,
                 stageHeight: stageSize.height,
                 initiatorDimensions,
                 targetDimensions,
+                metadata,
                 gap: this.linkPairGap(
                     this.#relationships.linkKeyFor(
                         initiator.id,
                         target.id
                     )
-                )
-            });
-
-        changed.forEach(participant => {
-            this.#context?.positionAvatar?.(participant);
-        });
-
-        if (animate) {
-            this.#context?.animateLinkedPair?.([
-                target,
-                initiator
-            ]);
-        }
-
-        return changed;
-
-    }
-
-    /**
-     * Applies lapped relationship layout.
-     *
-     * @param {Object} initiator
-     * @param {Object} target
-     *
-     * @returns {Object[]}
-     */
-    #snapLappedPair(initiator, target) {
-
-        const stageSize =
-            this.#stageSize();
-
-        const changed =
-            this.#layout.applyLappedPairLayout({
-                initiator,
-                target,
-                stageWidth: stageSize.width,
-                stageHeight: stageSize.height,
-                primaryDimensions:
-                    this.#renderedDimensions(target),
-                lapDimensions:
-                    this.#renderedDimensions(initiator),
+                ),
                 locked: Boolean(this.#context?.isLayoutLocked?.())
             });
 
         changed.forEach(participant => {
             this.#context?.positionAvatar?.(participant);
         });
+
+        if (animate && metadata.geometryStrategy !== "anchorPair") {
+            this.#context?.animateLinkedPair?.([
+                target,
+                initiator
+            ]);
+        }
 
         return changed;
 
