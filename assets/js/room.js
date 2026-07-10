@@ -1592,6 +1592,18 @@ async function handleRoomDeleted(payload = {}) {
   }
 }
 
+function bindModalCloseButtons(buttonIds, closeHandler) {
+  buttonIds.forEach(id => document.getElementById(id)?.addEventListener('click', closeHandler));
+}
+
+function positionFloatingMenu(menu, x, y) {
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
 function positionAvatar(p) {
   const img = p.avatarEl;
   const label = p.labelEl;
@@ -2979,11 +2991,7 @@ function openTextContextMenu(x, y, mode) {
   document.getElementById('text-cut').style.display = mode === 'input' ? 'block' : 'none';
   document.getElementById('text-paste').style.display = mode === 'input' ? 'block' : 'none';
   textCtxMenu.classList.add('visible');
-  const rect = textCtxMenu.getBoundingClientRect();
-  const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
-  const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
-  textCtxMenu.style.left = `${left}px`;
-  textCtxMenu.style.top = `${top}px`;
+  positionFloatingMenu(textCtxMenu, x, y);
 }
 
 function closeTextContextMenu() {
@@ -3014,9 +3022,7 @@ function openTabContextMenu(x, y, chatKey) {
   document.getElementById('tab-close-dm').style.display = chatKey.startsWith('dm:') ? 'block' : 'none';
   document.getElementById('tab-unlink').style.display = chatKey.startsWith('link:') ? 'block' : 'none';
   tabCtxMenu.classList.add('visible');
-  const rect = tabCtxMenu.getBoundingClientRect();
-  tabCtxMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
-  tabCtxMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  positionFloatingMenu(tabCtxMenu, x, y);
 }
 
 function openMessageActionMenu(x, y, msg) {
@@ -3035,9 +3041,7 @@ function openMessageActionMenu(x, y, msg) {
   document.getElementById('msg-edit-action').style.display = editable ? 'block' : 'none';
   document.getElementById('msg-delete-action').style.display = mine ? 'block' : 'none';
   msgActionMenu.classList.add('visible');
-  const rect = msgActionMenu.getBoundingClientRect();
-  msgActionMenu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
-  msgActionMenu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  positionFloatingMenu(msgActionMenu, x, y);
 }
 
 function closeRoomMenu() {
@@ -3522,8 +3526,7 @@ async function deleteGesture(gesture) {
   }
 }
 
-document.getElementById('gesture-delete-close')?.addEventListener('click', closeDeleteGestureModal);
-document.getElementById('gesture-delete-cancel')?.addEventListener('click', closeDeleteGestureModal);
+bindModalCloseButtons(['gesture-delete-close', 'gesture-delete-cancel'], closeDeleteGestureModal);
 gestureDeleteConfirm?.addEventListener('click', async () => {
   const gesture = pendingGestureDelete;
   if (!gesture) return;
@@ -3779,8 +3782,7 @@ function closeDeleteMessageModal() {
   document.getElementById('delete-message-modal')?.classList.remove('open');
 }
 
-document.getElementById('delete-message-close')?.addEventListener('click', closeDeleteMessageModal);
-document.getElementById('delete-message-cancel')?.addEventListener('click', closeDeleteMessageModal);
+bindModalCloseButtons(['delete-message-close', 'delete-message-cancel'], closeDeleteMessageModal);
 
 document.getElementById('delete-message-confirm')?.addEventListener('click', async () => {
   const chatKey = pendingDeleteChatKey || activeChatKey();
@@ -3850,8 +3852,7 @@ auraOptionsEl?.addEventListener('click', e => {
 document.getElementById('aura-set')?.addEventListener('click', () => {
   setCurrentAura();
 });
-document.getElementById('aura-close')?.addEventListener('click', closeAuraModal);
-document.getElementById('aura-cancel')?.addEventListener('click', closeAuraModal);
+bindModalCloseButtons(['aura-close', 'aura-cancel'], closeAuraModal);
 
 document.getElementById('ctx-unlink').addEventListener('click', () => {
   closeContextMenu();
@@ -4166,8 +4167,7 @@ document.getElementById('room-action-clear-history')?.addEventListener('click', 
   document.getElementById('clear-room-history-modal')?.classList.add('open');
 });
 
-document.getElementById('clear-room-history-close')?.addEventListener('click', closeClearRoomHistoryModal);
-document.getElementById('clear-room-history-cancel')?.addEventListener('click', closeClearRoomHistoryModal);
+bindModalCloseButtons(['clear-room-history-close', 'clear-room-history-cancel'], closeClearRoomHistoryModal);
 
 document.getElementById('clear-room-history-confirm')?.addEventListener('click', async e => {
   const btn = e.currentTarget;
@@ -4239,8 +4239,7 @@ document.getElementById('room-delete-open')?.addEventListener('click', () => {
   document.getElementById('room-delete-modal')?.classList.add('open');
 });
 
-document.getElementById('room-delete-close')?.addEventListener('click', closeRoomDeleteModal);
-document.getElementById('room-delete-cancel')?.addEventListener('click', closeRoomDeleteModal);
+bindModalCloseButtons(['room-delete-close', 'room-delete-cancel'], closeRoomDeleteModal);
 
 document.getElementById('room-delete-confirm')?.addEventListener('click', async e => {
   const btn = e.currentTarget;
@@ -4625,8 +4624,7 @@ voiceDeviceForm?.addEventListener('submit', async e => {
   await joinVoice();
 });
 
-document.getElementById('voice-device-close')?.addEventListener('click', closeVoiceDeviceModal);
-document.getElementById('voice-device-cancel')?.addEventListener('click', closeVoiceDeviceModal);
+bindModalCloseButtons(['voice-device-close', 'voice-device-cancel'], closeVoiceDeviceModal);
 
 async function joinVoice() {
   return voiceRuntime?.media?.join();
