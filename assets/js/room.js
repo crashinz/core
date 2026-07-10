@@ -1846,7 +1846,6 @@ function renderPeople() {
   }
 
   if (!participants || participants.size === 0) {
-    console.warn("[renderPeople] no participants yet");
     return;
   }
 
@@ -4782,9 +4781,6 @@ async function bootRoom() {
 
   const roomId = document.body.dataset.roomId;
   cfg = await fetch(appUrl(`/api/room_config.php?id=${encodeURIComponent(roomId)}`)).then(r => r.json());
-console.log("[BOOT] cfg loaded:", cfg);
-console.log("cfg.participants", cfg.participants);
-console.log("participant count", cfg.participants?.length);
   if (cfg.error) throw new Error(cfg.error);
   renderImportedRoomLayout(cfg.importLayout);
   renderImportedMusicPlayer(cfg.musicPlaylist);
@@ -4797,7 +4793,6 @@ console.log("participant count", cfg.participants?.length);
   avatarRuntime?.coordinator?.seedLinkIcons(cfg.linkIcons || {});
   await Promise.all((cfg.participants || []).map(p => renderParticipantWhenReady(p, { animateJoin: true }).catch(() => {
     renderParticipant(p, { animateJoin: true });
-  console.log("participants rendered");	
   })));
   (cfg.dmUsers || []).forEach(rememberDmUser);
   (cfg.messages || []).forEach(msg => addMessageToChannel(msg, 'room', false));
@@ -4848,7 +4843,6 @@ console.log("participant count", cfg.participants?.length);
 }
 
 function updateRoomLayout() {
-  console.warn("[SAFE FALLBACK] updateRoomLayout missing");
 }
 
 window.addEventListener('resize', () => {
