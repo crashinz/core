@@ -2237,26 +2237,6 @@ function applyParticipantAura(person) {
   avatarRuntime?.aura?.applyParticipantAura(person).catch(console.warn);
 }
 
-function roomEffectByKey(key) {
-  return roomEffectsRuntime?.effects?.effectByKey(key) || null;
-}
-
-async function loadRoomEffectModule(effect) {
-  return roomEffectsRuntime?.effects?.loadModule(effect);
-}
-
-function cleanupRoomEffectVisuals() {
-  roomEffectsRuntime?.effects?.cleanup();
-}
-
-async function applyRoomEffect(effectPayload, announce = false) {
-  await roomEffectsRuntime?.effects?.apply(effectPayload, announce);
-}
-
-async function loadRoomEffectsState() {
-  return roomEffectsRuntime?.effects?.loadState();
-}
-
 function renderRoomEffectsModal() {
   const select = document.getElementById('room-effect-select');
   const current = document.getElementById('room-effect-current');
@@ -4217,7 +4197,7 @@ document.getElementById('room-action-edit')?.addEventListener('click', () => {
 document.getElementById('room-action-effects')?.addEventListener('click', async () => {
   closeRoomActionMenu();
   try {
-    await loadRoomEffectsState();
+    await roomEffectsRuntime?.effects?.loadState();
     renderRoomEffectsModal();
     document.getElementById('room-effects-modal').classList.add('open');
   } catch (err) {
@@ -4272,7 +4252,7 @@ document.getElementById('room-effects-form')?.addEventListener('submit', async e
       duration_minutes: document.getElementById('room-effect-duration').value,
     });
     cfg.activeRoomEffect = data.current || null;
-    await applyRoomEffect(cfg.activeRoomEffect, false);
+    await roomEffectsRuntime?.effects?.apply(cfg.activeRoomEffect, false);
     renderRoomEffectsModal();
     document.getElementById('room-effects-modal').classList.remove('open');
   } catch (err) {
@@ -4288,7 +4268,7 @@ document.getElementById('room-effect-stop')?.addEventListener('click', async () 
       action: 'effect_stop',
     });
     cfg.activeRoomEffect = null;
-    await applyRoomEffect(null, false);
+    await roomEffectsRuntime?.effects?.apply(null, false);
     renderRoomEffectsModal();
   } catch (err) {
     alert(err.message || err);
@@ -4781,7 +4761,7 @@ async function bootRoom() {
   setPermissionUI();
   renderRoomEffectsModal();
   if (cfg.activeRoomEffect?.active) {
-    await applyRoomEffect(cfg.activeRoomEffect, false);
+    await roomEffectsRuntime?.effects?.apply(cfg.activeRoomEffect, false);
     addSystemMessage(`${cfg.activeRoomEffect.label || 'Room effect'} is currently active.`);
   }
   updateComposerState();
