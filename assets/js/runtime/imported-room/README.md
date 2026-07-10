@@ -1,7 +1,7 @@
 # Imported Room Runtime
 
-**Build:** 000030  
-**Owner:** ImportedRoomRuntime  
+**Build:** 000031
+**Owner:** ImportedRoomRuntime
 **Status:** Runtime Owned - Behavioral Verification Pending
 
 ImportedRoomRuntime owns imported room layout and imported room music behavior.
@@ -18,6 +18,7 @@ ImportedRoomRuntime owns:
 - imported room music-player compatibility logic
 - domain-specific imported website player behavior, including
   inner-tranquillity.net compatibility logic
+- imported website page-level player compatibility diagnostics
 - imported room diagnostics
 
 ImportedRoomRuntime does not own:
@@ -34,8 +35,10 @@ ImportedRoomRuntime does not own:
 
 - `ImportedRoomLayoutRenderer` owns imported room layout presentation.
 - `ImportedRoomMusicService` owns imported room music-player behavior,
-  imported website player compatibility, modal lifecycle, inline embed
-  presentation, and diagnostics.
+  modal lifecycle, inline embed presentation, and diagnostics.
+- `ImportedRoomWebsitePlayerService` owns page-level imported website player
+  compatibility, including inner-tranquillity.net MediaElement initialization
+  and scoped page-level player presentation compatibility.
 
 ## Host Boundary
 
@@ -53,6 +56,9 @@ assignment, room update callbacks, and runtime configuration wiring.
 - `ImportedRoomRuntime.music.closeModal()`
 - `ImportedRoomRuntime.music.setMinimized(minimized)`
 - `ImportedRoomRuntime.music.clampModal()`
+- `ImportedRoomRuntime.websitePlayer.configure(context)`
+- `ImportedRoomRuntime.websitePlayer.inlinePlayerHtml(track)`
+- `ImportedRoomRuntime.websitePlayer.applyCompatibility(options)`
 - `ImportedRoomRuntime.getDiagnostics()`
 
 ## Behavioral Verification

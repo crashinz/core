@@ -15,7 +15,7 @@
  *      imported background synchronization.
  *
  * Build:
- *      000030
+ *      000031
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -23,6 +23,9 @@
  * Build 000030
  * - Introduced ImportedRoomLayoutRenderer.
  * - Transferred imported room layout rendering from room.js.
+ * Build 000031
+ * - Applied imported page text and main-image sizing variables from imported
+ *   layout data.
  ******************************************************************************/
 
 /**
@@ -199,6 +202,10 @@ export class ImportedRoomLayoutRenderer {
             layout
         );
 
+        this.#syncImportedSizing(
+            layout
+        );
+
         this.syncBackgroundLayer();
 
         const chunks =
@@ -265,6 +272,18 @@ export class ImportedRoomLayoutRenderer {
         stage?.style.removeProperty(
             "--vp-import-text"
         );
+        stage?.style.removeProperty(
+            "--vp-import-text-size"
+        );
+        stage?.style.removeProperty(
+            "--vp-import-main-image-width"
+        );
+        stage?.style.removeProperty(
+            "--vp-import-main-image-max-width"
+        );
+        stage?.style.removeProperty(
+            "--vp-import-mobile-image-width"
+        );
 
         this.#lastSectionCount = 0;
         this.#lastRendered = false;
@@ -327,7 +346,7 @@ export class ImportedRoomLayoutRenderer {
                 "ImportedRoomRuntime",
 
             build:
-                "000030",
+                "000031",
 
             configured:
                 Boolean(this.#context),
@@ -451,6 +470,93 @@ export class ImportedRoomLayoutRenderer {
             stage?.style.removeProperty("--audio-player-progress");
             stage?.style.removeProperty("--audio-player-progress-handle");
             stage?.style.removeProperty("--audio-player-volume-fill");
+
+        }
+
+    }
+
+    #syncImportedSizing(layout) {
+
+        const stage =
+            this.#stageElement();
+
+        const textSize =
+            this.#safeCssSize(
+                layout.text_size
+            );
+
+        if (textSize) {
+
+            stage?.style.setProperty(
+                "--vp-import-text-size",
+                textSize
+            );
+
+        } else {
+
+            stage?.style.removeProperty(
+                "--vp-import-text-size"
+            );
+
+        }
+
+        const mainImageWidth =
+            this.#safeCssSize(
+                layout.main_image_width
+            );
+
+        if (mainImageWidth) {
+
+            stage?.style.setProperty(
+                "--vp-import-main-image-width",
+                mainImageWidth
+            );
+
+        } else {
+
+            stage?.style.removeProperty(
+                "--vp-import-main-image-width"
+            );
+
+        }
+
+        const mainImageMaxWidth =
+            this.#safeCssSize(
+                layout.main_image_max_width
+            );
+
+        if (mainImageMaxWidth) {
+
+            stage?.style.setProperty(
+                "--vp-import-main-image-max-width",
+                mainImageMaxWidth
+            );
+
+        } else {
+
+            stage?.style.removeProperty(
+                "--vp-import-main-image-max-width"
+            );
+
+        }
+
+        const mobileImageWidth =
+            this.#safeCssSize(
+                layout.mobile_image_width
+            );
+
+        if (mobileImageWidth) {
+
+            stage?.style.setProperty(
+                "--vp-import-mobile-image-width",
+                mobileImageWidth
+            );
+
+        } else {
+
+            stage?.style.removeProperty(
+                "--vp-import-mobile-image-width"
+            );
 
         }
 

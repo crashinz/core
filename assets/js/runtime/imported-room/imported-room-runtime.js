@@ -14,7 +14,7 @@
  *      Owns imported room layout and music runtime coordination.
  *
  * Build:
- *      000030
+ *      000031
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -22,6 +22,9 @@
  * Build 000030
  * - Introduced ImportedRoomRuntime foundation.
  * - Added ImportedRoomLayoutRenderer and ImportedRoomMusicService ownership.
+ * Build 000031
+ * - Added ImportedRoomWebsitePlayerService ownership for page-level imported
+ *   website music-player compatibility.
  ******************************************************************************/
 
 /**
@@ -48,6 +51,12 @@ import {
 
 } from "./services/imported-room-music-service.js";
 
+import {
+
+    ImportedRoomWebsitePlayerService
+
+} from "./services/imported-room-website-player-service.js";
+
 //--------------------------------------------------
 // Imported Room Runtime
 //--------------------------------------------------
@@ -70,6 +79,11 @@ export class ImportedRoomRuntime extends CoreModule {
      * Imported room music workflow service.
      */
     #music = null;
+
+    /**
+     * Imported website page-level player compatibility service.
+     */
+    #websitePlayer = null;
 
     //--------------------------------------------------
     // Constructor
@@ -127,6 +141,17 @@ export class ImportedRoomRuntime extends CoreModule {
 
     }
 
+    /**
+     * Returns the Imported Room Website Player Service.
+     *
+     * @returns {ImportedRoomWebsitePlayerService}
+     */
+    get websitePlayer() {
+
+        return this.#websitePlayer;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -144,13 +169,16 @@ export class ImportedRoomRuntime extends CoreModule {
                 "ImportedRoomRuntime",
 
             build:
-                "000030",
+                "000031",
 
             layout:
                 this.#layout?.getDiagnostics() ?? null,
 
             music:
-                this.#music?.getDiagnostics() ?? null
+                this.#music?.getDiagnostics() ?? null,
+
+            websitePlayer:
+                this.#websitePlayer?.getDiagnostics() ?? null
 
         });
 
@@ -165,6 +193,7 @@ export class ImportedRoomRuntime extends CoreModule {
      */
     onInitialize() {
 
+        this.#createWebsitePlayerService();
         this.#createMusicService();
         this.#createLayoutRenderer();
 
@@ -177,6 +206,7 @@ export class ImportedRoomRuntime extends CoreModule {
 
         this.#layout?.destroy();
         this.#music?.destroy();
+        this.#websitePlayer?.destroy();
 
     }
 
@@ -185,13 +215,28 @@ export class ImportedRoomRuntime extends CoreModule {
     //--------------------------------------------------
 
     /**
+     * Creates the Imported Room Website Player Service runtime component.
+     */
+    #createWebsitePlayerService() {
+
+        this.#websitePlayer =
+            new ImportedRoomWebsitePlayerService(
+                this
+            );
+
+        this.#websitePlayer.initialize();
+
+    }
+
+    /**
      * Creates the Imported Room Music Service runtime component.
      */
     #createMusicService() {
 
         this.#music =
             new ImportedRoomMusicService(
-                this
+                this,
+                this.#websitePlayer
             );
 
         this.#music.initialize();

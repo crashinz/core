@@ -176,6 +176,12 @@ function room_import_css_color(string $value): string {
     return '';
 }
 
+function room_import_css_size(string $value): string {
+    $value = trim($value);
+    if ($value === '') return '';
+    return preg_match('~^[0-9.]+(?:px|pt|em|rem|%)$~i', $value) ? $value : '';
+}
+
 function room_import_style_from_node(DOMNode $node, array $parent = []): array {
     $style = $parent;
     if (!$node instanceof DOMElement) return $style;
@@ -183,7 +189,8 @@ function room_import_style_from_node(DOMNode $node, array $parent = []): array {
     $color = room_import_css_color(room_import_style_value($inline, 'color') ?: (string)$node->getAttribute('color') ?: (string)$node->getAttribute('text'));
     if ($color !== '') $style['color'] = $color;
     $fontSize = room_import_style_value($inline, 'font-size');
-    if ($fontSize !== '' && preg_match('~^[0-9.]+(?:px|pt|em|rem|%)$~i', $fontSize)) $style['font_size'] = $fontSize;
+    $fontSize = room_import_css_size($fontSize);
+    if ($fontSize !== '') $style['font_size'] = $fontSize;
     $align = strtolower(room_import_style_value($inline, 'text-align') ?: (string)$node->getAttribute('align'));
     if (in_array($align, ['left', 'center', 'right'], true)) $style['text_align'] = $align;
     return $style;
@@ -276,6 +283,11 @@ function room_import_css_asset_manifest(string $html, string $sourceUrl): array 
     'images' => [],
     'background_image' => '',
     'text_color' => '',
+    'text_size' => '',
+    'desktop_image_width' => '',
+    'desktop_image_max_width' => '',
+    'main_image_width' => '',
+    'mobile_image_width' => '',
     'audio_player_bg' => '',
     'audio_player_text_buttons' => '',
     'music' => []
@@ -349,6 +361,26 @@ elseif ($key === 'website-font-color') {
         $manifest['text_color'] = $color;
     }
 }
+elseif ($key === 'text-size') {
+    $size = room_import_css_size($value);
+    if ($size !== '') $manifest['text_size'] = $size;
+}
+elseif ($key === 'desktop-image-width') {
+    $size = room_import_css_size($value);
+    if ($size !== '') $manifest['desktop_image_width'] = $size;
+}
+elseif ($key === 'desktop-image-max-width') {
+    $size = room_import_css_size($value);
+    if ($size !== '') $manifest['desktop_image_max_width'] = $size;
+}
+elseif ($key === 'main-image-width') {
+    $size = room_import_css_size($value);
+    if ($size !== '') $manifest['main_image_width'] = $size;
+}
+elseif ($key === 'mobile-image-width') {
+    $size = room_import_css_size($value);
+    if ($size !== '') $manifest['mobile_image_width'] = $size;
+}
 elseif ($key === 'audio-player-bg') {
     $color = room_import_css_color($value);
     if ($color !== '') $manifest['audio_player_bg'] = $color;
@@ -392,6 +424,18 @@ function room_import_parse(string $html, string $sourceUrl): array {
         if ($bgColor !== '') $backgroundColor = $bgColor;
     }
     $textColor = room_import_css_color((string)($cssManifest['text_color'] ?? ''));
+	$textSize = room_import_css_size((string)($cssManifest['text_size'] ?? ''));
+    $mainImageWidthSource = (string)($cssManifest['desktop_image_width'] ?? '');
+    if ($mainImageWidthSource === '') $mainImageWidthSource = (string)($cssManifest['main_image_width'] ?? '');
+    if ($mainImageWidthSource === '') $mainImageWidthSource = '45%';
+	$mainImageWidth = room_import_css_size($mainImageWidthSource);
+    $mainImageMaxWidthSource = (string)($cssManifest['desktop_image_max_width'] ?? '');
+    if ($mainImageMaxWidthSource === '') $mainImageMaxWidthSource = '1200px';
+	$mainImageMaxWidth = room_import_css_size($mainImageMaxWidthSource);
+	$mobileImageWidth = room_import_css_size((string)(
+        $cssManifest['mobile_image_width']
+        ?? ''
+    ));
 	$audioPlayerBg = room_import_css_color((string)($cssManifest['audio_player_bg'] ?? ''));
 	$audioPlayerTextButtons = room_import_css_color((string)($cssManifest['audio_player_text_buttons'] ?? ''));
     if ($textColor === '' && $body instanceof DOMElement) {
@@ -592,6 +636,10 @@ if ($header && $avatars && count($other) >= 2) {
 		'title' => $title,
 		'background_color' => $backgroundColor,
 		'text_color' => $textColor,
+		'text_size' => $textSize,
+		'main_image_width' => $mainImageWidth,
+		'main_image_max_width' => $mainImageMaxWidth,
+		'mobile_image_width' => $mobileImageWidth,
 		'audio_player_bg' => $audioPlayerBg,
 		'audio_player_text_buttons' => $audioPlayerTextButtons,
         'background_image' => $backgroundImage,
@@ -641,6 +689,10 @@ function room_import_localize(array $preview): array {
     'source_url' => $preview['source_url'] ?? '',
     'background_color' => $preview['background_color'] ?? '#000000',
     'text_color' => $preview['text_color'] ?? '',
+    'text_size' => $preview['text_size'] ?? '',
+    'main_image_width' => $preview['main_image_width'] ?? '',
+    'main_image_max_width' => $preview['main_image_max_width'] ?? '',
+    'mobile_image_width' => $preview['mobile_image_width'] ?? '',
     'audio_player_bg' => $preview['audio_player_bg'] ?? '',
     'audio_player_text_buttons' => $preview['audio_player_text_buttons'] ?? '',
     'sections' => [],

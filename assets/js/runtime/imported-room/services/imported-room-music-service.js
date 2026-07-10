@@ -11,11 +11,11 @@
  *      Imported Room Runtime
  *
  * Purpose:
- *      Owns imported room music-player rendering, imported website music-player
- *      integration, compatibility behavior, modal lifecycle, and diagnostics.
+ *      Owns imported room music-player rendering, modal lifecycle, and
+ *      diagnostics.
  *
  * Build:
- *      000030
+ *      000031
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -23,6 +23,9 @@
  * Build 000030
  * - Introduced ImportedRoomMusicService.
  * - Transferred imported room music-player ownership from room.js.
+ * Build 000031
+ * - Delegated page-level imported website player compatibility to
+ *   ImportedRoomWebsitePlayerService.
  ******************************************************************************/
 
 /**
@@ -50,6 +53,8 @@ export class ImportedRoomMusicService {
 
     #runtime;
 
+    #websitePlayer;
+
     #context = null;
 
     #tracks = [];
@@ -75,10 +80,14 @@ export class ImportedRoomMusicService {
      *
      * @param {ImportedRoomRuntime} runtime
      *        Owning Imported Room Runtime.
+     *
+     * @param {ImportedRoomWebsitePlayerService} websitePlayer
+     *        Runtime-owned imported website page-level player service.
      */
-    constructor(runtime) {
+    constructor(runtime, websitePlayer) {
 
         this.#runtime = runtime;
+        this.#websitePlayer = websitePlayer;
 
     }
 
@@ -134,6 +143,7 @@ export class ImportedRoomMusicService {
 
         this.#clearBindings();
         this.#context = context;
+        this.#websitePlayer?.configure(context);
         this.#bindModalControls();
         this.#initDrag();
 
@@ -321,33 +331,9 @@ export class ImportedRoomMusicService {
      */
     inlinePlayerHtml(track) {
 
-        if (!track?.url) return "";
-
-        if (track.type === "audio") {
-
-            return `
-      <div class="vp-import-player">
-        <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${track.url}" type="audio/mpeg">
-        </audio>
-      </div>
-    `;
-
-        }
-
-        if (track.type === "youtube") {
-
-            return `
-      <div class="vp-import-player">
-        <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${track.url}" type="video/x-youtube">
-        </audio>
-      </div>
-    `;
-
-        }
-
-        return "";
+        return this.#websitePlayer?.inlinePlayerHtml(
+            track
+        ) || "";
 
     }
 
@@ -359,78 +345,9 @@ export class ImportedRoomMusicService {
     applyInlinePlayerCompatibility(options = {}) {
 
         this.#inlineCompatibilityApplied =
-            false;
-
-        if (!options.innerTranquillity) return;
-
-        const windowRef =
-            this.#window();
-
-        const jQueryRef =
-            windowRef?.jQuery || windowRef?.$;
-
-        if (!jQueryRef?.fn?.player) return;
-
-        jQueryRef("audio.vp-page-player").player({
-            audioWidth: 252,
-            audioHeight: 30
-        });
-
-        this.#document()?.querySelectorAll(".vp-import-player").forEach(wrapper => {
-
-            if (options.backgroundTile && options.backgroundPath) {
-
-                wrapper.style.background = "transparent";
-                wrapper.style.border = "none";
-
-            } else {
-
-                wrapper.style.background =
-                    windowRef?.getComputedStyle?.(
-                        options.stage
-                    ).getPropertyValue("--audio-player-bg").trim();
-
-            }
-
-        });
-
-        windowRef?.setTimeout?.(
-            () => {
-
-                if (options.backgroundPath) {
-
-                    this.#document()
-                        ?.querySelectorAll(".vp-import-player .mejs__controls")
-                        .forEach(element => {
-
-                            element.style.background = "transparent";
-
-                        });
-
-                    this.#document()
-                        ?.querySelectorAll(".vp-import-player .mejs__time-total")
-                        .forEach(element => {
-
-                            element.style.background = "transparent";
-
-                        });
-
-                    this.#document()
-                        ?.querySelectorAll(".vp-import-player .mejs__horizontal-volume-total")
-                        .forEach(element => {
-
-                            element.style.background = "transparent";
-
-                        });
-
-                }
-
-            },
-            100
-        );
-
-        this.#inlineCompatibilityApplied =
-            true;
+            Boolean(this.#websitePlayer?.applyCompatibility(
+                options
+            ));
 
     }
 
@@ -633,7 +550,7 @@ export class ImportedRoomMusicService {
                 "ImportedRoomRuntime",
 
             build:
-                "000030",
+                "000031",
 
             configured:
                 Boolean(this.#context),
@@ -651,7 +568,10 @@ export class ImportedRoomMusicService {
                 this.#dragInitialized,
 
             inlineCompatibilityApplied:
-                this.#inlineCompatibilityApplied
+                this.#inlineCompatibilityApplied,
+
+            websitePlayer:
+                this.#websitePlayer?.getDiagnostics() ?? null
 
         });
 
@@ -660,12 +580,6 @@ export class ImportedRoomMusicService {
     //--------------------------------------------------
     // Private Methods
     //--------------------------------------------------
-
-    #document() {
-
-        return this.#context?.document || globalThis.document || null;
-
-    }
 
     #window() {
 

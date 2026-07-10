@@ -879,6 +879,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background-repeat: no-repeat, repeat;
   background-size: cover, auto;
   background-position: center, top left;
+  background-attachment: local, local;
 }
 .vp-room-layout[hidden] { display: none; }
 .vp-import-section {
@@ -896,7 +897,9 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   filter: drop-shadow(0 14px 24px rgba(0,0,0,.44));
 }
 .vp-import-header img {
-  max-height: 42vh;
+  width: var(--vp-import-main-image-width, auto);
+  max-width: min(var(--vp-import-main-image-max-width, 1200px), 100%);
+  max-height: none;
   filter: none;
 }
 .vp-import-avatar-row {
@@ -935,7 +938,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .vp-import-text {
   max-width: min(820px, 86%);
   color: var(--vp-import-text, rgba(255,255,255,.86));
-  font-size: 15px;
+  font-size: var(--vp-import-text-size, 15px);
 /*  line-height: 1.45; */
   line-height: normal;
   text-align: center;
@@ -968,7 +971,40 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 }
 .vp-import-player {
     margin: 12px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     pointer-events: auto;
+}
+
+.vp-import-player .mejs__container,
+.vp-import-player .mejs__inner {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.vp-import-player .mejs__controls {
+    display: flex !important;
+    align-items: center !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    box-sizing: border-box;
+}
+
+.vp-import-player .mejs__button,
+.vp-import-player .mejs__time,
+.vp-import-player .mejs__time-rail,
+.vp-import-player .mejs__horizontal-volume-slider {
+    display: flex !important;
+    align-items: center !important;
+}
+
+.vp-import-player .mejs__time {
+    height: 30px !important;
+    line-height: 30px !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
 }
 
 .vp-page-player .mejs__mute button {
@@ -978,6 +1014,15 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
     min-height: 14px !important;
     font-size: 12px !important;
     line-height: 14px !important;
+}
+
+@media (max-width: 768px) {
+  .vp-import-header img {
+    width: var(
+      --vp-import-mobile-image-width,
+      var(--vp-import-main-image-width, auto)
+    );
+  }
 }
 .vp-music-player {
   display: grid;
