@@ -285,7 +285,9 @@ Relationship Persistence Repair Complete
 Build 000038 added persisted relationship payload ingestion for the first-class
 runtime relationship identity model. Build 000039 added deterministic
 database-side backfill, repair, divergence diagnostics, and administrative
-recovery for the additive persisted relationship tables.
+recovery for the additive persisted relationship tables. Build 000040
+operationally certified the relationship persistence and repair system on
+SQLite and on MariaDB through the repository's MySQL-compatible PDO path.
 
 The current legacy `linked_to` / `link_mode` participant-edge model remains
 valid and remains the compatibility write authority while API payloads can now
