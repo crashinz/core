@@ -284,7 +284,8 @@ $blockedUserIds = array_map(fn(array $row): int => (int)$row['blocked_user_id'],
 $roomEffects = array_values(room_effect_catalog());
 $activeRoomEffect = active_room_effect($pdo, (int)$session['id']);
 $relationships = avatar_relationship_payloads_for_session($pdo, (int)$session['id']);
-$relationshipDivergence = avatar_relationship_divergence_report($pdo, (int)$session['id']);
+$relationshipRepairDiagnostics = avatar_relationship_repair($pdo, ['session_id' => (int)$session['id'], 'apply' => false]);
+$relationshipDivergence = $relationshipRepairDiagnostics['actions'] ?? [];
 
 json_out([
     'roomId' => (int)$room['id'],
@@ -321,6 +322,9 @@ json_out([
             'relationshipCount' => count($relationships),
             'divergenceCount' => count($relationshipDivergence),
             'divergence' => $relationshipDivergence,
+            'summary' => $relationshipRepairDiagnostics['summary'] ?? [],
+            'repairMode' => 'dry_run',
+            'repairAvailable' => true,
             'writeStrategy' => 'legacy-writes-with-relationship-record-synchronization',
         ],
     ],

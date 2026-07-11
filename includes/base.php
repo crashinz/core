@@ -1651,44 +1651,372 @@ function avatar_relationship_payloads_for_session(PDO $pdo, int $sessionId): arr
     return array_values(array_filter(array_map(fn(array $row): ?array => avatar_relationship_payload($pdo, (int)$row['id']), $stmt->fetchAll())));
 }
 
-function avatar_relationship_divergence_report(PDO $pdo, int $sessionId): array {
-    $relationships = avatar_relationship_payloads_for_session($pdo, $sessionId);
-    $diverged = [];
-    $relationshipsByLegacyKey = [];
-    foreach ($relationships as $relationship) {
-        if (!empty($relationship['legacy_link_key'])) {
-            $relationshipsByLegacyKey[(string)$relationship['legacy_link_key']] = true;
-        }
+function avatar_relationship_count(PDO $pdo, ?int $sessionId = null): array {
+    $suffix = $sessionId !== null ? ' WHERE session_id = ?' : '';
+    $params = $sessionId !== null ? [$sessionId] : [];
+    $relationshipStmt = $pdo->prepare('SELECT COUNT(*) FROM avatar_relationships' . $suffix);
+    $relationshipStmt->execute($params);
+    $memberSql = 'SELECT COUNT(*)
+                    FROM avatar_relationship_members arm
+                    JOIN avatar_relationships ar ON ar.id = arm.relationship_id' . ($sessionId !== null ? ' WHERE ar.session_id = ?' : '');
+    $memberStmt = $pdo->prepare($memberSql);
+    $memberStmt->execute($params);
+    $legacyStmt = $pdo->prepare('SELECT COUNT(*) FROM participants WHERE linked_to_participant_id IS NOT NULL' . ($sessionId !== null ? ' AND session_id = ?' : ''));
+    $legacyStmt->execute($params);
+    return [
+        'relationships' => (int)$relationshipStmt->fetchColumn(),
+        'members' => (int)$memberStmt->fetchColumn(),
+        'legacy_edges' => (int)$legacyStmt->fetchColumn(),
+    ];
+}
+
+function avatar_relationship_decode_json(?string $json): array {
+    if ($json === null || trim($json) === '') return ['valid' => true, 'value' => null];
+    $decoded = json_decode($json, true);
+    return [
+        'valid' => json_last_error() === JSON_ERROR_NONE,
+        'value' => $decoded,
+        'error' => json_last_error_msg(),
+    ];
+}
+
+function avatar_relationship_repair_result(bool $apply, string $reason, array $context, string $policy, string $status = 'repairable'): array {
+    return [
+        'reason' => $reason,
+        'policy' => $policy,
+        'status' => $status,
+        'repair_mode' => $apply ? 'repair' : 'dry_run',
+    ] + $context;
+}
+
+function avatar_relationship_session_ids(PDO $pdo, ?int $sessionId = null): array {
+    if ($sessionId !== null) {
+        $stmt = $pdo->prepare('SELECT id FROM room_sessions WHERE id = ? LIMIT 1');
+        $stmt->execute([$sessionId]);
+        return $stmt->fetchColumn() ? [$sessionId] : [];
     }
-    $legacyStmt = $pdo->prepare('SELECT id, linked_to_participant_id, link_mode FROM participants WHERE session_id = ? AND linked_to_participant_id IS NOT NULL');
-    $legacyStmt->execute([$sessionId]);
-    foreach ($legacyStmt->fetchAll() as $legacyEdge) {
-        $legacyKey = link_key_for((int)$legacyEdge['id'], (int)$legacyEdge['linked_to_participant_id']);
-        if (empty($relationshipsByLegacyKey[$legacyKey])) {
-            $diverged[] = [
-                'relationship_id' => avatar_relationship_public_id_for((int)$legacyEdge['id'], (int)$legacyEdge['linked_to_participant_id']),
-                'reason' => 'missing_relationship_record',
-                'legacy_link_key' => $legacyKey,
-                'mode' => avatar_relationship_mode((string)$legacyEdge['link_mode']),
-            ];
-        }
+    return array_map(fn(array $row): int => (int)$row['id'], $pdo->query('SELECT id FROM room_sessions ORDER BY id ASC')->fetchAll());
+}
+
+function avatar_relationship_legacy_audit(PDO $pdo, int $sessionId): array {
+    $participantsStmt = $pdo->prepare('SELECT id, linked_to_participant_id, link_mode FROM participants WHERE session_id = ? ORDER BY id ASC');
+    $participantsStmt->execute([$sessionId]);
+    $participants = [];
+    foreach ($participantsStmt->fetchAll() as $row) {
+        $participants[(int)$row['id']] = [
+            'id' => (int)$row['id'],
+            'linked_to' => $row['linked_to_participant_id'] !== null ? (int)$row['linked_to_participant_id'] : null,
+            'mode' => (string)($row['link_mode'] ?? 'normal'),
+        ];
     }
-    foreach ($relationships as $relationship) {
-        $members = $relationship['members'] ?? [];
-        $initiator = $members[0]['participantId'] ?? 0;
-        $target = $members[1]['participantId'] ?? 0;
-        if (!$initiator || !$target) {
-            $diverged[] = ['relationship_id' => $relationship['id'], 'reason' => 'missing_members'];
+
+    $edges = [];
+    $pairCounts = [];
+    foreach ($participants as $participant) {
+        if (!$participant['linked_to']) continue;
+        $legacyKey = link_key_for((int)$participant['id'], (int)$participant['linked_to']);
+        $edge = [
+            'participant_id' => (int)$participant['id'],
+            'target_participant_id' => (int)$participant['linked_to'],
+            'mode' => (string)$participant['mode'],
+            'normalized_mode' => avatar_relationship_mode((string)$participant['mode']),
+            'legacy_link_key' => $legacyKey,
+            'relationship_id' => avatar_relationship_public_id_for((int)$participant['id'], (int)$participant['linked_to']),
+        ];
+        $edges[] = $edge;
+        $pairCounts[$legacyKey] = ($pairCounts[$legacyKey] ?? 0) + 1;
+    }
+
+    $valid = [];
+    $invalid = [];
+    foreach ($edges as $edge) {
+        $initiator = (int)$edge['participant_id'];
+        $target = (int)$edge['target_participant_id'];
+        $context = ['session_id' => $sessionId] + $edge;
+        if ($target === $initiator) {
+            $invalid[] = avatar_relationship_repair_result(false, 'invalid_self_legacy_link', $context, 'clear invalid self-link legacy projection');
             continue;
         }
-        $stmt = $pdo->prepare('SELECT linked_to_participant_id, link_mode FROM participants WHERE session_id = ? AND id = ? LIMIT 1');
-        $stmt->execute([$sessionId, $initiator]);
-        $legacy = $stmt->fetch();
-        if (!$legacy || (int)$legacy['linked_to_participant_id'] !== (int)$target || avatar_relationship_mode((string)$legacy['link_mode']) !== avatar_relationship_mode((string)$relationship['mode'])) {
-            $diverged[] = ['relationship_id' => $relationship['id'], 'reason' => 'legacy_projection_mismatch'];
+        if (empty($participants[$target])) {
+            $invalid[] = avatar_relationship_repair_result(false, 'missing_legacy_target_participant', $context, 'clear invalid legacy edge referencing a missing participant');
+            continue;
         }
+        if (($pairCounts[$edge['legacy_link_key']] ?? 0) > 1) {
+            $invalid[] = avatar_relationship_repair_result(false, 'ambiguous_duplicate_legacy_pair', $context, 'operator review required; duplicate directed legacy pair is not guessed', 'skipped');
+            continue;
+        }
+        $targetLinkedTo = $participants[$target]['linked_to'] ?? null;
+        if ($targetLinkedTo !== null) {
+            $invalid[] = avatar_relationship_repair_result(false, 'conflicting_legacy_edge', $context + ['target_linked_to_participant_id' => $targetLinkedTo], 'operator review required; conflicting legacy graph is not guessed', 'skipped');
+            continue;
+        }
+        $valid[] = $edge;
     }
-    return $diverged;
+
+    return [
+        'participants' => $participants,
+        'valid_edges' => $valid,
+        'invalid_edges' => $invalid,
+    ];
+}
+
+function avatar_relationship_persisted_rows(PDO $pdo, ?int $sessionId = null): array {
+    $sql = 'SELECT ar.*, rs.id AS relationship_session_exists
+              FROM avatar_relationships ar
+              LEFT JOIN room_sessions rs ON rs.id = ar.session_id';
+    $params = [];
+    if ($sessionId !== null) {
+        $sql .= ' WHERE ar.session_id = ?';
+        $params[] = $sessionId;
+    }
+    $sql .= ' ORDER BY ar.session_id ASC, ar.id ASC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $memberStmt = $pdo->prepare(
+            'SELECT arm.*, p.session_id AS participant_session_id
+               FROM avatar_relationship_members arm
+               LEFT JOIN participants p ON p.id = arm.participant_id
+              WHERE arm.relationship_id = ?
+              ORDER BY arm.member_order ASC, arm.id ASC'
+        );
+        $memberStmt->execute([(int)$row['id']]);
+        $row['members'] = $memberStmt->fetchAll();
+        $rows[] = $row;
+    }
+    return $rows;
+}
+
+function avatar_relationship_record_context(array $relationship): array {
+    return [
+        'session_id' => isset($relationship['session_id']) ? (int)$relationship['session_id'] : null,
+        'relationship_db_id' => isset($relationship['id']) ? (int)$relationship['id'] : null,
+        'relationship_id' => (string)($relationship['relationship_public_id'] ?? ''),
+        'legacy_link_key' => $relationship['legacy_link_key'] ?? null,
+    ];
+}
+
+function avatar_relationship_delete_records(PDO $pdo, array $relationshipIds): int {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $relationshipIds), fn(int $id): bool => $id > 0)));
+    if (!$ids) return 0;
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $pdo->prepare("DELETE FROM avatar_relationship_members WHERE relationship_id IN ($placeholders)")->execute($ids);
+    $pdo->prepare("DELETE FROM avatar_relationships WHERE id IN ($placeholders)")->execute($ids);
+    return count($ids);
+}
+
+function avatar_relationship_repair(PDO $pdo, array $options = []): array {
+    $apply = !empty($options['apply']);
+    $sessionId = isset($options['session_id']) && $options['session_id'] !== null && $options['session_id'] !== ''
+        ? (int)$options['session_id']
+        : null;
+    $beforeCounts = avatar_relationship_count($pdo, $sessionId);
+    $actions = [];
+    $reasonCounts = [];
+    $repaired = 0;
+    $skipped = 0;
+    $removed = 0;
+    $createdOrSynced = 0;
+    $normalized = 0;
+    $sessions = avatar_relationship_session_ids($pdo, $sessionId);
+    $validEdgesBySession = [];
+    $validLegacyKeys = [];
+
+    $recordAction = function(array $action) use (&$actions, &$reasonCounts, &$repaired, &$skipped): void {
+        $actions[] = $action;
+        $reason = (string)($action['reason'] ?? 'unknown');
+        $reasonCounts[$reason] = ($reasonCounts[$reason] ?? 0) + 1;
+        if (($action['status'] ?? '') === 'skipped') $skipped++;
+        if (in_array(($action['status'] ?? ''), ['repaired', 'would_repair'], true)) $repaired++;
+    };
+
+    if ($apply && !$pdo->inTransaction()) {
+        $pdo->beginTransaction();
+        $ownTransaction = true;
+    } else {
+        $ownTransaction = false;
+    }
+
+    try {
+        foreach ($sessions as $sid) {
+            $legacyAudit = avatar_relationship_legacy_audit($pdo, $sid);
+            $validEdgesBySession[$sid] = $legacyAudit['valid_edges'];
+            foreach ($legacyAudit['valid_edges'] as $edge) {
+                $validLegacyKeys[$sid . ':' . $edge['legacy_link_key']] = true;
+                if ($edge['mode'] !== $edge['normalized_mode']) {
+                    $action = avatar_relationship_repair_result(
+                        $apply,
+                        'unsupported_legacy_mode',
+                        ['session_id' => $sid] + $edge,
+                        'normalize legacy participant link_mode to the current compatibility mode',
+                        $apply ? 'repaired' : 'would_repair'
+                    );
+                    $recordAction($action);
+                    if ($apply) {
+                        $pdo->prepare('UPDATE participants SET link_mode = ? WHERE id = ? AND session_id = ?')
+                            ->execute([$edge['normalized_mode'], (int)$edge['participant_id'], $sid]);
+                        $normalized++;
+                    }
+                }
+            }
+            foreach ($legacyAudit['invalid_edges'] as $invalid) {
+                $status = $invalid['status'] === 'skipped' ? 'skipped' : ($apply ? 'repaired' : 'would_repair');
+                $action = array_merge($invalid, ['repair_mode' => $apply ? 'repair' : 'dry_run', 'status' => $status]);
+                $recordAction($action);
+                if ($apply && $status === 'repaired') {
+                    $participantId = (int)($invalid['participant_id'] ?? 0);
+                    if ($participantId > 0) {
+                        $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? AND session_id = ?")
+                            ->execute([$participantId, $sid]);
+                        avatar_relationship_clear_for_participants($pdo, $sid, [$participantId]);
+                    }
+                }
+            }
+        }
+
+        $records = avatar_relationship_persisted_rows($pdo, $sessionId);
+        $recordsByPair = [];
+        $deleteIds = [];
+        foreach ($records as $relationship) {
+            $ctx = avatar_relationship_record_context($relationship);
+            $sid = (int)$relationship['session_id'];
+            $members = $relationship['members'] ?? [];
+            $mode = (string)($relationship['mode'] ?? 'normal');
+            $normalizedMode = avatar_relationship_mode($mode);
+            $legacyKey = (string)($relationship['legacy_link_key'] ?? '');
+            if ($legacyKey === '' && count($members) >= 2) {
+                $legacyKey = link_key_for((int)$members[0]['participant_id'], (int)$members[1]['participant_id']);
+            }
+            if ($legacyKey !== '') {
+                $recordsByPair[$sid . ':' . $legacyKey][] = (int)$relationship['id'];
+            }
+
+            $metadataJson = avatar_relationship_decode_json($relationship['metadata_json'] ?? null);
+            $anchorsJson = avatar_relationship_decode_json($relationship['anchors_json'] ?? null);
+            $optionsJson = avatar_relationship_decode_json($relationship['options_json'] ?? null);
+            $memberParticipantIds = array_map(fn(array $member): int => (int)$member['participant_id'], $members);
+            $memberOrders = array_map(fn(array $member): int => (int)$member['member_order'], $members);
+            $memberSessions = array_values(array_unique(array_filter(array_map(fn(array $member): int => (int)($member['participant_session_id'] ?? 0), $members))));
+            $memberRoles = array_map(fn(array $member): string => (string)$member['member_role'], $members);
+            $relationshipPublicId = (string)($relationship['relationship_public_id'] ?? '');
+            $validLegacyBacked = $legacyKey !== '' && !empty($validLegacyKeys[$sid . ':' . $legacyKey]);
+            $expectedPublicId = null;
+            if ($validLegacyBacked && count($memberParticipantIds) >= 2) {
+                $expectedPublicId = avatar_relationship_public_id_for((int)$memberParticipantIds[0], (int)$memberParticipantIds[1]);
+            }
+
+            $recordReasons = [];
+            if (empty($relationship['relationship_session_exists'])) $recordReasons[] = 'relationship_session_missing';
+            if (!$metadataJson['valid']) $recordReasons[] = 'malformed_metadata_json';
+            if (!$anchorsJson['valid']) $recordReasons[] = 'malformed_anchors_json';
+            if (!$optionsJson['valid']) $recordReasons[] = 'malformed_options_json';
+            if ($normalizedMode !== $mode) $recordReasons[] = 'unsupported_persisted_mode';
+            if (count($members) < 2) $recordReasons[] = 'missing_relationship_members';
+            if (count($memberParticipantIds) !== count(array_unique($memberParticipantIds))) $recordReasons[] = 'duplicate_relationship_member';
+            if (count($memberOrders) !== count(array_unique($memberOrders))) $recordReasons[] = 'duplicate_member_order';
+            if ($memberOrders !== [0, 1] && count($memberOrders) >= 2) $recordReasons[] = 'invalid_member_ordering';
+            if (($memberRoles[0] ?? null) !== 'initiator' || ($memberRoles[1] ?? null) !== 'target') $recordReasons[] = 'invalid_member_roles';
+            if ($memberSessions && ($memberSessions !== [$sid])) $recordReasons[] = 'member_session_mismatch';
+            if (!$memberSessions && count($members) > 0) $recordReasons[] = 'member_participant_missing';
+            if (!preg_match('/^legacy-edge:\d+:\d+$/', $relationshipPublicId)) $recordReasons[] = 'invalid_relationship_identity_namespace';
+            if (!$validLegacyBacked) $recordReasons[] = 'orphaned_normalized_relationship';
+            if ($expectedPublicId && $relationshipPublicId !== $expectedPublicId) $recordReasons[] = 'relationship_identity_projection_mismatch';
+
+            foreach (array_values(array_unique($recordReasons)) as $reason) {
+                $repairable = $validLegacyBacked || in_array($reason, ['orphaned_normalized_relationship', 'member_participant_missing', 'member_session_mismatch', 'relationship_session_missing'], true);
+                $status = $repairable ? ($apply ? 'repaired' : 'would_repair') : 'skipped';
+                $recordAction(avatar_relationship_repair_result(
+                    $apply,
+                    $reason,
+                    $ctx,
+                    $validLegacyBacked
+                        ? 'reconstruct normalized relationship from valid legacy participant edge'
+                        : 'remove malformed or orphaned normalized relationship when explicit repair is requested',
+                    $status
+                ));
+            }
+            if ($recordReasons && !$validLegacyBacked) {
+                $deleteIds[] = (int)$relationship['id'];
+            }
+        }
+
+        foreach ($recordsByPair as $pairKey => $ids) {
+            if (count($ids) <= 1) continue;
+            sort($ids);
+            $extras = array_slice($ids, 1);
+            foreach ($extras as $extraId) {
+                $recordAction(avatar_relationship_repair_result(
+                    $apply,
+                    'duplicate_persisted_relationship_for_pair',
+                    ['relationship_db_id' => $extraId, 'legacy_pair_key' => $pairKey],
+                    'retain the first deterministic record and remove duplicate normalized records before legacy resync',
+                    $apply ? 'repaired' : 'would_repair'
+                ));
+                $deleteIds[] = $extraId;
+            }
+        }
+
+        foreach ($validEdgesBySession as $sid => $edges) {
+            foreach ($edges as $edge) {
+                $pairKey = $sid . ':' . $edge['legacy_link_key'];
+                if (!empty($recordsByPair[$pairKey])) continue;
+                $recordAction(avatar_relationship_repair_result(
+                    $apply,
+                    'missing_relationship_record',
+                    ['session_id' => $sid] + $edge,
+                    'reconstruct missing normalized relationship from valid legacy participant edge',
+                    $apply ? 'repaired' : 'would_repair'
+                ));
+            }
+        }
+
+        if ($apply) {
+            $removed += avatar_relationship_delete_records($pdo, $deleteIds);
+            foreach ($validEdgesBySession as $sid => $edges) {
+                foreach ($edges as $edge) {
+                    $relationship = avatar_relationship_sync_legacy($pdo, $sid, (int)$edge['participant_id'], (int)$edge['target_participant_id'], (string)$edge['normalized_mode']);
+                    if ($relationship) $createdOrSynced++;
+                }
+            }
+        } else {
+            $removed = count(array_values(array_unique($deleteIds)));
+            foreach ($validEdgesBySession as $edges) $createdOrSynced += count($edges);
+        }
+
+        if ($ownTransaction) $pdo->commit();
+    } catch (Throwable $e) {
+        if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+
+    $afterCounts = $apply ? avatar_relationship_count($pdo, $sessionId) : $beforeCounts;
+    return [
+        'ok' => true,
+        'mode' => $apply ? 'repair' : 'dry_run',
+        'scope' => $sessionId !== null ? 'session' : 'database',
+        'session_id' => $sessionId,
+        'sessions_checked' => count($sessions),
+        'counts' => [
+            'before' => $beforeCounts,
+            'after' => $afterCounts,
+        ],
+        'summary' => [
+            'divergence_count' => count($actions),
+            'repairable_count' => count(array_filter($actions, fn(array $action): bool => in_array(($action['status'] ?? ''), ['repaired', 'would_repair'], true))),
+            'skipped_count' => $skipped,
+            'repaired_or_would_repair_count' => $repaired,
+            'removed_or_would_remove_count' => $removed,
+            'created_or_synced_count' => $createdOrSynced,
+            'normalized_legacy_modes' => $normalized,
+            'reason_counts' => $reasonCounts,
+        ],
+        'actions' => $actions,
+    ];
+}
+
+function avatar_relationship_divergence_report(PDO $pdo, int $sessionId): array {
+    return avatar_relationship_repair($pdo, ['session_id' => $sessionId, 'apply' => false])['actions'];
 }
 
 function room_effect_catalog(): array {
@@ -1971,6 +2299,7 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
         if (count($matches) > 1) {
             $extraIds = array_map(fn($row) => (int)$row['id'], array_slice($matches, 1));
             $placeholders = implode(',', array_fill(0, count($extraIds), '?'));
+            avatar_relationship_clear_for_participants($pdo, $sessionId, $extraIds);
             $pdo->prepare("DELETE FROM participants WHERE id IN ($placeholders)")->execute($extraIds);
         }
         return $participant;

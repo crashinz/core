@@ -102,6 +102,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         ], $rows)]);
     }
 
+    if ($action === 'relationship_repair') {
+        $sessionId = isset($_GET['session_id']) && $_GET['session_id'] !== '' ? (int)$_GET['session_id'] : null;
+        json_out(['relationshipRepair' => avatar_relationship_repair($pdo, ['session_id' => $sessionId, 'apply' => false])]);
+    }
+
     json_out(['error' => 'Unknown action'], 400);
 }
 
@@ -175,6 +180,26 @@ if ($action === 'undo_room_ejection') {
     $pdo->prepare('DELETE FROM room_ejections WHERE id = ?')->execute([$id]);
     log_tool($pdo, (int)$me['id'], 'admin_undo_room_kick', $row ? (int)$row['user_id'] : null, $row ? (int)$row['room_id'] : null, 'Undid room kick');
     json_out(['ok' => true]);
+}
+
+if ($action === 'relationship_repair') {
+    $sessionId = isset($body['session_id']) && $body['session_id'] !== '' ? (int)$body['session_id'] : null;
+    $apply = !empty($body['apply']) || !empty($body['repair']);
+    $result = avatar_relationship_repair($pdo, ['session_id' => $sessionId, 'apply' => $apply]);
+    if ($apply) {
+        log_tool(
+            $pdo,
+            (int)$me['id'],
+            'admin_avatar_relationship_repair',
+            null,
+            null,
+            ($sessionId !== null ? 'Session ' . $sessionId . ': ' : 'Database: ')
+                . 'repaired/synced ' . (int)$result['summary']['created_or_synced_count']
+                . ', removed ' . (int)$result['summary']['removed_or_would_remove_count']
+                . ', skipped ' . (int)$result['summary']['skipped_count']
+        );
+    }
+    json_out(['relationshipRepair' => $result]);
 }
 
 json_out(['error' => 'Unknown action'], 400);
