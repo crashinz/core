@@ -276,23 +276,24 @@ Future runtime expansion SHALL occur through the Avatar Runtime rather than bypa
 
 Build:
 
-000036
+000037
 
 Status:
 
-Relationship Stability and Resize Certification Complete
+Relationship Identity Foundation Complete
 
-Build 000036 certifies AvatarCoordinator as the authoritative relationship
-refresh orchestrator for geometry-changing events. Browser resize, stage
-resize, rendered avatar image/dimension changes, remote relationship
-reconciliation, drag completion, webcam frame changes, and participant
-lifecycle cleanup now route through AvatarCoordinator before AvatarLayoutService
-executes relationship geometry.
+Build 000037 adds first-class runtime relationship identity objects owned by
+AvatarRelationshipService. The current legacy `linked_to` / `link_mode`
+participant-edge model remains valid, while runtime consumers can now resolve
+relationships by stable runtime ID, participant pair, participant membership,
+metadata, capability, members, roles, ordering, anchors, options, persistence
+flags, and reconciliation flags.
 
-AvatarRenderer remains the owner of authoritative rendered avatar dimensions
-and notifies host composition when image loading changes those dimensions.
-AvatarLayoutService remains the owner of relationship geometry strategies,
-anchor metadata consumption, bounds, and clamping.
+AvatarRelationshipService also defines the formal relationship event contract
+and observer API for relationship lifecycle events.
+
+AvatarCoordinator consumes relationship identity objects during refresh
+sequencing and continues to delegate geometry execution to AvatarLayoutService.
 
 The runtime infrastructure has been established.
 

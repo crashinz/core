@@ -20,7 +20,7 @@
  *      networking, and ChatRuntime behavior with their documented owners.
  *
  * Build:
- *      000036
+ *      000037
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -49,6 +49,10 @@
  * Build 000036
  * - Added authoritative relationship refresh scheduling, reason diagnostics,
  *   and resize/rendered-size stability orchestration.
+ *
+ * Build 000037
+ * - Consumed runtime relationship identity objects during relationship
+ *   refresh sequencing.
  ******************************************************************************/
 
 /**
@@ -1251,7 +1255,7 @@ export class AvatarCoordinator {
                 "AvatarRuntime",
 
             build:
-                "000036",
+                "000037",
 
             configured:
                 Boolean(this.#context),
@@ -1521,7 +1525,14 @@ export class AvatarCoordinator {
         const stageSize =
             this.#stageSize();
 
+        const relationship =
+            this.#relationships.relationshipForPair(
+                initiator,
+                target
+            );
+
         const metadata =
+            relationship?.metadata ||
             this.#relationships.relationshipMetadataForPair(
                 initiator,
                 target
@@ -1543,10 +1554,8 @@ export class AvatarCoordinator {
                 targetDimensions,
                 metadata,
                 gap: this.linkPairGap(
-                    this.#relationships.linkKeyFor(
-                        initiator.id,
-                        target.id
-                    )
+                    relationship?.key ||
+                    this.#relationships.linkKeyFor(initiator.id, target.id)
                 ),
                 locked: Boolean(this.#context?.isLayoutLocked?.())
             });

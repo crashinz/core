@@ -19,7 +19,7 @@
  *      documented owners.
  *
  * Build:
- *      000034
+ *      000037
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -41,6 +41,10 @@
  *
  * Build 000035
  * - Added relationship geometry strategy declarations.
+ *
+ * Build 000037
+ * - Added first-class runtime relationship identity objects, relationship
+ *   event contract, and legacy directed-edge compatibility translation.
  ******************************************************************************/
 
 /**
@@ -54,6 +58,7 @@
 //--------------------------------------------------
 
 const RELATIONSHIP_METADATA_SCHEMA_VERSION = 1;
+const RELATIONSHIP_ID_PREFIX = "legacy-edge";
 
 const RELATIONSHIP_CAPABILITIES = Object.freeze({
 
@@ -131,6 +136,7 @@ const RELATIONSHIP_CAPABILITIES = Object.freeze({
 
 const RELATIONSHIP_METADATA_CONTRACT = Object.freeze({
     schemaVersion: RELATIONSHIP_METADATA_SCHEMA_VERSION,
+    relationshipId: null,
     groupId: null,
     mode: "normal",
     capability: "normal",
@@ -172,6 +178,37 @@ const RELATIONSHIP_METADATA_CONTRACT = Object.freeze({
         })
 });
 
+const RELATIONSHIP_EVENT_TYPES = Object.freeze({
+    CREATED: "relationship.created",
+    REMOVED: "relationship.removed",
+    MEMBER_ADDED: "relationship.member.added",
+    MEMBER_REMOVED: "relationship.member.removed",
+    MODE_CHANGED: "relationship.mode.changed",
+    METADATA_CHANGED: "relationship.metadata.changed",
+    ANCHORS_CHANGED: "relationship.anchors.changed",
+    ORDERING_CHANGED: "relationship.ordering.changed"
+});
+
+const RELATIONSHIP_EVENT_CONTRACT = Object.freeze({
+    schemaVersion: 1,
+    types: RELATIONSHIP_EVENT_TYPES,
+    payload:
+        Object.freeze({
+            type: "",
+            relationshipId: "",
+            relationship: null,
+            participantIds:
+                Object.freeze([]),
+            mode: "normal",
+            capability: "normal",
+            metadata: null,
+            previous: null,
+            changes:
+                Object.freeze({}),
+            source: "runtime"
+        })
+});
+
 //--------------------------------------------------
 // Avatar Relationship Service
 //--------------------------------------------------
@@ -193,6 +230,13 @@ export class AvatarRelationshipService {
      * @type {AvatarRuntime}
      */
     #runtime;
+
+    /**
+     * Runtime relationship event observers.
+     *
+     * @type {Set<Function>}
+     */
+    #relationshipEventListeners = new Set();
 
     //--------------------------------------------------
     // Constructor
@@ -226,6 +270,8 @@ export class AvatarRelationshipService {
      */
     destroy() {
 
+        this.#relationshipEventListeners.clear();
+
     }
 
     //--------------------------------------------------
@@ -253,6 +299,38 @@ export class AvatarRelationshipService {
     relationshipMetadataContract() {
 
         return RELATIONSHIP_METADATA_CONTRACT;
+
+    }
+
+    /**
+     * Returns the relationship event contract.
+     *
+     * @returns {Object}
+     */
+    relationshipEventContract() {
+
+        return RELATIONSHIP_EVENT_CONTRACT;
+
+    }
+
+    /**
+     * Observes runtime relationship lifecycle events.
+     *
+     * @param {Function} listener
+     *
+     * @returns {Function}
+     */
+    observeRelationshipEvents(listener) {
+
+        if (typeof listener !== "function") {
+            return () => {};
+        }
+
+        this.#relationshipEventListeners.add(listener);
+
+        return () => {
+            this.#relationshipEventListeners.delete(listener);
+        };
 
     }
 
@@ -350,6 +428,9 @@ export class AvatarRelationshipService {
             schemaVersion:
                 RELATIONSHIP_METADATA_SCHEMA_VERSION,
 
+            relationshipId:
+                source.relationshipId || fallbackSource.relationshipId || null,
+
             groupId:
                 source.groupId || fallbackSource.groupId || null,
 
@@ -380,27 +461,33 @@ export class AvatarRelationshipService {
                 Object.freeze(
                     Array.isArray(source.order)
                         ? source.order.slice()
+                        : Array.isArray(fallbackSource.order)
+                            ? fallbackSource.order.slice()
                         : members.map(member => member.participantId)
                 ),
 
             anchors:
-                this.#normalizeAnchors(source.anchors),
+                this.#normalizeAnchors(source.anchors || fallbackSource.anchors),
 
             options:
                 Object.freeze({
+                    ...(fallbackSource.options || {}),
                     ...(source.options || {})
                 }),
 
             movement:
                 source.movement ||
+                fallbackSource.movement ||
                 capability.defaults.movement,
 
             drag:
                 source.drag ||
+                fallbackSource.drag ||
                 capability.defaults.drag,
 
             rendering:
                 source.rendering ||
+                fallbackSource.rendering ||
                 capability.defaults.rendering,
 
             persistence:
@@ -443,6 +530,16 @@ export class AvatarRelationshipService {
      */
     relationshipMetadataForPair(firstParticipant, secondParticipant) {
 
+        const relationship =
+            this.relationshipForPair(
+                firstParticipant,
+                secondParticipant
+            );
+
+        if (relationship) {
+            return relationship.metadata;
+        }
+
         const initiator =
             this.relationshipInitiator(firstParticipant, secondParticipant) ||
             firstParticipant;
@@ -455,11 +552,18 @@ export class AvatarRelationshipService {
         const mode =
             this.linkModeForPair(firstParticipant, secondParticipant);
 
+        const relationshipId =
+            this.relationshipIdFor(
+                firstParticipant?.id,
+                secondParticipant?.id
+            );
+
         return this.normalizeRelationshipMetadata(
             {},
             {
+                relationshipId,
                 groupId:
-                    this.linkKeyFor(firstParticipant?.id, secondParticipant?.id),
+                    relationshipId,
                 mode,
                 members:
                     [
@@ -482,6 +586,164 @@ export class AvatarRelationshipService {
                     ]
             }
         );
+
+    }
+
+    /**
+     * Returns the stable runtime relationship id for two participants.
+     *
+     * @param {number|string} firstParticipantId
+     * @param {number|string} secondParticipantId
+     *
+     * @returns {string}
+     */
+    relationshipIdFor(firstParticipantId, secondParticipantId) {
+
+        return `${RELATIONSHIP_ID_PREFIX}:${this.linkKeyFor(
+            firstParticipantId,
+            secondParticipantId
+        )}`;
+
+    }
+
+    /**
+     * Returns all runtime relationship identity objects.
+     *
+     * @returns {Object[]}
+     */
+    relationships() {
+
+        return Object.freeze(
+            this.linkedPairs()
+                .map(([, first, second]) =>
+                    this.#relationshipFromPair(first, second)
+                )
+                .filter(Boolean)
+        );
+
+    }
+
+    /**
+     * Resolves a runtime relationship by id.
+     *
+     * @param {string} relationshipId
+     *
+     * @returns {Object|null}
+     */
+    relationshipById(relationshipId) {
+
+        const id =
+            String(relationshipId || "");
+
+        return this.relationships()
+            .find(relationship => relationship.id === id) || null;
+
+    }
+
+    /**
+     * Resolves a runtime relationship for a participant pair.
+     *
+     * @param {Object} firstParticipant
+     * @param {Object} secondParticipant
+     *
+     * @returns {Object|null}
+     */
+    relationshipForPair(firstParticipant, secondParticipant) {
+
+        return this.#relationshipFromPair(
+            firstParticipant,
+            secondParticipant
+        );
+
+    }
+
+    /**
+     * Resolves the primary runtime relationship for a participant.
+     *
+     * @param {number|string|Object} participantOrId
+     *
+     * @returns {Object|null}
+     */
+    relationshipForParticipant(participantOrId) {
+
+        return this.relationshipsForParticipant(participantOrId)[0] || null;
+
+    }
+
+    /**
+     * Resolves all runtime relationships for a participant.
+     *
+     * @param {number|string|Object} participantOrId
+     *
+     * @returns {Object[]}
+     */
+    relationshipsForParticipant(participantOrId) {
+
+        const participantId =
+            Number(
+                typeof participantOrId === "object"
+                    ? participantOrId?.id
+                    : participantOrId
+            );
+
+        if (!Number.isFinite(participantId) || participantId <= 0) {
+            return Object.freeze([]);
+        }
+
+        return Object.freeze(
+            this.relationships()
+                .filter(relationship =>
+                    relationship.memberIds.includes(participantId)
+                )
+        );
+
+    }
+
+    /**
+     * Returns normalized relationship members and roles.
+     *
+     * @param {string|Object} relationshipOrId
+     *
+     * @returns {Object[]}
+     */
+    relationshipMembers(relationshipOrId) {
+
+        const relationship =
+            this.#resolveRelationship(relationshipOrId);
+
+        return relationship?.members || Object.freeze([]);
+
+    }
+
+    /**
+     * Returns relationship metadata for a relationship object or id.
+     *
+     * @param {string|Object} relationshipOrId
+     *
+     * @returns {Object}
+     */
+    relationshipMetadata(relationshipOrId) {
+
+        const relationship =
+            this.#resolveRelationship(relationshipOrId);
+
+        return relationship?.metadata || this.normalizeRelationshipMetadata();
+
+    }
+
+    /**
+     * Returns the relationship capability for a relationship object or id.
+     *
+     * @param {string|Object} relationshipOrId
+     *
+     * @returns {Object}
+     */
+    relationshipCapabilityFor(relationshipOrId) {
+
+        const relationship =
+            this.#resolveRelationship(relationshipOrId);
+
+        return this.relationshipCapability(relationship?.mode);
 
     }
 
@@ -640,6 +902,12 @@ export class AvatarRelationshipService {
      */
     link(initiatorId, targetId, mode = "normal") {
 
+        const previousRelationships =
+            this.#relationshipsForParticipants([
+                initiatorId,
+                targetId
+            ]);
+
         const initiator = this.#participant(initiatorId);
         const target = this.#participant(targetId);
 
@@ -652,6 +920,23 @@ export class AvatarRelationshipService {
 
         target.linked_to = null;
         target.link_mode = "normal";
+
+        const relationship =
+            this.relationshipForPair(
+                initiator,
+                target
+            );
+
+        if (relationship) {
+            this.#emitRelationshipEvent(
+                RELATIONSHIP_EVENT_TYPES.CREATED,
+                relationship,
+                {
+                    previous:
+                        previousRelationships
+                }
+            );
+        }
 
         return Object.freeze({
 
@@ -677,6 +962,9 @@ export class AvatarRelationshipService {
      */
     setParticipantRelationship(participantId, targetId, mode = "normal") {
 
+        const previousRelationship =
+            this.relationshipForParticipant(participantId);
+
         const participant = this.#participant(participantId);
 
         if (!participant) {
@@ -700,6 +988,33 @@ export class AvatarRelationshipService {
 
         }
 
+        const relationship =
+            participant.linked_to
+                ? this.relationshipForParticipant(participant.id)
+                : null;
+
+        if (relationship) {
+            this.#emitRelationshipEvent(
+                previousRelationship
+                    ? RELATIONSHIP_EVENT_TYPES.MODE_CHANGED
+                    : RELATIONSHIP_EVENT_TYPES.CREATED,
+                relationship,
+                {
+                    previous:
+                        previousRelationship
+                }
+            );
+        } else if (previousRelationship) {
+            this.#emitRelationshipEvent(
+                RELATIONSHIP_EVENT_TYPES.REMOVED,
+                previousRelationship,
+                {
+                    previous:
+                        previousRelationship
+                }
+            );
+        }
+
         return participant;
 
     }
@@ -712,6 +1027,9 @@ export class AvatarRelationshipService {
      * @returns {Object[]}
      */
     unlinkParticipant(participantId) {
+
+        const previousRelationships =
+            this.relationshipsForParticipant(participantId);
 
         const id = Number(participantId);
         const changed = [];
@@ -747,6 +1065,17 @@ export class AvatarRelationshipService {
 
         }
 
+        previousRelationships.forEach(relationship => {
+            this.#emitRelationshipEvent(
+                RELATIONSHIP_EVENT_TYPES.REMOVED,
+                relationship,
+                {
+                    previous:
+                        relationship
+                }
+            );
+        });
+
         return changed;
 
     }
@@ -762,6 +1091,7 @@ export class AvatarRelationshipService {
 
         const id = Number(participantId);
         const changed = [];
+        const previousRelationships = [];
 
         for (const participant of this.#participants.values()) {
 
@@ -769,10 +1099,31 @@ export class AvatarRelationshipService {
                 continue;
             }
 
+            const relationship =
+                this.relationshipForPair(
+                    participant,
+                    this.#participant(id)
+                );
+
+            if (relationship) {
+                previousRelationships.push(relationship);
+            }
+
             this.#clearParticipant(participant);
             changed.push(participant);
 
         }
+
+        previousRelationships.forEach(relationship => {
+            this.#emitRelationshipEvent(
+                RELATIONSHIP_EVENT_TYPES.REMOVED,
+                relationship,
+                {
+                    previous:
+                        relationship
+                }
+            );
+        });
 
         return changed;
 
@@ -811,6 +1162,9 @@ export class AvatarRelationshipService {
      */
     clearParticipant(participantId) {
 
+        const previousRelationship =
+            this.relationshipForParticipant(participantId);
+
         const participant = this.#participant(participantId);
 
         if (!participant) {
@@ -818,6 +1172,17 @@ export class AvatarRelationshipService {
         }
 
         this.#clearParticipant(participant);
+
+        if (previousRelationship) {
+            this.#emitRelationshipEvent(
+                RELATIONSHIP_EVENT_TYPES.REMOVED,
+                previousRelationship,
+                {
+                    previous:
+                        previousRelationship
+                }
+            );
+        }
 
         return participant;
 
@@ -982,6 +1347,8 @@ export class AvatarRelationshipService {
     getDiagnostics() {
 
         const pairs = this.linkedPairs();
+        const relationships =
+            this.relationships();
 
         return Object.freeze({
 
@@ -995,6 +1362,50 @@ export class AvatarRelationshipService {
 
             capabilities:
                 this.relationshipCapabilities(),
+
+            relationshipEventTypes:
+                RELATIONSHIP_EVENT_TYPES,
+
+            relationshipCount:
+                relationships.length,
+
+            relationships:
+                relationships.map(relationship => Object.freeze({
+
+                    id:
+                        relationship.id,
+
+                    key:
+                        relationship.key,
+
+                    source:
+                        relationship.source,
+
+                    participantIds:
+                        relationship.memberIds,
+
+                    mode:
+                        relationship.mode,
+
+                    capability:
+                        relationship.capability,
+
+                    memberRoles:
+                        relationship.members.map(member =>
+                            Object.freeze({
+                                participantId:
+                                    member.participantId,
+                                role:
+                                    member.role,
+                                order:
+                                    member.order
+                            })
+                        ),
+
+                    metadata:
+                        relationship.metadata
+
+                })),
 
             pairCount:
                 pairs.length,
@@ -1051,6 +1462,275 @@ export class AvatarRelationshipService {
     #participant(participantId) {
 
         return this.#participants.get(participantId) || null;
+
+    }
+
+    /**
+     * Resolves a relationship object or id.
+     *
+     * @param {string|Object} relationshipOrId
+     *
+     * @returns {Object|null}
+     */
+    #resolveRelationship(relationshipOrId) {
+
+        if (
+            relationshipOrId &&
+            typeof relationshipOrId === "object" &&
+            relationshipOrId.id
+        ) {
+            return relationshipOrId;
+        }
+
+        return this.relationshipById(relationshipOrId);
+
+    }
+
+    /**
+     * Builds a runtime relationship identity object from a legacy pair.
+     *
+     * @param {Object} firstParticipant
+     * @param {Object} secondParticipant
+     *
+     * @returns {Object|null}
+     */
+    #relationshipFromPair(firstParticipant, secondParticipant) {
+
+        if (!firstParticipant || !secondParticipant) {
+            return null;
+        }
+
+        const initiator =
+            this.relationshipInitiator(firstParticipant, secondParticipant);
+
+        if (!initiator) {
+            return null;
+        }
+
+        const target =
+            initiator === firstParticipant
+                ? secondParticipant
+                : firstParticipant;
+
+        const key =
+            this.linkKeyFor(
+                firstParticipant.id,
+                secondParticipant.id
+            );
+
+        const id =
+            this.relationshipIdFor(
+                firstParticipant.id,
+                secondParticipant.id
+            );
+
+        const mode =
+            this.linkModeForPair(
+                firstParticipant,
+                secondParticipant
+            );
+
+        const capability =
+            this.relationshipCapability(mode);
+
+        const members =
+            Object.freeze([
+                Object.freeze({
+                    participantId:
+                        Number(initiator.id),
+                    role:
+                        "initiator",
+                    order:
+                        0,
+                    participant:
+                        initiator,
+                    anchor:
+                        null,
+                    options:
+                        Object.freeze({})
+                }),
+                Object.freeze({
+                    participantId:
+                        Number(target.id),
+                    role:
+                        "target",
+                    order:
+                        1,
+                    participant:
+                        target,
+                    anchor:
+                        null,
+                    options:
+                        Object.freeze({})
+                })
+            ]);
+
+        const metadata =
+            this.normalizeRelationshipMetadata(
+                {},
+                {
+                    groupId:
+                        id,
+                    relationshipId:
+                        id,
+                    mode,
+                    geometryStrategy:
+                        capability.geometryStrategy,
+                    members:
+                        members.map(member => ({
+                            participantId:
+                                member.participantId,
+                            role:
+                                member.role,
+                            order:
+                                member.order
+                        }))
+                }
+            );
+
+        return Object.freeze({
+
+            id,
+
+            key,
+
+            source:
+                "legacy-directed-edge",
+
+            stable:
+                true,
+
+            mode,
+
+            capability:
+                capability.id,
+
+            geometryStrategy:
+                capability.geometryStrategy,
+
+            initiatorId:
+                Number(initiator.id),
+
+            targetId:
+                Number(target.id),
+
+            initiator,
+
+            target,
+
+            memberIds:
+                Object.freeze(
+                    members.map(member => member.participantId)
+                ),
+
+            members,
+
+            order:
+                metadata.order,
+
+            metadata,
+
+            anchors:
+                metadata.anchors,
+
+            options:
+                metadata.options,
+
+            persistence:
+                metadata.persistence,
+
+            reconciliation:
+                metadata.reconciliation
+
+        });
+
+    }
+
+    /**
+     * Captures relationships touching any supplied participant ids.
+     *
+     * @param {Array<number|string>} participantIds
+     *
+     * @returns {Object[]}
+     */
+    #relationshipsForParticipants(participantIds = []) {
+
+        const ids =
+            new Set(
+                Array.from(participantIds || [])
+                    .map(id => Number(id))
+                    .filter(id => Number.isFinite(id) && id > 0)
+            );
+
+        if (!ids.size) {
+            return [];
+        }
+
+        const seen = new Set();
+        const relationships = [];
+
+        this.relationships()
+            .forEach(relationship => {
+                const touchesParticipant =
+                    relationship.memberIds.some(id => ids.has(id));
+
+                if (!touchesParticipant || seen.has(relationship.id)) {
+                    return;
+                }
+
+                seen.add(relationship.id);
+                relationships.push(relationship);
+            });
+
+        return relationships;
+
+    }
+
+    /**
+     * Emits a relationship lifecycle event.
+     *
+     * @param {string} type
+     * @param {Object} relationship
+     * @param {Object} details
+     */
+    #emitRelationshipEvent(type, relationship, details = {}) {
+
+        if (!relationship || !this.#relationshipEventListeners.size) {
+            return;
+        }
+
+        const event =
+            Object.freeze({
+                type:
+                    type || RELATIONSHIP_EVENT_TYPES.METADATA_CHANGED,
+                relationshipId:
+                    relationship.id,
+                relationship,
+                participantIds:
+                    relationship.memberIds,
+                mode:
+                    relationship.mode,
+                capability:
+                    relationship.capability,
+                metadata:
+                    relationship.metadata,
+                previous:
+                    details.previous || null,
+                changes:
+                    Object.freeze({
+                        ...(details.changes || {})
+                    }),
+                source:
+                    details.source || "runtime"
+            });
+
+        this.#relationshipEventListeners.forEach(listener => {
+            try {
+                listener(event);
+            } catch (error) {
+                void error;
+            }
+        });
 
     }
 
