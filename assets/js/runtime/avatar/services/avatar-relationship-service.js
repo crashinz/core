@@ -19,7 +19,7 @@
  *      documented owners.
  *
  * Build:
- *      000037
+ *      000038
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -45,6 +45,9 @@
  * Build 000037
  * - Added first-class runtime relationship identity objects, relationship
  *   event contract, and legacy directed-edge compatibility translation.
+ *
+ * Build 000038
+ * - Added persisted relationship payload ingestion and cache reconciliation.
  ******************************************************************************/
 
 /**
@@ -238,6 +241,20 @@ export class AvatarRelationshipService {
      */
     #relationshipEventListeners = new Set();
 
+    /**
+     * Persisted relationship payloads keyed by relationship id.
+     *
+     * @type {Map<string, Object>}
+     */
+    #persistedRelationships = new Map();
+
+    /**
+     * Persisted relationship payloads keyed by legacy link key.
+     *
+     * @type {Map<string, Object>}
+     */
+    #persistedRelationshipsByLegacyKey = new Map();
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -271,6 +288,8 @@ export class AvatarRelationshipService {
     destroy() {
 
         this.#relationshipEventListeners.clear();
+        this.#persistedRelationships.clear();
+        this.#persistedRelationshipsByLegacyKey.clear();
 
     }
 
@@ -331,6 +350,83 @@ export class AvatarRelationshipService {
         return () => {
             this.#relationshipEventListeners.delete(listener);
         };
+
+    }
+
+    /**
+     * Seeds persisted relationship identity payloads from the API layer.
+     *
+     * @param {Object[]} relationships
+     */
+    seedPersistedRelationships(relationships = []) {
+
+        this.#persistedRelationships.clear();
+        this.#persistedRelationshipsByLegacyKey.clear();
+
+        Array.from(relationships || [])
+            .forEach(relationship => {
+                this.upsertPersistedRelationship(relationship);
+            });
+
+    }
+
+    /**
+     * Adds or updates one persisted relationship identity payload.
+     *
+     * @param {Object} relationship
+     *
+     * @returns {Object|null}
+     */
+    upsertPersistedRelationship(relationship) {
+
+        const normalized =
+            this.#normalizePersistedRelationshipPayload(relationship);
+
+        if (!normalized) {
+            return null;
+        }
+
+        this.#persistedRelationships.set(
+            normalized.id,
+            normalized
+        );
+
+        if (normalized.legacyLinkKey) {
+            this.#persistedRelationshipsByLegacyKey.set(
+                normalized.legacyLinkKey,
+                normalized
+            );
+        }
+
+        return normalized;
+
+    }
+
+    /**
+     * Removes a cached persisted relationship by participant pair.
+     *
+     * @param {number|string} firstParticipantId
+     * @param {number|string} secondParticipantId
+     */
+    removePersistedRelationshipForPair(firstParticipantId, secondParticipantId) {
+
+        const key =
+            this.linkKeyFor(
+                firstParticipantId,
+                secondParticipantId
+            );
+
+        const relationship =
+            this.#persistedRelationshipsByLegacyKey.get(key) ||
+            this.#persistedRelationships.get(
+                this.relationshipIdFor(firstParticipantId, secondParticipantId)
+            );
+
+        if (relationship) {
+            this.#persistedRelationships.delete(relationship.id);
+        }
+
+        this.#persistedRelationshipsByLegacyKey.delete(key);
 
     }
 
@@ -1366,6 +1462,9 @@ export class AvatarRelationshipService {
             relationshipEventTypes:
                 RELATIONSHIP_EVENT_TYPES,
 
+            persistedRelationshipCount:
+                this.#persistedRelationships.size,
+
             relationshipCount:
                 relationships.length,
 
@@ -1518,13 +1617,18 @@ export class AvatarRelationshipService {
                 secondParticipant.id
             );
 
+        const persisted =
+            this.#persistedRelationshipsByLegacyKey.get(key) || null;
+
         const id =
+            persisted?.id ||
             this.relationshipIdFor(
                 firstParticipant.id,
                 secondParticipant.id
             );
 
         const mode =
+            persisted?.mode ||
             this.linkModeForPair(
                 firstParticipant,
                 secondParticipant
@@ -1575,16 +1679,25 @@ export class AvatarRelationshipService {
                         id,
                     mode,
                     geometryStrategy:
+                        persisted?.geometryStrategy ||
                         capability.geometryStrategy,
                     members:
-                        members.map(member => ({
-                            participantId:
-                                member.participantId,
-                            role:
-                                member.role,
-                            order:
-                                member.order
-                        }))
+                        persisted?.members?.length
+                            ? persisted.members
+                            : members.map(member => ({
+                                participantId:
+                                    member.participantId,
+                                role:
+                                    member.role,
+                                order:
+                                    member.order
+                            })),
+                    anchors:
+                        persisted?.anchors,
+                    options:
+                        persisted?.options,
+                    metadataSource:
+                        persisted ? "persisted" : "legacy"
                 }
             );
 
@@ -1595,7 +1708,9 @@ export class AvatarRelationshipService {
             key,
 
             source:
-                "legacy-directed-edge",
+                persisted
+                    ? "persisted"
+                    : "legacy-directed-edge",
 
             stable:
                 true,
@@ -1683,6 +1798,96 @@ export class AvatarRelationshipService {
             });
 
         return relationships;
+
+    }
+
+    /**
+     * Normalizes a persisted relationship payload from the API layer.
+     *
+     * @param {Object} relationship
+     *
+     * @returns {Object|null}
+     */
+    #normalizePersistedRelationshipPayload(relationship) {
+
+        if (!relationship || typeof relationship !== "object") {
+            return null;
+        }
+
+        const id =
+            String(
+                relationship.id ||
+                relationship.relationship_id ||
+                ""
+            );
+
+        if (!id) {
+            return null;
+        }
+
+        const legacyLinkKey =
+            String(
+                relationship.legacy_link_key ||
+                relationship.legacyLinkKey ||
+                ""
+            );
+
+        const mode =
+            this.normalizeLinkMode(relationship.mode);
+
+        const capability =
+            this.relationshipCapability(mode);
+
+        const members =
+            Array.from(relationship.members || [])
+                .map((member, index) => Object.freeze({
+                    participantId:
+                        Number(
+                            member?.participantId ||
+                            member?.participant_id ||
+                            0
+                        ),
+                    role:
+                        String(member?.role || member?.member_role || ""),
+                    order:
+                        Number.isFinite(Number(member?.order ?? member?.member_order))
+                            ? Number(member?.order ?? member?.member_order)
+                            : index,
+                    anchor:
+                        member?.anchor || null,
+                    options:
+                        Object.freeze({
+                            ...(member?.options || {})
+                        })
+                }))
+                .filter(member => member.participantId > 0);
+
+        const uniqueMemberIds =
+            new Set(members.map(member => member.participantId));
+
+        if (uniqueMemberIds.size !== members.length) {
+            return null;
+        }
+
+        return Object.freeze({
+            id,
+            legacyLinkKey,
+            mode,
+            capability:
+                relationship.capability || capability.id,
+            geometryStrategy:
+                relationship.geometryStrategy ||
+                relationship.geometry_strategy ||
+                capability.geometryStrategy,
+            members:
+                Object.freeze(members),
+            metadata:
+                relationship.metadata || {},
+            anchors:
+                relationship.anchors || relationship.metadata?.anchors || null,
+            options:
+                relationship.options || relationship.metadata?.options || {}
+        });
 
     }
 

@@ -20,7 +20,7 @@
  *      networking, and ChatRuntime behavior with their documented owners.
  *
  * Build:
- *      000037
+ *      000038
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -53,6 +53,9 @@
  * Build 000037
  * - Consumed runtime relationship identity objects during relationship
  *   refresh sequencing.
+ *
+ * Build 000038
+ * - Reconciled persisted relationship payloads from remote link events.
  ******************************************************************************/
 
 /**
@@ -714,6 +717,10 @@ export class AvatarCoordinator {
         const previousPartnerId =
             Number(person.linked_to || 0);
 
+        if (payload.relationship) {
+            this.#relationships.upsertPersistedRelationship(payload.relationship);
+        }
+
         this.#relationships.setParticipantRelationship(
             person.id,
             payload.linked_to,
@@ -758,6 +765,12 @@ export class AvatarCoordinator {
         this.#context?.renderParticipant?.(person);
 
         if (!payload.linked_to) {
+            if (previousPartnerId) {
+                this.#relationships.removePersistedRelationshipForPair(
+                    person.id,
+                    previousPartnerId
+                );
+            }
             this.clearScheduledRelationshipRefresh(person.id);
             this.clearScheduledRelationshipRefresh(previousPartnerId);
             this.#context?.onLinkUnavailable?.(person.id);
@@ -1255,7 +1268,7 @@ export class AvatarCoordinator {
                 "AvatarRuntime",
 
             build:
-                "000037",
+                "000038",
 
             configured:
                 Boolean(this.#context),

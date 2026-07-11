@@ -4675,6 +4675,7 @@ async function bootRoom() {
   });
   restoreSessionLock();
   (cfg.blockedUserIds || []).forEach(id => blockedUserIds.add(Number(id)));
+  avatarRuntime?.relationships?.seedPersistedRelationships(cfg.relationships || []);
   avatarRuntime?.coordinator?.seedLinkIcons(cfg.linkIcons || {});
   await Promise.all((cfg.participants || []).map(p => renderParticipantWhenReady(p, { animateJoin: true }).catch(() => {
     renderParticipant(p, { animateJoin: true });

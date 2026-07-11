@@ -69,7 +69,9 @@ if ($action === 'link') {
         ->execute([(int)$p['id'], (int)$p['id']]);
     $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
         ->execute([$targetId, $targetId]);
+    avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$p['id'], $targetId]);
     $pdo->prepare('UPDATE participants SET linked_to_participant_id = ?, link_mode = ? WHERE id = ?')->execute([$targetId, $linkMode, (int)$p['id']]);
+    $relationship = avatar_relationship_sync_legacy($pdo, $sessionId, (int)$p['id'], $targetId, $linkMode);
 
     if (isset($body['initiator_x'], $body['initiator_y'], $body['target_x'], $body['target_y'])) {
         $pdo->prepare('UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?')
@@ -93,6 +95,10 @@ if ($action === 'link') {
         'linked_to' => $targetId,
         'link_mode' => $linkMode,
     ];
+    if ($relationship) {
+        $payload['relationship_id'] = $relationship['id'];
+        $payload['relationship'] = $relationship;
+    }
     if (isset($body['initiator_x'], $body['initiator_y'], $body['target_x'], $body['target_y'])) {
         $payload['initiator_position'] = [
             'x' => max(0, min(1, (float)$body['initiator_x'])),
@@ -104,26 +110,30 @@ if ($action === 'link') {
         ];
     }
     emit_event($pdo, $sessionId, 'link', $payload);
-    json_out(['ok' => true, 'link_key' => link_key_for((int)$p['id'], $targetId)]);
+    json_out(['ok' => true, 'link_key' => link_key_for((int)$p['id'], $targetId), 'relationship_id' => $relationship['id'] ?? null, 'relationship' => $relationship]);
 }
 
 if ($action === 'unlink') {
     $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND linked_to_participant_id = ?');
     $stmt->execute([$sessionId, (int)$p['id']]);
     $reverse = $stmt->fetchAll();
+    $clearIds = array_merge([(int)$p['id']], array_map(fn(array $row): int => (int)$row['id'], $reverse));
 
     $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
         ->execute([(int)$p['id'], (int)$p['id']]);
+    avatar_relationship_clear_for_participants($pdo, $sessionId, $clearIds);
     emit_event($pdo, $sessionId, 'link', [
         'participant_id' => (int)$p['id'],
         'linked_to' => null,
         'link_mode' => 'normal',
+        'relationship_removed' => true,
     ]);
     foreach ($reverse as $row) {
         emit_event($pdo, $sessionId, 'link', [
             'participant_id' => (int)$row['id'],
             'linked_to' => null,
             'link_mode' => 'normal',
+            'relationship_removed' => true,
         ]);
     }
     json_out(['ok' => true]);
@@ -139,10 +149,14 @@ if ($action === 'block_user' || $action === 'unblock_user') {
     }
     if (!$targetUserId || $targetUserId === (int)$p['user_id']) json_out(['error' => 'User required'], 400);
     if ($action === 'block_user') {
+        $affectedStmt = $pdo->prepare('SELECT id FROM participants WHERE (user_id = ? OR user_id = ?) AND session_id = ?');
+        $affectedStmt->execute([(int)$p['user_id'], $targetUserId, $sessionId]);
+        $affectedParticipantIds = array_map(fn(array $row): int => (int)$row['id'], $affectedStmt->fetchAll());
         $pdo->prepare(db_uses_mysql_syntax($pdo) ? 'INSERT IGNORE INTO user_blocks (blocker_user_id, blocked_user_id) VALUES (?,?)' : 'INSERT OR IGNORE INTO user_blocks (blocker_user_id, blocked_user_id) VALUES (?,?)')
             ->execute([(int)$p['user_id'], $targetUserId]);
         $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE (user_id = ? OR user_id = ?) AND session_id = ?")
             ->execute([(int)$p['user_id'], $targetUserId, $sessionId]);
+        avatar_relationship_clear_for_participants($pdo, $sessionId, $affectedParticipantIds);
         emit_event($pdo, $sessionId, 'block', ['blocker_user_id' => (int)$p['user_id'], 'blocked_user_id' => $targetUserId]);
         log_tool($pdo, (int)$p['user_id'], 'block_user', $targetUserId, null, 'User block');
     } else {
@@ -170,6 +184,7 @@ if ($action === 'link_icon') {
     if (!$stmt->fetch()) json_out(['error' => 'You are not linked to that participant'], 403);
 
     $linkKey = link_key_for((int)$p['id'], $targetId);
+    $relationshipId = avatar_relationship_public_id_for((int)$p['id'], $targetId);
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT INTO link_icons (session_id, link_key, icon_name, updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE icon_name = VALUES(icon_name), updated_at = CURRENT_TIMESTAMP'
         : 'INSERT INTO link_icons (session_id, link_key, icon_name, updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(session_id, link_key) DO UPDATE SET icon_name = excluded.icon_name, updated_at = CURRENT_TIMESTAMP'
@@ -177,6 +192,7 @@ if ($action === 'link_icon') {
     $stmt->execute([$sessionId, $linkKey, $iconName]);
     $payload = [
         'link_key' => $linkKey,
+        'relationship_id' => $relationshipId,
         'participant_id' => (int)$p['id'],
         'target_participant_id' => $targetId,
         'icon_name' => $iconName,

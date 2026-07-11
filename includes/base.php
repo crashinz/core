@@ -138,7 +138,7 @@ function mysqlize_schema(string $schema): string {
     $schema = str_replace('INTEGER', 'INT', $schema);
     $schema = str_replace('REAL', 'DOUBLE', $schema);
     $schema = preg_replace('/\bTEXT\b/', 'VARCHAR(1024)', $schema) ?? $schema;
-    $longTextColumns = ['payload', 'content', 'original_content', 'url_preview_json', 'reply_to_json', 'state_json', 'data', 'reason'];
+    $longTextColumns = ['payload', 'content', 'original_content', 'url_preview_json', 'reply_to_json', 'state_json', 'data', 'reason', 'metadata_json', 'anchors_json', 'options_json', 'anchor_json'];
     foreach ($longTextColumns as $column) {
         $schema = preg_replace('/\b' . $column . '\s+VARCHAR\(1024\)/', $column . ' LONGTEXT', $schema) ?? $schema;
     }
@@ -170,6 +170,13 @@ function mysqlize_schema(string $schema): string {
         'label' => 'VARCHAR(191)',
         'file_path' => 'VARCHAR(512)',
         'link_key' => 'VARCHAR(191)',
+        'relationship_public_id' => 'VARCHAR(191)',
+        'legacy_link_key' => 'VARCHAR(191)',
+        'mode' => 'VARCHAR(32)',
+        'capability' => 'VARCHAR(64)',
+        'geometry_strategy' => 'VARCHAR(64)',
+        'member_role' => 'VARCHAR(64)',
+        'divergence_status' => 'VARCHAR(32)',
         'scope' => 'VARCHAR(32)',
         'action' => 'VARCHAR(64)',
         'setting_key' => 'VARCHAR(191)',
@@ -398,6 +405,46 @@ function migrate(PDO $pdo): void {
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY(session_id, link_key),
             FOREIGN KEY(session_id) REFERENCES room_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS avatar_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            relationship_public_id TEXT NOT NULL,
+            legacy_link_key TEXT DEFAULT NULL,
+            mode TEXT NOT NULL DEFAULT 'normal',
+            capability TEXT NOT NULL DEFAULT 'normal',
+            geometry_strategy TEXT DEFAULT NULL,
+            metadata_json TEXT DEFAULT NULL,
+            anchors_json TEXT DEFAULT NULL,
+            options_json TEXT DEFAULT NULL,
+            legacy_initiator_participant_id INTEGER DEFAULT NULL,
+            legacy_target_participant_id INTEGER DEFAULT NULL,
+            last_synced_from_legacy_at TEXT DEFAULT NULL,
+            divergence_status TEXT NOT NULL DEFAULT 'synced',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(session_id, relationship_public_id),
+            UNIQUE(session_id, legacy_link_key),
+            FOREIGN KEY(session_id) REFERENCES room_sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY(legacy_initiator_participant_id) REFERENCES participants(id) ON DELETE SET NULL,
+            FOREIGN KEY(legacy_target_participant_id) REFERENCES participants(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS avatar_relationship_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            relationship_id INTEGER NOT NULL,
+            participant_id INTEGER NOT NULL,
+            member_role TEXT NOT NULL DEFAULT 'member',
+            member_order INTEGER NOT NULL DEFAULT 0,
+            anchor_json TEXT DEFAULT NULL,
+            options_json TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(relationship_id, participant_id),
+            UNIQUE(relationship_id, member_order),
+            FOREIGN KEY(relationship_id) REFERENCES avatar_relationships(id) ON DELETE CASCADE,
+            FOREIGN KEY(participant_id) REFERENCES participants(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS link_icon_catalog (
@@ -1448,6 +1495,202 @@ function emit_community_event(PDO $pdo, string $scope, ?int $sessionId, ?string 
     $stmt->execute([$scope, $sessionId, $linkKey, $type, json_encode($payload, JSON_UNESCAPED_SLASHES)]);
 }
 
+function avatar_relationship_mode(string $mode): string {
+    return in_array($mode, ['normal', 'lap'], true) ? $mode : 'normal';
+}
+
+function avatar_relationship_capability(string $mode): array {
+    $mode = avatar_relationship_mode($mode);
+    if ($mode === 'lap') {
+        return [
+            'mode' => 'lap',
+            'capability' => 'lap',
+            'geometry_strategy' => 'anchorPair',
+            'orientation' => 'bottom-right',
+            'rendering' => 'lap-pair',
+        ];
+    }
+    return [
+        'mode' => 'normal',
+        'capability' => 'normal',
+        'geometry_strategy' => 'sideBySide',
+        'orientation' => 'right',
+        'rendering' => 'stage-link-icon',
+    ];
+}
+
+function avatar_relationship_public_id_for(int $a, int $b): string {
+    return 'legacy-edge:' . link_key_for($a, $b);
+}
+
+function avatar_relationship_metadata(int $initiatorId, int $targetId, string $mode, ?string $relationshipId = null): array {
+    $capability = avatar_relationship_capability($mode);
+    $relationshipId = $relationshipId ?: avatar_relationship_public_id_for($initiatorId, $targetId);
+    return [
+        'schemaVersion' => 1,
+        'relationshipId' => $relationshipId,
+        'groupId' => $relationshipId,
+        'mode' => $capability['mode'],
+        'capability' => $capability['capability'],
+        'geometryStrategy' => $capability['geometry_strategy'],
+        'metadataSource' => 'legacy',
+        'members' => [
+            ['participantId' => $initiatorId, 'role' => 'initiator', 'order' => 0],
+            ['participantId' => $targetId, 'role' => 'target', 'order' => 1],
+        ],
+        'orientation' => $capability['orientation'],
+        'order' => [$initiatorId, $targetId],
+        'anchors' => ['relationship' => null, 'members' => [], 'mode' => []],
+        'options' => [],
+        'movement' => 'group',
+        'drag' => 'breakable',
+        'rendering' => $capability['rendering'],
+        'persistence' => ['supported' => true, 'legacyDirectedEdge' => true, 'futureMetadata' => true],
+        'reconciliation' => ['supported' => true, 'eventPayload' => 'link'],
+        'behavior' => ['static' => true, 'animated' => false],
+    ];
+}
+
+function avatar_relationship_clear_for_participants(PDO $pdo, int $sessionId, array $participantIds): void {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $participantIds), fn(int $id): bool => $id > 0)));
+    if (!$ids) return;
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT DISTINCT ar.id
+           FROM avatar_relationships ar
+           LEFT JOIN avatar_relationship_members arm ON arm.relationship_id = ar.id
+          WHERE ar.session_id = ?
+            AND (
+              ar.legacy_initiator_participant_id IN ($placeholders)
+              OR ar.legacy_target_participant_id IN ($placeholders)
+              OR arm.participant_id IN ($placeholders)
+            )"
+    );
+    $stmt->execute(array_merge([$sessionId], $ids, $ids, $ids));
+    $relationshipIds = array_map(fn(array $row): int => (int)$row['id'], $stmt->fetchAll());
+    if (!$relationshipIds) return;
+    $deletePlaceholders = implode(',', array_fill(0, count($relationshipIds), '?'));
+    $pdo->prepare("DELETE FROM avatar_relationship_members WHERE relationship_id IN ($deletePlaceholders)")->execute($relationshipIds);
+    $pdo->prepare("DELETE FROM avatar_relationships WHERE id IN ($deletePlaceholders)")->execute($relationshipIds);
+}
+
+function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiatorId, int $targetId, string $mode): ?array {
+    if ($initiatorId <= 0 || $targetId <= 0 || $initiatorId === $targetId) return null;
+    $mode = avatar_relationship_mode($mode);
+    $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND id IN (?,?)');
+    $stmt->execute([$sessionId, $initiatorId, $targetId]);
+    $found = array_map(fn(array $row): int => (int)$row['id'], $stmt->fetchAll());
+    if (count(array_unique($found)) !== 2) return null;
+
+    avatar_relationship_clear_for_participants($pdo, $sessionId, [$initiatorId, $targetId]);
+
+    $capability = avatar_relationship_capability($mode);
+    $relationshipId = avatar_relationship_public_id_for($initiatorId, $targetId);
+    $legacyKey = link_key_for($initiatorId, $targetId);
+    $metadata = avatar_relationship_metadata($initiatorId, $targetId, $mode, $relationshipId);
+    $metadataJson = json_encode($metadata, JSON_UNESCAPED_SLASHES);
+    $anchorsJson = json_encode($metadata['anchors'], JSON_UNESCAPED_SLASHES);
+    $optionsJson = json_encode($metadata['options'], JSON_UNESCAPED_SLASHES);
+    $insert = $pdo->prepare(db_uses_mysql_syntax($pdo)
+        ? 'INSERT IGNORE INTO avatar_relationships (session_id, relationship_public_id, legacy_link_key, mode, capability, geometry_strategy, metadata_json, anchors_json, options_json, legacy_initiator_participant_id, legacy_target_participant_id, last_synced_from_legacy_at, divergence_status, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
+        : 'INSERT OR IGNORE INTO avatar_relationships (session_id, relationship_public_id, legacy_link_key, mode, capability, geometry_strategy, metadata_json, anchors_json, options_json, legacy_initiator_participant_id, legacy_target_participant_id, last_synced_from_legacy_at, divergence_status, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
+    );
+    $insert->execute([$sessionId, $relationshipId, $legacyKey, $mode, $capability['capability'], $capability['geometry_strategy'], $metadataJson, $anchorsJson, $optionsJson, $initiatorId, $targetId, gmdate('Y-m-d H:i:s'), 'synced']);
+    $pdo->prepare('UPDATE avatar_relationships SET legacy_link_key = ?, mode = ?, capability = ?, geometry_strategy = ?, metadata_json = ?, anchors_json = ?, options_json = ?, legacy_initiator_participant_id = ?, legacy_target_participant_id = ?, last_synced_from_legacy_at = ?, divergence_status = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ? AND relationship_public_id = ?')
+        ->execute([$legacyKey, $mode, $capability['capability'], $capability['geometry_strategy'], $metadataJson, $anchorsJson, $optionsJson, $initiatorId, $targetId, gmdate('Y-m-d H:i:s'), 'synced', $sessionId, $relationshipId]);
+    $stmt = $pdo->prepare('SELECT id FROM avatar_relationships WHERE session_id = ? AND relationship_public_id = ? LIMIT 1');
+    $stmt->execute([$sessionId, $relationshipId]);
+    $dbRelationshipId = (int)($stmt->fetchColumn() ?: 0);
+    if (!$dbRelationshipId) return null;
+    $pdo->prepare('DELETE FROM avatar_relationship_members WHERE relationship_id = ?')->execute([$dbRelationshipId]);
+    $memberInsert = $pdo->prepare('INSERT INTO avatar_relationship_members (relationship_id, participant_id, member_role, member_order, anchor_json, options_json) VALUES (?,?,?,?,?,?)');
+    foreach ($metadata['members'] as $member) {
+        $memberInsert->execute([$dbRelationshipId, (int)$member['participantId'], (string)$member['role'], (int)$member['order'], null, json_encode([], JSON_UNESCAPED_SLASHES)]);
+    }
+    return avatar_relationship_payload($pdo, $dbRelationshipId);
+}
+
+function avatar_relationship_payload(PDO $pdo, int $relationshipDbId): ?array {
+    $stmt = $pdo->prepare('SELECT * FROM avatar_relationships WHERE id = ? LIMIT 1');
+    $stmt->execute([$relationshipDbId]);
+    $relationship = $stmt->fetch();
+    if (!$relationship) return null;
+    $membersStmt = $pdo->prepare('SELECT participant_id, member_role, member_order, anchor_json, options_json FROM avatar_relationship_members WHERE relationship_id = ? ORDER BY member_order ASC, id ASC');
+    $membersStmt->execute([$relationshipDbId]);
+    $members = array_map(fn(array $row): array => [
+        'participantId' => (int)$row['participant_id'],
+        'role' => (string)$row['member_role'],
+        'order' => (int)$row['member_order'],
+        'anchor' => !empty($row['anchor_json']) ? json_decode((string)$row['anchor_json'], true) : null,
+        'options' => !empty($row['options_json']) ? (json_decode((string)$row['options_json'], true) ?: []) : [],
+    ], $membersStmt->fetchAll());
+    $metadata = !empty($relationship['metadata_json']) ? (json_decode((string)$relationship['metadata_json'], true) ?: []) : [];
+    return [
+        'id' => (string)$relationship['relationship_public_id'],
+        'relationship_id' => (string)$relationship['relationship_public_id'],
+        'source' => 'persisted',
+        'legacy_link_key' => $relationship['legacy_link_key'] ?? null,
+        'mode' => avatar_relationship_mode((string)$relationship['mode']),
+        'capability' => (string)($relationship['capability'] ?: avatar_relationship_mode((string)$relationship['mode'])),
+        'geometryStrategy' => $relationship['geometry_strategy'] ?: avatar_relationship_capability((string)$relationship['mode'])['geometry_strategy'],
+        'members' => $members,
+        'metadata' => $metadata,
+        'anchors' => !empty($relationship['anchors_json']) ? (json_decode((string)$relationship['anchors_json'], true) ?: []) : ($metadata['anchors'] ?? []),
+        'options' => !empty($relationship['options_json']) ? (json_decode((string)$relationship['options_json'], true) ?: []) : ($metadata['options'] ?? []),
+        'persistence' => ['supported' => true, 'legacyDirectedEdge' => true, 'futureMetadata' => true],
+        'reconciliation' => ['supported' => true, 'eventPayload' => 'link'],
+        'divergence_status' => $relationship['divergence_status'] ?? 'synced',
+        'created_at' => $relationship['created_at'] ?? null,
+        'updated_at' => $relationship['updated_at'] ?? null,
+    ];
+}
+
+function avatar_relationship_payloads_for_session(PDO $pdo, int $sessionId): array {
+    $stmt = $pdo->prepare('SELECT id FROM avatar_relationships WHERE session_id = ? ORDER BY id ASC');
+    $stmt->execute([$sessionId]);
+    return array_values(array_filter(array_map(fn(array $row): ?array => avatar_relationship_payload($pdo, (int)$row['id']), $stmt->fetchAll())));
+}
+
+function avatar_relationship_divergence_report(PDO $pdo, int $sessionId): array {
+    $relationships = avatar_relationship_payloads_for_session($pdo, $sessionId);
+    $diverged = [];
+    $relationshipsByLegacyKey = [];
+    foreach ($relationships as $relationship) {
+        if (!empty($relationship['legacy_link_key'])) {
+            $relationshipsByLegacyKey[(string)$relationship['legacy_link_key']] = true;
+        }
+    }
+    $legacyStmt = $pdo->prepare('SELECT id, linked_to_participant_id, link_mode FROM participants WHERE session_id = ? AND linked_to_participant_id IS NOT NULL');
+    $legacyStmt->execute([$sessionId]);
+    foreach ($legacyStmt->fetchAll() as $legacyEdge) {
+        $legacyKey = link_key_for((int)$legacyEdge['id'], (int)$legacyEdge['linked_to_participant_id']);
+        if (empty($relationshipsByLegacyKey[$legacyKey])) {
+            $diverged[] = [
+                'relationship_id' => avatar_relationship_public_id_for((int)$legacyEdge['id'], (int)$legacyEdge['linked_to_participant_id']),
+                'reason' => 'missing_relationship_record',
+                'legacy_link_key' => $legacyKey,
+                'mode' => avatar_relationship_mode((string)$legacyEdge['link_mode']),
+            ];
+        }
+    }
+    foreach ($relationships as $relationship) {
+        $members = $relationship['members'] ?? [];
+        $initiator = $members[0]['participantId'] ?? 0;
+        $target = $members[1]['participantId'] ?? 0;
+        if (!$initiator || !$target) {
+            $diverged[] = ['relationship_id' => $relationship['id'], 'reason' => 'missing_members'];
+            continue;
+        }
+        $stmt = $pdo->prepare('SELECT linked_to_participant_id, link_mode FROM participants WHERE session_id = ? AND id = ? LIMIT 1');
+        $stmt->execute([$sessionId, $initiator]);
+        $legacy = $stmt->fetch();
+        if (!$legacy || (int)$legacy['linked_to_participant_id'] !== (int)$target || avatar_relationship_mode((string)$legacy['link_mode']) !== avatar_relationship_mode((string)$relationship['mode'])) {
+            $diverged[] = ['relationship_id' => $relationship['id'], 'reason' => 'legacy_projection_mismatch'];
+        }
+    }
+    return $diverged;
+}
+
 function room_effect_catalog(): array {
     $dir = __DIR__ . '/../assets/room-effects';
     $catalog = [];
@@ -1578,6 +1821,7 @@ function cleanup_stale_participants(PDO $pdo, ?int $sessionId = null): void {
     foreach ($stale as $row) {
         $participantId = (int)$row['id'];
         $clearParticipant->execute([$participantId, $participantId]);
+        avatar_relationship_clear_for_participants($pdo, (int)$row['session_id'], [$participantId]);
         $clearVoice->execute([$participantId]);
         $clearUser->execute([(int)$row['user_id']]);
         emit_event($pdo, (int)$row['session_id'], 'participant_leave', ['id' => $participantId, 'participant_id' => $participantId]);

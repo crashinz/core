@@ -71,6 +71,7 @@ if ($action === 'kick') {
 
     $pdo->prepare("UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, webcam_enabled = 0, linked_to_participant_id = NULL, link_mode = 'normal' WHERE session_id = ? AND user_id = ?")
         ->execute([$sessionId, (int)$target['user_id']]);
+    avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$target['id']]);
     $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')
         ->execute([(int)$target['user_id']]);
 
@@ -110,6 +111,7 @@ if ($action === 'community_eject') {
 
     $pdo->prepare("UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, webcam_enabled = 0, linked_to_participant_id = NULL, link_mode = 'normal' WHERE user_id = ?")
         ->execute([(int)$target['user_id']]);
+    avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$target['id']]);
     $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')
         ->execute([(int)$target['user_id']]);
 

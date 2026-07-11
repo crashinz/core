@@ -276,24 +276,23 @@ Future runtime expansion SHALL occur through the Avatar Runtime rather than bypa
 
 Build:
 
-000037
+000038
 
 Status:
 
-Relationship Identity Foundation Complete
+Persisted Relationship Contract Complete
 
-Build 000037 adds first-class runtime relationship identity objects owned by
-AvatarRelationshipService. The current legacy `linked_to` / `link_mode`
-participant-edge model remains valid, while runtime consumers can now resolve
-relationships by stable runtime ID, participant pair, participant membership,
-metadata, capability, members, roles, ordering, anchors, options, persistence
-flags, and reconciliation flags.
+Build 000038 adds persisted relationship payload ingestion for the first-class
+runtime relationship identity model. The current legacy `linked_to` /
+`link_mode` participant-edge model remains valid while API payloads can now
+carry relationship identity, metadata, members, roles, ordering, anchors,
+options, persistence flags, and reconciliation flags.
 
-AvatarRelationshipService also defines the formal relationship event contract
-and observer API for relationship lifecycle events.
+AvatarRelationshipService owns persisted payload normalization and ingestion.
+AvatarCoordinator reconciles persisted payloads from remote link events.
 
-AvatarCoordinator consumes relationship identity objects during refresh
-sequencing and continues to delegate geometry execution to AvatarLayoutService.
+The PHP/API layer owns database persistence and transport. `room.js` remains
+host composition and only seeds the runtime from room configuration.
 
 The runtime infrastructure has been established.
 
