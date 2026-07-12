@@ -27,6 +27,12 @@
  *   through the generic RuntimeDiagnostics capability.
  ******************************************************************************/
 
+import {
+
+    VoiceDeviceService
+
+} from "./voice-device-service.js";
+
 /**
  * @file voice-media-service.js
  *
@@ -125,7 +131,7 @@ export class VoiceMediaService {
 
     #speaking = false;
 
-    #selectedOutputDeviceId = "";
+    #devices;
 
     #analyserTimer = null;
 
@@ -169,11 +175,7 @@ export class VoiceMediaService {
 
     #remoteWebcamReadinessRequests = new Set();
 
-    #deviceRefreshGeneration = 0;
-
     #pollInProgress = false;
-
-    #deviceChangeListener = null;
 
     #pendingRemoteAudioTracks = new Map();
 
@@ -210,6 +212,7 @@ export class VoiceMediaService {
     constructor(runtime) {
 
         this.#runtime = runtime;
+        this.#devices = new VoiceDeviceService();
 
     }
 
@@ -234,7 +237,7 @@ export class VoiceMediaService {
         this.#stopVoiceStream();
         this.#removeAllAudioElements();
         this.#closeAllPeers();
-        this.#unbindDeviceChangeListener();
+        this.#devices.destroy();
         this.#context = null;
         this.#voiceParticipants = [];
         this.#lastStatusSignature = "";
@@ -331,7 +334,7 @@ export class VoiceMediaService {
                 this.#speaking,
 
             selectedOutputDeviceId:
-                this.#selectedOutputDeviceId
+                this.#devices.selectedOutputDeviceId
 
         });
 
@@ -351,7 +354,24 @@ export class VoiceMediaService {
         this.#context = context;
         this.#clientEpoch =
             this.#clientEpoch || this.#createClientEpoch();
-        this.#bindDeviceChangeListener();
+        this.#devices.configure({
+            navigator: context.navigator,
+            HTMLMediaElement: context.HTMLMediaElement,
+            canPopulateDevices: context.canPopulateDevices,
+            getInputDeviceId: context.getInputDeviceId,
+            getOutputDeviceId: context.getOutputDeviceId,
+            setInputDeviceOptions: context.setInputDeviceOptions,
+            setOutputDeviceOptions: context.setOutputDeviceOptions,
+            setOutputDeviceDisabled: context.setOutputDeviceDisabled,
+            restoreInputDevice: context.restoreInputDevice,
+            restoreOutputDevice: context.restoreOutputDevice,
+            deviceOption: context.deviceOption,
+            setDeviceStatus: context.setDeviceStatus,
+            setDevicePermissionRequired: context.setDevicePermissionRequired,
+            hasActiveVoiceStream: () => Boolean(this.#voiceStream),
+            recordDiagnostic: entry => this.#recordAudioPathDiagnostic(entry),
+            warn: error => this.#warn(error)
+        });
 
     }
 
@@ -366,184 +386,7 @@ export class VoiceMediaService {
      */
     async populateDevices(reason = "manual") {
 
-        if (!this.#context?.canPopulateDevices?.()) return;
-
-        const refreshGeneration =
-            ++this.#deviceRefreshGeneration;
-
-        this.#context?.setDeviceStatus?.(
-            "Loading audio devices...",
-            "working"
-        );
-
-        const mediaDevices =
-            this.#context?.navigator?.mediaDevices;
-
-        if (!mediaDevices?.enumerateDevices) {
-
-            this.#context?.setInputDeviceOptions?.(
-                "<option value=\"\">Default microphone</option>"
-            );
-
-            this.#context?.setOutputDeviceOptions?.(
-                "<option value=\"\">Default speaker</option>"
-            );
-
-            this.#context?.setOutputDeviceDisabled?.(
-                true
-            );
-
-            this.#context?.setDeviceStatus?.(
-                "Your browser does not expose selectable audio devices.",
-                "error"
-            );
-
-            return;
-
-        }
-
-        const previousInput =
-            this.#context?.getInputDeviceId?.() || "";
-
-        const previousOutput =
-            this.#context?.getOutputDeviceId?.() ||
-            this.#selectedOutputDeviceId;
-
-        const devices =
-            await mediaDevices.enumerateDevices();
-
-        if (refreshGeneration !== this.#deviceRefreshGeneration) {
-
-            this.#recordAudioPathDiagnostic({
-
-                event:
-                    "device-enumeration-stale-result-skipped",
-
-                reason,
-
-                refreshGeneration,
-
-                activeRefreshGeneration:
-                    this.#deviceRefreshGeneration
-
-            });
-
-            return;
-
-        }
-
-        const inputs =
-            devices.filter(device => device.kind === "audioinput");
-
-        const outputs =
-            devices.filter(device => device.kind === "audiooutput");
-
-        this.#recordAudioPathDiagnostic({
-
-            event:
-                "device-enumeration",
-
-            reason,
-
-            selectedInputDeviceId:
-                previousInput || null,
-
-            selectedOutputDeviceId:
-                previousOutput || null,
-
-            audioInputCount:
-                inputs.length,
-
-            audioOutputCount:
-                outputs.length,
-
-            renderedInputOptionCount:
-                inputs.length + 1,
-
-            renderedOutputOptionCount:
-                outputs.length + 1,
-
-            refreshGeneration,
-
-            deviceLabelsAvailable:
-                devices.some(device => Boolean(device.label)),
-
-            devices:
-                devices.map(device => ({
-
-                    kind:
-                        device.kind || null,
-
-                    hasDeviceId:
-                        Boolean(device.deviceId),
-
-                    hasLabel:
-                        Boolean(device.label),
-
-                    label:
-                        device.label || null
-
-                }))
-
-        });
-
-        this.#context?.setInputDeviceOptions?.([
-
-            "<option value=\"\">Default microphone</option>",
-
-            ...inputs.map((device, index) =>
-                this.#context?.deviceOption?.(
-                    device,
-                    `Microphone ${index + 1}`
-                ) || ""
-            )
-
-        ].join(""));
-
-        this.#context?.setOutputDeviceOptions?.([
-
-            "<option value=\"\">Default speaker</option>",
-
-            ...outputs.map((device, index) =>
-                this.#context?.deviceOption?.(
-                    device,
-                    `Speaker ${index + 1}`
-                ) || ""
-            )
-
-        ].join(""));
-
-        this.#context?.restoreInputDevice?.(
-            previousInput
-        );
-
-        this.#context?.restoreOutputDevice?.(
-            previousOutput
-        );
-
-        const outputUnsupported =
-            typeof this.#context?.HTMLMediaElement === "undefined" ||
-            !("setSinkId" in this.#context.HTMLMediaElement.prototype);
-
-        this.#context?.setOutputDeviceDisabled?.(
-            outputUnsupported
-        );
-
-        const labelsAvailable =
-            devices.some(device => Boolean(device.label));
-
-        this.#context?.setDevicePermissionRequired?.(
-            !labelsAvailable
-        );
-
-        this.#context?.setDeviceStatus?.(
-            !labelsAvailable ?
-                "Microphone permission is required to list named devices." :
-                outputUnsupported ?
-                    "Speaker selection is not supported by this browser." :
-                    "",
-            !labelsAvailable || outputUnsupported ? "working" : ""
-        );
+        return this.#devices.populate(reason);
 
     }
 
@@ -555,41 +398,7 @@ export class VoiceMediaService {
      */
     async requestDevicePermissionAndPopulate() {
 
-        const mediaDevices =
-            this.#context?.navigator?.mediaDevices;
-
-        if (!mediaDevices?.getUserMedia) {
-
-            return this.populateDevices("permission-unavailable");
-
-        }
-
-        let permissionStream = null;
-
-        try {
-
-            if (!this.#voiceStream) {
-
-                permissionStream =
-                    await mediaDevices.getUserMedia({
-
-                        audio:
-                            true,
-
-                        video:
-                            false
-
-                    });
-
-            }
-
-            await this.populateDevices("after-explicit-permission");
-
-        } finally {
-
-            permissionStream?.getTracks?.().forEach(track => track.stop());
-
-        }
+        return this.#devices.requestPermissionAndPopulate();
 
     }
 
@@ -604,8 +413,7 @@ export class VoiceMediaService {
 
         try {
 
-            this.#selectedOutputDeviceId =
-                this.#context?.getOutputDeviceId?.() || "";
+            this.#devices.captureSelectedOutputDevice();
 
             const mediaDevices =
                 this.#context?.navigator?.mediaDevices;
@@ -619,7 +427,7 @@ export class VoiceMediaService {
                     this.#context?.getInputDeviceId?.() || null,
 
                 selectedOutputDeviceId:
-                    this.#selectedOutputDeviceId || null
+                    this.#devices.selectedOutputDeviceId || null
 
             });
 
@@ -627,7 +435,7 @@ export class VoiceMediaService {
                 await mediaDevices.getUserMedia({
 
                     audio:
-                        this.#selectedAudioConstraints(),
+                        this.#devices.selectedInputConstraints(),
 
                     video:
                         false
@@ -934,21 +742,7 @@ export class VoiceMediaService {
      */
     async applyAudioOutput(audio) {
 
-        if (!audio || typeof audio.setSinkId !== "function") return;
-
-        try {
-
-            await audio.setSinkId(
-                this.#selectedOutputDeviceId || ""
-            );
-
-        } catch (error) {
-
-            this.#warn(
-                error
-            );
-
-        }
+        return this.#devices.applyAudioOutput(audio);
 
     }
 
@@ -1580,6 +1374,9 @@ export class VoiceMediaService {
                 Array.from(this.#transportProbeTimers.values())
                     .reduce((count, timers) => count + timers.size, 0),
 
+            devices:
+                this.#devices.getDiagnostics(),
+
             polling:
                 this.#pollTimer !== null
 
@@ -1639,85 +1436,6 @@ export class VoiceMediaService {
     #webcamStream() {
 
         return this.#context?.getWebcamStream?.() || null;
-
-    }
-
-    #bindDeviceChangeListener() {
-
-        const mediaDevices =
-            this.#context?.navigator?.mediaDevices;
-
-        if (
-            this.#deviceChangeListener ||
-            !mediaDevices ||
-            typeof mediaDevices.addEventListener !== "function"
-        ) {
-
-            return;
-
-        }
-
-        this.#deviceChangeListener =
-            () => {
-
-                this.#recordAudioPathDiagnostic({
-
-                    event:
-                        "devicechange"
-
-                });
-
-                this.populateDevices("devicechange").catch(error =>
-                    this.#warn(error)
-                );
-
-            };
-
-        mediaDevices.addEventListener(
-            "devicechange",
-            this.#deviceChangeListener
-        );
-
-    }
-
-    #unbindDeviceChangeListener() {
-
-        const mediaDevices =
-            this.#context?.navigator?.mediaDevices;
-
-        if (
-            this.#deviceChangeListener &&
-            mediaDevices &&
-            typeof mediaDevices.removeEventListener === "function"
-        ) {
-
-            mediaDevices.removeEventListener(
-                "devicechange",
-                this.#deviceChangeListener
-            );
-
-        }
-
-        this.#deviceChangeListener = null;
-
-    }
-
-    #selectedAudioConstraints() {
-
-        const deviceId =
-            this.#context?.getInputDeviceId?.() || "";
-
-        if (!deviceId) return true;
-
-        return {
-
-            deviceId:
-                {
-                    exact:
-                        deviceId
-                }
-
-        };
 
     }
 
