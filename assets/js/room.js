@@ -54,6 +54,15 @@ function cacheBust(url) {
   return `${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`;
 }
 
+function innerTranquillityPlayerCapability() {
+  const body = document.body;
+  return Object.freeze({
+    relevant: body?.dataset.innerTranquillityPlayerRelevant === 'true',
+    available: body?.dataset.innerTranquillityPlayerAvailable === 'true',
+    reason: body?.dataset.innerTranquillityPlayerReason || 'capability-unavailable',
+  });
+}
+
 let cfg = null;
 const vpMusicYoutube = document.getElementById('vp-music-youtube');
 let participants = new Map();
@@ -5159,6 +5168,7 @@ async function bootRoom() {
   const roomId = document.body.dataset.roomId;
   cfg = await fetch(appUrl(`/api/room_config.php?id=${encodeURIComponent(roomId)}`)).then(r => r.json());
   if (cfg.error) throw new Error(cfg.error);
+  cfg.innerTranquillityPlayer = innerTranquillityPlayerCapability();
   importedRoomRuntime?.layout?.render(cfg.importLayout);
   importedRoomRuntime?.music?.renderPlayer(cfg.musicPlaylist);
   chatPoll().seed({

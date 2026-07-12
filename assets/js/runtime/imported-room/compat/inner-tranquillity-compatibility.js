@@ -51,6 +51,10 @@ export class InnerTranquillityCompatibility {
 
     #lastPlayerCount = 0;
 
+    #lastCapabilityAvailable = false;
+
+    #lastUnavailableReason = "";
+
     #playerPlaybackStates = new WeakMap();
 
     #playerElements = new Set();
@@ -89,6 +93,8 @@ export class InnerTranquillityCompatibility {
         this.#context = null;
         this.#lastApplied = false;
         this.#lastPlayerCount = 0;
+        this.#lastCapabilityAvailable = false;
+        this.#lastUnavailableReason = "";
 
     }
 
@@ -122,6 +128,15 @@ export class InnerTranquillityCompatibility {
             false;
 
         if (!this.matches(options)) return false;
+
+        this.#lastCapabilityAvailable =
+            Boolean(options.privatePlayerAvailable);
+        this.#lastUnavailableReason =
+            this.#lastCapabilityAvailable
+                ? ""
+                : String(options.privatePlayerUnavailableReason || "capability-unavailable");
+
+        if (!this.#lastCapabilityAvailable) return false;
 
         const windowRef =
             this.#window();
@@ -209,6 +224,12 @@ export class InnerTranquillityCompatibility {
 
             playerCount:
                 this.#lastPlayerCount,
+
+            capabilityAvailable:
+                this.#lastCapabilityAvailable,
+
+            unavailableReason:
+                this.#lastUnavailableReason,
 
             playbackDiagnostics:
                 this.#playbackDiagnostics.slice()

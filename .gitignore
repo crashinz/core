@@ -54,16 +54,19 @@ framework/**/*.md
 !framework/README.md
 framework/templates/
 
-# Local engineering verification only.
-# Keep this directory on the development machine, but do not publish it.
+
+
+# Local engineering verification and private compatibility dependencies.
+# Keep these directories on the development machine, but do not publish them.
+/framework/build-prompts/
 /framework/verification/
+/player/
 
 # Root Markdown files are private/internal by default.
 # README.md remains public. AI_BOOTSTRAP.md therefore
 # stays local and ignored.
 /*.md
 !README.md
-/player/
 
 # --------------------------------------------------
 # Node.js

@@ -208,9 +208,13 @@ export class ImportedRoomLayoutRenderer {
 
         this.syncBackgroundLayer();
 
+        const playerCapability =
+            this.#privatePlayerCapability();
+
         const chunks =
             this.#renderSections(
-                layout.sections
+                layout.sections,
+                playerCapability
             );
 
         this.#music?.prepareInlinePlayerRemoval(
@@ -221,13 +225,15 @@ export class ImportedRoomLayoutRenderer {
             chunks.join("");
 
         this.#lastInnerTranquillity =
-            chunks.join("").toLowerCase().includes(
-                "inner-tranquillity"
-            );
+            playerCapability.relevant;
 
         this.#music?.applyInlinePlayerCompatibility({
             innerTranquillity:
                 this.#lastInnerTranquillity,
+            privatePlayerAvailable:
+                playerCapability.available,
+            privatePlayerUnavailableReason:
+                playerCapability.reason,
             stage:
                 stage,
             backgroundTile:
@@ -569,7 +575,7 @@ export class ImportedRoomLayoutRenderer {
 
     }
 
-    #renderSections(sections) {
+    #renderSections(sections, playerCapability) {
 
         const chunks =
             [];
@@ -599,6 +605,7 @@ export class ImportedRoomLayoutRenderer {
         sections.forEach(section => {
 
             if (
+                playerCapability.relevant &&
                 firstTrack &&
                 !roomTrackInserted &&
                 section?.type === "text" &&
@@ -673,6 +680,19 @@ export class ImportedRoomLayoutRenderer {
         flushAvatarRow();
 
         return chunks;
+
+    }
+
+    #privatePlayerCapability() {
+
+        const capability =
+            this.#config()?.innerTranquillityPlayer || {};
+
+        return {
+            relevant: Boolean(capability.relevant),
+            available: Boolean(capability.available),
+            reason: String(capability.reason || "capability-unavailable")
+        };
 
     }
 

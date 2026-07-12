@@ -1,0 +1,13 @@
+.git/
+.local/
+.secrets/
+framework/verification/
+player/
+includes/config.php
+db/*.sqlite
+db/*.sqlite-shm
+db/*.sqlite-wal
+*.log
+*.zip
+__pycache__/
+*.pyc

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/base.php';
+require_once __DIR__ . '/includes/inner_tranquillity_player_capability.php';
 $user = require_user();
 $pdo = db();
 $communityEjection = active_community_ejection($pdo, (int)$user['id']);
@@ -55,6 +56,7 @@ emit_event($pdo, (int)$session['id'], 'participant_join', [
 $lastEventId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ' . (int)$session['id'])->fetchColumn();
 $linkIconCatalog = link_icon_catalog($pdo);
 $csrfToken = csrf_token();
+$innerTranquillityPlayer = inner_tranquillity_player_capability($room);
 $roomAssetVersion = static function (string $path): string {
     $absolutePath = __DIR__ . $path;
     $version = is_file($absolutePath) ? (string)filemtime($absolutePath) : (string)time();
@@ -74,9 +76,11 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e($room['name']) ?> - ChatSpace CE</title>
   <link rel="stylesheet" href="<?= e($roomAssetVersion('/assets/css/styles.css')) ?>">
-  <link rel="stylesheet" href="/player/Generic.css"> 
+  <?php if ($innerTranquillityPlayer['available']): ?>
+  <link rel="stylesheet" href="<?= e($innerTranquillityPlayer['assets']['css']) ?>">
+  <?php endif; ?>
 </head>
-<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>">
+<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>">
 <div class="room-layout">
   <div class="version-banner" id="version-banner" hidden>
     <span id="version-banner-text">A new ChatSpace version is available.</span>
@@ -620,9 +624,11 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     <div class="friend-list" id="friend-results" style="margin-top:12px;"></div>
   </div>
 </div>
-<script src="/player/jquery-3.2.1.min.js"></script>
+<?php if ($innerTranquillityPlayer['available']): ?>
+<script src="<?= e($innerTranquillityPlayer['assets']['jquery']) ?>"></script>
+<script src="<?= e($innerTranquillityPlayer['assets']['player']) ?>"></script>
+<?php endif; ?>
 <script src="https://www.youtube.com/iframe_api"></script>
-<script src="/player/player.js"></script>
 
 <script src="<?= e($roomAssetVersion('/assets/js/avatar-processing.js')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/room.js')) ?>"></script>

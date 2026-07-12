@@ -12,3 +12,9 @@ const CHATSPACE_SQLITE_PATH = __DIR__ . '/../db/chatspace-00000000-0000-4000-800
 // const CHATSPACE_DB_NAME = 'chatspace_ce';
 // const CHATSPACE_DB_USER = 'chatspace';
 // const CHATSPACE_DB_PASS = '';
+
+// Optional private Inner-Tranquillity imported-room player capability.
+// Shared/public installations should leave this disabled.
+const CHATSPACE_INNER_TRANQUILLITY_PLAYER_ENABLED = false;
+const CHATSPACE_INNER_TRANQUILLITY_PLAYER_ASSET_BASE = '/player';
+const CHATSPACE_INNER_TRANQUILLITY_PLAYER_RUNTIME_HOSTS = [];

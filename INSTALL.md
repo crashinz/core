@@ -93,4 +93,9 @@ location ^~ /assets/uploads/ {
 
 The release zip is flat by design. Extract it directly into the target folder.
 
+`.distignore` is the authoritative release-packaging exclusion record. Local
+verification infrastructure, private player assets, generated configuration,
+databases, credentials, logs, caches, Git metadata, and existing archives must
+not be included in a shared release package.
+
 macOS metadata such as `.DS_Store`, `__MACOSX`, `.AppleDouble`, and `._*` files are excluded from release packages.
