@@ -159,6 +159,10 @@ function mysqlize_schema(string $schema): string {
         'room_name' => 'VARCHAR(191)',
         'webcam_path' => 'VARCHAR(512)',
         'join_token' => 'VARCHAR(96)',
+        'sender_epoch' => 'VARCHAR(96)',
+        'recipient_epoch' => 'VARCHAR(96)',
+        'client_epoch' => 'VARCHAR(96)',
+        'expires_at' => 'VARCHAR(32)',
         'message_type' => 'VARCHAR(32)',
         'mime_type' => 'VARCHAR(128)',
         'original_name' => 'VARCHAR(255)',
@@ -393,9 +397,20 @@ function migrate(PDO $pdo): void {
             media TEXT NOT NULL DEFAULT 'voice',
             from_participant_id INTEGER NOT NULL,
             to_participant_id INTEGER NOT NULL,
+            sender_epoch TEXT DEFAULT NULL,
+            recipient_epoch TEXT DEFAULT NULL,
             type TEXT NOT NULL,
             data TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT DEFAULT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS media_signal_clients (
+            participant_id INTEGER PRIMARY KEY,
+            session_id INTEGER NOT NULL,
+            client_epoch TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS link_icons (
@@ -668,6 +683,28 @@ function migrate(PDO $pdo): void {
                 $pdo->exec("ALTER TABLE voice_sessions ADD COLUMN {$voiceCol} INTEGER NOT NULL DEFAULT 0");
             }
         }
+        $mysqlMediaSignalCols = $pdo->query('SHOW COLUMNS FROM media_signals')->fetchAll();
+        $mysqlMediaSignalColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $mysqlMediaSignalCols);
+        foreach ([
+            'sender_epoch' => 'VARCHAR(96) DEFAULT NULL',
+            'recipient_epoch' => 'VARCHAR(96) DEFAULT NULL',
+            'expires_at' => 'VARCHAR(32) DEFAULT NULL',
+        ] as $column => $definition) {
+            if (!in_array($column, $mysqlMediaSignalColNames, true)) {
+                $pdo->exec("ALTER TABLE media_signals ADD COLUMN {$column} {$definition}");
+            }
+        }
+        foreach ([
+            'CREATE INDEX idx_media_signals_delivery ON media_signals(session_id, to_participant_id, recipient_epoch, id)',
+            'CREATE INDEX idx_media_signals_expiry ON media_signals(expires_at)',
+            'CREATE INDEX idx_media_signal_clients_session ON media_signal_clients(session_id, client_epoch)',
+        ] as $indexSql) {
+            try {
+                $pdo->exec($indexSql);
+            } catch (Throwable $e) {
+                // Existing installs already have this index.
+            }
+        }
         foreach (['messages', 'community_messages'] as $previewTable) {
             $previewCols = $pdo->query('SHOW COLUMNS FROM ' . $previewTable)->fetchAll();
             $previewColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $previewCols);
@@ -766,6 +803,16 @@ function migrate(PDO $pdo): void {
             $pdo->exec("ALTER TABLE voice_sessions ADD COLUMN {$voiceCol} INTEGER NOT NULL DEFAULT 0");
         }
     }
+    $mediaSignalCols = $pdo->query('PRAGMA table_info(media_signals)')->fetchAll();
+    $mediaSignalColNames = array_map(fn(array $col): string => (string)$col['name'], $mediaSignalCols);
+    foreach (['sender_epoch', 'recipient_epoch', 'expires_at'] as $mediaSignalCol) {
+        if (!in_array($mediaSignalCol, $mediaSignalColNames, true)) {
+            $pdo->exec("ALTER TABLE media_signals ADD COLUMN {$mediaSignalCol} TEXT DEFAULT NULL");
+        }
+    }
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_media_signals_delivery ON media_signals(session_id, to_participant_id, recipient_epoch, id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_media_signals_expiry ON media_signals(expires_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_media_signal_clients_session ON media_signal_clients(session_id, client_epoch)');
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS room_effects (
             session_id INTEGER PRIMARY KEY,

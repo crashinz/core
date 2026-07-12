@@ -27,6 +27,19 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+.build-000042-probe-marker {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2147483647;
+  padding: 4px 6px;
+  border: 1px solid rgba(0,0,0,.24);
+  border-radius: 4px;
+  background: rgba(255,255,255,.92);
+  color: #111;
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  pointer-events: none;
+}
 html, body { height: 100%; margin: 0; }
 body { font-family: Outfit, system-ui, sans-serif; background: var(--bg); color: var(--text); }
 a { color: inherit; }
@@ -963,11 +976,49 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
     min-height: var(--play-icon-height) !important;
 }
 
-.vp-page-player .mejs__pause > button {
+.vp-import-player .mejs__time-rail {
+    height: 30px !important;
+    min-height: 30px !important;
+    padding-top: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.vp-import-player .mejs__time-total {
+    margin: 0 !important;
+    position: relative !important;
+}
+
+.vp-import-player .mejs__time-buffering,
+.vp-import-player .mejs__time-loaded,
+.vp-import-player .mejs__time-current,
+.vp-import-player .mejs__time-hovered,
+.vp-import-player .mejs__time-handle {
+    top: 0 !important;
+}
+
+.vp-import-player .vp-page-player .mejs__pause > button {
     width: var(--pause-icon-width) !important;
     height: var(--pause-icon-height) !important;
     min-width: var(--pause-icon-width) !important;
     min-height: var(--pause-icon-height) !important;
+    display: flex !important;
+    align-items: stretch !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    overflow: visible !important;
+    background: none !important;
+    transform: none !important;
+}
+
+.vp-import-player .vp-page-player .mejs__pause > button::before,
+.vp-import-player .vp-page-player .mejs__pause > button::after {
+    content: "";
+    display: block;
+    width: 4px;
+    height: var(--pause-icon-height);
+    flex: 0 0 4px;
+    background: var(--audio-player-icon-color);
 }
 .vp-import-player {
     margin: 12px 0;

@@ -213,6 +213,10 @@ export class ImportedRoomLayoutRenderer {
                 layout.sections
             );
 
+        this.#music?.prepareInlinePlayerRemoval(
+            "imported-layout-render"
+        );
+
         layoutEl.innerHTML =
             chunks.join("");
 
@@ -255,6 +259,9 @@ export class ImportedRoomLayoutRenderer {
 
         if (layoutEl) {
 
+            this.#music?.prepareInlinePlayerRemoval(
+                "imported-layout-clear"
+            );
             layoutEl.hidden = true;
             layoutEl.innerHTML = "";
             layoutEl.classList.remove(

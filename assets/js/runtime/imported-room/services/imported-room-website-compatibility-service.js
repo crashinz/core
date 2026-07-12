@@ -156,10 +156,15 @@ export class ImportedRoomWebsiteCompatibilityService {
 
         if (track.type === "audio") {
 
+            const sourceType =
+                this.#audioSourceType(
+                    track
+                );
+
             return `
       <div class="vp-import-player">
         <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${track.url}" type="audio/mpeg">
+          <source src="${this.#esc(track.url)}" type="${this.#esc(sourceType)}">
         </audio>
       </div>
     `;
@@ -171,7 +176,7 @@ export class ImportedRoomWebsiteCompatibilityService {
             return `
       <div class="vp-import-player">
         <audio class="vp-page-player" preload="none" controls loop>
-          <source src="${track.url}" type="video/x-youtube">
+          <source src="${this.#esc(track.url)}" type="video/x-youtube">
         </audio>
       </div>
     `;
@@ -222,6 +227,19 @@ export class ImportedRoomWebsiteCompatibilityService {
 
     }
 
+    /**
+     * Prepares active website players for intentional layout removal.
+     *
+     * @param {string} reason
+     */
+    prepareForRemoval(reason = "imported-layout-removal") {
+
+        this.#compatibilities.forEach(compatibility => {
+            compatibility.prepareForRemoval?.(reason);
+        });
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -256,6 +274,42 @@ export class ImportedRoomWebsiteCompatibilityService {
                 )
 
         });
+
+    }
+
+    //--------------------------------------------------
+    // Private Methods
+    //--------------------------------------------------
+
+    #audioSourceType(track) {
+
+        const explicitType =
+            String(track?.mime || track?.mime_type || track?.type_hint || "")
+                .trim();
+
+        if (explicitType.startsWith("audio/")) {
+
+            return explicitType;
+
+        }
+
+        const url =
+            String(track?.url || "").split("?")[0].toLowerCase();
+
+        if (url.endsWith(".wav")) return "audio/wav";
+        if (url.endsWith(".ogg") || url.endsWith(".oga")) return "audio/ogg";
+        if (url.endsWith(".m4a")) return "audio/mp4";
+        if (url.endsWith(".aac")) return "audio/aac";
+
+        return "audio/mpeg";
+
+    }
+
+    #esc(value) {
+
+        return this.#context?.esc?.(
+            value
+        ) || String(value ?? "");
 
     }
 

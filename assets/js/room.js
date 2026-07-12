@@ -1,7 +1,41 @@
 'use strict';
 
+const BUILD_000042_PROBE_VERSION = 'build-000042-late-join-webcam-readiness-v6';
 const APP_BASE = document.body?.dataset.appBase || '';
 const CSRF_TOKEN = document.body?.dataset.csrf || '';
+
+window.__BUILD_000042_ROOM_JS_VERSION = BUILD_000042_PROBE_VERSION;
+
+function installBuild000042Probe() {
+  const roomId = document.body?.dataset.roomId || '';
+  if (!roomId.startsWith('build-000042')) return;
+  const existing = window.__build000042VoiceProbe;
+  const probe = existing && typeof existing === 'object' ? existing : {};
+  probe.marker = 'Build000042VoiceProbe';
+  probe.version = BUILD_000042_PROBE_VERSION;
+  probe.installedAt = probe.installedAt || Date.now();
+  probe.roomId = roomId;
+  probe.scriptFingerprints = {
+    roomJs: BUILD_000042_PROBE_VERSION,
+    voiceMediaService: window.__BUILD_000042_VOICE_MEDIA_SERVICE_VERSION || null,
+  };
+  probe.signaling = Array.isArray(probe.signaling) ? probe.signaling : [];
+  probe.videoLifecycle = Array.isArray(probe.videoLifecycle) ? probe.videoLifecycle : [];
+  probe.videoAssignments = Array.isArray(probe.videoAssignments) ? probe.videoAssignments : [];
+  probe.audioAssignments = Array.isArray(probe.audioAssignments) ? probe.audioAssignments : [];
+  probe.playResults = Array.isArray(probe.playResults) ? probe.playResults : [];
+  window.__build000042VoiceProbe = probe;
+  document.body.dataset.build000042Probe = BUILD_000042_PROBE_VERSION;
+  if (!document.getElementById('build-000042-probe-marker')) {
+    const marker = document.createElement('div');
+    marker.id = 'build-000042-probe-marker';
+    marker.className = 'build-000042-probe-marker';
+    marker.textContent = `Build 000042 probe ${BUILD_000042_PROBE_VERSION}`;
+    document.body.appendChild(marker);
+  }
+}
+
+installBuild000042Probe();
 
 function appUrl(path) {
   if (!path) return APP_BASE || '/';
@@ -23,6 +57,7 @@ function cacheBust(url) {
 let cfg = null;
 const vpMusicYoutube = document.getElementById('vp-music-youtube');
 let participants = new Map();
+let presenceRefreshCycle = 0;
 let chatRuntimeCore = null;
 let chatRuntime = null;
 let roomRuntime = null;
@@ -91,6 +126,7 @@ const voiceDeviceForm = document.getElementById('voice-device-form');
 const voiceInputDevice = document.getElementById('voice-input-device');
 const voiceOutputDevice = document.getElementById('voice-output-device');
 const voiceDeviceStatus = document.getElementById('voice-device-status');
+const voiceDeviceRefresh = document.getElementById('voice-device-refresh');
 const voiceNoteModal = document.getElementById('voice-note-modal');
 const appVersionEl = document.getElementById('app-version');
 const latencyMonitorEl = document.getElementById('latency-monitor');
@@ -172,6 +208,11 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
   ]);
+
+  if (window.__build000042VoiceProbe?.scriptFingerprints) {
+    window.__build000042VoiceProbe.scriptFingerprints.voiceMediaService =
+      window.__BUILD_000042_VOICE_MEDIA_SERVICE_VERSION || null;
+  }
 
   chatRuntimeCore = new Core();
   chatRuntime = new ChatRuntime();
@@ -555,7 +596,6 @@ function configureRoomEventRouter() {
       renderParticipantWhenReady(Object.assign({ online: true }, payload), { animateJoin: !hadStageAvatar }).catch(() => {
         renderParticipant(Object.assign({ online: true }, payload), { animateJoin: !hadStageAvatar });
       });
-      if (webcamStream && Number(payload.id) !== Number(cfg.myParticipantId)) connectMediaPeer(payload.id);
       if (!alreadyKnown && payload.id !== cfg.myParticipantId) addSystemMessage(`${payload.display_name} joined the room.`);
     },
     onParticipantLeave(payload) {
@@ -582,20 +622,38 @@ function configureRoomEventRouter() {
       positionAvatar(person);
     },
     onParticipantWebcam(payload) {
-      applyWebcamState(payload.participant_id, Boolean(payload.webcam_enabled || payload.webcam_path), payload.webcam_path || null);
+      applyWebcamState(payload.participant_id, Boolean(payload.webcam_enabled || payload.webcam_path), payload.webcam_path || null, 'room-event-webcam');
     },
     onParticipantAvatar(payload) {
       const person = participants.get(payload.participant_id);
       if (!person) return;
+      const localCaptureActive = Number(payload.participant_id) === Number(cfg.myParticipantId)
+        && Boolean(webcamStream?.getVideoTracks?.().some(track => track.readyState === 'live'));
+      const nextWebcamEnabled = Boolean(payload.webcam_enabled || payload.webcam_path || localCaptureActive);
+      recordVoiceLifecycleDiagnostic({
+        event: 'webcam-state-change',
+        source: 'room-event-avatar',
+        participantId: Number(payload.participant_id),
+        previous: {
+          webcam_enabled: Boolean(person.webcam_enabled),
+          webcam_path: person.webcam_path || null,
+        },
+        next: {
+          webcam_enabled: nextWebcamEnabled,
+          webcam_path: payload.webcam_path || null,
+        },
+        willDetach: !nextWebcamEnabled,
+        localCaptureAuthoritative: localCaptureActive,
+      });
 
       participants.update(payload.participant_id, {
         avatar_path: payload.avatar_path,
         avatar_url: payload.avatar_url,
         avatar_version: Date.now(),
         webcam_path: payload.webcam_path || null,
-        webcam_enabled: Boolean(payload.webcam_enabled || payload.webcam_path),
+        webcam_enabled: nextWebcamEnabled,
       });
-      if (!person.webcam_enabled) detachParticipantVideo(person.id);
+      if (!nextWebcamEnabled) detachParticipantVideo(person.id, true, 'participant-avatar-event');
       renderParticipant(person);
     },
     onParticipantAura(payload) {
@@ -614,6 +672,19 @@ function configureRoomEventRouter() {
     onPresenceLeave(payload) {
       const person = participants.get(payload.participant_id);
       if (!person) return;
+      recordVoiceLifecycleDiagnostic({
+        event: 'webcam-state-change',
+        source: 'presence-leave',
+        participantId: Number(payload.participant_id),
+        previous: {
+          webcam_enabled: Boolean(person.webcam_enabled),
+          webcam_path: person.webcam_path || null,
+        },
+        next: {
+          webcam_enabled: Boolean(person.webcam_enabled),
+          webcam_path: null,
+        },
+      });
 
       participants.update(payload.participant_id, {
         online: false,
@@ -722,6 +793,10 @@ function configureVoiceRuntime() {
     getOutputDeviceId() {
       return voiceOutputDevice?.value || '';
     },
+    getVoiceSourceHint() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('build000042_audio_source') || '';
+    },
     setInputDeviceOptions(html) {
       if (voiceInputDevice) voiceInputDevice.innerHTML = html;
     },
@@ -743,9 +818,17 @@ function configureVoiceRuntime() {
     },
     deviceOption,
     setDeviceStatus: setVoiceDeviceStatus,
+    setDevicePermissionRequired(required) {
+      if (voiceDeviceRefresh) {
+        voiceDeviceRefresh.textContent = required ? 'Allow microphone & refresh' : 'Refresh devices';
+      }
+    },
     closeDeviceModal: closeVoiceDeviceModal,
     getAudioElements() {
       return Array.from(document.querySelectorAll('audio[id^="voice-audio-"]'));
+    },
+    getAudioElement(participantId) {
+      return document.getElementById(`voice-audio-${participantId}`);
     },
     getOrCreateAudioElement(participantId) {
       let audio = document.getElementById(`voice-audio-${participantId}`);
@@ -766,9 +849,28 @@ function configureVoiceRuntime() {
     fetchMediaSignals(query) {
       return fetch(appUrl('/api/media_signal.php?' + query)).then(r => r.json());
     },
+    recordVoiceSignalDiagnostic(entry) {
+      window.__build000042VoiceProbe?.signaling?.push({
+        name: 'runtimeSignalDiagnostic',
+        at: Date.now(),
+        ...entry,
+      });
+    },
+    recordVoiceLifecycleDiagnostic: recordVoiceLifecycleDiagnostic,
     warn(error) {
       console.warn(error);
     },
+  });
+}
+
+function recordVoiceLifecycleDiagnostic(entry = {}) {
+  const probe = window.__build000042VoiceProbe;
+  if (!probe) return;
+  if (!Array.isArray(probe.videoLifecycle)) probe.videoLifecycle = [];
+  probe.videoLifecycle.push({
+    at: performance.timeOrigin + performance.now(),
+    localParticipantId: cfg?.myParticipantId || null,
+    ...entry,
   });
 }
 
@@ -861,6 +963,9 @@ function configureImportedRoomRuntime() {
     mediaUrl,
     isHttpUrl,
     getConfig: () => cfg,
+    reportPlaybackError(error, detail) {
+      console.error('Imported website player playback failed.', detail, error);
+    },
     getLayoutElement() {
       return vpRoomLayout;
     },
@@ -1157,10 +1262,39 @@ function setAvatarImageSource(img, nextSrc, flip = false) {
   });
 }
 
-function attachParticipantVideo(participantId, stream, own = false) {
+function attachParticipantVideo(participantId, stream, own = false, presentationIdentity = {}) {
   const person = participants.get(Number(participantId));
+  const previousPreviewTrackId = person?.webcamVideoEl?.srcObject?.getVideoTracks?.()[0]?.id || null;
+  recordVoiceLifecycleDiagnostic({
+    event: 'attachParticipantVideo-called',
+    participantId: Number(participantId),
+    own: Boolean(own),
+    hasPerson: Boolean(person),
+    hasStream: Boolean(stream),
+    streamTrackCount: stream?.getTracks?.().length || 0,
+    source: presentationIdentity.source || (own ? 'local-capture' : 'unknown'),
+    peerInstanceId: presentationIdentity.peerInstanceId || null,
+    generation: presentationIdentity.generation || null,
+    receiverIdentity: presentationIdentity.receiverIdentity || null,
+    requestedStreamIdentity: presentationIdentity.streamIdentity || null,
+    videoTrackState: stream?.getVideoTracks?.().map(track => ({
+      id: track.id,
+      readyState: track.readyState,
+      enabled: track.enabled,
+      muted: track.muted,
+    })) || [],
+  });
   if (!person || !stream) {
-    if (stream) pendingRemoteVideoStreams.set(Number(participantId), stream);
+    if (stream) pendingRemoteVideoStreams.set(Number(participantId), {
+      stream,
+      own,
+      presentationIdentity,
+    });
+    recordVoiceLifecycleDiagnostic({
+      event: 'attachParticipantVideo-pending',
+      participantId: Number(participantId),
+      reason: !person ? 'missing-participant' : 'missing-stream',
+    });
     return;
   }
   pendingRemoteVideoStreams.delete(Number(participantId));
@@ -1168,12 +1302,51 @@ function attachParticipantVideo(participantId, stream, own = false) {
     stage: roomStage,
     document,
     own,
+    source: presentationIdentity.source || (own ? 'local-capture' : 'unknown'),
+    presentationIdentity,
+    onWebcamPresentationDiagnostic: recordVoiceLifecycleDiagnostic,
+    onWebcamPresentationError(error, detail) {
+      console.error('Webcam playback failed.', detail, error);
+    },
     addContextListeners: addAvatarContextListeners,
     makeDraggable,
   });
   participants.update(participantId, {
     webcam_enabled: true,
   });
+  recordVoiceLifecycleDiagnostic({
+    event: 'webcam-state-change',
+    source: 'attachParticipantVideo',
+    participantId: Number(participantId),
+    previous: {
+      webcam_enabled: Boolean(person.webcam_enabled),
+      webcam_path: person.webcam_path || null,
+    },
+    next: {
+      webcam_enabled: true,
+      webcam_path: person.webcam_path || null,
+    },
+  });
+  recordVoiceLifecycleDiagnostic({
+    event: 'attachParticipantVideo-complete',
+    participantId: Number(participantId),
+    hasVideoElement: Boolean(person.webcamVideoEl),
+    videoSrcObjectTrackCount: person.webcamVideoEl?.srcObject?.getTracks?.().length || 0,
+  });
+  if (own) {
+    const localTrackId = stream.getVideoTracks?.()[0]?.id || null;
+    recordVoiceLifecycleDiagnostic({
+      event: previousPreviewTrackId && previousPreviewTrackId !== localTrackId
+        ? 'local-preview-replaced'
+        : 'local-preview-attached',
+      participantId: Number(participantId),
+      previousTrackId: previousPreviewTrackId,
+      localPreviewTrackId: localTrackId,
+      muted: Boolean(person.webcamVideoEl?.muted),
+      autoplay: Boolean(person.webcamVideoEl?.autoplay),
+      playsInline: Boolean(person.webcamVideoEl?.playsInline),
+    });
+  }
   positionAvatar(person);
   avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
     participant: person,
@@ -1181,34 +1354,130 @@ function attachParticipantVideo(participantId, stream, own = false) {
   });
 }
 
-function detachParticipantVideo(participantId, flip = true) {
+function detachParticipantVideo(participantId, flip = true, reason = 'explicit-detach') {
   const person = participants.get(Number(participantId));
+  const previousTrackId = person?.webcamVideoEl?.srcObject?.getVideoTracks?.()[0]?.id || null;
+  recordVoiceLifecycleDiagnostic({
+    event: 'detachParticipantVideo-called',
+    participantId: Number(participantId),
+    flip: Boolean(flip),
+    hasPerson: Boolean(person),
+    hadVideoElement: Boolean(person?.webcamVideoEl),
+    videoSrcObjectTrackCount: person?.webcamVideoEl?.srcObject?.getTracks?.().length || 0,
+  });
   pendingRemoteVideoStreams.delete(Number(participantId));
   if (!person) return;
+  const previous = {
+    webcam_enabled: Boolean(person.webcam_enabled),
+    webcam_path: person.webcam_path || null,
+  };
   participants.update(participantId, {
     webcam_enabled: false,
     webcam_path: null,
   });
+  recordVoiceLifecycleDiagnostic({
+    event: 'webcam-state-change',
+    source: 'detachParticipantVideo',
+    participantId: Number(participantId),
+    previous,
+    next: {
+      webcam_enabled: false,
+      webcam_path: null,
+    },
+  });
   avatarRuntime?.renderer?.detachWebcam(person, {
     flip,
     window,
+    reason,
+    onWebcamPresentationDiagnostic: recordVoiceLifecycleDiagnostic,
   });
+  recordVoiceLifecycleDiagnostic({
+    event: 'detachParticipantVideo-complete',
+    participantId: Number(participantId),
+    hasVideoElement: Boolean(person.webcamVideoEl),
+    reason,
+  });
+  if (Number(participantId) === Number(cfg?.myParticipantId)) {
+    recordVoiceLifecycleDiagnostic({
+      event: 'local-preview-removed',
+      participantId: Number(participantId),
+      previousTrackId,
+      reason,
+    });
+  }
   avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
     participant: person,
     reason: 'webcam-frame-change',
   });
 }
 
-function applyWebcamState(participantId, enabled, webcamPath = null) {
+function applyWebcamState(participantId, enabled, webcamPath = null, source = 'unknown') {
   const person = participants.get(Number(participantId));
   if (!person) return;
+  const localCaptureTrack = Number(participantId) === Number(cfg?.myParticipantId)
+    ? webcamStream?.getVideoTracks?.().find(track => track.readyState === 'live') || null
+    : null;
+  const previous = {
+    webcam_enabled: Boolean(person.webcam_enabled),
+    webcam_path: person.webcam_path || null,
+  };
   const next = Object.assign({}, person, {
     webcam_path: webcamPath || null,
-    webcam_enabled: Boolean(enabled || webcamPath),
+    webcam_enabled: Boolean(enabled || webcamPath || localCaptureTrack),
+  });
+  recordVoiceLifecycleDiagnostic({
+    event: 'webcam-state-change',
+    source,
+    participantId: Number(participantId),
+    previous,
+    next: {
+      webcam_enabled: Boolean(next.webcam_enabled),
+      webcam_path: next.webcam_path || null,
+    },
+    willDetach: !next.webcam_enabled,
+    localCaptureAuthoritative: Boolean(localCaptureTrack),
   });
   if (!next.webcam_path && isWebcamAssetUrl(next.avatar_url)) next.avatar_url = null;
   renderParticipant(next);
-  if (!next.webcam_enabled) detachParticipantVideo(participantId);
+  if (localCaptureTrack) {
+    syncLocalWebcamPreview(`participant-state:${source}`);
+  } else if (!next.webcam_enabled) {
+    detachParticipantVideo(participantId, true, `participant-state:${source}`);
+  }
+  if (Number(participantId) !== Number(cfg?.myParticipantId)) {
+    voiceRuntime?.media?.reconcileRemoteWebcamPresentation(
+      participantId,
+      Boolean(next.webcam_enabled),
+      `participant-state:${source}`
+    );
+    voiceRuntime?.media?.reconcileRemoteWebcamReadiness(
+      participantId,
+      Boolean(next.webcam_enabled),
+      `participant-state:${source}`
+    );
+  }
+}
+
+function syncLocalWebcamPreview(reason = 'local-capture-sync') {
+  const participantId = Number(cfg?.myParticipantId);
+  const person = participants.get(participantId);
+  const track = webcamStream?.getVideoTracks?.().find(item => item.readyState === 'live') || null;
+  if (!person || !track) return false;
+
+  participants.update(participantId, {
+    webcam_enabled: true,
+    webcam_path: null,
+  });
+  attachParticipantVideo(participantId, webcamStream, true);
+  recordVoiceLifecycleDiagnostic({
+    event: 'local-preview-reconciled',
+    participantId,
+    reason,
+    localPreviewTrackId: person.webcamVideoEl?.srcObject?.getVideoTracks?.()[0]?.id || null,
+    currentLocalTrackId: track.id,
+    previewUsesCurrentTrack: person.webcamVideoEl?.srcObject?.getVideoTracks?.()[0] === track,
+  });
+  return true;
 }
 
 function messageAvatarUrl(msg, participant = null) {
@@ -1515,6 +1784,18 @@ function renderParticipant(p, options = {}) {
   if (!merged.webcam_path && isWebcamAssetUrl(merged.avatar_url)) merged.avatar_url = null;
 
   const nowWebcam = Boolean(merged.webcam_path || merged.webcam_enabled);
+  if (wasWebcam !== nowWebcam) {
+    recordVoiceLifecycleDiagnostic({
+      event: 'renderParticipant-webcam-mode-change',
+      participantId: Number(merged.id),
+      previousWebcam: wasWebcam,
+      nextWebcam: nowWebcam,
+      webcam_enabled: Boolean(merged.webcam_enabled),
+      webcam_path: merged.webcam_path || null,
+      hadVideoElement: Boolean(existing.webcamVideoEl),
+      reason: nowWebcam ? 'render-to-webcam' : 'render-to-avatar',
+    });
+  }
   avatarRuntime?.renderer?.syncParticipant(merged, {
     stage: roomStage,
     document,
@@ -1542,7 +1823,27 @@ function renderParticipant(p, options = {}) {
   positionAvatar(merged);
   applyParticipantAura(merged);
   const pendingVideo = pendingRemoteVideoStreams.get(Number(merged.id));
-  if (pendingVideo) attachParticipantVideo(merged.id, pendingVideo, Number(merged.id) === Number(cfg.myParticipantId));
+  if (pendingVideo) {
+    const pendingStream = pendingVideo.stream || pendingVideo;
+    attachParticipantVideo(
+      merged.id,
+      pendingStream,
+      Boolean(pendingVideo.own ?? (Number(merged.id) === Number(cfg.myParticipantId))),
+      pendingVideo.presentationIdentity || { source: 'pending-participant-render' }
+    );
+  }
+  if (Number(merged.id) === Number(cfg.myParticipantId)) {
+    syncLocalWebcamPreview('participant-render');
+  }
+  if (wasWebcam && !nowWebcam) {
+    recordVoiceLifecycleDiagnostic({
+      event: 'avatar-fallback-detected',
+      participantId: Number(merged.id),
+      reason: 'renderParticipant-webcam-state-false',
+      hasVideoElement: Boolean(merged.webcamVideoEl),
+      videoSrcObjectTrackCount: merged.webcamVideoEl?.srcObject?.getTracks?.().length || 0,
+    });
+  }
   if (options.animateJoin) runAvatarPixelEffect(merged, 'in');
   renderPeople();
   renderLinkTabs();
@@ -2443,7 +2744,10 @@ function attachSmartBackgroundVideo(video) {
     if (!state.ready || state.seeking || state.destroyed || !video.isConnected) return;
     state.seeking = true;
     video.currentTime = state.start;
-    video.play?.().catch(() => {});
+    video.play?.().catch(error => {
+      if (error?.name === 'AbortError' && (state.destroyed || !video.isConnected)) return;
+      console.error('Room background video playback failed.', error);
+    });
     window.setTimeout(() => { state.seeking = false; }, 90);
   };
 
@@ -2471,7 +2775,10 @@ function attachSmartBackgroundVideo(video) {
       state.end = Number(edges.end || 0) || null;
       state.ready = true;
       if (state.start > 0 && video.currentTime < state.start) video.currentTime = state.start;
-      video.play?.().catch(() => {});
+      video.play?.().catch(error => {
+        if (error?.name === 'AbortError' && (state.destroyed || !video.isConnected)) return;
+        console.error('Room background video playback failed.', error);
+      });
     }).catch(() => {
       state.ready = true;
     });
@@ -2656,6 +2963,7 @@ function showTyping(participantId, active) {
 function clearAvatarSpeech(participantId, person) {
   const p = person || participants.get(participantId);
   if (!p?.speechEl) return;
+  if (p.speechAudio) p.speechAudio.__chatspacePlaybackInterruption = 'speech-clear';
   p.speechAudio?.pause?.();
   p.speechAudio = null;
   clearInterval(p.speechGifLoopTimer);
@@ -2716,7 +3024,9 @@ function showAvatarSpeech(participantId, msg) {
         }
       }, { once: true });
       p.speechAudio = audio;
-      audio.play().catch(() => {
+      audio.play().catch(error => {
+        const intentionalAbort = error?.name === 'AbortError' && Boolean(audio.__chatspacePlaybackInterruption);
+        if (!intentionalAbort) console.warn('Avatar speech audio playback failed.', error);
         if (participants.hasSpeechToken(participantId, token)) participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 4200));
       });
     } else if (isGif || isGesture) {
@@ -2748,6 +3058,7 @@ function showAvatarSpeech(participantId, msg) {
       gesture: isGesture,
       caption: gesture?.text || gesture?.name || msg.original_name || '',
       onclick: isGesture ? () => {
+        if (p.speechAudio) p.speechAudio.__chatspacePlaybackInterruption = 'speech-gesture-dismiss';
         p.speechAudio?.pause?.();
         p.speechAudio = null;
         clearAvatarSpeech(participantId, p);
@@ -2952,6 +3263,13 @@ document.getElementById('logout-link')?.addEventListener('click', async e => {
 
 async function refreshPresence() {
   if (roomExitInProgress) return;
+  presenceRefreshCycle += 1;
+  const cycleId = `presence-${presenceRefreshCycle}`;
+  recordVoiceLifecycleDiagnostic({
+    event: 'presence-refresh-start',
+    cycleId,
+    source: 'presence-refresh',
+  });
   try {
     const qs = new URLSearchParams({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, mode: 'presence' });
     const data = await fetch(appUrl('/api/heartbeat.php?' + qs)).then(r => r.json());
@@ -2961,11 +3279,25 @@ async function refreshPresence() {
         participants.update(p.id, {
           online: p.online,
         });
-        if (p.online) applyWebcamState(existing.id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null);
+        if (p.online) applyWebcamState(existing.id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null, 'heartbeat-presence');
         else if (existing.avatarEl) removeParticipant(existing.id, { keepRecord: true });
       }
     });
-  } catch {}
+    recordVoiceLifecycleDiagnostic({
+      event: 'presence-refresh-complete',
+      cycleId,
+      source: 'presence-refresh',
+      participantCount: (data.participants || []).length,
+    });
+  } catch (error) {
+    recordVoiceLifecycleDiagnostic({
+      event: 'presence-refresh-failed',
+      cycleId,
+      source: 'presence-refresh',
+      errorName: error?.name || null,
+      message: error?.message || String(error),
+    });
+  }
 }
 
 function openAvatarContextMenu(x, y, participant) {
@@ -3524,6 +3856,7 @@ gestureDeleteConfirm?.addEventListener('click', async () => {
 function toggleGestureAudio(gesture, btn) {
   if (!gesture.audio_path) return;
   if (activeGestureAudio?.btn === btn) {
+    activeGestureAudio.audio.__chatspacePlaybackInterruption = 'gesture-toggle-off';
     activeGestureAudio.audio.pause();
     activeGestureAudio = null;
     btn.classList.remove('playing');
@@ -3531,6 +3864,7 @@ function toggleGestureAudio(gesture, btn) {
     return;
   }
   if (activeGestureAudio) {
+    activeGestureAudio.audio.__chatspacePlaybackInterruption = 'gesture-replaced';
     activeGestureAudio.audio.pause();
     activeGestureAudio.btn.classList.remove('playing');
     activeGestureAudio.btn.style.setProperty('--progress', '0deg');
@@ -3549,7 +3883,12 @@ function toggleGestureAudio(gesture, btn) {
     btn.style.setProperty('--progress', '0deg');
     if (activeGestureAudio?.audio === audio) activeGestureAudio = null;
   }, { once: true });
-  audio.play().then(update).catch(err => alert(err.message || 'Could not play audio.'));
+  audio.play().then(update).catch(err => {
+    const intentionalAbort = err?.name === 'AbortError' && Boolean(audio.__chatspacePlaybackInterruption);
+    if (intentionalAbort) return;
+    console.error('Gesture audio playback failed.', err);
+    alert(err.message || 'Could not play audio.');
+  });
 }
 
 async function sendGesture(gesture) {
@@ -3925,40 +4264,185 @@ avatarFileInput.addEventListener('change', async () => {
   }
 });
 
+function watchLocalWebcamStream(stream) {
+  const localVideoTrack = stream?.getVideoTracks?.()[0] || null;
+  localVideoTrack?.addEventListener('ended', () => {
+    if (!webcamStream?.getVideoTracks?.().includes(localVideoTrack)) return;
+    const endedStream = webcamStream;
+    webcamStream = null;
+    recordVoiceLifecycleDiagnostic({
+      event: 'local-webcam-track-ended',
+      participantId: Number(cfg.myParticipantId),
+      trackId: localVideoTrack.id,
+      readyState: localVideoTrack.readyState,
+    });
+    endedStream.getTracks().forEach(track => {
+      if (track !== localVideoTrack) track.stop();
+    });
+    apiPost('/api/media_signal.php', {
+      action: 'webcam_off',
+      media: 'webcam',
+      session_id: cfg.sessionId,
+      join_token: cfg.myJoinToken,
+    }).catch(() => {});
+    applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-track-ended');
+    renegotiateMediaPeers({
+      reason: 'local-webcam-track-ended',
+      mediaReason: 'webcam',
+      webcamOperation: 'track-ended',
+    });
+  }, { once: true });
+  return localVideoTrack;
+}
+
+async function replaceLocalWebcamCapture(nextStream, operation = 'replace') {
+  const nextTrack = nextStream?.getVideoTracks?.().find(track => track.readyState === 'live') || null;
+  if (!nextTrack) throw new Error('Replacement webcam stream has no live video track.');
+  const previousStream = webcamStream;
+  const previousTrack = previousStream?.getVideoTracks?.()[0] || null;
+  webcamStream = nextStream;
+  watchLocalWebcamStream(nextStream);
+  const me = participants.get(cfg.myParticipantId);
+  if (me) {
+    participants.update(cfg.myParticipantId, {
+      webcam_enabled: true,
+      webcam_path: null,
+    });
+    renderParticipant(me);
+  }
+  await apiPost('/api/media_signal.php', {
+    action: 'webcam_on',
+    media: 'webcam',
+    session_id: cfg.sessionId,
+    join_token: cfg.myJoinToken,
+  });
+  await connectMediaPeers({
+    reason: `local-webcam-${operation}`,
+    mediaReason: 'webcam',
+    webcamOperation: operation,
+  });
+  if (previousStream && previousStream !== nextStream) {
+    previousStream.getTracks().forEach(track => track.stop());
+  }
+  recordVoiceLifecycleDiagnostic({
+    event: 'local-webcam-capture-replaced',
+    participantId: Number(cfg.myParticipantId),
+    webcamOperation: operation,
+    previousTrackId: previousTrack?.id || null,
+    nextTrackId: nextTrack.id,
+    localPreviewTrackId: me?.webcamVideoEl?.srcObject?.getVideoTracks?.()[0]?.id || null,
+    localPreviewUsesReplacementTrack: me?.webcamVideoEl?.srcObject?.getVideoTracks?.()[0] === nextTrack,
+  });
+  restartVoicePoll(0);
+  return {
+    previousTrackId: previousTrack?.id || null,
+    nextTrackId: nextTrack.id,
+  };
+}
+
 ctxToggleWebcam.addEventListener('click', async () => {
   closeContextMenu();
   if (webcamStream) {
-    webcamStream.getTracks().forEach(t => t.stop());
+    const previousWebcamStream = webcamStream;
+    recordVoiceLifecycleDiagnostic({
+      event: 'local-webcam-disable-start',
+      participantId: Number(cfg.myParticipantId),
+      tracks: webcamStream.getTracks().map(track => ({
+        id: track.id,
+        kind: track.kind,
+        readyState: track.readyState,
+        enabled: track.enabled,
+        muted: track.muted,
+      })),
+    });
     webcamStream = null;
-    await apiPost('/api/media_signal.php', { action: 'webcam_off', media: 'webcam', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
-    detachParticipantVideo(cfg.myParticipantId);
-    applyWebcamState(cfg.myParticipantId, false, null);
-    renegotiateMediaPeers();
+    previousWebcamStream.getTracks().forEach(t => t.stop());
+    applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-off');
+    const persistence = apiPost('/api/media_signal.php', {
+      action: 'webcam_off',
+      media: 'webcam',
+      session_id: cfg.sessionId,
+      join_token: cfg.myJoinToken,
+    });
+    const negotiation = renegotiateMediaPeers({
+      reason: 'local-webcam-disable',
+      mediaReason: 'webcam',
+      webcamOperation: 'disable',
+    });
+    await Promise.all([persistence, negotiation]);
     return;
   }
   try {
+    recordVoiceLifecycleDiagnostic({
+      event: 'local-webcam-enable-start',
+      participantId: Number(cfg.myParticipantId),
+    });
     webcamStream = await navigator.mediaDevices.getUserMedia({
       video: { width: { ideal: 640 }, height: { ideal: 640 }, frameRate: { ideal: 30, max: 30 } },
       audio: false,
     });
+    watchLocalWebcamStream(webcamStream);
+    recordVoiceLifecycleDiagnostic({
+      event: 'local-webcam-getUserMedia-success',
+      participantId: Number(cfg.myParticipantId),
+      tracks: webcamStream.getTracks().map(track => ({
+        id: track.id,
+        kind: track.kind,
+        readyState: track.readyState,
+        enabled: track.enabled,
+        muted: track.muted,
+      })),
+    });
     const me = participants.get(cfg.myParticipantId);
     if (me) {
+      recordVoiceLifecycleDiagnostic({
+        event: 'webcam-state-change',
+        source: 'local-webcam-on',
+        participantId: Number(cfg.myParticipantId),
+        previous: {
+          webcam_enabled: Boolean(me.webcam_enabled),
+          webcam_path: me.webcam_path || null,
+        },
+        next: {
+          webcam_enabled: true,
+          webcam_path: null,
+        },
+      });
       participants.update(cfg.myParticipantId, {
         webcam_enabled: true,
         webcam_path: null,
       });
       renderParticipant(me);
-      attachParticipantVideo(cfg.myParticipantId, webcamStream, true);
     }
     await apiPost('/api/media_signal.php', { action: 'webcam_on', media: 'webcam', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
-    connectMediaPeers();
+    connectMediaPeers({
+      reason: 'local-webcam-enable',
+      mediaReason: 'webcam',
+      webcamOperation: 'enable',
+    });
     restartVoicePoll(0);
   } catch (err) {
+    recordVoiceLifecycleDiagnostic({
+      event: 'local-webcam-enable-failed',
+      participantId: Number(cfg.myParticipantId),
+      message: err?.message || String(err),
+    });
     if (webcamStream) webcamStream.getTracks().forEach(t => t.stop());
     webcamStream = null;
+    applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-enable-failed');
     showWarning(err.message || 'Could not enable webcam.');
   }
 });
+
+if (window.__build000042VoiceProbe) {
+  window.__build000042VoiceProbe.replaceLocalWebcamCapture = async () => {
+    const replacement = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 640 }, frameRate: { ideal: 30, max: 30 } },
+      audio: false,
+    });
+    return replaceLocalWebcamCapture(replacement, 'replace');
+  };
+}
 
 function setRoomHeight(pct) {
   document.documentElement.style.setProperty('--room-height', `${pct}%`);
@@ -4588,12 +5072,12 @@ async function connectMediaPeer(participantId) {
   return voiceRuntime?.media?.connectMediaPeer(participantId);
 }
 
-function connectMediaPeers() {
-  voiceRuntime?.media?.connectMediaPeers();
+function connectMediaPeers(options = {}) {
+  return voiceRuntime?.media?.connectMediaPeers(options);
 }
 
-function renegotiateMediaPeers() {
-  voiceRuntime?.media?.renegotiateMediaPeers();
+function renegotiateMediaPeers(options = {}) {
+  return voiceRuntime?.media?.renegotiateMediaPeers(options);
 }
 
 document.getElementById('voice-toggle').addEventListener('click', async () => {
@@ -4608,6 +5092,14 @@ voiceDeviceForm?.addEventListener('submit', async e => {
 });
 
 bindModalCloseButtons(['voice-device-close', 'voice-device-cancel'], closeVoiceDeviceModal);
+
+voiceDeviceRefresh?.addEventListener('click', async () => {
+  setVoiceDeviceStatus('Requesting microphone permission and refreshing devices...', 'working');
+  await voiceRuntime?.media?.requestDevicePermissionAndPopulate().catch(err => {
+    console.warn(err);
+    setVoiceDeviceStatus('Microphone permission was not granted. Default devices can still be used.', 'error');
+  });
+});
 
 async function joinVoice() {
   return voiceRuntime?.media?.join();
@@ -4729,6 +5221,20 @@ async function bootRoom() {
 }
 
 function updateRoomLayout() {
+  participants.forEach(positionAvatar);
+}
+
+function runFrameSync() {
+  frameQueued = false;
+
+  if (!pendingLayout) return;
+
+  pendingLayout = false;
+  updateRoomLayout();
+  avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+    all: true,
+    reason: 'frame-sync',
+  });
 }
 
 window.addEventListener('resize', () => {

@@ -13,6 +13,7 @@ __MACOSX/
 
 includes/config.php
 .secrets/
+.local/
 
 # --------------------------------------------------
 # Database
@@ -51,11 +52,20 @@ assets/uploads/webcam/*
 # Internal framework documentation
 framework/**/*.md
 !framework/README.md
-framework/templates
+framework/templates/
+
+# Local engineering verification only.
+# Keep this directory on the development machine, but do not publish it.
+/framework/verification/
+
+# Root Markdown files are private/internal by default.
+# README.md remains public. AI_BOOTSTRAP.md therefore
+# stays local and ignored.
 /*.md
 !README.md
+/player/
 
---------------------------------------------------
+# --------------------------------------------------
 # Node.js
 # --------------------------------------------------
 
@@ -84,4 +94,4 @@ yarn-error.log*
 
 Thumbs.db
 Desktop.ini
-framework/archive/design/Relationship_Synchronization.md
+*.zip

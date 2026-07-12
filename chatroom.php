@@ -54,6 +54,17 @@ emit_event($pdo, (int)$session['id'], 'participant_join', [
 ]);
 $lastEventId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ' . (int)$session['id'])->fetchColumn();
 $linkIconCatalog = link_icon_catalog($pdo);
+$csrfToken = csrf_token();
+$roomAssetVersion = static function (string $path): string {
+    $absolutePath = __DIR__ . $path;
+    $version = is_file($absolutePath) ? (string)filemtime($absolutePath) : (string)time();
+    return app_url($path) . '?v=' . rawurlencode($version);
+};
+
+// Release the session lock before client runtime APIs begin polling this room.
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
 
 ?>
 <!doctype html>
@@ -62,10 +73,10 @@ $linkIconCatalog = link_icon_catalog($pdo);
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e($room['name']) ?> - ChatSpace CE</title>
-  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+  <link rel="stylesheet" href="<?= e($roomAssetVersion('/assets/css/styles.css')) ?>">
   <link rel="stylesheet" href="/player/Generic.css"> 
 </head>
-<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>">
+<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>">
 <div class="room-layout">
   <div class="version-banner" id="version-banner" hidden>
     <span id="version-banner-text">A new ChatSpace version is available.</span>
@@ -241,6 +252,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
     <div class="minor" id="voice-device-note">Choose your audio devices before joining voice.</div>
     <div class="voice-device-actions">
       <button class="btn btn-primary" id="voice-device-join" type="submit">Join Voice</button>
+      <button class="btn" id="voice-device-refresh" type="button">Allow microphone &amp; refresh</button>
       <button class="btn" id="voice-device-cancel" type="button">Cancel</button>
     </div>
     <div class="admin-form-status" id="voice-device-status" aria-live="polite"></div>
@@ -258,7 +270,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
 </div>
 <div class="modal" id="room-edit-modal">
   <form class="modal-box" id="room-edit-form" enctype="multipart/form-data">
-    <?= csrf_input() ?>
+    <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
     <div class="modal-head">
       <strong>Edit Room</strong>
       <button class="window-close" id="room-edit-close" type="button" aria-label="Close">×</button>
@@ -545,7 +557,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
   <button id="logout-link" type="button"><img src="<?= e(app_url('/assets/images/logout.png')) ?>" alt="">Log Out</button>
 </div>
 <form id="logout-form" method="post" action="<?= e(app_url('/logout.php')) ?>" hidden>
-  <?= csrf_input() ?>
+  <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
 </form>
 <div class="session-lock" id="session-lock" aria-hidden="true">
   <form class="session-lock-box" id="session-lock-form">
@@ -612,7 +624,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
 <script src="https://www.youtube.com/iframe_api"></script>
 <script src="/player/player.js"></script>
 
-<script src="<?= e(app_url('/assets/js/avatar-processing.js')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/room.js')) ?>"></script>
+<script src="<?= e($roomAssetVersion('/assets/js/avatar-processing.js')) ?>"></script>
+<script src="<?= e($roomAssetVersion('/assets/js/room.js')) ?>"></script>
 </body>
 </html>

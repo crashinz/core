@@ -106,6 +106,14 @@ export class AvatarRenderer {
      */
     #stageLinkIcons = new Map();
 
+    #webcamPresentations = new WeakMap();
+
+    #webcamElementIds = new WeakMap();
+
+    #webcamElementSerial = 0;
+
+    #webcamPlaybackStates = new WeakMap();
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -518,6 +526,26 @@ export class AvatarRenderer {
         const documentRef = options.document || document;
         const stage = options.stage;
         let video = participant.webcamVideoEl;
+        const requestedTrack = stream.getVideoTracks?.()[0] || null;
+        const existingStream = video?.srcObject || null;
+        const existingTrack = existingStream?.getVideoTracks?.()[0] || null;
+        const existingPresentation = video
+            ? this.#webcamPresentations.get(video) || null
+            : null;
+        const requestedIdentity = options.presentationIdentity || {};
+        const samePeerGeneration = !requestedIdentity.peerInstanceId || (
+            existingPresentation?.peerInstanceId === requestedIdentity.peerInstanceId &&
+            existingPresentation?.generation === requestedIdentity.generation &&
+            existingPresentation?.receiverIdentity === requestedIdentity.receiverIdentity
+        );
+        const sameLiveCanonicalTrack = Boolean(
+            video &&
+            existingTrack &&
+            existingTrack === requestedTrack &&
+            existingTrack.readyState === "live" &&
+            samePeerGeneration
+        );
+        let created = false;
 
         if (!video) {
             video = documentRef.createElement("video");
@@ -536,13 +564,101 @@ export class AvatarRenderer {
             );
 
             participant.webcamVideoEl = video;
+            created = true;
+            this.#installWebcamMediaDiagnostics(video, participant, options);
         }
 
-        if (video.srcObject !== stream) video.srcObject = stream;
+        const elementIdentity = this.#webcamElementIdentity(video);
+        const requestedStreamIdentity = requestedIdentity.streamIdentity || null;
+        let sourceReplaced = false;
+        let replacementReason = null;
+
+        if (!sameLiveCanonicalTrack && video.srcObject !== stream) {
+            replacementReason = !existingTrack
+                ? "missing-existing-track"
+                : existingTrack.readyState === "ended"
+                    ? "existing-track-ended"
+                    : existingTrack !== requestedTrack
+                        ? "track-identity-changed"
+                        : "peer-or-receiver-identity-changed";
+            this.#markWebcamPlaybackInterruption(
+                video,
+                `source-replacement:${replacementReason}`
+            );
+            video.srcObject = stream;
+            sourceReplaced = true;
+        }
+
+        this.#webcamPresentations.set(video, {
+            peerInstanceId: requestedIdentity.peerInstanceId || null,
+            generation: requestedIdentity.generation || null,
+            receiverIdentity: requestedIdentity.receiverIdentity || null,
+            streamIdentity: requestedStreamIdentity,
+            track: requestedTrack
+        });
+
         video.muted = Boolean(options.own);
         video.classList.toggle("avatar-webcam-self", Boolean(options.own));
-        video.play?.().catch(() => {});
+        const playSequence = this.#beginWebcamPlayback(video);
+        const playResult = video.play?.();
+        playResult?.then?.(
+            () => {
+                this.#finishWebcamPlayback(video, playSequence);
+                options.onWebcamPresentationDiagnostic?.({
+                    event: "webcam-presentation-play-resolved",
+                    participantId: Number(participant.id),
+                    elementIdentity,
+                    remoteTrackId: requestedTrack?.id || null,
+                    source: options.source || "avatar-renderer"
+                });
+            },
+            error => {
+                const interruptionReason =
+                    this.#finishWebcamPlayback(video, playSequence);
+                const intentionalAbort =
+                    error?.name === "AbortError" && Boolean(interruptionReason);
+                const detail = {
+                    event: intentionalAbort
+                        ? "webcam-presentation-play-aborted-intentionally"
+                        : "webcam-presentation-play-rejected",
+                    participantId: Number(participant.id),
+                    elementIdentity,
+                    remoteTrackId: requestedTrack?.id || null,
+                    source: options.source || "avatar-renderer",
+                    interruptionReason,
+                    errorName: error?.name || null,
+                    message: error?.message || String(error)
+                };
+                options.onWebcamPresentationDiagnostic?.(detail);
+                if (!intentionalAbort) {
+                    options.onWebcamPresentationError?.(error, detail);
+                }
+            }
+        );
         participant.avatarEl?.classList.add("avatar-hidden-behind-webcam");
+
+        options.onWebcamPresentationDiagnostic?.({
+            event: sameLiveCanonicalTrack
+                ? "webcam-presentation-attachment-skipped"
+                : "webcam-presentation-attached",
+            participantId: Number(participant.id),
+            own: Boolean(options.own),
+            source: options.source || "avatar-renderer",
+            elementIdentity,
+            elementCreated: created,
+            existingStreamIdentity: existingPresentation?.streamIdentity || null,
+            requestedStreamIdentity,
+            existingTrackId: existingTrack?.id || null,
+            remoteTrackId: requestedTrack?.id || null,
+            sourceReplaced,
+            replacementReason,
+            loadCalled: false,
+            playCalled: Boolean(video.play),
+            peerInstanceId: requestedIdentity.peerInstanceId || null,
+            generation: requestedIdentity.generation || null,
+            receiverIdentity: requestedIdentity.receiverIdentity || null,
+            avatarHidden: participant.avatarEl?.classList.contains("avatar-hidden-behind-webcam") || false
+        });
 
         return video;
 
@@ -569,9 +685,24 @@ export class AvatarRenderer {
         participant.webcamVideoEl = null;
         participant.avatarEl?.classList.remove("avatar-hidden-behind-webcam");
 
+        options.onWebcamPresentationDiagnostic?.({
+            event: "webcam-presentation-removed",
+            participantId: Number(participant.id),
+            elementIdentity: video ? this.#webcamElementIdentity(video) : null,
+            remoteTrackId: video?.srcObject?.getVideoTracks?.()[0]?.id || null,
+            reason: options.reason || "explicit-detach",
+            avatarHidden: false
+        });
+
         if (!video) return;
 
+        this.#markWebcamPlaybackInterruption(
+            video,
+            options.reason || "explicit-detach"
+        );
+        video.pause?.();
         video.srcObject = null;
+        this.#webcamPresentations.delete(video);
 
         if (!options.flip) {
             video.remove();
@@ -584,6 +715,103 @@ export class AvatarRenderer {
 
         const scheduler = options.window || window;
         scheduler.setTimeout(() => video.remove(), 330);
+
+    }
+
+    #webcamElementIdentity(video) {
+
+        if (!this.#webcamElementIds.has(video)) {
+
+            this.#webcamElementSerial += 1;
+            this.#webcamElementIds.set(
+                video,
+                `webcam-element-${this.#webcamElementSerial}`
+            );
+
+        }
+
+        return this.#webcamElementIds.get(video);
+
+    }
+
+    #beginWebcamPlayback(video) {
+
+        let state = this.#webcamPlaybackStates.get(video);
+        if (!state) {
+            state = {
+                sequence: 0,
+                pending: new Set(),
+                interruptions: new Map()
+            };
+            this.#webcamPlaybackStates.set(video, state);
+        }
+
+        state.sequence += 1;
+        state.pending.add(state.sequence);
+        return state.sequence;
+
+    }
+
+    #markWebcamPlaybackInterruption(video, reason) {
+
+        const state = this.#webcamPlaybackStates.get(video);
+        if (!state) return;
+        state.pending.forEach(sequence => {
+            state.interruptions.set(sequence, String(reason));
+        });
+
+    }
+
+    #finishWebcamPlayback(video, sequence) {
+
+        const state = this.#webcamPlaybackStates.get(video);
+        if (!state) return null;
+        const reason = state.interruptions.get(sequence) || null;
+        state.pending.delete(sequence);
+        state.interruptions.delete(sequence);
+        return reason;
+
+    }
+
+    #installWebcamMediaDiagnostics(video, participant, options) {
+
+        const mediaEvents = [
+            "loadstart",
+            "loadedmetadata",
+            "canplay",
+            "playing",
+            "emptied",
+            "suspend",
+            "stalled",
+            "waiting",
+            "abort"
+        ];
+
+        for (const eventName of mediaEvents) {
+
+            video.addEventListener?.(eventName, () => {
+
+                const presentation =
+                    this.#webcamPresentations.get(video) || null;
+
+                const track =
+                    video.srcObject?.getVideoTracks?.()[0] || null;
+
+                options.onWebcamPresentationDiagnostic?.({
+                    event: `webcam-media-${eventName}`,
+                    participantId: Number(participant.id),
+                    elementIdentity: this.#webcamElementIdentity(video),
+                    streamIdentity: presentation?.streamIdentity || null,
+                    remoteTrackId: track?.id || null,
+                    readyState: video.readyState,
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight,
+                    source: options.source || "avatar-renderer"
+                });
+
+            });
+
+        }
 
     }
 

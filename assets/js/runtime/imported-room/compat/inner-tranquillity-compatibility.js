@@ -51,6 +51,12 @@ export class InnerTranquillityCompatibility {
 
     #lastPlayerCount = 0;
 
+    #playerPlaybackStates = new WeakMap();
+
+    #playerElements = new Set();
+
+    #playbackDiagnostics = [];
+
     //--------------------------------------------------
     // Public Lifecycle
     //--------------------------------------------------
@@ -71,6 +77,15 @@ export class InnerTranquillityCompatibility {
      */
     destroy() {
 
+        this.prepareForRemoval("compatibility-destroy");
+        this.#playerElements.forEach(player => {
+            const state = this.#playerPlaybackStates.get(player);
+            if (state?.originalPlay && player.play === state.guardedPlay) {
+                player.play = state.originalPlay;
+            }
+        });
+        this.#playerElements.clear();
+        this.#playerPlaybackStates = new WeakMap();
         this.#context = null;
         this.#lastApplied = false;
         this.#lastPlayerCount = 0;
@@ -116,6 +131,10 @@ export class InnerTranquillityCompatibility {
 
         if (!jQueryRef?.fn?.player) return false;
 
+        this.#document()
+            ?.querySelectorAll("audio.vp-page-player")
+            .forEach(player => this.#guardPlayback(player));
+
         jQueryRef("audio.vp-page-player").player({
             audioWidth: 252,
             audioHeight: 30
@@ -139,6 +158,27 @@ export class InnerTranquillityCompatibility {
             true;
 
         return true;
+
+    }
+
+    /**
+     * Marks and pauses page-level players before intentional DOM replacement.
+     *
+     * @param {string} reason
+     */
+    prepareForRemoval(reason = "imported-layout-removal") {
+
+        this.#playerElements.forEach(player => {
+            const state = this.#playerPlaybackStates.get(player);
+            if (!state) return;
+
+            state.interruptions.set(
+                state.playSequence,
+                String(reason || "imported-layout-removal")
+            );
+
+            if (!player.paused) player.pause?.();
+        });
 
     }
 
@@ -168,7 +208,10 @@ export class InnerTranquillityCompatibility {
                 this.#lastApplied,
 
             playerCount:
-                this.#lastPlayerCount
+                this.#lastPlayerCount,
+
+            playbackDiagnostics:
+                this.#playbackDiagnostics.slice()
 
         });
 
@@ -187,6 +230,81 @@ export class InnerTranquillityCompatibility {
     #window() {
 
         return this.#context?.window || globalThis.window || null;
+
+    }
+
+    #guardPlayback(player) {
+
+        if (!player?.play || this.#playerPlaybackStates.has(player)) return;
+
+        const state = {
+            originalPlay: player.play,
+            guardedPlay: null,
+            playSequence: 0,
+            interruptions: new Map()
+        };
+
+        state.guardedPlay = (...args) => {
+            state.playSequence += 1;
+            const playSequence = state.playSequence;
+            const result = state.originalPlay.apply(player, args);
+
+            result?.catch?.(error => {
+                const interruptionReason = state.interruptions.get(playSequence) || null;
+                state.interruptions.delete(playSequence);
+
+                if (error?.name === "AbortError" && interruptionReason) {
+                    this.#recordPlaybackDiagnostic({
+                        event: "inline-player-play-aborted-intentionally",
+                        playSequence,
+                        reason: interruptionReason,
+                        errorName: error.name,
+                        message: error.message || String(error)
+                    });
+                    return;
+                }
+
+                const detail = {
+                    event: "inline-player-play-rejected-unexpectedly",
+                    playSequence,
+                    reason: interruptionReason,
+                    errorName: error?.name || null,
+                    message: error?.message || String(error)
+                };
+                this.#recordPlaybackDiagnostic(detail);
+
+                if (this.#context?.reportPlaybackError) {
+                    this.#context.reportPlaybackError(error, detail);
+                } else {
+                    this.#window()?.console?.error?.(
+                        "Imported website player playback failed.",
+                        error
+                    );
+                }
+            });
+
+            return result;
+        };
+
+        player.play = state.guardedPlay;
+        this.#playerPlaybackStates.set(player, state);
+        this.#playerElements.add(player);
+
+    }
+
+    #recordPlaybackDiagnostic(entry) {
+
+        this.#playbackDiagnostics.push({
+            at: Date.now(),
+            ...entry
+        });
+
+        if (this.#playbackDiagnostics.length > 80) {
+            this.#playbackDiagnostics.splice(
+                0,
+                this.#playbackDiagnostics.length - 80
+            );
+        }
 
     }
 

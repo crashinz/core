@@ -355,6 +355,17 @@ export class ImportedRoomMusicService {
     }
 
     /**
+     * Prepares the page-level imported player for intentional DOM removal.
+     *
+     * @param {string} reason
+     */
+    prepareInlinePlayerRemoval(reason = "imported-layout-removal") {
+
+        this.#websiteCompatibility?.prepareForRemoval(reason);
+
+    }
+
+    /**
      * Opens the imported music modal.
      *
      * @param {Object} track

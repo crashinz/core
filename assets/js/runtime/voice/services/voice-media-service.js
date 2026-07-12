@@ -50,6 +50,56 @@ const DEFAULT_ICE_SERVERS = Object.freeze([
 
 ]);
 
+const BUILD_000042_VOICE_MEDIA_SERVICE_VERSION =
+    "build-000042-late-join-webcam-readiness-v6";
+
+const SIGNAL_OUTCOME = Object.freeze({
+
+    CONSUMED:
+        "consumed",
+
+    DEFERRED:
+        "deferred",
+
+    DUPLICATE:
+        "duplicate",
+
+    STALE_GENERATION:
+        "stale-generation",
+
+    TERMINAL_INVALID:
+        "terminal-invalid",
+
+    RETRYABLE_FAILURE:
+        "retryable-failure"
+
+});
+
+const TERMINAL_SIGNAL_OUTCOMES = new Set([
+
+    SIGNAL_OUTCOME.CONSUMED,
+    SIGNAL_OUTCOME.DUPLICATE,
+    SIGNAL_OUTCOME.STALE_GENERATION,
+    SIGNAL_OUTCOME.TERMINAL_INVALID
+
+]);
+
+class VoiceNegotiationError extends Error {
+
+    constructor(operation, message, details = {}) {
+
+        super(message);
+        this.name = "VoiceNegotiationError";
+        this.operation = operation;
+        this.details = details;
+
+    }
+
+}
+
+globalThis.__BUILD_000042_VOICE_MEDIA_SERVICE_VERSION =
+    BUILD_000042_VOICE_MEDIA_SERVICE_VERSION;
+
 //--------------------------------------------------
 // Voice Media Service
 //--------------------------------------------------
@@ -93,9 +143,61 @@ export class VoiceMediaService {
 
     #lastStatusSignature = "";
 
-    #lastSignalId = 0;
+    #signalFetchCursor = 0;
 
     #peers = new Map();
+
+    #peerSerial = 0;
+
+    #negotiationSerial = 0;
+
+    #renegotiationRequestSerial = 0;
+
+    #signalInbox = new Map();
+
+    #terminalSignalIds = new Map();
+
+    #processingSignalIds = new Set();
+
+    #drainingSignalInbox = false;
+
+    #maxSignalInboxSize = 320;
+
+    #maxTerminalSignalHistory = 640;
+
+    #maxSignalAttempts = 3;
+
+    #clientEpoch = null;
+
+    #clientEpochRegistered = false;
+
+    #remoteWebcamReadinessRequests = new Set();
+
+    #deviceRefreshGeneration = 0;
+
+    #pollInProgress = false;
+
+    #deviceChangeListener = null;
+
+    #pendingRemoteAudioTracks = new Map();
+
+    #remoteVideoPresentations = new Map();
+
+    #mediaObjectIds = new WeakMap();
+
+    #mediaObjectSerial = 0;
+
+    #audioPlaybackStates = new WeakMap();
+
+    #transportProbeDelays = Object.freeze([
+
+        0,
+
+        2000,
+
+        5000
+
+    ]);
 
     //--------------------------------------------------
     // Constructor
@@ -134,10 +236,19 @@ export class VoiceMediaService {
         this.#stopVoiceStream();
         this.#removeAllAudioElements();
         this.#closeAllPeers();
+        this.#unbindDeviceChangeListener();
         this.#context = null;
         this.#voiceParticipants = [];
         this.#lastStatusSignature = "";
-        this.#lastSignalId = 0;
+        this.#signalFetchCursor = 0;
+        this.#signalInbox.clear();
+        this.#terminalSignalIds.clear();
+        this.#processingSignalIds.clear();
+        this.#clientEpoch = null;
+        this.#clientEpochRegistered = false;
+        this.#remoteWebcamReadinessRequests.clear();
+        this.#pendingRemoteAudioTracks.clear();
+        this.#remoteVideoPresentations.clear();
 
     }
 
@@ -240,6 +351,9 @@ export class VoiceMediaService {
     configure(context = {}) {
 
         this.#context = context;
+        this.#clientEpoch =
+            this.#clientEpoch || this.#createClientEpoch();
+        this.#bindDeviceChangeListener();
 
     }
 
@@ -252,9 +366,12 @@ export class VoiceMediaService {
      *
      * @returns {Promise<void>}
      */
-    async populateDevices() {
+    async populateDevices(reason = "manual") {
 
         if (!this.#context?.canPopulateDevices?.()) return;
+
+        const refreshGeneration =
+            ++this.#deviceRefreshGeneration;
 
         this.#context?.setDeviceStatus?.(
             "Loading audio devices...",
@@ -297,11 +414,80 @@ export class VoiceMediaService {
         const devices =
             await mediaDevices.enumerateDevices();
 
+        if (refreshGeneration !== this.#deviceRefreshGeneration) {
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "device-enumeration-stale-result-skipped",
+
+                reason,
+
+                refreshGeneration,
+
+                activeRefreshGeneration:
+                    this.#deviceRefreshGeneration
+
+            });
+
+            return;
+
+        }
+
         const inputs =
             devices.filter(device => device.kind === "audioinput");
 
         const outputs =
             devices.filter(device => device.kind === "audiooutput");
+
+        this.#recordAudioPathDiagnostic({
+
+            event:
+                "device-enumeration",
+
+            reason,
+
+            selectedInputDeviceId:
+                previousInput || null,
+
+            selectedOutputDeviceId:
+                previousOutput || null,
+
+            audioInputCount:
+                inputs.length,
+
+            audioOutputCount:
+                outputs.length,
+
+            renderedInputOptionCount:
+                inputs.length + 1,
+
+            renderedOutputOptionCount:
+                outputs.length + 1,
+
+            refreshGeneration,
+
+            deviceLabelsAvailable:
+                devices.some(device => Boolean(device.label)),
+
+            devices:
+                devices.map(device => ({
+
+                    kind:
+                        device.kind || null,
+
+                    hasDeviceId:
+                        Boolean(device.deviceId),
+
+                    hasLabel:
+                        Boolean(device.label),
+
+                    label:
+                        device.label || null
+
+                }))
+
+        });
 
         this.#context?.setInputDeviceOptions?.([
 
@@ -345,10 +531,67 @@ export class VoiceMediaService {
             outputUnsupported
         );
 
-        this.#context?.setDeviceStatus?.(
-            outputUnsupported ? "Speaker selection is not supported by this browser." : "",
-            outputUnsupported ? "working" : ""
+        const labelsAvailable =
+            devices.some(device => Boolean(device.label));
+
+        this.#context?.setDevicePermissionRequired?.(
+            !labelsAvailable
         );
+
+        this.#context?.setDeviceStatus?.(
+            !labelsAvailable ?
+                "Microphone permission is required to list named devices." :
+                outputUnsupported ?
+                    "Speaker selection is not supported by this browser." :
+                    "",
+            !labelsAvailable || outputUnsupported ? "working" : ""
+        );
+
+    }
+
+    /**
+     * Requests microphone permission from an explicit host UI action, then
+     * refreshes device labels without retaining a new capture stream.
+     *
+     * @returns {Promise<void>}
+     */
+    async requestDevicePermissionAndPopulate() {
+
+        const mediaDevices =
+            this.#context?.navigator?.mediaDevices;
+
+        if (!mediaDevices?.getUserMedia) {
+
+            return this.populateDevices("permission-unavailable");
+
+        }
+
+        let permissionStream = null;
+
+        try {
+
+            if (!this.#voiceStream) {
+
+                permissionStream =
+                    await mediaDevices.getUserMedia({
+
+                        audio:
+                            true,
+
+                        video:
+                            false
+
+                    });
+
+            }
+
+            await this.populateDevices("after-explicit-permission");
+
+        } finally {
+
+            permissionStream?.getTracks?.().forEach(track => track.stop());
+
+        }
 
     }
 
@@ -369,6 +612,19 @@ export class VoiceMediaService {
             const mediaDevices =
                 this.#context?.navigator?.mediaDevices;
 
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "audio-source-acquire-start",
+
+                selectedInputDeviceId:
+                    this.#context?.getInputDeviceId?.() || null,
+
+                selectedOutputDeviceId:
+                    this.#selectedOutputDeviceId || null
+
+            });
+
             this.#voiceStream =
                 await mediaDevices.getUserMedia({
 
@@ -380,12 +636,36 @@ export class VoiceMediaService {
 
                 });
 
+            const audioTrack =
+                this.#voiceStream?.getAudioTracks?.()[0] || null;
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "audio-source-acquired",
+
+                sourceType:
+                    this.#audioSourceType(audioTrack),
+
+                stream:
+                    this.#streamSnapshot(this.#voiceStream),
+
+                track:
+                    this.#trackSnapshot(audioTrack),
+
+                selectedInputDeviceId:
+                    this.#context?.getInputDeviceId?.() || null
+
+            });
+
             this.#muted = false;
             this.#deafened = false;
             this.#speaking = false;
             this.#joined = true;
+            this.#attachPendingRemoteAudioTracks();
 
             this.#context?.updateToggleButton?.();
+            await this.populateDevices("after-permission").catch(() => {});
 
             await this.#context?.apiPost?.(
                 "/api/media_signal.php",
@@ -394,6 +674,7 @@ export class VoiceMediaService {
                     media: "voice",
                     session_id: this.#config()?.sessionId,
                     participant_id: this.#config()?.myParticipantId,
+                    client_epoch: this.#clientEpoch,
                     join_token: this.#config()?.myJoinToken
                 }
             );
@@ -401,10 +682,10 @@ export class VoiceMediaService {
             await this.syncStatus(true);
             this.#startAnalyser();
             this.#forEachAudioElement(audio => this.applyAudioOutput(audio));
-            this.connectMediaPeers();
+            await this.connectMediaPeers();
             this.startPolling(0);
             this.#context?.closeDeviceModal?.();
-            this.populateDevices().catch(() => {});
+            this.populateDevices("after-join").catch(() => {});
 
         } catch (error) {
 
@@ -437,11 +718,12 @@ export class VoiceMediaService {
         this.#stopAnalyser();
         this.#context?.updateToggleButton?.();
         this.#removeAllAudioElements();
+        this.#pendingRemoteAudioTracks.clear();
         this.#stopVoiceStream();
 
         if (this.#webcamStream()) {
 
-            this.renegotiateMediaPeers();
+            await this.renegotiateMediaPeers();
 
         } else {
 
@@ -456,6 +738,7 @@ export class VoiceMediaService {
                 media: "voice",
                 session_id: this.#config()?.sessionId,
                 participant_id: this.#config()?.myParticipantId,
+                client_epoch: this.#clientEpoch,
                 join_token: this.#config()?.myJoinToken
             }
         ).catch(() => {});
@@ -551,6 +834,7 @@ export class VoiceMediaService {
                 media: "voice",
                 session_id: this.#config()?.sessionId,
                 participant_id: this.#config()?.myParticipantId,
+                client_epoch: this.#clientEpoch,
                 join_token: this.#config()?.myJoinToken,
                 muted: this.#muted,
                 deafened: this.#deafened,
@@ -677,7 +961,7 @@ export class VoiceMediaService {
      *
      * @returns {Promise<void>}
      */
-    async connectMediaPeer(participantId) {
+    async connectMediaPeer(participantId, options = {}) {
 
         const id =
             Number(participantId);
@@ -685,22 +969,133 @@ export class VoiceMediaService {
         if (
             !id ||
             id === Number(this.#config()?.myParticipantId) ||
-            !this.mediaActive()
+            (!this.mediaActive() && !options.allowReceiveOnly)
         ) {
 
-            return;
+            return SIGNAL_OUTCOME.DEFERRED;
 
         }
 
-        const pc =
-            await this.#getPeer(
-                id,
-                false
-            );
+        if (!this.#ownsOffer(id)) {
 
-        await this.#makePeerOffer(
+            const pc =
+                this.#peers.get(id) || null;
+
+            if (pc) {
+
+                return this.#requestPeerNegotiation(
+                    id,
+                    pc,
+                    options.reason || "connect-media-peer",
+                    options
+                );
+
+            } else {
+
+                const requestId =
+                    this.#nextRenegotiationRequestId(id, null);
+
+                this.#recordNegotiationDiagnostic({
+
+                    event:
+                        "renegotiation-request-accepted",
+
+                    requestId,
+
+                    mediaReason:
+                        options.mediaReason || "initial-peer",
+
+                    webcamOperation:
+                        options.webcamOperation || null,
+
+                    localParticipantId:
+                        this.#localParticipantId(),
+
+                    remoteParticipantId:
+                        id,
+
+                    authoritativeOffererParticipantId:
+                        Math.min(this.#localParticipantId(), id),
+
+                    role:
+                        "answerer",
+
+                    peerInstanceId:
+                        null,
+
+                    generation:
+                        this.#clientEpoch
+
+                });
+
+                await this.#sendSignal(
+                    id,
+                    "renegotiate",
+                    {
+
+                        reason:
+                            options.reason || "remote-offer-request",
+
+                        media_reason:
+                            options.mediaReason || "initial-peer",
+
+                        webcam_operation:
+                            options.webcamOperation || null,
+
+                        request_id:
+                            requestId,
+
+                        generation:
+                            this.#clientEpoch,
+
+                        late_join_ready:
+                            Boolean(options.lateJoinReady)
+
+                    }
+                );
+
+                return SIGNAL_OUTCOME.CONSUMED;
+
+            }
+
+        }
+
+        const existingPeer =
+            this.#peers.get(id) || null;
+
+        const pc =
+            existingPeer || this.#createPeer(id, "offerer");
+
+        if (!existingPeer && options.missingPeerRequest) {
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "peer-created-for-webcam-first-request",
+
+                requestId:
+                    options.requestId || null,
+
+                signalId:
+                    Number(options.signalId) || null,
+
+                mediaReason:
+                    options.mediaReason || null,
+
+                webcamOperation:
+                    options.webcamOperation || null,
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+        }
+
+        return this.#requestPeerNegotiation(
             id,
-            pc
+            pc,
+            options.reason || "connect-media-peer",
+            options
         );
 
     }
@@ -708,41 +1103,269 @@ export class VoiceMediaService {
     /**
      * Connects media peers for all known participants.
      */
-    connectMediaPeers() {
+    async connectMediaPeers(options = {}) {
 
         if (!this.mediaActive()) return;
 
-        this.#participants().forEach(person => {
+        await Promise.all(
+            [...this.#participants().values()].map(person => {
 
-            if (Number(person.id) !== Number(this.#config()?.myParticipantId)) {
+                if (Number(person.id) === Number(this.#config()?.myParticipantId)) {
 
-                this.connectMediaPeer(
-                    person.id
+                    return Promise.resolve();
+
+                }
+
+                return this.connectMediaPeer(
+                    person.id,
+                    options
                 );
 
-            }
-
-        });
+            })
+        );
 
     }
 
     /**
      * Renegotiates existing media peers.
      */
-    renegotiateMediaPeers() {
+    async renegotiateMediaPeers(options = {}) {
 
-        this.#peers.forEach((pc, id) => {
+        for (const [id, pc] of this.#peers) {
 
-            this.#syncPeerLocalTracks(
-                pc
-            );
-
-            this.#makePeerOffer(
+            await this.#requestPeerNegotiation(
                 id,
-                pc
+                pc,
+                options.reason || "renegotiate-media-peers",
+                options
             );
+
+        }
+
+    }
+
+    /**
+     * Reconciles remote webcam presentation from the active canonical receiver.
+     * Re-enabling a sender on an existing transceiver does not fire ontrack again.
+     *
+     * @param {number|string} participantId
+     * @param {boolean} enabled
+     * @param {string} reason
+     *
+     * @returns {boolean}
+     */
+    reconcileRemoteWebcamPresentation(participantId, enabled, reason = "participant-state") {
+
+        const id =
+            Number(participantId);
+
+        if (!id || id === this.#localParticipantId()) return false;
+
+        const pc =
+            this.#peers.get(id) || null;
+
+        if (!enabled) {
+
+            this.#remoteVideoPresentations.delete(id);
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                    "remote-video-removed",
+
+                remoteParticipantId:
+                    id,
+
+                reason,
+
+                ...(pc ? this.#peerSnapshot(pc) : {})
+
+            });
+
+            return false;
+
+        }
+
+        if (!pc || !this.#isActivePeer(pc)) return false;
+
+        const transceiver =
+            pc.__voiceTransceivers?.video || null;
+
+        const track =
+            transceiver?.receiver?.track || null;
+
+        if (!track || track.readyState === "ended") return false;
+
+        const stream =
+            this.#canonicalRemoteVideoStream(pc, transceiver, track);
+
+        const presentation =
+            this.#remoteVideoPresentations.get(id);
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "remote-video-presentation-attach-requested",
+
+            remoteParticipantId:
+                id,
+
+            reason,
+
+            receiverIdentity:
+                presentation?.receiverIdentity || null,
+
+            remoteTrackId:
+                track.id || null,
+
+            requestedStreamIdentity:
+                presentation?.streamIdentity || null,
+
+            ...this.#peerSnapshot(pc)
 
         });
+
+        this.#context?.attachParticipantVideo?.(
+            id,
+            stream,
+            false,
+            {
+                source: `receiver-reconciliation:${reason}`,
+                peerInstanceId: pc.__voicePeerInstanceId || null,
+                generation: pc.__voiceGeneration || null,
+                receiverIdentity: presentation?.receiverIdentity || null,
+                streamIdentity: presentation?.streamIdentity || null,
+                remoteTrackId: track.id || null
+            }
+        );
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "remote-video-attached",
+
+            remoteParticipantId:
+                id,
+
+            reason,
+
+            finalRemoteReceiverTrackId:
+                track.id || null,
+
+            finalVideoTransceiverDirection:
+                transceiver.direction || null,
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        return true;
+
+    }
+
+    async reconcileRemoteWebcamReadiness(participantId, enabled, reason = "participant-state") {
+
+        const id =
+            Number(participantId);
+
+        if (!id || id === this.#localParticipantId()) return SIGNAL_OUTCOME.DEFERRED;
+
+        if (!enabled) {
+
+            this.#remoteWebcamReadinessRequests.delete(id);
+            return SIGNAL_OUTCOME.CONSUMED;
+
+        }
+
+        if (this.#peers.has(id)) return SIGNAL_OUTCOME.DUPLICATE;
+
+        if (!this.#clientEpochRegistered) {
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "remote-webcam-readiness-deferred",
+
+                reason,
+
+                remoteParticipantId:
+                    id,
+
+                clientEpoch:
+                    this.#clientEpoch
+
+            });
+
+            return SIGNAL_OUTCOME.DEFERRED;
+
+        }
+
+        if (this.#remoteWebcamReadinessRequests.has(id)) {
+
+            return SIGNAL_OUTCOME.DUPLICATE;
+
+        }
+
+        this.#remoteWebcamReadinessRequests.add(id);
+
+        this.#recordNegotiationDiagnostic({
+
+            event:
+                "remote-webcam-readiness-requested",
+
+            reason,
+
+            remoteParticipantId:
+                id,
+
+            clientEpoch:
+                this.#clientEpoch,
+
+            authoritativeOffererParticipantId:
+                Math.min(this.#localParticipantId(), id),
+
+            role:
+                this.#ownsOffer(id) ? "offerer" : "answerer"
+
+        });
+
+        try {
+
+            const outcome =
+                await this.connectMediaPeer(id, {
+
+                    allowReceiveOnly:
+                        true,
+
+                    reason:
+                        "client-epoch-ready-remote-webcam",
+
+                    mediaReason:
+                        "webcam",
+
+                    webcamOperation:
+                        "late-join",
+
+                    lateJoinReady:
+                        true
+
+                });
+
+            if (outcome !== SIGNAL_OUTCOME.CONSUMED) {
+
+                this.#remoteWebcamReadinessRequests.delete(id);
+
+            }
+
+            return outcome;
+
+        } catch (error) {
+
+            this.#remoteWebcamReadinessRequests.delete(id);
+            this.#warn(error);
+            return SIGNAL_OUTCOME.RETRYABLE_FAILURE;
+
+        }
 
     }
 
@@ -758,8 +1381,29 @@ export class VoiceMediaService {
 
         if (!this.#peers.has(id)) return;
 
-        this.#peers.get(id).close();
+        const pc =
+            this.#peers.get(id);
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "peer-close",
+
+            reason:
+                "closePeer",
+
+            remoteParticipantId:
+                id,
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        pc.close();
         this.#peers.delete(id);
+        this.#pendingRemoteAudioTracks.delete(id);
+        this.#remoteVideoPresentations.delete(id);
+        this.#remoteWebcamReadinessRequests.delete(id);
 
     }
 
@@ -769,6 +1413,22 @@ export class VoiceMediaService {
      * @returns {Promise<void>}
      */
     async poll() {
+
+        if (this.#pollInProgress) {
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "poll-skipped-overlap"
+
+            });
+
+            return;
+
+        }
+
+        this.#pollInProgress =
+            true;
 
         try {
 
@@ -785,7 +1445,10 @@ export class VoiceMediaService {
                         this.#config()?.myParticipantId,
 
                     after:
-                        this.#lastSignalId,
+                        this.#signalFetchCursor,
+
+                    client_epoch:
+                        this.#clientEpoch,
 
                     join_token:
                         this.#config()?.myJoinToken
@@ -795,14 +1458,44 @@ export class VoiceMediaService {
             const data =
                 await this.#context?.fetchMediaSignals?.(qs);
 
+            const clientEpochWasRegistered =
+                this.#clientEpochRegistered;
+
+            this.#clientEpochRegistered =
+                Boolean(
+                    data?.client_epoch &&
+                    data.client_epoch === this.#clientEpoch
+                );
+
             this.#renderVoiceList(
                 data?.voice_participants || []
             );
 
-            for (const signal of data?.signals || []) {
+            this.#stageFetchedSignals(
+                data?.signals || [],
+                data?.signal_errors || []
+            );
 
-                await this.#handleSignal(
-                    signal
+            const highWaterSignalId =
+                Number(data?.last_signal_id);
+
+            if (highWaterSignalId > this.#signalFetchCursor) {
+
+                this.#signalFetchCursor =
+                    highWaterSignalId;
+
+            }
+
+            await this.#drainSignalInbox();
+
+            if (
+                !clientEpochWasRegistered &&
+                this.#clientEpochRegistered &&
+                !this.mediaActive()
+            ) {
+
+                await this.#reconcileKnownRemoteWebcams(
+                    "client-epoch-registered"
                 );
 
             }
@@ -812,6 +1505,11 @@ export class VoiceMediaService {
             this.#warn(
                 error
             );
+
+        } finally {
+
+            this.#pollInProgress =
+                false;
 
         }
 
@@ -861,8 +1559,23 @@ export class VoiceMediaService {
             peerCount:
                 this.#peers.size,
 
-            lastSignalId:
-                this.#lastSignalId,
+            signalFetchCursor:
+                this.#signalFetchCursor,
+
+            clientEpochRegistered:
+                this.#clientEpochRegistered,
+
+            remoteWebcamReadinessRequestCount:
+                this.#remoteWebcamReadinessRequests.size,
+
+            processedSignalCount:
+                this.#terminalSignalIds.size,
+
+            pendingSignalCount:
+                this.#signalInbox.size,
+
+            processingSignalCount:
+                this.#processingSignalIds.size,
 
             polling:
                 this.#pollTimer !== null
@@ -875,9 +1588,42 @@ export class VoiceMediaService {
     // Private Methods
     //--------------------------------------------------
 
+    async #reconcileKnownRemoteWebcams(reason) {
+
+        for (const participant of this.#participants().values()) {
+
+            const id =
+                Number(participant?.id);
+
+            if (
+                !id ||
+                id === this.#localParticipantId() ||
+                !Boolean(participant.webcam_enabled || participant.webcam_path)
+            ) {
+
+                continue;
+
+            }
+
+            await this.reconcileRemoteWebcamReadiness(
+                id,
+                true,
+                reason
+            );
+
+        }
+
+    }
+
     #config() {
 
         return this.#context?.getConfig?.() || {};
+
+    }
+
+    #roomId() {
+
+        return this.#config()?.roomPublicId || this.#config()?.roomId || null;
 
     }
 
@@ -890,6 +1636,66 @@ export class VoiceMediaService {
     #webcamStream() {
 
         return this.#context?.getWebcamStream?.() || null;
+
+    }
+
+    #bindDeviceChangeListener() {
+
+        const mediaDevices =
+            this.#context?.navigator?.mediaDevices;
+
+        if (
+            this.#deviceChangeListener ||
+            !mediaDevices ||
+            typeof mediaDevices.addEventListener !== "function"
+        ) {
+
+            return;
+
+        }
+
+        this.#deviceChangeListener =
+            () => {
+
+                this.#recordAudioPathDiagnostic({
+
+                    event:
+                        "devicechange"
+
+                });
+
+                this.populateDevices("devicechange").catch(error =>
+                    this.#warn(error)
+                );
+
+            };
+
+        mediaDevices.addEventListener(
+            "devicechange",
+            this.#deviceChangeListener
+        );
+
+    }
+
+    #unbindDeviceChangeListener() {
+
+        const mediaDevices =
+            this.#context?.navigator?.mediaDevices;
+
+        if (
+            this.#deviceChangeListener &&
+            mediaDevices &&
+            typeof mediaDevices.removeEventListener === "function"
+        ) {
+
+            mediaDevices.removeEventListener(
+                "devicechange",
+                this.#deviceChangeListener
+            );
+
+        }
+
+        this.#deviceChangeListener = null;
 
     }
 
@@ -948,6 +1754,12 @@ export class VoiceMediaService {
 
     #removeAllAudioElements() {
 
+        this.#forEachAudioElement(audio => {
+            this.#prepareAudioElementRemoval(
+                audio,
+                "remove-all-remote-audio"
+            );
+        });
         this.#context?.removeAllAudioElements?.();
 
     }
@@ -968,13 +1780,33 @@ export class VoiceMediaService {
 
     #closeAllPeers() {
 
-        for (const pc of this.#peers.values()) {
+        for (const [id, pc] of this.#peers.entries()) {
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                    "peer-close",
+
+                reason:
+                    "closeAllPeers",
+
+                remoteParticipantId:
+                    id,
+
+                ...this.#peerSnapshot(pc)
+
+            });
 
             pc.close();
 
         }
 
         this.#peers.clear();
+        this.#processingSignalIds.clear();
+        this.#pollInProgress = false;
+        this.#pendingRemoteAudioTracks.clear();
+        this.#remoteVideoPresentations.clear();
+        this.#remoteWebcamReadinessRequests.clear();
 
     }
 
@@ -983,6 +1815,110 @@ export class VoiceMediaService {
         this.#context?.warn?.(
             error
         );
+
+    }
+
+    #createClientEpoch() {
+
+        const cryptoObject =
+            this.#context?.window?.crypto || globalThis.crypto;
+
+        if (typeof cryptoObject?.randomUUID === "function") {
+
+            return cryptoObject.randomUUID();
+
+        }
+
+        return [
+
+            Date.now().toString(36),
+            Math.random().toString(36).slice(2),
+            Math.random().toString(36).slice(2)
+
+        ].join("-");
+
+    }
+
+    #recordCriticalFailure(pc, error, extra = {}) {
+
+        const details =
+            error instanceof VoiceNegotiationError ? error.details : {};
+
+        this.#recordNegotiationDiagnostic({
+
+            event:
+                "critical-peer-operation-failed",
+
+            operation:
+                extra.operation || error?.operation || "unknown",
+
+            errorName:
+                error?.name || null,
+
+            message:
+                error?.message || String(error),
+
+            localGeneration:
+                pc?.__voiceGeneration || null,
+
+            remoteGeneration:
+                pc?.__voiceRemotePeerInstanceId || null,
+
+            ...this.#peerSnapshot(pc),
+            ...details,
+            ...extra
+
+        });
+
+        this.#warn(error);
+
+    }
+
+    #recoverFailedPeer(pc, operation, error) {
+
+        if (!pc) return;
+
+        this.#recordCriticalFailure(pc, error, { operation });
+
+        const participantId =
+            Number(pc.__voiceRemoteParticipantId);
+
+        if (this.#isActivePeer(pc)) {
+
+            pc.close();
+            this.#peers.delete(participantId);
+            this.#pendingRemoteAudioTracks.delete(participantId);
+            this.#remoteVideoPresentations.delete(participantId);
+            this.#remoteWebcamReadinessRequests.delete(participantId);
+            this.#removeAudioElement(
+                participantId,
+                "peer-replacement"
+            );
+            this.#context?.detachParticipantVideo?.(participantId);
+
+            if (this.mediaActive() && this.#ownsOffer(participantId)) {
+
+                const setTimer =
+                    this.#context?.setTimeout || setTimeout;
+
+                setTimer(
+                    () => this.connectMediaPeer(participantId).catch(nextError =>
+                        this.#recordCriticalFailure(null, nextError, {
+
+                            operation:
+                                "rebuild-failed-peer",
+
+                            remoteParticipantId:
+                                participantId
+
+                        })
+                    ),
+                    0
+                );
+
+            }
+
+        }
 
     }
 
@@ -1125,9 +2061,153 @@ export class VoiceMediaService {
 
     }
 
-    #syncPeerLocalTracks(pc) {
+    #localMediaTrackByKind(kind) {
+
+        return this.#localMediaTracks().find(track =>
+            track.kind === kind
+        ) || null;
+
+    }
+
+    #reserveOffererTransceivers(pc) {
+
+        if (!pc || pc.__voiceTransceivers) {
+
+            return pc?.__voiceTransceivers || null;
+
+        }
+
+        pc.__voiceTransceivers = {
+
+            audio:
+                null,
+
+            video:
+                null,
+
+            fallback:
+                false
+
+        };
+
+        if (typeof pc.addTransceiver !== "function") {
+
+            pc.__voiceTransceivers.fallback =
+                true;
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                    "transceiver-reservation-unavailable",
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            throw new VoiceNegotiationError(
+                "reserve-offerer-transceivers",
+                "RTCRtpTransceiver support is required for deterministic media negotiation.",
+                this.#peerSnapshot(pc)
+            );
+
+        }
+
+        pc.__voiceTransceivers.audio =
+            pc.addTransceiver(
+                "audio",
+                {
+
+                    direction:
+                        "recvonly"
+
+                }
+            );
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "transceiver-reserved",
+
+            mediaKind:
+                "audio",
+
+            transceiver:
+                this.#transceiverSnapshot(
+                    pc.__voiceTransceivers.audio,
+                    0
+                ),
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        pc.__voiceTransceivers.video =
+            pc.addTransceiver(
+                "video",
+                {
+
+                    direction:
+                        "recvonly"
+
+                }
+            );
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "transceiver-reserved",
+
+            mediaKind:
+                "video",
+
+            transceiver:
+                this.#transceiverSnapshot(
+                    pc.__voiceTransceivers.video,
+                    1
+                ),
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        return pc.__voiceTransceivers;
+
+    }
+
+    async #syncPeerLocalTracks(pc) {
 
         if (!pc) return;
+
+        const transceivers =
+            pc.__voiceTransceivers || null;
+
+        if (!transceivers) {
+
+            throw new VoiceNegotiationError(
+                "sync-local-tracks",
+                "Canonical peer transceivers are not established.",
+                this.#peerSnapshot(pc)
+            );
+
+        }
+
+        if (transceivers && !transceivers.fallback) {
+
+            await this.#syncTransceiverTrack(
+                pc,
+                "audio",
+                this.#localMediaTrackByKind("audio")
+            );
+
+            await this.#syncTransceiverTrack(
+                pc,
+                "video",
+                this.#localMediaTrackByKind("video")
+            );
+
+            return;
+
+        }
 
         const desired =
             this.#localMediaTracks();
@@ -1143,7 +2223,65 @@ export class VoiceMediaService {
 
                 if (sender.track !== track) {
 
-                    sender.replaceTrack(track).catch(() => {});
+                    this.#recordVideoLifecycleDiagnostic({
+
+                        event:
+                            "replaceTrack-called",
+
+                        peerInstanceId:
+                            pc.__voicePeerInstanceId || null,
+
+                        generation:
+                            pc.__voiceGeneration || null,
+
+                        previousTrack:
+                            this.#trackSnapshot(sender.track),
+
+                        nextTrack:
+                            this.#trackSnapshot(track),
+
+                        sender:
+                            this.#senderSnapshot(sender)
+
+                    });
+
+                    sender.replaceTrack(track).then(() => {
+
+                        this.#recordVideoLifecycleDiagnostic({
+
+                            event:
+                                "replaceTrack-complete",
+
+                            peerInstanceId:
+                                pc.__voicePeerInstanceId || null,
+
+                            generation:
+                                pc.__voiceGeneration || null,
+
+                            sender:
+                                this.#senderSnapshot(sender)
+
+                        });
+
+                    }).catch(error => {
+
+                        this.#recordVideoLifecycleDiagnostic({
+
+                            event:
+                                "replaceTrack-failed",
+
+                            peerInstanceId:
+                                pc.__voicePeerInstanceId || null,
+
+                            generation:
+                                pc.__voiceGeneration || null,
+
+                            message:
+                                error?.message || String(error)
+
+                        });
+
+                    });
 
                 }
 
@@ -1155,6 +2293,25 @@ export class VoiceMediaService {
                         this.#voiceStream;
 
                 if (stream) {
+
+                    this.#recordVideoLifecycleDiagnostic({
+
+                        event:
+                            "addTrack-called",
+
+                        peerInstanceId:
+                            pc.__voicePeerInstanceId || null,
+
+                        generation:
+                            pc.__voiceGeneration || null,
+
+                        track:
+                            this.#trackSnapshot(track),
+
+                        streamTrackCount:
+                            stream.getTracks?.().length || 0
+
+                    });
 
                     pc.addTrack(
                         track,
@@ -1173,6 +2330,25 @@ export class VoiceMediaService {
 
             if (!desired.some(track => track.kind === sender.track.kind)) {
 
+                this.#recordVideoLifecycleDiagnostic({
+
+                    event:
+                        "removeTrack-called",
+
+                    peerInstanceId:
+                        pc.__voicePeerInstanceId || null,
+
+                    generation:
+                        pc.__voiceGeneration || null,
+
+                    sender:
+                        this.#senderSnapshot(sender),
+
+                    track:
+                        this.#trackSnapshot(sender.track)
+
+                });
+
                 pc.removeTrack(
                     sender
                 );
@@ -1183,37 +2359,658 @@ export class VoiceMediaService {
 
     }
 
+    async #syncTransceiverTrack(pc, kind, track) {
+
+        const transceiver =
+            pc?.__voiceTransceivers?.[kind] || null;
+
+        const sender =
+            transceiver?.sender || null;
+
+        if (!transceiver || !sender) return;
+
+        const nextDirection =
+            track ? "sendrecv" : "recvonly";
+
+        if (transceiver.direction !== nextDirection) {
+
+            const previousDirection =
+                transceiver.direction || null;
+
+            transceiver.direction =
+                nextDirection;
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                    "transceiver-direction-updated",
+
+                mediaKind:
+                    kind,
+
+                previousDirection,
+
+                nextDirection,
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+        }
+
+        if (sender.track === track) return;
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "replaceTrack-called",
+
+            mediaKind:
+                kind,
+
+            sourceType:
+                kind === "audio" ? this.#audioSourceType(track) : null,
+
+            peerInstanceId:
+                pc.__voicePeerInstanceId || null,
+
+            generation:
+                pc.__voiceGeneration || null,
+
+            previousTrack:
+                this.#trackSnapshot(sender.track),
+
+            nextTrack:
+                this.#trackSnapshot(track),
+
+            sender:
+                this.#senderSnapshot(sender),
+
+            transceiver:
+                this.#transceiverSnapshot(
+                    transceiver,
+                    this.#transceiverIndex(
+                        pc,
+                        transceiver
+                    )
+                )
+
+        });
+
+        try {
+
+            await sender.replaceTrack(track);
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                "replaceTrack-complete",
+
+                mediaKind:
+                    kind,
+
+                sourceType:
+                    kind === "audio" ? this.#audioSourceType(sender.track) : null,
+
+                peerInstanceId:
+                    pc.__voicePeerInstanceId || null,
+
+                generation:
+                    pc.__voiceGeneration || null,
+
+                sender:
+                    this.#senderSnapshot(sender),
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            if (kind === "audio") {
+
+                this.#recordAudioPathDiagnostic({
+
+                    event:
+                        "audio-sender-track-confirmed",
+
+                    remoteParticipantId:
+                        pc.__voiceRemoteParticipantId || null,
+
+                    peerInstanceId:
+                        pc.__voicePeerInstanceId || null,
+
+                    generation:
+                        pc.__voiceGeneration || null,
+
+                    negotiationId:
+                        pc.__voicePendingLocalOffer || null,
+
+                    transceiverIndex:
+                        this.#transceiverIndex(
+                            pc,
+                            transceiver
+                        ),
+
+                    trackId:
+                        sender.track?.id || null,
+
+                    sourceType:
+                        this.#audioSourceType(sender.track),
+
+                    intendedTrack:
+                        this.#trackSnapshot(track),
+
+                    sender:
+                        this.#senderSnapshot(sender),
+
+                    senderTrackMatchesIntended:
+                        sender.track === track
+
+                });
+
+                this.#scheduleTransportRtpProbe(
+                    pc,
+                    "after-sender-confirmation",
+                    {
+
+                        transceiverIndex:
+                            this.#transceiverIndex(
+                                pc,
+                                transceiver
+                            ),
+
+                        trackId:
+                            sender.track?.id || null
+
+                    }
+                );
+
+            }
+
+        } catch (error) {
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                    "replaceTrack-failed",
+
+                mediaKind:
+                    kind,
+
+                peerInstanceId:
+                    pc.__voicePeerInstanceId || null,
+
+                generation:
+                    pc.__voiceGeneration || null,
+
+                message:
+                    error?.message || String(error),
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            throw new VoiceNegotiationError(
+                "replace-track",
+                `Failed to attach the local ${kind} track to its canonical transceiver.`,
+                {
+
+                    cause:
+                        error?.message || String(error),
+
+                    mediaKind:
+                        kind,
+
+                    ...this.#peerSnapshot(pc)
+
+                }
+            );
+
+        }
+
+    }
+
+    #enqueuePeerOperation(pc, operation, callback) {
+
+        if (!pc) {
+
+            return Promise.reject(new VoiceNegotiationError(
+                operation,
+                "Peer operation requested without an active peer."
+            ));
+
+        }
+
+        const run = async () => {
+
+            if (!this.#isActivePeer(pc)) {
+
+                this.#recordNegotiationDiagnostic({
+
+                    event:
+                        "peer-operation-stale-generation-skipped",
+
+                    operation,
+
+                    activePeerInstanceId:
+                        this.#peers.get(Number(pc.__voiceRemoteParticipantId))?.__voicePeerInstanceId || null,
+
+                    ...this.#peerSnapshot(pc)
+
+                });
+
+                return SIGNAL_OUTCOME.STALE_GENERATION;
+
+            }
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "peer-operation-start",
+
+                operation,
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            const result =
+                await callback();
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "peer-operation-complete",
+
+                operation,
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            return result;
+
+        };
+
+        const result =
+            pc.__voiceOperationTail.then(run, run);
+
+        pc.__voiceOperationTail =
+            result.catch(() => {});
+
+        return result;
+
+    }
+
+    async #requestPeerNegotiation(participantId, pc, reason, options = {}) {
+
+        if (!pc) return SIGNAL_OUTCOME.DEFERRED;
+
+        pc.__voicePendingNegotiation =
+            true;
+
+        return this.#enqueuePeerOperation(
+            pc,
+            `negotiate:${reason}`,
+            async () => {
+
+                await this.#establishLocalTrackOwnership(pc);
+
+                if (!this.#ownsOffer(participantId)) {
+
+                    await this.#requestOffererRenegotiation(
+                        participantId,
+                        pc,
+                        reason,
+                        options
+                    );
+
+                    pc.__voicePendingNegotiation =
+                        false;
+
+                    return SIGNAL_OUTCOME.CONSUMED;
+
+                }
+
+                if (pc.signalingState !== "stable") {
+
+                    return SIGNAL_OUTCOME.DEFERRED;
+
+                }
+
+                await this.#makePeerOffer(participantId, pc);
+                pc.__voicePendingNegotiation =
+                    false;
+
+                return SIGNAL_OUTCOME.CONSUMED;
+
+            }
+        );
+
+    }
+
+    async #requestOffererRenegotiation(participantId, pc, reason, options = {}) {
+
+        const requestSignature =
+            this.#localMediaNegotiationSignature(pc);
+
+        const pendingRequest =
+            pc.__voicePendingRenegotiationRequest || null;
+
+        if (pendingRequest?.signature === requestSignature) {
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "renegotiation-request-coalesced",
+
+                requestId:
+                    pendingRequest.requestId,
+
+                mediaReason:
+                    options.mediaReason || reason,
+
+                webcamOperation:
+                    options.webcamOperation || null,
+
+                authoritativeOffererParticipantId:
+                    Number(participantId),
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            return SIGNAL_OUTCOME.DUPLICATE;
+
+        }
+
+        const requestId =
+            this.#nextRenegotiationRequestId(participantId, pc);
+
+        pc.__voicePendingRenegotiationRequest = {
+
+            requestId,
+
+            signature:
+                requestSignature
+
+        };
+
+        this.#recordNegotiationDiagnostic({
+
+            event:
+                "renegotiation-request-accepted",
+
+            requestId,
+
+            mediaReason:
+                options.mediaReason || reason,
+
+            webcamOperation:
+                options.webcamOperation || null,
+
+            authoritativeOffererParticipantId:
+                Number(participantId),
+
+            finalVideoTransceiverDirection:
+                pc.__voiceTransceivers?.video?.direction || null,
+
+            finalLocalSenderTrackId:
+                pc.__voiceTransceivers?.video?.sender?.track?.id || null,
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        try {
+
+            await this.#sendSignal(
+                participantId,
+                "renegotiate",
+                {
+
+                    reason,
+
+                    media_reason:
+                        options.mediaReason || reason,
+
+                    webcam_operation:
+                        options.webcamOperation || null,
+
+                    request_id:
+                        requestId,
+
+                    media_signature:
+                        requestSignature,
+
+                    peer_instance_id:
+                        pc.__voicePeerInstanceId,
+
+                    generation:
+                        pc.__voiceGeneration,
+
+                    target_peer_instance_id:
+                        pc.__voiceRemotePeerInstanceId || null
+
+                },
+                {
+
+                    generation:
+                        pc.__voiceGeneration,
+
+                    peerInstanceId:
+                        pc.__voicePeerInstanceId,
+
+                    targetPeerInstanceId:
+                        pc.__voiceRemotePeerInstanceId || null
+
+                }
+            );
+
+        } catch (error) {
+
+            if (pc.__voicePendingRenegotiationRequest?.requestId === requestId) {
+
+                pc.__voicePendingRenegotiationRequest =
+                    null;
+
+            }
+
+            throw error;
+
+        }
+
+        return SIGNAL_OUTCOME.CONSUMED;
+
+    }
+
+    async #establishLocalTrackOwnership(pc) {
+
+        if (!pc.__voiceTransceivers) {
+
+            if (pc.__voiceRole !== "offerer") {
+
+                throw new VoiceNegotiationError(
+                    "establish-local-track-ownership",
+                    "Answerer transceivers must be adopted from the remote offer before local tracks are attached.",
+                    this.#peerSnapshot(pc)
+                );
+
+            }
+
+            this.#reserveOffererTransceivers(pc);
+
+        }
+
+        await this.#syncPeerLocalTracks(pc);
+
+    }
+
     async #makePeerOffer(participantId, pc = this.#peers.get(Number(participantId))) {
 
-        if (!pc || pc.__makingOffer || pc.signalingState !== "stable") return;
+        if (
+            !pc ||
+            pc.signalingState !== "stable" ||
+            !this.#ownsOffer(participantId)
+        ) {
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "offer-skipped",
+
+                remoteParticipantId:
+                    Number(participantId),
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                signalingState:
+                    pc?.signalingState || null,
+
+                ownsOffer:
+                    this.#ownsOffer(participantId)
+
+            });
+
+            return;
+
+        }
 
         pc.__makingOffer =
             true;
 
-        try {
-
-            this.#syncPeerLocalTracks(
+        const negotiationId =
+            this.#nextNegotiationId(
+                participantId,
                 pc
             );
 
+        try {
+
+            await this.#establishLocalTrackOwnership(pc);
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "create-offer-before",
+
+                remoteParticipantId:
+                    Number(participantId),
+
+                peerInstanceId:
+                    pc.__voicePeerInstanceId,
+
+                generation:
+                    pc.__voiceGeneration,
+
+                negotiationId,
+
+                signalingState:
+                    pc.signalingState,
+
+                connectionState:
+                    pc.connectionState,
+
+                iceConnectionState:
+                    pc.iceConnectionState
+
+            });
+
             const offer =
                 await pc.createOffer();
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "create-offer-after",
+
+                remoteParticipantId:
+                    Number(participantId),
+
+                peerInstanceId:
+                    pc.__voicePeerInstanceId,
+
+                generation:
+                    pc.__voiceGeneration,
+
+                negotiationId,
+
+                signalingState:
+                    pc.signalingState
+
+            });
 
             await pc.setLocalDescription(
                 offer
             );
 
+            this.#reconcileCanonicalTransceivers(
+                pc,
+                pc.localDescription,
+                "local-offer"
+            );
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "set-local-offer-after",
+
+                remoteParticipantId:
+                    Number(participantId),
+
+                peerInstanceId:
+                    pc.__voicePeerInstanceId,
+
+                generation:
+                    pc.__voiceGeneration,
+
+                negotiationId,
+
+                signalingState:
+                    pc.signalingState
+
+            });
+
+            pc.__voicePendingLocalOffer =
+                negotiationId;
+
+            this.#scheduleTransportRtpProbe(
+                pc,
+                "after-local-offer",
+                {
+
+                    negotiationId
+
+                }
+            );
+
             await this.#sendSignal(
                 participantId,
                 "offer",
-                pc.localDescription
+                pc.localDescription,
+                {
+
+                    negotiationId,
+
+                    generation:
+                        pc.__voiceGeneration,
+
+                    peerInstanceId:
+                        pc.__voicePeerInstanceId,
+
+                    targetPeerInstanceId:
+                        pc.__voiceRemotePeerInstanceId || null
+
+                }
             );
 
         } catch (error) {
 
-            this.#warn(
-                error
-            );
+            this.#recoverFailedPeer(pc, "create-local-offer", error);
+            throw error;
 
         } finally {
 
@@ -1224,25 +3021,11 @@ export class VoiceMediaService {
 
     }
 
-    async #getPeer(id, polite = false) {
+    #createPeer(id, role) {
 
         if (this.#peers.has(id)) {
 
-            const existing =
-                this.#peers.get(id);
-
-            if (polite) {
-
-                existing.__polite =
-                    true;
-
-            }
-
-            this.#syncPeerLocalTracks(
-                existing
-            );
-
-            return existing;
+            return this.#peers.get(id);
 
         }
 
@@ -1259,44 +3042,194 @@ export class VoiceMediaService {
             });
 
         pc.__polite =
-            polite;
+            this.#isPolitePeer(id);
+
+        pc.__voiceRole =
+            role;
+
+        pc.__voicePeerInstanceId =
+            this.#nextPeerInstanceId(id);
+
+        pc.__voiceRemoteParticipantId =
+            id;
+
+        pc.__voiceGeneration =
+            pc.__voicePeerInstanceId;
+
+        pc.__voicePendingLocalOffer =
+            null;
+
+        pc.__voiceAppliedRemoteAnswer =
+            null;
+
+        pc.__voiceRemotePeerInstanceId =
+            null;
+
+        pc.__voiceOperationTail =
+            Promise.resolve();
+
+        pc.__voicePendingNegotiation =
+            false;
+
+        pc.__voicePendingRenegotiationRequest =
+            null;
+
+        pc.__voicePendingIceSignals =
+            [];
+
+        pc.__voiceAdoptingRemoteDescription =
+            false;
+
+        pc.__voiceDeferredTrackEvents =
+            [];
+
+        pc.__voiceTransceivers =
+            null;
 
         this.#peers.set(
             id,
             pc
         );
 
-        this.#syncPeerLocalTracks(
-            pc
-        );
+        this.#remoteWebcamReadinessRequests.delete(id);
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "peer-created",
+
+            remoteParticipantId:
+                id,
+
+            ...this.#peerSnapshot(pc)
+
+        });
 
         pc.ontrack =
-            event => this.#handlePeerTrack(id, event);
+            event => this.#handlePeerTrack(id, event, pc);
 
         pc.onicecandidate =
             event => {
 
                 if (event.candidate) {
 
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "ice-candidate-sent",
+
+                        remoteParticipantId:
+                            id,
+
+                        peerInstanceId:
+                            pc.__voicePeerInstanceId,
+
+                        generation:
+                            pc.__voiceGeneration,
+
+                        remotePeerInstanceId:
+                            pc.__voiceRemotePeerInstanceId || null,
+
+                        candidate:
+                            this.#iceCandidateSnapshot(event.candidate)
+
+                    });
+
                     this.#sendSignal(
                         id,
                         "ice",
-                        event.candidate
-                    );
+                        event.candidate,
+                        {
+
+                            generation:
+                                pc.__voiceGeneration,
+
+                            peerInstanceId:
+                                pc.__voicePeerInstanceId,
+
+                            targetPeerInstanceId:
+                                pc.__voiceRemotePeerInstanceId || null
+
+                        }
+                    ).catch(error => {
+
+                        this.#recordCriticalFailure(
+                            pc,
+                            error,
+                            {
+
+                                operation:
+                                    "send-ice-candidate"
+
+                            }
+                        );
+
+                    });
 
                 }
 
             };
 
-        pc.onnegotiationneeded =
-            async () => {
+        pc.onconnectionstatechange =
+            () => {
 
-                if (polite) return;
-
-                await this.#makePeerOffer(
-                    id,
-                    pc
+                this.#recordTransportStateDiagnostic(
+                    pc,
+                    "connectionstatechange"
                 );
+
+                this.#scheduleTransportRtpProbe(
+                    pc,
+                    `connection-${pc.connectionState || "unknown"}`
+                );
+
+            };
+
+        pc.oniceconnectionstatechange =
+            () => {
+
+                this.#recordTransportStateDiagnostic(
+                    pc,
+                    "iceconnectionstatechange"
+                );
+
+                this.#scheduleTransportRtpProbe(
+                    pc,
+                    `ice-${pc.iceConnectionState || "unknown"}`
+                );
+
+            };
+
+        pc.onicegatheringstatechange =
+            () => {
+
+                this.#recordTransportStateDiagnostic(
+                    pc,
+                    "icegatheringstatechange"
+                );
+
+            };
+
+        pc.onnegotiationneeded =
+            () => {
+
+                pc.__voicePendingNegotiation =
+                    true;
+
+                this.#requestPeerNegotiation(
+                    id,
+                    pc,
+                    "onnegotiationneeded"
+                ).catch(error => this.#recordCriticalFailure(
+                    pc,
+                    error,
+                    {
+
+                        operation:
+                            "onnegotiationneeded"
+
+                    }
+                ));
 
             };
 
@@ -1304,36 +3237,1107 @@ export class VoiceMediaService {
 
     }
 
-    #handlePeerTrack(id, event) {
+    async #acceptOfferSignal(signal) {
+
+        const from =
+            Number(signal.from_participant_id);
+
+        const description =
+            this.#incomingSessionDescription("offer", signal.data);
+
+        if (!description) return SIGNAL_OUTCOME.TERMINAL_INVALID;
+
+        let pc =
+            this.#peers.get(from) || null;
+
+        if (!pc) {
+
+            pc =
+                this.#createPeer(from, "answerer");
+
+        }
+
+        if (!this.#signalTargetsPeer(pc, signal)) {
+
+            return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        }
+
+        return this.#enqueuePeerOperation(
+            pc,
+            `accept-offer:${signal.id}`,
+            async () => {
+
+                const offerCollision =
+                    pc.__makingOffer || pc.signalingState !== "stable";
+
+                if (offerCollision) {
+
+                    if (!pc.__polite) {
+
+                        return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                    }
+
+                    try {
+
+                        await pc.setLocalDescription({ type: "rollback" });
+
+                    } catch (error) {
+
+                        this.#recoverFailedPeer(pc, "rollback-collision", error);
+
+                        throw new VoiceNegotiationError(
+                            "rollback-collision",
+                            "Failed to roll back a colliding local offer.",
+                            {
+
+                                cause:
+                                    error?.message || String(error),
+
+                                signalId:
+                                    signal.id,
+
+                                ...this.#peerSnapshot(pc)
+
+                            }
+                        );
+
+                    }
+
+                }
+
+                try {
+
+                    pc.__voiceAdoptingRemoteDescription =
+                        true;
+
+                    await pc.setRemoteDescription(description);
+                    pc.__voiceRemotePeerInstanceId =
+                        signal.data?.peer_instance_id || null;
+
+                    this.#reconcileCanonicalTransceivers(
+                        pc,
+                        pc.remoteDescription,
+                        "remote-offer"
+                    );
+
+                    pc.__voiceAdoptingRemoteDescription =
+                        false;
+
+                    this.#drainDeferredTrackEvents(pc);
+
+                    await this.#syncPeerLocalTracks(pc);
+
+                    const completedRequest =
+                        pc.__voicePendingRenegotiationRequest || null;
+
+                    if (completedRequest) {
+
+                        this.#recordNegotiationDiagnostic({
+
+                            event:
+                                "renegotiation-request-offer-received",
+
+                            requestId:
+                                completedRequest.requestId,
+
+                            offerNegotiationId:
+                                signal.data?.negotiation_id || null,
+
+                            finalVideoTransceiverDirection:
+                                pc.__voiceTransceivers?.video?.direction || null,
+
+                            finalLocalSenderTrackId:
+                                pc.__voiceTransceivers?.video?.sender?.track?.id || null,
+
+                            finalRemoteReceiverTrackId:
+                                pc.__voiceTransceivers?.video?.receiver?.track?.id || null,
+
+                            ...this.#peerSnapshot(pc)
+
+                        });
+
+                        pc.__voicePendingRenegotiationRequest =
+                            null;
+
+                    }
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "set-remote-offer-after",
+
+                        signalId:
+                            signal.id,
+
+                        negotiationId:
+                            signal.data?.negotiation_id || null,
+
+                        ...this.#peerSnapshot(pc)
+
+                    });
+
+                    const answer =
+                        await pc.createAnswer();
+
+                    await pc.setLocalDescription(answer);
+
+                    this.#reconcileCanonicalTransceivers(
+                        pc,
+                        pc.localDescription,
+                        "local-answer"
+                    );
+
+                    await this.#sendSignal(
+                        from,
+                        "answer",
+                        pc.localDescription,
+                        {
+
+                            negotiationId:
+                                signal.data?.negotiation_id || null,
+
+                            generation:
+                                pc.__voiceGeneration,
+
+                            peerInstanceId:
+                                pc.__voicePeerInstanceId,
+
+                            targetPeerInstanceId:
+                                signal.data?.peer_instance_id || null
+
+                        }
+                    );
+
+                    this.#scheduleTransportRtpProbe(
+                        pc,
+                        "after-local-answer",
+                        {
+
+                            signalId:
+                                signal.id
+
+                        }
+                    );
+
+                    return SIGNAL_OUTCOME.CONSUMED;
+
+                } catch (error) {
+
+                    pc.__voiceAdoptingRemoteDescription =
+                        false;
+                    this.#recoverFailedPeer(pc, "accept-remote-offer", error);
+                    throw error;
+
+                }
+
+            }
+        );
+
+    }
+
+    async #acceptAnswerSignal(signal) {
+
+        const from =
+            Number(signal.from_participant_id);
+
+        const pc =
+            this.#peers.get(from) || null;
+
+        if (!pc || pc.__voiceRole !== "offerer") {
+
+            return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        }
+
+        if (!this.#signalTargetsPeer(pc, signal)) {
+
+            return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        }
+
+        const description =
+            this.#incomingSessionDescription("answer", signal.data);
+
+        if (!description) return SIGNAL_OUTCOME.TERMINAL_INVALID;
+
+        return this.#enqueuePeerOperation(
+            pc,
+            `accept-answer:${signal.id}`,
+            async () => {
+
+                if (!this.#signalMatchesPeerGeneration(pc, signal)) {
+
+                    return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                }
+
+                if (
+                    pc.__voiceAppliedRemoteAnswer === signal.data?.negotiation_id &&
+                    signal.data?.negotiation_id
+                ) {
+
+                    return SIGNAL_OUTCOME.DUPLICATE;
+
+                }
+
+                if (pc.signalingState !== "have-local-offer") {
+
+                    return pc.__voicePendingLocalOffer ?
+                        SIGNAL_OUTCOME.DEFERRED :
+                        SIGNAL_OUTCOME.STALE_GENERATION;
+
+                }
+
+                if (
+                    pc.__voicePendingLocalOffer &&
+                    signal.data?.negotiation_id &&
+                    pc.__voicePendingLocalOffer !== signal.data.negotiation_id
+                ) {
+
+                    return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                }
+
+                try {
+
+                    await pc.setRemoteDescription(description);
+                    pc.__voiceRemotePeerInstanceId =
+                        signal.data?.peer_instance_id || null;
+
+                    this.#reconcileCanonicalTransceivers(
+                        pc,
+                        pc.remoteDescription,
+                        "remote-answer"
+                    );
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "set-remote-answer-after",
+
+                        signalId:
+                            signal.id,
+
+                        negotiationId:
+                            signal.data?.negotiation_id || null,
+
+                        ...this.#peerSnapshot(pc)
+
+                    });
+
+                    pc.__voiceAppliedRemoteAnswer =
+                        signal.data?.negotiation_id || signal.id;
+
+                    pc.__voicePendingLocalOffer =
+                        null;
+
+                    this.#scheduleTransportRtpProbe(
+                        pc,
+                        "after-remote-answer",
+                        {
+
+                            signalId:
+                                signal.id
+
+                        }
+                    );
+
+                    this.#schedulePendingPeerNegotiation(pc);
+
+                    return SIGNAL_OUTCOME.CONSUMED;
+
+                } catch (error) {
+
+                    this.#recoverFailedPeer(pc, "accept-remote-answer", error);
+                    throw error;
+
+                }
+
+            }
+        );
+
+    }
+
+    async #acceptIceSignal(signal) {
+
+        const from =
+            Number(signal.from_participant_id);
+
+        const pc =
+            this.#peers.get(from) || null;
+
+        if (!pc) return SIGNAL_OUTCOME.DEFERRED;
+
+        if (!this.#signalTargetsPeer(pc, signal)) {
+
+            return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        }
+
+        if (
+            !pc.remoteDescription ||
+            !pc.__voiceRemotePeerInstanceId
+        ) {
+
+            return SIGNAL_OUTCOME.DEFERRED;
+
+        }
+
+        if (!this.#signalMatchesPeerGeneration(pc, signal)) {
+
+            return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        }
+
+        const candidate =
+            this.#incomingIceCandidate(signal.data);
+
+        if (!candidate) return SIGNAL_OUTCOME.TERMINAL_INVALID;
+
+        return this.#enqueuePeerOperation(
+            pc,
+            `accept-ice:${signal.id}`,
+            async () => {
+
+                if (!pc.remoteDescription) return SIGNAL_OUTCOME.DEFERRED;
+
+                try {
+
+                    await pc.addIceCandidate(candidate);
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "ice-candidate-applied",
+
+                        signalId:
+                            signal.id,
+
+                        ...this.#peerSnapshot(pc)
+
+                    });
+
+                    return SIGNAL_OUTCOME.CONSUMED;
+
+                } catch (error) {
+
+                    throw new VoiceNegotiationError(
+                        "add-ice-candidate",
+                        "Failed to apply a generation-matched ICE candidate.",
+                        {
+
+                            cause:
+                                error?.message || String(error),
+
+                            signalId:
+                                signal.id,
+
+                            ...this.#peerSnapshot(pc)
+
+                        }
+                    );
+
+                }
+
+            }
+        );
+
+    }
+
+    #signalTargetsPeer(pc, signal) {
+
+        const targetPeerInstanceId =
+            signal?.data?.target_peer_instance_id || null;
+
+        if (!targetPeerInstanceId) return true;
+
+        return targetPeerInstanceId === pc?.__voicePeerInstanceId;
+
+    }
+
+    #schedulePendingPeerNegotiation(pc) {
+
+        if (!pc?.__voicePendingNegotiation || pc.signalingState !== "stable") return;
+
+        Promise.resolve().then(() => this.#requestPeerNegotiation(
+            pc.__voiceRemoteParticipantId,
+            pc,
+            "pending-after-stable"
+        )).catch(error => this.#recordCriticalFailure(
+            pc,
+            error,
+            { operation: "pending-after-stable" }
+        ));
+
+    }
+
+    #parseSdpMediaSections(description) {
+
+        const sdp =
+            description?.sdp;
+
+        if (typeof sdp !== "string") return [];
+
+        const sections =
+            [];
+
+        let current =
+            null;
+
+        for (const line of sdp.replace(/\r\n/g, "\n").split("\n")) {
+
+            if (line.startsWith("m=")) {
+
+                current = {
+
+                    kind:
+                        line.slice(2).split(/\s+/)[0],
+
+                    index:
+                        sections.length,
+
+                    mid:
+                        null
+
+                };
+
+                sections.push(current);
+
+            } else if (current && line.startsWith("a=mid:")) {
+
+                current.mid =
+                    line.slice(6).trim();
+
+            }
+
+        }
+
+        return sections;
+
+    }
+
+    #reconcileCanonicalTransceivers(pc, description, source) {
+
+        const sections =
+            this.#parseSdpMediaSections(description).filter(section =>
+                section.kind === "audio" || section.kind === "video"
+            );
+
+        const transceivers =
+            pc.getTransceivers();
+
+        const next = {
+
+            audio:
+                null,
+
+            video:
+                null,
+
+            fallback:
+                false
+
+        };
+
+        for (const kind of ["audio", "video"]) {
+
+            const mediaSections =
+                sections.filter(section => section.kind === kind);
+
+            if (mediaSections.length !== 1 || mediaSections[0].mid === null) {
+
+                throw new VoiceNegotiationError(
+                    "reconcile-transceivers",
+                    `Expected exactly one assigned ${kind} SDP media section.`,
+                    {
+
+                        source,
+
+                        sections,
+
+                        ...this.#peerSnapshot(pc)
+
+                    }
+                );
+
+            }
+
+            const matches =
+                transceivers.filter(transceiver =>
+                    String(transceiver.mid) === String(mediaSections[0].mid)
+                );
+
+            if (matches.length !== 1) {
+
+                throw new VoiceNegotiationError(
+                    "reconcile-transceivers",
+                    `The ${kind} SDP mid does not identify one browser transceiver.`,
+                    {
+
+                        source,
+
+                        mediaSection:
+                            mediaSections[0],
+
+                        matchingTransceiverCount:
+                            matches.length,
+
+                        ...this.#peerSnapshot(pc)
+
+                    }
+                );
+
+            }
+
+            next[kind] =
+                matches[0];
+
+            const previous =
+                pc.__voiceTransceivers?.[kind] || null;
+
+            if (
+                previous &&
+                previous !== matches[0] &&
+                previous.mid !== null
+            ) {
+
+                throw new VoiceNegotiationError(
+                    "reconcile-transceivers",
+                    `Canonical ${kind} transceiver identity changed after negotiation.`,
+                    {
+
+                        source,
+
+                        previousMid:
+                            previous.mid,
+
+                        nextMid:
+                            matches[0].mid,
+
+                        ...this.#peerSnapshot(pc)
+
+                    }
+                );
+
+            }
+
+        }
+
+        const canonical =
+            new Set([next.audio, next.video]);
+
+        const unassociated =
+            transceivers.filter(transceiver =>
+                !canonical.has(transceiver) &&
+                (
+                    transceiver.mid !== null ||
+                    transceiver.sender?.track ||
+                    transceiver.receiver?.track?.readyState === "live"
+                )
+            );
+
+        if (unassociated.length > 0) {
+
+            throw new VoiceNegotiationError(
+                "reconcile-transceivers",
+                "Additional active transceivers are not associated with the canonical SDP media sections.",
+                {
+
+                    source,
+
+                    unassociatedCount:
+                        unassociated.length,
+
+                    ...this.#peerSnapshot(pc)
+
+                }
+            );
+
+        }
+
+        pc.__voiceTransceivers =
+            next;
+
+        this.#recordNegotiationDiagnostic({
+
+            event:
+                "canonical-transceivers-reconciled",
+
+            source,
+
+            sections,
+
+            audioIdentityVerified:
+                pc.getTransceivers().includes(next.audio),
+
+            videoIdentityVerified:
+                pc.getTransceivers().includes(next.video),
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        return next;
+
+    }
+
+    #drainDeferredTrackEvents(pc) {
+
+        const events =
+            pc.__voiceDeferredTrackEvents.splice(0);
+
+        for (const event of events) {
+
+            this.#handlePeerTrack(
+                pc.__voiceRemoteParticipantId,
+                event,
+                pc
+            );
+
+        }
+
+    }
+
+    #handlePeerTrack(id, event, eventPeer = null) {
 
         const track =
             event.track;
 
+        const pc =
+            eventPeer ||
+            this.#peers.get(
+                Number(id)
+            );
+
+        if (!this.#isActivePeer(pc)) {
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "ontrack-stale-peer-skipped",
+
+                remoteParticipantId:
+                    Number(id),
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                activePeerInstanceId:
+                    this.#peers.get(Number(id))?.__voicePeerInstanceId || null,
+
+                track:
+                    this.#trackSnapshot(track)
+
+            });
+
+            return;
+
+        }
+
+        if (pc.__voiceAdoptingRemoteDescription && !pc.__voiceTransceivers) {
+
+            pc.__voiceDeferredTrackEvents.push(event);
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                    "ontrack-deferred-for-transceiver-reconciliation",
+
+                remoteParticipantId:
+                    Number(id),
+
+                track:
+                    this.#trackSnapshot(track),
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            return;
+
+        }
+
+        const canonicalTransceiver =
+            pc.__voiceTransceivers?.[track.kind] || null;
+
+        if (
+            !event.transceiver ||
+            event.transceiver !== canonicalTransceiver ||
+            event.transceiver.mid === null ||
+            !pc.getTransceivers().includes(event.transceiver)
+        ) {
+
+            const error =
+                new VoiceNegotiationError(
+                    "remote-track-ownership",
+                    `Remote ${track.kind} track arrived on a non-canonical transceiver.`,
+                    {
+
+                        eventTransceiverMid:
+                            event.transceiver?.mid ?? null,
+
+                        canonicalTransceiverMid:
+                            canonicalTransceiver?.mid ?? null,
+
+                        sameObject:
+                            event.transceiver === canonicalTransceiver,
+
+                        ...this.#peerSnapshot(pc)
+
+                    }
+                );
+
+            this.#recoverFailedPeer(pc, "remote-track-ownership", error);
+            return;
+
+        }
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "remote-track-canonical-ownership-verified",
+
+            remoteParticipantId:
+                Number(id),
+
+            mediaKind:
+                track.kind,
+
+            transceiverMid:
+                event.transceiver.mid,
+
+            eventTransceiverIsCanonical:
+                event.transceiver === canonicalTransceiver,
+
+            senderIsCanonical:
+                event.transceiver.sender === canonicalTransceiver.sender,
+
+            receiverIsCanonical:
+                event.transceiver.receiver === canonicalTransceiver.receiver,
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "ontrack",
+
+            remoteParticipantId:
+                Number(id),
+
+            track:
+                this.#trackSnapshot(track),
+
+            streams:
+                event.streams?.map(stream => ({
+
+                    trackCount:
+                        stream.getTracks?.().length || 0,
+
+                    videoTrackCount:
+                        stream.getVideoTracks?.().length || 0,
+
+                    audioTrackCount:
+                        stream.getAudioTracks?.().length || 0
+
+                })) || [],
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
         if (track.kind === "video") {
 
-            const MediaStreamClass =
-                this.#context?.window?.MediaStream ||
-                globalThis.MediaStream;
+            track.addEventListener(
+                "mute",
+                () => this.#recordVideoLifecycleDiagnostic({
 
-            const stream =
-                event.streams?.[0] ||
-                new MediaStreamClass([track]);
+                    event:
+                        "remote-video-track-mute",
 
-            this.#context?.attachParticipantVideo?.(
-                id,
-                stream
+                    remoteParticipantId:
+                        Number(id),
+
+                    track:
+                        this.#trackSnapshot(track),
+
+                    ...this.#peerSnapshot(pc)
+
+                })
+            );
+
+            track.addEventListener(
+                "unmute",
+                () => this.#recordVideoLifecycleDiagnostic({
+
+                    event:
+                        "remote-video-track-unmute",
+
+                    remoteParticipantId:
+                        Number(id),
+
+                    track:
+                        this.#trackSnapshot(track),
+
+                    ...this.#peerSnapshot(pc)
+
+                })
             );
 
             track.addEventListener(
                 "ended",
-                () => this.#context?.detachParticipantVideo?.(id)
+                () => this.#recordVideoLifecycleDiagnostic({
+
+                    event:
+                        "remote-video-track-ended",
+
+                    remoteParticipantId:
+                        Number(id),
+
+                    reason:
+                        "track-ended-event",
+
+                    track:
+                        this.#trackSnapshot(track),
+
+                    ...this.#peerSnapshot(pc)
+
+                })
+            );
+
+            const stream =
+                this.#canonicalRemoteVideoStream(
+                    pc,
+                    canonicalTransceiver,
+                    track,
+                    event.streams?.[0] || null
+                );
+
+            const presentation =
+                this.#remoteVideoPresentations.get(Number(id));
+
+            this.#context?.attachParticipantVideo?.(
+                id,
+                stream,
+                false,
+                {
+                    source: "canonical-ontrack",
+                    peerInstanceId: pc.__voicePeerInstanceId || null,
+                    generation: pc.__voiceGeneration || null,
+                    receiverIdentity: presentation?.receiverIdentity || null,
+                    streamIdentity: presentation?.streamIdentity || null,
+                    remoteTrackId: track.id || null
+                }
+            );
+
+            this.#recordVideoLifecycleDiagnostic({
+
+                event:
+                    "attachParticipantVideo-dispatched",
+
+                remoteParticipantId:
+                    Number(id),
+
+                track:
+                    this.#trackSnapshot(track),
+
+                streamTrackCount:
+                    stream.getTracks?.().length || 0,
+
+                receiverIdentity:
+                    presentation?.receiverIdentity || null,
+
+                streamIdentity:
+                    presentation?.streamIdentity || null,
+
+                ...this.#peerSnapshot(pc)
+
+            });
+
+            track.addEventListener(
+                "ended",
+                () => {
+
+                    if (!this.#isActivePeer(pc)) return;
+
+                    this.#recordVideoLifecycleDiagnostic({
+
+                        event:
+                            "detachParticipantVideo-dispatched",
+
+                        remoteParticipantId:
+                            Number(id),
+
+                        reason:
+                            "remote-video-track-ended",
+
+                        track:
+                            this.#trackSnapshot(track),
+
+                        ...this.#peerSnapshot(pc)
+
+                    });
+
+                    this.#context?.detachParticipantVideo?.(id);
+
+                }
             );
 
             return;
 
         }
 
-        if (track.kind !== "audio" || !this.#joined) return;
+        if (track.kind !== "audio") return;
+
+        if (!this.#joined) {
+
+            this.#pendingRemoteAudioTracks.set(
+                Number(id),
+                {
+
+                    track,
+
+                    streams:
+                        event.streams || [],
+
+                    peer:
+                        pc,
+
+                    peerInstanceId:
+                        pc.__voicePeerInstanceId,
+
+                    generation:
+                        pc.__voiceGeneration,
+
+                    transceiver:
+                        event.transceiver
+
+                }
+            );
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "remote-audio-pending-unjoined",
+
+                remoteParticipantId:
+                    Number(id),
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                trackId:
+                    track.id || null,
+
+                track:
+                    this.#trackSnapshot(track),
+
+                streams:
+                    event.streams?.map(stream => this.#streamSnapshot(stream)) || []
+
+            });
+
+            return;
+
+        }
+
+        this.#attachRemoteAudioTrack(
+            id,
+            track,
+            event.streams || [],
+            pc,
+            event.transceiver
+        );
+
+    }
+
+    #attachPendingRemoteAudioTracks() {
+
+        this.#pendingRemoteAudioTracks.forEach((entry, id) => {
+
+            if (
+                !this.#isActivePeer(entry.peer) ||
+                entry.peer.__voicePeerInstanceId !== entry.peerInstanceId ||
+                entry.peer.__voiceGeneration !== entry.generation ||
+                entry.peer.__voiceTransceivers?.audio !== entry.transceiver
+            ) {
+
+                this.#recordAudioPathDiagnostic({
+
+                    event:
+                        "pending-remote-audio-stale-skipped",
+
+                    remoteParticipantId:
+                        Number(id),
+
+                    peerInstanceId:
+                        entry.peerInstanceId || null,
+
+                    generation:
+                        entry.generation || null
+
+                });
+
+                return;
+
+            }
+
+            this.#attachRemoteAudioTrack(
+                id,
+                entry.track,
+                entry.streams || [],
+                entry.peer,
+                entry.transceiver
+            );
+
+        });
+
+        this.#pendingRemoteAudioTracks.clear();
+
+    }
+
+    #attachRemoteAudioTrack(id, track, streams = [], eventPeer = null, transceiver = null) {
+
+        const pc =
+            eventPeer || this.#peers.get(Number(id));
+
+        if (
+            !this.#isActivePeer(pc) ||
+            pc.__voiceTransceivers?.audio !== transceiver
+        ) {
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "remote-audio-attachment-stale-skipped",
+
+                remoteParticipantId:
+                    Number(id),
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                transceiverMid:
+                    transceiver?.mid ?? null
+
+            });
+
+            return;
+
+        }
 
         const MediaStreamClass =
             this.#context?.window?.MediaStream ||
@@ -1349,37 +4353,207 @@ export class VoiceMediaService {
         audio.muted =
             this.#deafened;
 
-        audio.srcObject =
-            event.streams?.[0] ||
+        const nextStream =
             new MediaStreamClass([track]);
+
+        if (audio.srcObject && audio.srcObject !== nextStream) {
+            this.#markAudioPlaybackInterruption(
+                audio,
+                "remote-track-replacement"
+            );
+        }
+
+        audio.srcObject = nextStream;
+
+        this.#recordAudioPathDiagnostic({
+
+            event:
+                "remote-audio-srcObject-set",
+
+            remoteParticipantId:
+                Number(id),
+
+            peerInstanceId:
+                pc?.__voicePeerInstanceId || null,
+
+            generation:
+                pc?.__voiceGeneration || null,
+
+            negotiationId:
+                pc?.__voicePendingLocalOffer || null,
+
+            trackId:
+                track.id || null,
+
+            track:
+                this.#trackSnapshot(track),
+
+            audioElementId:
+                audio.id || null,
+
+            muted:
+                audio.muted,
+
+            volume:
+                audio.volume,
+
+            sinkId:
+                audio.sinkId || null,
+
+            srcObject:
+                this.#streamSnapshot(audio.srcObject)
+
+        });
 
         this.applyAudioOutput(
             audio
-        );
+        ).then(() => {
 
-    }
+            this.#recordAudioPathDiagnostic({
 
-    #mediaSignalData(data) {
+                event:
+                    "remote-audio-output-applied",
 
-        if (!data || typeof data !== "object") return data;
+                remoteParticipantId:
+                    Number(id),
 
-        return Object.assign(
-            {},
-            data,
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                trackId:
+                    track.id || null,
+
+                sinkId:
+                    audio.sinkId || null
+
+            });
+
+        });
+
+        const playSequence =
+            this.#beginAudioPlayback(audio);
+
+        audio.play?.().then(() => {
+
+            this.#finishAudioPlayback(
+                audio,
+                playSequence
+            );
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "remote-audio-play-resolved",
+
+                remoteParticipantId:
+                    Number(id),
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                trackId:
+                    track.id || null,
+
+                paused:
+                    audio.paused,
+
+                muted:
+                    audio.muted,
+
+                volume:
+                    audio.volume,
+
+                sinkId:
+                    audio.sinkId || null
+
+            });
+
+        }).catch(error => {
+
+            const interruptionReason =
+                this.#finishAudioPlayback(
+                    audio,
+                    playSequence
+                );
+
+            const intentionalAbort =
+                error?.name === "AbortError" && Boolean(interruptionReason);
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    intentionalAbort
+                        ? "remote-audio-play-aborted-intentionally"
+                        : "remote-audio-play-rejected",
+
+                remoteParticipantId:
+                    Number(id),
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                trackId:
+                    track.id || null,
+
+                message:
+                    error?.message || String(error),
+
+                name:
+                    error?.name || null,
+
+                interruptionReason
+
+            });
+
+            if (!intentionalAbort) {
+                this.#context?.warn?.(error);
+            }
+
+        });
+
+        this.#scheduleTransportRtpProbe(
+            pc,
+            "after-remote-audio-attach",
             {
-                chatspace_media:
-                    this.#webcamStream() ? "video" : "voice"
+
+                remoteParticipantId:
+                    Number(id),
+
+                trackId:
+                    track.id || null
+
             }
         );
 
     }
 
-    #sendSignal(toId, type, data) {
+    #sendSignal(toId, type, data, metadata = {}) {
 
         const payload =
-            this.#mediaSignalData(
-                data
+            this.#outgoingSignalPayload(
+                type,
+                data,
+                metadata
             );
+
+        if (!payload) {
+
+            this.#warn(
+                new Error(`Skipped malformed outgoing ${type} media signal.`)
+            );
+
+            return Promise.resolve();
+
+        }
 
         return this.#context?.apiPost?.(
             "/api/media_signal.php",
@@ -1388,13 +4562,16 @@ export class VoiceMediaService {
                     "signal",
 
                 media:
-                    payload?.chatspace_media === "video" ? "webcam" : "voice",
+                    this.#signalMedia(),
 
                 session_id:
                     this.#config()?.sessionId,
 
                 participant_id:
                     this.#config()?.myParticipantId,
+
+                client_epoch:
+                    this.#clientEpoch,
 
                 to_id:
                     toId,
@@ -1407,22 +4584,326 @@ export class VoiceMediaService {
                 data:
                     payload
             }
+        )?.then(result => {
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "signal-persisted",
+
+                signalId:
+                    Number(result?.signal_id) || null,
+
+                signalKind:
+                    type,
+
+                senderParticipantId:
+                    this.#localParticipantId(),
+
+                recipientParticipantId:
+                    Number(toId),
+
+                senderEpoch:
+                    this.#clientEpoch,
+
+                recipientEpoch:
+                    result?.recipient_epoch || null,
+
+                negotiationId:
+                    payload.negotiation_id || null,
+
+                peerInstanceId:
+                    payload.peer_instance_id || null,
+
+                generation:
+                    payload.generation || null
+
+            });
+
+            return result;
+
+        });
+
+    }
+
+    #stageFetchedSignals(signals, signalErrors) {
+
+        const staged = [
+
+            ...signals.map(signal => ({ signal, serverError: null })),
+            ...signalErrors.map(serverError => ({
+
+                signal: {
+
+                    id:
+                        serverError.id,
+
+                    media:
+                        serverError.media,
+
+                    from_participant_id:
+                        serverError.from_participant_id,
+
+                    type:
+                        serverError.type
+
+                },
+
+                serverError
+
+            }))
+
+        ].sort((left, right) =>
+            Number(left.signal?.id) - Number(right.signal?.id)
         );
+
+        for (const entry of staged) {
+
+            const signalId =
+                Number(entry.signal?.id);
+
+            if (!signalId) continue;
+
+            if (this.#terminalSignalIds.has(signalId)) {
+
+                this.#recordNegotiationDiagnostic({
+
+                    event:
+                        "signal-terminal-duplicate-observed",
+
+                    signalId,
+
+                    signalKind:
+                        entry.signal?.type || null
+
+                });
+
+                continue;
+
+            }
+
+            if (!this.#signalInbox.has(signalId)) {
+
+                if (this.#signalInbox.size >= this.#maxSignalInboxSize) {
+
+                    const error =
+                        new VoiceNegotiationError(
+                            "stage-signal",
+                            "Voice signal inbox capacity was exceeded.",
+                            {
+
+                                signalId,
+
+                                inboxSize:
+                                    this.#signalInbox.size
+
+                            }
+                        );
+
+                    this.#recordCriticalFailure(null, error);
+                    this.#rememberTerminalSignal(
+                        signalId,
+                        SIGNAL_OUTCOME.TERMINAL_INVALID
+                    );
+                    continue;
+
+                }
+
+                this.#signalInbox.set(signalId, {
+
+                    signal:
+                        entry.signal,
+
+                    serverError:
+                        entry.serverError,
+
+                    attempts:
+                        0,
+
+                    outcome:
+                        null
+
+                });
+
+            }
+
+        }
+
+    }
+
+    async #drainSignalInbox() {
+
+        if (this.#drainingSignalInbox) return;
+
+        this.#drainingSignalInbox =
+            true;
+
+        try {
+
+            let madeProgress =
+                true;
+
+            while (madeProgress) {
+
+                madeProgress =
+                    false;
+
+                const entries =
+                    [...this.#signalInbox.entries()].sort(
+                        ([leftId], [rightId]) => leftId - rightId
+                    );
+
+                for (const [signalId, entry] of entries) {
+
+                    if (this.#processingSignalIds.has(signalId)) continue;
+
+                    this.#processingSignalIds.add(signalId);
+                    entry.attempts += 1;
+
+                    let outcome =
+                        SIGNAL_OUTCOME.RETRYABLE_FAILURE;
+
+                    try {
+
+                        if (entry.serverError) {
+
+                            this.#recordNegotiationDiagnostic({
+
+                                event:
+                                    "server-signal-error",
+
+                                signalId,
+
+                                signalKind:
+                                    entry.signal?.type || null,
+
+                                serverError:
+                                    entry.serverError
+
+                            });
+
+                            outcome =
+                                SIGNAL_OUTCOME.TERMINAL_INVALID;
+
+                        } else {
+
+                            outcome =
+                                await this.#handleSignal(entry.signal);
+
+                        }
+
+                    } catch (error) {
+
+                        this.#recordCriticalFailure(
+                            this.#peers.get(Number(entry.signal?.from_participant_id)) || null,
+                            error,
+                            {
+
+                                signalId,
+
+                                signalKind:
+                                    entry.signal?.type || null,
+
+                                attempts:
+                                    entry.attempts
+
+                            }
+                        );
+
+                        outcome =
+                            error instanceof VoiceNegotiationError ?
+                                SIGNAL_OUTCOME.TERMINAL_INVALID :
+                                SIGNAL_OUTCOME.RETRYABLE_FAILURE;
+
+                    } finally {
+
+                        this.#processingSignalIds.delete(signalId);
+
+                    }
+
+                    entry.outcome =
+                        outcome;
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "signal-processing-outcome",
+
+                        signalId,
+
+                        signalKind:
+                            entry.signal?.type || null,
+
+                        outcome,
+
+                        attempts:
+                            entry.attempts
+
+                    });
+
+                    if (TERMINAL_SIGNAL_OUTCOMES.has(outcome)) {
+
+                        this.#signalInbox.delete(signalId);
+                        this.#rememberTerminalSignal(signalId, outcome);
+                        madeProgress =
+                            true;
+
+                    } else if (
+                        outcome === SIGNAL_OUTCOME.RETRYABLE_FAILURE &&
+                        entry.attempts >= this.#maxSignalAttempts
+                    ) {
+
+                        this.#signalInbox.delete(signalId);
+                        this.#rememberTerminalSignal(
+                            signalId,
+                            SIGNAL_OUTCOME.TERMINAL_INVALID
+                        );
+                        madeProgress =
+                            true;
+
+                    }
+
+                }
+
+            }
+
+        } finally {
+
+            this.#drainingSignalInbox =
+                false;
+
+        }
+
+    }
+
+    #rememberTerminalSignal(signalId, outcome) {
+
+        this.#terminalSignalIds.set(
+            Number(signalId),
+            outcome
+        );
+
+        while (this.#terminalSignalIds.size > this.#maxTerminalSignalHistory) {
+
+            const oldestId =
+                this.#terminalSignalIds.keys().next().value;
+
+            this.#terminalSignalIds.delete(oldestId);
+
+        }
 
     }
 
     async #handleSignal(signal) {
 
-        this.#lastSignalId =
-            Math.max(
-                this.#lastSignalId,
-                signal.id
-            );
-
         const from =
             Number(signal.from_participant_id);
 
-        if (!from || from === Number(this.#config()?.myParticipantId)) return;
+        if (!from || from === Number(this.#config()?.myParticipantId)) {
+
+            return SIGNAL_OUTCOME.CONSUMED;
+
+        }
 
         const remote =
             this.#participants().get(
@@ -1433,6 +4914,7 @@ export class VoiceMediaService {
             Boolean(remote?.webcam_enabled || remote?.webcam_path);
 
         const signalHasVideo =
+            signal.media === "webcam" ||
             signal.data?.chatspace_media === "video";
 
         const shouldHandleMedia =
@@ -1443,111 +4925,1842 @@ export class VoiceMediaService {
                 signalHasVideo
             );
 
-        if (!shouldHandleMedia && signal.type !== "leave") return;
+        if (!shouldHandleMedia && signal.type !== "leave") {
+
+            return SIGNAL_OUTCOME.DEFERRED;
+
+        }
 
         if (signal.type === "leave") {
 
-            this.#context?.removeAudioElement?.(
+            this.#removeAudioElement(
+                from,
+                "remote-leave"
+            );
+
+            this.#pendingRemoteAudioTracks.delete(
                 from
             );
 
             if (this.#peers.has(from) && !remoteHasWebcam) {
 
+                const leavingPeer =
+                    this.#peers.get(from);
+
+                this.#recordVideoLifecycleDiagnostic({
+
+                    event:
+                        "detachParticipantVideo-dispatched",
+
+                    remoteParticipantId:
+                        from,
+
+                    reason:
+                        "remote-leave-no-webcam",
+
+                    ...this.#peerSnapshot(leavingPeer)
+
+                });
+
                 this.#context?.detachParticipantVideo?.(
                     from
                 );
 
-                this.#peers.get(from).close();
+                this.#recordVideoLifecycleDiagnostic({
+
+                    event:
+                        "peer-close",
+
+                    reason:
+                        "remote-leave-no-webcam",
+
+                    remoteParticipantId:
+                        from,
+
+                    ...this.#peerSnapshot(leavingPeer)
+
+                });
+
+                leavingPeer.close();
                 this.#peers.delete(from);
+                this.#remoteVideoPresentations.delete(from);
+                this.#remoteWebcamReadinessRequests.delete(from);
 
             }
 
-            return;
+            return SIGNAL_OUTCOME.CONSUMED;
 
         }
 
-        const pc =
-            await this.#getPeer(
-                from,
-                signal.type === "offer"
-            );
-
         if (signal.type === "join") {
 
-            if (!this.#joined && !this.#webcamStream()) return;
+            if (!this.#joined && !this.#webcamStream()) {
 
-            const offer =
-                await pc.createOffer();
+                return SIGNAL_OUTCOME.DEFERRED;
 
-            await pc.setLocalDescription(
-                offer
-            );
+            }
 
-            await this.#sendSignal(
-                from,
-                "offer",
-                pc.localDescription
-            );
+            await this.connectMediaPeer(from);
+
+            return SIGNAL_OUTCOME.CONSUMED;
 
         }
 
         if (signal.type === "offer") {
 
-            this.#syncPeerLocalTracks(
-                pc
-            );
+            return this.#acceptOfferSignal(signal);
 
-            const offerCollision =
-                pc.__makingOffer ||
-                pc.signalingState !== "stable";
+        }
 
-            if (offerCollision) {
+        if (signal.type === "renegotiate") {
 
-                if (!pc.__polite) return;
+            if (!this.#ownsOffer(from)) {
 
-                await pc.setLocalDescription({
-
-                    type:
-                        "rollback"
-
-                }).catch(() => {});
+                return SIGNAL_OUTCOME.STALE_GENERATION;
 
             }
 
-            await pc.setRemoteDescription(
-                signal.data
-            );
+            let pc =
+                this.#peers.get(from) || null;
 
-            const answer =
-                await pc.createAnswer();
+            const requestId =
+                signal.data?.request_id || null;
 
-            await pc.setLocalDescription(
-                answer
-            );
+            const requestGeneration =
+                signal.data?.generation || null;
 
-            await this.#sendSignal(
-                from,
-                "answer",
-                pc.localDescription
-            );
+            const senderEpoch =
+                signal.sender_epoch || null;
+
+            const lateJoinReady =
+                Boolean(signal.data?.late_join_ready);
+
+            if (
+                pc &&
+                lateJoinReady &&
+                !signal.data?.target_peer_instance_id &&
+                pc.signalingState === "have-local-offer" &&
+                !pc.__voiceRemotePeerInstanceId
+            ) {
+
+                this.#recordNegotiationDiagnostic({
+
+                    event:
+                        "late-join-stale-offer-replaced",
+
+                    requestId,
+
+                    signalId:
+                        Number(signal.id) || null,
+
+                    requestGeneration,
+
+                    senderEpoch,
+
+                    ...this.#peerSnapshot(pc)
+
+                });
+
+                pc.close();
+                this.#peers.delete(from);
+                this.#pendingRemoteAudioTracks.delete(from);
+                this.#remoteVideoPresentations.delete(from);
+                pc = null;
+
+            }
+
+            if (
+                !pc &&
+                (
+                    signal.data?.target_peer_instance_id ||
+                    (
+                        requestGeneration &&
+                        senderEpoch &&
+                        requestGeneration !== senderEpoch
+                    )
+                )
+            ) {
+
+                this.#recordNegotiationDiagnostic({
+
+                    event:
+                        "renegotiation-request-rejected-stale",
+
+                    requestId,
+
+                    signalId:
+                        Number(signal.id) || null,
+
+                    mediaReason:
+                        signal.data?.media_reason || signal.data?.reason || null,
+
+                    webcamOperation:
+                        signal.data?.webcam_operation || null,
+
+                    requestGeneration,
+
+                    senderEpoch,
+
+                    targetPeerInstanceId:
+                        signal.data?.target_peer_instance_id || null,
+
+                    authoritativeOffererParticipantId:
+                        this.#localParticipantId()
+
+                });
+
+                return SIGNAL_OUTCOME.STALE_GENERATION;
+
+            }
+
+            if (!pc) {
+
+                this.#recordNegotiationDiagnostic({
+
+                    event:
+                        "renegotiation-request-received-no-peer",
+
+                    requestId,
+
+                    signalId:
+                        Number(signal.id) || null,
+
+                    mediaReason:
+                        signal.data?.media_reason || signal.data?.reason || null,
+
+                    webcamOperation:
+                        signal.data?.webcam_operation || null,
+
+                    requestGeneration,
+
+                    senderEpoch,
+
+                    requestingParticipantId:
+                        from,
+
+                    authoritativeOffererParticipantId:
+                        this.#localParticipantId()
+
+                });
+
+            }
+
+            if (
+                pc &&
+                (
+                    !this.#signalTargetsPeer(pc, signal) ||
+                    !this.#signalMatchesPeerGeneration(pc, signal)
+                )
+            ) {
+
+                this.#recordNegotiationDiagnostic({
+
+                    event:
+                        "renegotiation-request-rejected-stale",
+
+                    requestId,
+
+                    signalId:
+                        Number(signal.id) || null,
+
+                    mediaReason:
+                        signal.data?.media_reason || signal.data?.reason || null,
+
+                    webcamOperation:
+                        signal.data?.webcam_operation || null,
+
+                    authoritativeOffererParticipantId:
+                        this.#localParticipantId(),
+
+                    ...this.#peerSnapshot(pc)
+
+                });
+
+                return SIGNAL_OUTCOME.STALE_GENERATION;
+
+            }
+
+            const coalesced =
+                Boolean(pc?.__voicePendingNegotiation);
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    coalesced ?
+                        "renegotiation-request-coalesced" :
+                        "renegotiation-request-accepted",
+
+                requestId,
+
+                signalId:
+                    Number(signal.id) || null,
+
+                mediaReason:
+                    signal.data?.media_reason || signal.data?.reason || null,
+
+                webcamOperation:
+                    signal.data?.webcam_operation || null,
+
+                requestingParticipantId:
+                    from,
+
+                authoritativeOffererParticipantId:
+                    this.#localParticipantId(),
+
+                ...(pc ? this.#peerSnapshot(pc) : {})
+
+            });
+
+            if (!coalesced) {
+
+                if (!pc) {
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "missing-peer-creation-scheduled",
+
+                        requestId,
+
+                        signalId:
+                            Number(signal.id) || null,
+
+                        requestingParticipantId:
+                            from,
+
+                        authoritativeOffererParticipantId:
+                            this.#localParticipantId()
+
+                    });
+
+                }
+
+                try {
+
+                    const outcome =
+                        await this.connectMediaPeer(from, {
+
+                            reason:
+                                "remote-renegotiation-request",
+
+                            mediaReason:
+                                signal.data?.media_reason || signal.data?.reason || null,
+
+                            webcamOperation:
+                                signal.data?.webcam_operation || null,
+
+                            allowReceiveOnly:
+                                true,
+
+                            missingPeerRequest:
+                                !pc,
+
+                            requestId,
+
+                            signalId:
+                                Number(signal.id) || null
+
+                        });
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            outcome === SIGNAL_OUTCOME.DEFERRED ?
+                                "renegotiation-request-deferred" :
+                                "renegotiation-request-completed",
+
+                        requestId,
+
+                        signalId:
+                            Number(signal.id) || null,
+
+                        outcome,
+
+                        ...(this.#peers.get(from) ?
+                            this.#peerSnapshot(this.#peers.get(from)) :
+                            {
+
+                                remoteParticipantId:
+                                    from
+
+                            })
+
+                    });
+
+                    return outcome;
+
+                } catch (error) {
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "renegotiation-request-failed",
+
+                        requestId,
+
+                        signalId:
+                            Number(signal.id) || null,
+
+                        message:
+                            error?.message || String(error),
+
+                        ...(this.#peers.get(from) ?
+                            this.#peerSnapshot(this.#peers.get(from)) :
+                            {
+
+                                remoteParticipantId:
+                                    from
+
+                            })
+
+                    });
+
+                    throw error;
+
+                }
+
+            }
+
+            return SIGNAL_OUTCOME.DUPLICATE;
 
         }
 
         if (signal.type === "answer") {
 
-            await pc.setRemoteDescription(
-                signal.data
-            );
+            return this.#acceptAnswerSignal(signal);
 
         }
 
         if (signal.type === "ice") {
 
-            await pc.addIceCandidate(
-                signal.data
-            ).catch(() => {});
+            return this.#acceptIceSignal(signal);
 
         }
+
+        return SIGNAL_OUTCOME.TERMINAL_INVALID;
+
+    }
+
+    #signalMedia() {
+
+        return this.#webcamStream() ? "webcam" : "voice";
+
+    }
+
+    #localParticipantId() {
+
+        return Number(
+            this.#config()?.myParticipantId
+        );
+
+    }
+
+    #ownsOffer(remoteParticipantId) {
+
+        const localId =
+            this.#localParticipantId();
+
+        const remoteId =
+            Number(remoteParticipantId);
+
+        return Boolean(
+            localId &&
+            remoteId &&
+            localId < remoteId
+        );
+
+    }
+
+    #isPolitePeer(remoteParticipantId) {
+
+        const localId =
+            this.#localParticipantId();
+
+        const remoteId =
+            Number(remoteParticipantId);
+
+        return Boolean(
+            localId &&
+            remoteId &&
+            localId > remoteId
+        );
+
+    }
+
+    #isActivePeer(pc) {
+
+        if (!pc?.__voiceRemoteParticipantId) return false;
+
+        return this.#peers.get(
+            Number(pc.__voiceRemoteParticipantId)
+        ) === pc;
+
+    }
+
+    #nextPeerInstanceId(remoteParticipantId) {
+
+        this.#peerSerial +=
+            1;
+
+        return [
+
+            "peer",
+
+            this.#localParticipantId() || "local",
+
+            Number(remoteParticipantId) || "remote",
+
+            this.#peerSerial
+
+        ].join("-");
+
+    }
+
+    #nextNegotiationId(remoteParticipantId, pc) {
+
+        this.#negotiationSerial +=
+            1;
+
+        return [
+
+            "neg",
+
+            pc?.__voicePeerInstanceId || this.#localParticipantId() || "local",
+
+            Number(remoteParticipantId) || "remote",
+
+            this.#negotiationSerial
+
+        ].join("-");
+
+    }
+
+    #nextRenegotiationRequestId(remoteParticipantId, pc) {
+
+        this.#renegotiationRequestSerial +=
+            1;
+
+        return [
+
+            "reneg-request",
+
+            pc?.__voicePeerInstanceId || this.#localParticipantId() || "local",
+
+            Number(remoteParticipantId) || "remote",
+
+            this.#renegotiationRequestSerial
+
+        ].join("-");
+
+    }
+
+    #localMediaNegotiationSignature(pc) {
+
+        return ["audio", "video"].map(kind => {
+
+            const transceiver =
+                pc?.__voiceTransceivers?.[kind] || null;
+
+            return [
+
+                kind,
+
+                transceiver?.direction || "missing",
+
+                transceiver?.sender?.track?.id || "none"
+
+            ].join(":");
+
+        }).join("|");
+
+    }
+
+    #signalMatchesPeerGeneration(pc, signal) {
+
+        const remotePeerInstanceId =
+            signal?.data?.peer_instance_id || null;
+
+        if (
+            pc?.__voiceRemotePeerInstanceId &&
+            remotePeerInstanceId &&
+            pc.__voiceRemotePeerInstanceId !== remotePeerInstanceId
+        ) {
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "signal-stale-remote-peer-skipped",
+
+                signalId:
+                    Number(signal?.id) || null,
+
+                signalKind:
+                    signal?.type || null,
+
+                remoteParticipantId:
+                    Number(signal?.from_participant_id) || null,
+
+                peerInstanceId:
+                    pc.__voicePeerInstanceId || null,
+
+                generation:
+                    pc.__voiceGeneration || null,
+
+                expectedRemotePeerInstanceId:
+                    pc.__voiceRemotePeerInstanceId,
+
+                remotePeerInstanceId
+
+            });
+
+            return false;
+
+        }
+
+        return true;
+
+    }
+
+    #outgoingSignalPayload(type, data, metadata = {}) {
+
+        if (type === "offer" || type === "answer") {
+
+            const description =
+                this.#sessionDescription(type, data);
+
+            if (!description) return null;
+
+            this.#recordSignalDiagnostic(
+                "outgoing",
+                type,
+                description
+            );
+
+            return {
+
+                kind:
+                    type,
+
+                description,
+
+                negotiation_id:
+                    metadata.negotiationId || null,
+
+                generation:
+                    metadata.generation || null,
+
+                peer_instance_id:
+                    metadata.peerInstanceId || null,
+
+                target_peer_instance_id:
+                    metadata.targetPeerInstanceId || null
+
+            };
+
+        }
+
+        if (type === "ice") {
+
+            const candidate =
+                this.#iceCandidate(data);
+
+            if (!candidate) return null;
+
+            return {
+
+                kind:
+                    "ice",
+
+                candidate,
+
+                generation:
+                    metadata.generation || null,
+
+                peer_instance_id:
+                    metadata.peerInstanceId || null,
+
+                target_peer_instance_id:
+                    metadata.targetPeerInstanceId || null
+
+            };
+
+        }
+
+        return data;
+
+    }
+
+    #incomingSessionDescription(expectedType, data) {
+
+        const payload =
+            data && typeof data === "object" ? data : null;
+
+        const description =
+            payload?.description || payload;
+
+        const normalized =
+            this.#sessionDescription(
+                expectedType,
+                description
+            );
+
+        if (!normalized) {
+
+            this.#warn(
+                new Error(`Rejected malformed incoming ${expectedType} media signal.`)
+            );
+
+            this.#recordSignalDiagnostic(
+                "incoming-rejected",
+                expectedType,
+                data
+            );
+
+            return null;
+
+        }
+
+        this.#recordSignalDiagnostic(
+            "incoming",
+            expectedType,
+            normalized
+        );
+
+        return normalized;
+
+    }
+
+    #sessionDescription(expectedType, value) {
+
+        if (!value || typeof value !== "object") return null;
+
+        const type =
+            value.type;
+
+        const sdp =
+            value.sdp;
+
+        if (
+            type !== expectedType ||
+            typeof sdp !== "string" ||
+            !this.#looksLikeSdp(sdp)
+        ) {
+
+            return null;
+
+        }
+
+        return {
+
+            type,
+
+            sdp
+
+        };
+
+    }
+
+    #looksLikeSdp(sdp) {
+
+        if (typeof sdp !== "string" || !sdp) return false;
+
+        const normalized =
+            sdp.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+        if (!normalized.startsWith("v=0")) return false;
+
+        if (
+            !sdp.includes("\n") &&
+            (sdp.includes("\\n") || sdp.includes("\\r\\n"))
+        ) {
+
+            return false;
+
+        }
+
+        const trimmed =
+            sdp.trim();
+
+        return trimmed !== "[object Object]" && !trimmed.startsWith("{");
+
+    }
+
+    #iceCandidate(value) {
+
+        if (!value || typeof value !== "object") return null;
+
+        const source =
+            typeof value.toJSON === "function" ?
+                value.toJSON() :
+                value.candidate && typeof value.candidate === "object" ?
+                    value.candidate :
+                    value;
+
+        if (!source || typeof source.candidate !== "string" || !source.candidate) {
+
+            return null;
+
+        }
+
+        return {
+
+            candidate:
+                source.candidate,
+
+            sdpMid:
+                source.sdpMid ?? null,
+
+            sdpMLineIndex:
+                source.sdpMLineIndex ?? null,
+
+            usernameFragment:
+                source.usernameFragment ?? null
+
+        };
+
+    }
+
+    #incomingIceCandidate(data) {
+
+        const candidate =
+            this.#iceCandidate(data);
+
+        if (!candidate) {
+
+            this.#warn(
+                new Error("Rejected malformed incoming ice media signal.")
+            );
+
+            return null;
+
+        }
+
+        return candidate;
+
+    }
+
+    #recordSignalDiagnostic(direction, type, value) {
+
+        const description =
+            value?.description || value;
+
+        const sdp =
+            description?.sdp;
+
+        this.#context?.recordVoiceSignalDiagnostic?.({
+
+            direction,
+
+            type,
+
+            descriptionType:
+                description?.type || null,
+
+            sdpType:
+                typeof sdp,
+
+            sdpLength:
+                typeof sdp === "string" ? sdp.length : null,
+
+            firstLine:
+                typeof sdp === "string" ?
+                    sdp.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")[0] :
+                    null,
+
+            startsWithV0:
+                typeof sdp === "string" ?
+                    sdp.replace(/\r\n/g, "\n").replace(/\r/g, "\n").startsWith("v=0") :
+                    false,
+
+            hasRealNewline:
+                typeof sdp === "string" ? sdp.includes("\n") : false,
+
+            hasLiteralBackslashNewline:
+                typeof sdp === "string" ?
+                    (sdp.includes("\\n") || sdp.includes("\\r\\n")) :
+                    false
+
+        });
+
+    }
+
+    #trackSnapshot(track) {
+
+        if (!track) return null;
+
+        return {
+
+            id:
+                track.id || null,
+
+            kind:
+                track.kind || null,
+
+            label:
+                track.label || null,
+
+            readyState:
+                track.readyState || null,
+
+            enabled:
+                track.enabled ?? null,
+
+            muted:
+                track.muted ?? null
+
+        };
+
+    }
+
+    #streamSnapshot(stream) {
+
+        if (!stream) return null;
+
+        const tracks =
+            typeof stream.getTracks === "function" ?
+                stream.getTracks() :
+                [];
+
+        return {
+
+            id:
+                stream.id || null,
+
+            trackCount:
+                tracks.length,
+
+            audioTrackCount:
+                tracks.filter(track => track.kind === "audio").length,
+
+            videoTrackCount:
+                tracks.filter(track => track.kind === "video").length,
+
+            tracks:
+                tracks.map(track => this.#trackSnapshot(track))
+
+        };
+
+    }
+
+    #audioSourceType(track = this.#localMediaTrackByKind("audio")) {
+
+        const hint =
+            String(this.#context?.getVoiceSourceHint?.() || "").toLowerCase();
+
+        if (hint.includes("fake")) return "fake-wav";
+
+        const label =
+            String(track?.label || "").toLowerCase();
+
+        if (
+            label.includes("fake") ||
+            label.includes("wav") ||
+            label.includes("file")
+        ) {
+
+            return "fake-wav";
+
+        }
+
+        return "real-microphone";
+
+    }
+
+    #scheduleTransportRtpProbe(pc, reason, extra = {}) {
+
+        if (!pc || typeof pc.getStats !== "function") return;
+
+        const delays =
+            (
+                pc.connectionState === "connected" ||
+                pc.iceConnectionState === "connected" ||
+                pc.iceConnectionState === "completed"
+            ) ?
+                this.#transportProbeDelays :
+                [0];
+
+        delays.forEach(delay => {
+
+            setTimeout(
+                () => this.#recordTransportRtpProbe(
+                    pc,
+                    reason,
+                    delay,
+                    extra
+                ),
+                delay
+            );
+
+        });
+
+    }
+
+    async #recordTransportRtpProbe(pc, reason, delay, extra = {}) {
+
+        if (!this.#isActivePeer(pc)) {
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "transport-rtp-probe-stale-peer-skipped",
+
+                reason,
+
+                delay,
+
+                remoteParticipantId:
+                    pc?.__voiceRemoteParticipantId || null,
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                activePeerInstanceId:
+                    this.#peers.get(Number(pc?.__voiceRemoteParticipantId))?.__voicePeerInstanceId || null
+
+            });
+
+            return;
+
+        }
+
+        try {
+
+            const report =
+                await pc.getStats();
+
+            const summary =
+                this.#summarizePeerStats(
+                    pc,
+                    report
+                );
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "transport-rtp-probe",
+
+                reason,
+
+                delay,
+
+                remoteParticipantId:
+                    pc.__voiceRemoteParticipantId || null,
+
+                peerInstanceId:
+                    pc.__voicePeerInstanceId || null,
+
+                generation:
+                    pc.__voiceGeneration || null,
+
+                remotePeerInstanceId:
+                    pc.__voiceRemotePeerInstanceId || null,
+
+                negotiationId:
+                    pc.__voicePendingLocalOffer || pc.__voiceAppliedRemoteAnswer || null,
+
+                signalingState:
+                    pc.signalingState || null,
+
+                connectionState:
+                    pc.connectionState || null,
+
+                iceConnectionState:
+                    pc.iceConnectionState || null,
+
+                iceGatheringState:
+                    pc.iceGatheringState || null,
+
+                ...summary,
+
+                ...extra
+
+            });
+
+        } catch (error) {
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "transport-rtp-probe-failed",
+
+                reason,
+
+                delay,
+
+                remoteParticipantId:
+                    pc?.__voiceRemoteParticipantId || null,
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                message:
+                    error?.message || String(error)
+
+            });
+
+        }
+
+    }
+
+    #summarizePeerStats(pc, report) {
+
+        const stats =
+            Array.from(report.values ? report.values() : report);
+
+        const codecById =
+            new Map(
+                stats
+                    .filter(stat => stat.type === "codec")
+                    .map(stat => [stat.id, stat])
+            );
+
+        const remoteInboundById =
+            new Map(
+                stats
+                    .filter(stat => stat.type === "remote-inbound-rtp")
+                    .map(stat => [stat.id, stat])
+            );
+
+        const candidateById =
+            new Map(
+                stats
+                    .filter(stat =>
+                        stat.type === "local-candidate" ||
+                        stat.type === "remote-candidate"
+                    )
+                    .map(stat => [stat.id, stat])
+            );
+
+        const transport =
+            stats.find(stat => stat.type === "transport") || null;
+
+        const selectedCandidatePair =
+            stats.find(stat =>
+                stat.type === "candidate-pair" &&
+                (
+                    stat.selected ||
+                    stat.nominated ||
+                    stat.id === transport?.selectedCandidatePairId
+                )
+            ) || null;
+
+        const audioElement =
+            this.#context?.getAudioElement?.(
+                pc.__voiceRemoteParticipantId
+            ) || null;
+
+        return {
+
+            transport:
+                this.#transportStatsSnapshot(
+                    transport,
+                    selectedCandidatePair,
+                    candidateById
+                ),
+
+            outboundAudio:
+                stats
+                    .filter(stat =>
+                        stat.type === "outbound-rtp" &&
+                        (stat.kind === "audio" || stat.mediaType === "audio")
+                    )
+                    .map(stat => this.#outboundAudioStatsSnapshot(
+                        stat,
+                        codecById,
+                        remoteInboundById
+                    )),
+
+            inboundAudio:
+                stats
+                    .filter(stat =>
+                        stat.type === "inbound-rtp" &&
+                        (stat.kind === "audio" || stat.mediaType === "audio")
+                    )
+                    .map(stat => this.#inboundAudioStatsSnapshot(
+                        stat,
+                        codecById
+                    )),
+
+            audioTransceiver:
+                this.#transceiverSnapshot(
+                    pc.__voiceTransceivers?.audio || null,
+                    this.#transceiverIndex(
+                        pc,
+                        pc.__voiceTransceivers?.audio || null
+                    )
+                ),
+
+            remoteAudioElement:
+                this.#audioElementSnapshot(
+                    audioElement
+                )
+
+        };
+
+    }
+
+    #senderSnapshot(sender) {
+
+        if (!sender) return null;
+
+        return {
+
+            track:
+                this.#trackSnapshot(sender.track),
+
+            transportState:
+                sender.transport?.state || null
+
+        };
+
+    }
+
+    #transportStatsSnapshot(transport, candidatePair, candidateById) {
+
+        return {
+
+            dtlsState:
+                transport?.dtlsState || null,
+
+            iceRole:
+                transport?.iceRole || null,
+
+            iceLocalUsernameFragment:
+                transport?.iceLocalUsernameFragment || null,
+
+            selectedCandidatePairId:
+                transport?.selectedCandidatePairId || candidatePair?.id || null,
+
+            bytesSent:
+                transport?.bytesSent ?? candidatePair?.bytesSent ?? null,
+
+            bytesReceived:
+                transport?.bytesReceived ?? candidatePair?.bytesReceived ?? null,
+
+            selectedCandidatePair:
+                this.#candidatePairSnapshot(
+                    candidatePair,
+                    candidateById
+                )
+
+        };
+
+    }
+
+    #candidatePairSnapshot(candidatePair, candidateById) {
+
+        if (!candidatePair) return null;
+
+        return {
+
+            id:
+                candidatePair.id || null,
+
+            state:
+                candidatePair.state || null,
+
+            selected:
+                candidatePair.selected ?? null,
+
+            nominated:
+                candidatePair.nominated ?? null,
+
+            writable:
+                candidatePair.writable ?? null,
+
+            bytesSent:
+                candidatePair.bytesSent ?? null,
+
+            bytesReceived:
+                candidatePair.bytesReceived ?? null,
+
+            currentRoundTripTime:
+                candidatePair.currentRoundTripTime ?? null,
+
+            availableOutgoingBitrate:
+                candidatePair.availableOutgoingBitrate ?? null,
+
+            localCandidate:
+                this.#candidateSnapshot(
+                    candidateById.get(candidatePair.localCandidateId)
+                ),
+
+            remoteCandidate:
+                this.#candidateSnapshot(
+                    candidateById.get(candidatePair.remoteCandidateId)
+                )
+
+        };
+
+    }
+
+    #candidateSnapshot(candidate) {
+
+        if (!candidate) return null;
+
+        return {
+
+            id:
+                candidate.id || null,
+
+            candidateType:
+                candidate.candidateType || null,
+
+            protocol:
+                candidate.protocol || null,
+
+            address:
+                candidate.address || candidate.ip || null,
+
+            port:
+                candidate.port ?? null,
+
+            relayProtocol:
+                candidate.relayProtocol || null
+
+        };
+
+    }
+
+    #iceCandidateSnapshot(candidate) {
+
+        if (!candidate) return null;
+
+        const value =
+            typeof candidate.toJSON === "function" ?
+                candidate.toJSON() :
+                candidate;
+
+        return {
+
+            candidate:
+                typeof value.candidate === "string" ?
+                    value.candidate.slice(0, 120) :
+                    null,
+
+            sdpMid:
+                value.sdpMid ?? null,
+
+            sdpMLineIndex:
+                value.sdpMLineIndex ?? null,
+
+            usernameFragment:
+                value.usernameFragment || null
+
+        };
+
+    }
+
+    #outboundAudioStatsSnapshot(stat, codecById, remoteInboundById) {
+
+        const codec =
+            codecById.get(stat.codecId) || null;
+
+        const remoteInbound =
+            remoteInboundById.get(stat.remoteId) || null;
+
+        return {
+
+            id:
+                stat.id || null,
+
+            ssrc:
+                stat.ssrc ?? null,
+
+            active:
+                stat.active ?? null,
+
+            packetsSent:
+                stat.packetsSent ?? null,
+
+            bytesSent:
+                stat.bytesSent ?? null,
+
+            totalPacketSendDelay:
+                stat.totalPacketSendDelay ?? null,
+
+            audioLevel:
+                stat.audioLevel ?? null,
+
+            totalAudioEnergy:
+                stat.totalAudioEnergy ?? null,
+
+            codecMimeType:
+                codec?.mimeType || null,
+
+            remoteInbound:
+                remoteInbound ? {
+
+                    packetsLost:
+                        remoteInbound.packetsLost ?? null,
+
+                    roundTripTime:
+                        remoteInbound.roundTripTime ?? null,
+
+                    fractionLost:
+                        remoteInbound.fractionLost ?? null
+
+                } : null
+
+        };
+
+    }
+
+    #inboundAudioStatsSnapshot(stat, codecById) {
+
+        const codec =
+            codecById.get(stat.codecId) || null;
+
+        return {
+
+            id:
+                stat.id || null,
+
+            ssrc:
+                stat.ssrc ?? null,
+
+            packetsReceived:
+                stat.packetsReceived ?? null,
+
+            bytesReceived:
+                stat.bytesReceived ?? null,
+
+            packetsLost:
+                stat.packetsLost ?? null,
+
+            jitter:
+                stat.jitter ?? null,
+
+            audioLevel:
+                stat.audioLevel ?? null,
+
+            totalAudioEnergy:
+                stat.totalAudioEnergy ?? null,
+
+            codecMimeType:
+                codec?.mimeType || null
+
+        };
+
+    }
+
+    #audioElementSnapshot(audioElement) {
+
+        if (!audioElement) return null;
+
+        const stream =
+            audioElement.srcObject || null;
+
+        return {
+
+            id:
+                audioElement.id || null,
+
+            paused:
+                audioElement.paused ?? null,
+
+            muted:
+                audioElement.muted ?? null,
+
+            volume:
+                audioElement.volume ?? null,
+
+            sinkId:
+                audioElement.sinkId || null,
+
+            srcObject:
+                this.#streamSnapshot(stream)
+
+        };
+
+    }
+
+    #beginAudioPlayback(audioElement) {
+
+        let state = this.#audioPlaybackStates.get(audioElement);
+        if (!state) {
+            state = {
+                sequence: 0,
+                pending: new Set(),
+                interruptions: new Map()
+            };
+            this.#audioPlaybackStates.set(audioElement, state);
+        }
+
+        state.sequence += 1;
+        state.pending.add(state.sequence);
+        return state.sequence;
+
+    }
+
+    #markAudioPlaybackInterruption(audioElement, reason) {
+
+        const state = this.#audioPlaybackStates.get(audioElement);
+        if (!state) return;
+        state.pending.forEach(sequence => {
+            state.interruptions.set(sequence, String(reason));
+        });
+
+    }
+
+    #finishAudioPlayback(audioElement, sequence) {
+
+        const state = this.#audioPlaybackStates.get(audioElement);
+        if (!state) return null;
+        const reason = state.interruptions.get(sequence) || null;
+        state.pending.delete(sequence);
+        state.interruptions.delete(sequence);
+        return reason;
+
+    }
+
+    #prepareAudioElementRemoval(audioElement, reason) {
+
+        if (!audioElement) return;
+        this.#markAudioPlaybackInterruption(audioElement, reason);
+        audioElement.pause?.();
+        audioElement.srcObject = null;
+
+    }
+
+    #removeAudioElement(participantId, reason) {
+
+        const audioElement =
+            this.#context?.getAudioElement?.(participantId) || null;
+        this.#prepareAudioElementRemoval(audioElement, reason);
+        this.#context?.removeAudioElement?.(participantId);
+
+    }
+
+    #transceiverIndex(pc, transceiver) {
+
+        if (
+            !pc ||
+            !transceiver ||
+            typeof pc.getTransceivers !== "function"
+        ) {
+
+            return null;
+
+        }
+
+        const transceivers =
+            pc.getTransceivers();
+
+        const index =
+            transceivers.indexOf(
+                transceiver
+            );
+
+        return index >= 0 ? index : null;
+
+    }
+
+    #transceiverSnapshot(transceiver, index = null) {
+
+        if (!transceiver) return null;
+
+        return {
+
+            index,
+
+            mid:
+                transceiver.mid || null,
+
+            direction:
+                transceiver.direction || null,
+
+            currentDirection:
+                transceiver.currentDirection || null,
+
+            sender:
+                this.#senderSnapshot(transceiver.sender),
+
+            senderTrack:
+                this.#trackSnapshot(transceiver.sender?.track),
+
+            receiverTrack:
+                this.#trackSnapshot(transceiver.receiver?.track)
+
+        };
+
+    }
+
+    #peerSnapshot(pc) {
+
+        if (!pc) return {};
+
+        const senders =
+            typeof pc.getSenders === "function" ?
+                pc.getSenders() :
+                [];
+
+        const transceivers =
+            typeof pc.getTransceivers === "function" ?
+                pc.getTransceivers() :
+                [];
+
+        return {
+
+            remoteParticipantId:
+                pc.__voiceRemoteParticipantId || null,
+
+            role:
+                pc.__voiceRole || null,
+
+            peerInstanceId:
+                pc.__voicePeerInstanceId || null,
+
+            generation:
+                pc.__voiceGeneration || null,
+
+            remotePeerInstanceId:
+                pc.__voiceRemotePeerInstanceId || null,
+
+            pendingNegotiationId:
+                pc.__voicePendingLocalOffer || null,
+
+            appliedRemoteAnswer:
+                pc.__voiceAppliedRemoteAnswer || null,
+
+            signalingState:
+                pc.signalingState || null,
+
+            connectionState:
+                pc.connectionState || null,
+
+            iceConnectionState:
+                pc.iceConnectionState || null,
+
+            senders:
+                senders.map(sender => this.#senderSnapshot(sender)),
+
+            transceivers:
+                transceivers.map((transceiver, index) =>
+                    this.#transceiverSnapshot(
+                        transceiver,
+                        index
+                    )
+                ),
+
+            reservedTransceiverKinds:
+                [
+                    pc.__voiceTransceivers?.audio ? "audio" : null,
+                    pc.__voiceTransceivers?.video ? "video" : null
+                ].filter(Boolean),
+
+            canonicalTransceiverMids: {
+
+                audio:
+                    pc.__voiceTransceivers?.audio?.mid ?? null,
+
+                video:
+                    pc.__voiceTransceivers?.video?.mid ?? null
+
+            }
+
+        };
+
+    }
+
+    #recordNegotiationDiagnostic(entry = {}) {
+
+        this.#context?.recordVoiceSignalDiagnostic?.({
+
+            category:
+                "negotiation",
+
+            roomId:
+                this.#roomId(),
+
+            localParticipantId:
+                this.#localParticipantId() || null,
+
+            sourceType:
+                this.#audioSourceType(),
+
+            timestamp:
+                Date.now(),
+
+            processedSignalCount:
+                this.#terminalSignalIds.size,
+
+            processingSignalCount:
+                this.#processingSignalIds.size,
+
+            pendingSignalCount:
+                this.#signalInbox.size,
+
+            ...entry
+
+        });
+
+    }
+
+    #recordAudioPathDiagnostic(entry = {}) {
+
+        this.#context?.recordVoiceSignalDiagnostic?.({
+
+            category:
+                "audio-path",
+
+            roomId:
+                this.#roomId(),
+
+            localParticipantId:
+                this.#localParticipantId() || null,
+
+            sourceType:
+                entry.sourceType || this.#audioSourceType(),
+
+            timestamp:
+                Date.now(),
+
+            ...entry
+
+        });
+
+    }
+
+    #recordTransportStateDiagnostic(pc, event) {
+
+        this.#recordAudioPathDiagnostic({
+
+            event,
+
+            remoteParticipantId:
+                pc?.__voiceRemoteParticipantId || null,
+
+            peerInstanceId:
+                pc?.__voicePeerInstanceId || null,
+
+            generation:
+                pc?.__voiceGeneration || null,
+
+            remotePeerInstanceId:
+                pc?.__voiceRemotePeerInstanceId || null,
+
+            signalingState:
+                pc?.signalingState || null,
+
+            connectionState:
+                pc?.connectionState || null,
+
+            iceConnectionState:
+                pc?.iceConnectionState || null,
+
+            iceGatheringState:
+                pc?.iceGatheringState || null,
+
+            activePeer:
+                this.#isActivePeer(pc)
+
+        });
+
+    }
+
+    #recordVideoLifecycleDiagnostic(entry = {}) {
+
+        this.#context?.recordVoiceLifecycleDiagnostic?.({
+
+            category:
+                "video-lifecycle",
+
+            roomId:
+                this.#roomId(),
+
+            localParticipantId:
+                this.#localParticipantId() || null,
+
+            ...entry
+
+        });
+
+    }
+
+    #canonicalRemoteVideoStream(pc, transceiver, track, candidateStream = null) {
+
+        const participantId =
+            Number(pc?.__voiceRemoteParticipantId);
+
+        const receiver =
+            transceiver?.receiver || null;
+
+        const existing =
+            this.#remoteVideoPresentations.get(participantId) || null;
+
+        if (
+            existing?.peer === pc &&
+            existing?.receiver === receiver &&
+            existing?.track === track &&
+            existing?.stream?.getVideoTracks?.().includes(track)
+        ) {
+
+            return existing.stream;
+
+        }
+
+        const MediaStreamClass =
+            this.#context?.window?.MediaStream || globalThis.MediaStream;
+
+        const stream =
+            candidateStream?.getVideoTracks?.().includes(track)
+                ? candidateStream
+                : new MediaStreamClass([track]);
+
+        const presentation = {
+
+            peer:
+                pc,
+
+            receiver,
+
+            track,
+
+            stream,
+
+            receiverIdentity:
+                this.#mediaObjectIdentity(receiver, "receiver"),
+
+            streamIdentity:
+                this.#mediaObjectIdentity(stream, "stream")
+
+        };
+
+        this.#remoteVideoPresentations.set(
+            participantId,
+            presentation
+        );
+
+        return stream;
+
+    }
+
+    #mediaObjectIdentity(value, prefix) {
+
+        if (!value || (typeof value !== "object" && typeof value !== "function")) {
+
+            return null;
+
+        }
+
+        if (!this.#mediaObjectIds.has(value)) {
+
+            this.#mediaObjectSerial += 1;
+            this.#mediaObjectIds.set(
+                value,
+                `${prefix}-${this.#mediaObjectSerial}`
+            );
+
+        }
+
+        return this.#mediaObjectIds.get(value);
 
     }
 
