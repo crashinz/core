@@ -27,3 +27,9 @@ VoiceRuntime does not own:
 
 Application code interacts with VoiceRuntime through the public runtime module.
 Host UI, DOM shell callbacks, and API adapter wiring remain in `room.js`.
+
+High-volume signaling, media lifecycle, and transport/RTP evidence is not owned
+by VoiceRuntime. Build 000043 Part 2 routes that verification-only evidence to
+the framework-core RuntimeDiagnostics contract when explicitly enabled.
+VoiceMediaService retains peer and media ownership; diagnostics do not influence
+negotiation, recovery, source, track, or presentation decisions.

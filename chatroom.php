@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/base.php';
 require_once __DIR__ . '/includes/inner_tranquillity_player_capability.php';
+require_once __DIR__ . '/includes/runtime_diagnostics_capability.php';
 $user = require_user();
 $pdo = db();
 $communityEjection = active_community_ejection($pdo, (int)$user['id']);
@@ -57,6 +58,7 @@ $lastEventId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM events WHERE s
 $linkIconCatalog = link_icon_catalog($pdo);
 $csrfToken = csrf_token();
 $innerTranquillityPlayer = inner_tranquillity_player_capability($room);
+$runtimeDiagnostics = runtime_diagnostics_capability();
 $roomAssetVersion = static function (string $path): string {
     $absolutePath = __DIR__ . $path;
     $version = is_file($absolutePath) ? (string)filemtime($absolutePath) : (string)time();
@@ -80,7 +82,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <link rel="stylesheet" href="<?= e($innerTranquillityPlayer['assets']['css']) ?>">
   <?php endif; ?>
 </head>
-<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>">
+<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>" data-runtime-diagnostics-enabled="<?= $runtimeDiagnostics['enabled'] ? 'true' : 'false' ?>" data-runtime-diagnostics-mode="<?= e($runtimeDiagnostics['mode']) ?>" data-runtime-verification-controls="<?= $runtimeDiagnostics['verification_controls'] ? 'true' : 'false' ?>">
 <div class="room-layout">
   <div class="version-banner" id="version-banner" hidden>
     <span id="version-banner-text">A new ChatSpace version is available.</span>

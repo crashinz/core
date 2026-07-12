@@ -27,19 +27,6 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-.build-000042-probe-marker {
-  position: fixed;
-  left: 8px;
-  bottom: 8px;
-  z-index: 2147483647;
-  padding: 4px 6px;
-  border: 1px solid rgba(0,0,0,.24);
-  border-radius: 4px;
-  background: rgba(255,255,255,.92);
-  color: #111;
-  font: 11px/1.2 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  pointer-events: none;
-}
 html, body { height: 100%; margin: 0; }
 body { font-family: Outfit, system-ui, sans-serif; background: var(--bg); color: var(--text); }
 a { color: inherit; }

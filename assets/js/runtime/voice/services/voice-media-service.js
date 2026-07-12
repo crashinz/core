@@ -23,6 +23,8 @@
  * Build 000027
  * - Introduced VoiceMediaService.
  * - Transferred voice/WebRTC/media signaling ownership from room.js.
+ * - Build 000043 Part 2 gates verification-only transport/RTP diagnostics
+ *   through the generic RuntimeDiagnostics capability.
  ******************************************************************************/
 
 /**
@@ -49,9 +51,6 @@ const DEFAULT_ICE_SERVERS = Object.freeze([
     })
 
 ]);
-
-const BUILD_000042_VOICE_MEDIA_SERVICE_VERSION =
-    "build-000042-late-join-webcam-readiness-v6";
 
 const SIGNAL_OUTCOME = Object.freeze({
 
@@ -96,9 +95,6 @@ class VoiceNegotiationError extends Error {
     }
 
 }
-
-globalThis.__BUILD_000042_VOICE_MEDIA_SERVICE_VERSION =
-    BUILD_000042_VOICE_MEDIA_SERVICE_VERSION;
 
 //--------------------------------------------------
 // Voice Media Service
@@ -198,6 +194,8 @@ export class VoiceMediaService {
         5000
 
     ]);
+
+    #transportProbeTimers = new Map();
 
     //--------------------------------------------------
     // Constructor
@@ -1399,6 +1397,7 @@ export class VoiceMediaService {
 
         });
 
+        this.#clearTransportProbeTimers(pc);
         pc.close();
         this.#peers.delete(id);
         this.#pendingRemoteAudioTracks.delete(id);
@@ -1576,6 +1575,10 @@ export class VoiceMediaService {
 
             processingSignalCount:
                 this.#processingSignalIds.size,
+
+            transportProbeTimerCount:
+                Array.from(this.#transportProbeTimers.values())
+                    .reduce((count, timers) => count + timers.size, 0),
 
             polling:
                 this.#pollTimer !== null
@@ -1797,10 +1800,12 @@ export class VoiceMediaService {
 
             });
 
+            this.#clearTransportProbeTimers(pc);
             pc.close();
 
         }
 
+        this.#clearTransportProbeTimers();
         this.#peers.clear();
         this.#processingSignalIds.clear();
         this.#pollInProgress = false;
@@ -1885,6 +1890,7 @@ export class VoiceMediaService {
 
         if (this.#isActivePeer(pc)) {
 
+            this.#clearTransportProbeTimers(pc);
             pc.close();
             this.#peers.delete(participantId);
             this.#pendingRemoteAudioTracks.delete(participantId);
@@ -4981,6 +4987,7 @@ export class VoiceMediaService {
 
                 });
 
+                this.#clearTransportProbeTimers(leavingPeer);
                 leavingPeer.close();
                 this.#peers.delete(from);
                 this.#remoteVideoPresentations.delete(from);
@@ -5061,6 +5068,7 @@ export class VoiceMediaService {
 
                 });
 
+                this.#clearTransportProbeTimers(pc);
                 pc.close();
                 this.#peers.delete(from);
                 this.#pendingRemoteAudioTracks.delete(from);
@@ -5868,6 +5876,8 @@ export class VoiceMediaService {
 
     #scheduleTransportRtpProbe(pc, reason, extra = {}) {
 
+        if (!this.#context?.isRuntimeDiagnosticsEnabled?.()) return;
+
         if (!pc || typeof pc.getStats !== "function") return;
 
         const delays =
@@ -5879,18 +5889,63 @@ export class VoiceMediaService {
                 this.#transportProbeDelays :
                 [0];
 
+        const setTimer =
+            this.#context?.setTimeout || setTimeout;
+
         delays.forEach(delay => {
 
-            setTimeout(
-                () => this.#recordTransportRtpProbe(
-                    pc,
-                    reason,
-                    delay,
-                    extra
-                ),
+            let timerId = null;
+
+            timerId = setTimer(
+                () => {
+                    this.#forgetTransportProbeTimer(pc, timerId);
+                    return this.#recordTransportRtpProbe(
+                        pc,
+                        reason,
+                        delay,
+                        extra
+                    );
+                },
                 delay
             );
 
+            if (!this.#transportProbeTimers.has(pc)) {
+                this.#transportProbeTimers.set(pc, new Set());
+            }
+            this.#transportProbeTimers.get(pc).add(timerId);
+
+        });
+
+    }
+
+    #forgetTransportProbeTimer(pc, timerId) {
+
+        const timers =
+            this.#transportProbeTimers.get(pc);
+
+        if (!timers) return;
+
+        timers.delete(timerId);
+
+        if (timers.size === 0) {
+            this.#transportProbeTimers.delete(pc);
+        }
+
+    }
+
+    #clearTransportProbeTimers(pc = null) {
+
+        const clearTimer =
+            this.#context?.clearTimeout || clearTimeout;
+
+        const entries =
+            pc ?
+                [[pc, this.#transportProbeTimers.get(pc)]] :
+                Array.from(this.#transportProbeTimers.entries());
+
+        entries.forEach(([peer, timers]) => {
+            timers?.forEach(timerId => clearTimer(timerId));
+            this.#transportProbeTimers.delete(peer);
         });
 
     }

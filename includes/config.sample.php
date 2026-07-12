@@ -18,3 +18,9 @@ const CHATSPACE_SQLITE_PATH = __DIR__ . '/../db/chatspace-00000000-0000-4000-800
 const CHATSPACE_INNER_TRANQUILLITY_PLAYER_ENABLED = false;
 const CHATSPACE_INNER_TRANQUILLITY_PLAYER_ASSET_BASE = '/player';
 const CHATSPACE_INNER_TRANQUILLITY_PLAYER_RUNTIME_HOSTS = [];
+
+// Optional bounded runtime diagnostics. Shared/public installations should
+// leave diagnostics and verification controls disabled.
+const CHATSPACE_RUNTIME_DIAGNOSTICS_ENABLED = false;
+const CHATSPACE_RUNTIME_DIAGNOSTICS_MODE = 'standard';
+const CHATSPACE_RUNTIME_VERIFICATION_CONTROLS_ENABLED = false;

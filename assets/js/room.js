@@ -1,41 +1,7 @@
 'use strict';
 
-const BUILD_000042_PROBE_VERSION = 'build-000042-late-join-webcam-readiness-v6';
 const APP_BASE = document.body?.dataset.appBase || '';
 const CSRF_TOKEN = document.body?.dataset.csrf || '';
-
-window.__BUILD_000042_ROOM_JS_VERSION = BUILD_000042_PROBE_VERSION;
-
-function installBuild000042Probe() {
-  const roomId = document.body?.dataset.roomId || '';
-  if (!roomId.startsWith('build-000042')) return;
-  const existing = window.__build000042VoiceProbe;
-  const probe = existing && typeof existing === 'object' ? existing : {};
-  probe.marker = 'Build000042VoiceProbe';
-  probe.version = BUILD_000042_PROBE_VERSION;
-  probe.installedAt = probe.installedAt || Date.now();
-  probe.roomId = roomId;
-  probe.scriptFingerprints = {
-    roomJs: BUILD_000042_PROBE_VERSION,
-    voiceMediaService: window.__BUILD_000042_VOICE_MEDIA_SERVICE_VERSION || null,
-  };
-  probe.signaling = Array.isArray(probe.signaling) ? probe.signaling : [];
-  probe.videoLifecycle = Array.isArray(probe.videoLifecycle) ? probe.videoLifecycle : [];
-  probe.videoAssignments = Array.isArray(probe.videoAssignments) ? probe.videoAssignments : [];
-  probe.audioAssignments = Array.isArray(probe.audioAssignments) ? probe.audioAssignments : [];
-  probe.playResults = Array.isArray(probe.playResults) ? probe.playResults : [];
-  window.__build000042VoiceProbe = probe;
-  document.body.dataset.build000042Probe = BUILD_000042_PROBE_VERSION;
-  if (!document.getElementById('build-000042-probe-marker')) {
-    const marker = document.createElement('div');
-    marker.id = 'build-000042-probe-marker';
-    marker.className = 'build-000042-probe-marker';
-    marker.textContent = `Build 000042 probe ${BUILD_000042_PROBE_VERSION}`;
-    document.body.appendChild(marker);
-  }
-}
-
-installBuild000042Probe();
 
 function appUrl(path) {
   if (!path) return APP_BASE || '/';
@@ -63,6 +29,15 @@ function innerTranquillityPlayerCapability() {
   });
 }
 
+function runtimeDiagnosticsCapability() {
+  const body = document.body;
+  return Object.freeze({
+    enabled: body?.dataset.runtimeDiagnosticsEnabled === 'true',
+    mode: body?.dataset.runtimeDiagnosticsMode || 'disabled',
+    verificationControls: body?.dataset.runtimeVerificationControls === 'true',
+  });
+}
+
 let cfg = null;
 const vpMusicYoutube = document.getElementById('vp-music-youtube');
 let participants = new Map();
@@ -76,6 +51,9 @@ let roomEffectsRuntime = null;
 let importedRoomRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
+let runtimeDiagnosticsInstallation = null;
+let runtimeDiagnostics = null;
+let runtimeVerificationControls = null;
 let frameQueued = false;
 let pendingLayout = false;
 let layoutLocked = false;
@@ -206,7 +184,7 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
@@ -216,14 +194,30 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js')),
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
+    import(appUrl('/assets/js/core/runtime-diagnostics.js')),
   ]);
 
-  if (window.__build000042VoiceProbe?.scriptFingerprints) {
-    window.__build000042VoiceProbe.scriptFingerprints.voiceMediaService =
-      window.__BUILD_000042_VOICE_MEDIA_SERVICE_VERSION || null;
+  if (!runtimeDiagnosticsInstallation) {
+    const diagnosticsCapability = runtimeDiagnosticsCapability();
+    runtimeDiagnosticsInstallation = installRuntimeDiagnostics({
+      globalObject: window,
+      enabled: diagnosticsCapability.enabled,
+      mode: diagnosticsCapability.mode,
+      verificationControls: diagnosticsCapability.verificationControls,
+    });
+    runtimeDiagnostics = runtimeDiagnosticsInstallation.diagnostics;
+    runtimeVerificationControls = runtimeDiagnosticsInstallation.controls;
+    runtimeVerificationControls.register('replace-local-webcam-capture', async () => {
+      const replacement = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 640 }, frameRate: { ideal: 30, max: 30 } },
+        audio: false,
+      });
+      return replaceLocalWebcamCapture(replacement, 'replace');
+    });
   }
 
   chatRuntimeCore = new Core();
+  chatRuntimeCore.registerService('runtime-diagnostics', runtimeDiagnostics);
   chatRuntime = new ChatRuntime();
   roomRuntime = new RoomRuntime();
   voiceRuntime = new VoiceRuntime();
@@ -803,8 +797,9 @@ function configureVoiceRuntime() {
       return voiceOutputDevice?.value || '';
     },
     getVoiceSourceHint() {
+      if (!runtimeVerificationControls?.isEnabled()) return '';
       const params = new URLSearchParams(window.location.search);
-      return params.get('build000042_audio_source') || '';
+      return params.get('runtime_diagnostics_audio_source') || '';
     },
     setInputDeviceOptions(html) {
       if (voiceInputDevice) voiceInputDevice.innerHTML = html;
@@ -859,13 +854,16 @@ function configureVoiceRuntime() {
       return fetch(appUrl('/api/media_signal.php?' + query)).then(r => r.json());
     },
     recordVoiceSignalDiagnostic(entry) {
-      window.__build000042VoiceProbe?.signaling?.push({
-        name: 'runtimeSignalDiagnostic',
-        at: Date.now(),
-        ...entry,
-      });
+      recordRuntimeDiagnostic(
+        'signaling',
+        entry?.event || entry?.name || 'runtimeSignalDiagnostic',
+        entry,
+      );
     },
     recordVoiceLifecycleDiagnostic: recordVoiceLifecycleDiagnostic,
+    isRuntimeDiagnosticsEnabled() {
+      return runtimeDiagnostics?.isEnabled() || false;
+    },
     warn(error) {
       console.warn(error);
     },
@@ -873,14 +871,14 @@ function configureVoiceRuntime() {
 }
 
 function recordVoiceLifecycleDiagnostic(entry = {}) {
-  const probe = window.__build000042VoiceProbe;
-  if (!probe) return;
-  if (!Array.isArray(probe.videoLifecycle)) probe.videoLifecycle = [];
-  probe.videoLifecycle.push({
-    at: performance.timeOrigin + performance.now(),
+  recordRuntimeDiagnostic('videoLifecycle', entry.event || 'voice-lifecycle', {
     localParticipantId: cfg?.myParticipantId || null,
     ...entry,
   });
+}
+
+function recordRuntimeDiagnostic(category, event, details = {}) {
+  return runtimeDiagnostics?.record(category, event, details) || false;
 }
 
 function configureGameRuntime() {
@@ -4442,16 +4440,6 @@ ctxToggleWebcam.addEventListener('click', async () => {
     showWarning(err.message || 'Could not enable webcam.');
   }
 });
-
-if (window.__build000042VoiceProbe) {
-  window.__build000042VoiceProbe.replaceLocalWebcamCapture = async () => {
-    const replacement = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 640 }, height: { ideal: 640 }, frameRate: { ideal: 30, max: 30 } },
-      audio: false,
-    });
-    return replaceLocalWebcamCapture(replacement, 'replace');
-  };
-}
 
 function setRoomHeight(pct) {
   document.documentElement.style.setProperty('--room-height', `${pct}%`);
