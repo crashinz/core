@@ -73,4 +73,6 @@ collection.
 
 Part 5 closes Build 000043. Harness optimization, parallel equivalence,
 performance telemetry, and cross-browser certification are deferred intact to
-Build 000044 Part 4.
+Build 000044 Part 10. Parts 1 through 9 establish the approved relationship,
+formation, avatar-orientation, webcam-sizing, and dance feature foundations
+before final Build 000044 verification and certification.
