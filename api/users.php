@@ -80,38 +80,27 @@ if ($action === 'link') {
 }
 
 if ($action === 'unlink') {
-    $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND linked_to_participant_id = ?');
-    $stmt->execute([$sessionId, (int)$p['id']]);
-    $reverse = $stmt->fetchAll();
-    $clearIds = array_merge([(int)$p['id']], array_map(fn(array $row): int => (int)$row['id'], $reverse));
-
+    $relationshipDeparture = avatar_relationship_force_participant_departure(
+        $pdo,
+        $sessionId,
+        (int)$p['id'],
+        'legacy-unlink'
+    );
     $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
         ->execute([(int)$p['id'], (int)$p['id']]);
-    $dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, $sessionId, $clearIds);
-    $relationshipTombstone = $dissolvedRelationships[0] ?? null;
-    emit_event($pdo, $sessionId, 'link', [
-        'participant_id' => (int)$p['id'],
-        'linked_to' => null,
-        'link_mode' => 'normal',
-        'relationship_removed' => true,
-        'relationship_id' => $relationshipTombstone['id'] ?? null,
-        'relationship_version' => $relationshipTombstone['version'] ?? null,
-        'relationship_status' => 'dissolved',
-        'relationship' => $relationshipTombstone,
-    ]);
-    foreach ($reverse as $row) {
+    if (!empty($relationshipDeparture['idempotent']) && empty($relationshipDeparture['relationship'])) {
         emit_event($pdo, $sessionId, 'link', [
-            'participant_id' => (int)$row['id'],
+            'participant_id' => (int)$p['id'],
             'linked_to' => null,
             'link_mode' => 'normal',
             'relationship_removed' => true,
-            'relationship_id' => $relationshipTombstone['id'] ?? null,
-            'relationship_version' => $relationshipTombstone['version'] ?? null,
-            'relationship_status' => 'dissolved',
-            'relationship' => $relationshipTombstone,
+            'relationship_id' => null,
+            'relationship_version' => null,
+            'relationship_status' => null,
+            'relationship' => null,
         ]);
     }
-    json_out(['ok' => true, 'relationships' => $dissolvedRelationships]);
+    json_out(['ok' => true, 'relationship_departure' => $relationshipDeparture]);
 }
 
 if ($action === 'block_user' || $action === 'unblock_user') {
@@ -124,19 +113,37 @@ if ($action === 'block_user' || $action === 'unblock_user') {
     }
     if (!$targetUserId || $targetUserId === (int)$p['user_id']) json_out(['error' => 'User required'], 400);
     if ($action === 'block_user') {
-        $affectedStmt = $pdo->prepare('SELECT id FROM participants WHERE (user_id = ? OR user_id = ?) AND session_id = ?');
-        $affectedStmt->execute([(int)$p['user_id'], $targetUserId, $sessionId]);
-        $affectedParticipantIds = array_map(fn(array $row): int => (int)$row['id'], $affectedStmt->fetchAll());
         $pdo->prepare(db_uses_mysql_syntax($pdo) ? 'INSERT IGNORE INTO user_blocks (blocker_user_id, blocked_user_id) VALUES (?,?)' : 'INSERT OR IGNORE INTO user_blocks (blocker_user_id, blocked_user_id) VALUES (?,?)')
             ->execute([(int)$p['user_id'], $targetUserId]);
-        $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE (user_id = ? OR user_id = ?) AND session_id = ?")
-            ->execute([(int)$p['user_id'], $targetUserId, $sessionId]);
-        $dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, $sessionId, $affectedParticipantIds);
-        avatar_relationship_emit_dissolved_events($pdo, $sessionId, (int)$p['id'], $dissolvedRelationships);
+        $relationshipDeparture = null;
+        $activeRelationship = avatar_relationship_active_for_participant(
+            $pdo,
+            $sessionId,
+            (int)$p['id'],
+            (int)$p['id']
+        );
+        $sharesRelationship = $activeRelationship && array_filter(
+            $activeRelationship['members'] ?? [],
+            fn(array $member): bool => (int)($member['userId'] ?? 0) === $targetUserId
+        );
+        if ($sharesRelationship) {
+            $relationshipDeparture = avatar_relationship_force_participant_departure(
+                $pdo,
+                $sessionId,
+                (int)$p['id'],
+                'member-blocked'
+            );
+        }
         emit_event($pdo, $sessionId, 'block', [
             'blocker_user_id' => (int)$p['user_id'],
             'blocked_user_id' => $targetUserId,
-            'relationships' => $dissolvedRelationships,
+            'relationship_change' => $relationshipDeparture && !empty($relationshipDeparture['relationship'])
+                ? [
+                    'relationship_id' => $relationshipDeparture['relationship']['id'] ?? null,
+                    'relationship_version' => $relationshipDeparture['relationship']['version'] ?? null,
+                    'relationship_status' => $relationshipDeparture['relationship']['status'] ?? null,
+                ]
+                : null,
         ]);
         log_tool($pdo, (int)$p['user_id'], 'block_user', $targetUserId, null, 'User block');
     } else {

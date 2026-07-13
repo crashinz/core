@@ -100,4 +100,32 @@ if ($action === 'set_join_policy') {
     ));
 }
 
+if (in_array($action, ['leave', 'remove_member', 'promote_member', 'demote_member'], true)) {
+    $lifecycleAction = [
+        'leave' => 'leave',
+        'remove_member' => 'remove',
+        'promote_member' => 'promote',
+        'demote_member' => 'demote',
+    ][$action];
+    avatar_relationship_api_out(avatar_relationship_mutate_member(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion,
+        $lifecycleAction,
+        (int)($body['target_participant_id'] ?? 0)
+    ));
+}
+
+if ($action === 'dissolve') {
+    avatar_relationship_api_out(avatar_relationship_dissolve(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion
+    ));
+}
+
 json_out(['error' => 'Unknown action'], 400);

@@ -2446,13 +2446,23 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
           ORDER BY arm.member_order ASC, arm.id ASC"
     );
     $membersStmt->execute([$relationshipDbId]);
-    $members = array_map(function(array $row) use ($viewerParticipantId): array {
+    $memberRows = $membersStmt->fetchAll();
+    $viewerIsMember = $viewerParticipantId === null;
+    if (!$viewerIsMember) {
+        foreach ($memberRows as $memberRow) {
+            if ((int)$memberRow['participant_id'] === $viewerParticipantId) {
+                $viewerIsMember = true;
+                break;
+            }
+        }
+    }
+    $members = array_map(function(array $row) use ($viewerParticipantId, $viewerIsMember): array {
         $isViewer = $viewerParticipantId === null || (int)$row['participant_id'] === $viewerParticipantId;
         return [
         'participantId' => (int)$row['participant_id'],
         'role' => (string)$row['member_role'],
         'relationshipRole' => (string)$row['relationship_role'],
-        'permissionRole' => $isViewer ? (string)$row['permission_role'] : null,
+        'permissionRole' => $viewerIsMember ? (string)$row['permission_role'] : null,
         'status' => (string)$row['membership_status'],
         'order' => (int)$row['member_order'],
         'userId' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
@@ -2462,7 +2472,7 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         'anchor' => !empty($row['anchor_json']) ? json_decode((string)$row['anchor_json'], true) : null,
         'options' => !empty($row['options_json']) ? (json_decode((string)$row['options_json'], true) ?: []) : [],
         ];
-    }, $membersStmt->fetchAll());
+    }, $memberRows);
     $metadata = !empty($relationship['metadata_json']) ? (json_decode((string)$relationship['metadata_json'], true) ?: []) : [];
     return [
         'id' => (string)$relationship['relationship_public_id'],
@@ -3141,6 +3151,718 @@ function avatar_relationship_set_join_policy(
     });
 }
 
+function avatar_relationship_insert_history(
+    PDO $pdo,
+    int $relationshipDbId,
+    array $member,
+    ?int $actorParticipantId,
+    string $action,
+    int $relationshipVersion,
+    string $reason,
+    ?string $membershipEndedAt = null
+): void {
+    $pdo->prepare(
+        'INSERT INTO avatar_relationship_membership_history
+            (relationship_id, participant_id, user_id, actor_participant_id, action, outcome,
+             relationship_role, permission_role, member_order, membership_effective_at,
+             membership_ended_at, visible_after_message_id, relationship_version, reason)
+         VALUES (?,?,?,?,?,\'applied\',?,?,?,?,?,?,?,?)'
+    )->execute([
+        $relationshipDbId,
+        (int)$member['participant_id'],
+        isset($member['user_id']) ? (int)$member['user_id'] : null,
+        $actorParticipantId,
+        $action,
+        (string)($member['relationship_role'] ?? 'normal'),
+        (string)($member['permission_role'] ?? 'member'),
+        (int)($member['member_order'] ?? 0),
+        (string)($member['membership_effective_at'] ?? $member['created_at'] ?? gmdate('Y-m-d H:i:s')),
+        $membershipEndedAt,
+        max(0, (int)($member['visible_after_message_id'] ?? 0)),
+        $relationshipVersion,
+        $reason,
+    ]);
+}
+
+function avatar_relationship_close_pending_requests_locked(
+    PDO $pdo,
+    int $sessionId,
+    array $relationship,
+    string $reason
+): int {
+    $sql = "SELECT id FROM avatar_relationship_requests
+             WHERE relationship_id = ? AND status = 'pending'
+             ORDER BY id ASC";
+    if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([(int)$relationship['id']]);
+    $requestIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    if (!$requestIds) return 0;
+
+    $update = $pdo->prepare(
+        "UPDATE avatar_relationship_requests
+            SET status = 'expired', active_request_key = NULL,
+                resolution_reason = ?, resolved_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'pending'"
+    );
+    $closed = 0;
+    foreach ($requestIds as $requestId) {
+        $update->execute([$reason, $requestId]);
+        if ($update->rowCount() !== 1) continue;
+        $closed++;
+        avatar_relationship_emit_lifecycle_event($pdo, $sessionId, 'request-expired', [
+            'id' => (string)$relationship['relationship_public_id'],
+            'version' => max(1, (int)$relationship['version']),
+            'status' => (string)$relationship['status'],
+        ], ['resolution_reason' => $reason]);
+    }
+    return $closed;
+}
+
+function avatar_relationship_refresh_legacy_projection_locked(
+    PDO $pdo,
+    array $relationship,
+    array $members
+): void {
+    $relationshipDbId = (int)$relationship['id'];
+    $sessionId = (int)$relationship['session_id'];
+    $memberIds = array_values(array_map(fn(array $member): int => (int)$member['participant_id'], $members));
+    $memberById = [];
+    foreach ($members as $member) $memberById[(int)$member['participant_id']] = $member;
+
+    $legacyInitiatorId = (int)($relationship['legacy_initiator_participant_id'] ?? 0);
+    $legacyTargetId = (int)($relationship['legacy_target_participant_id'] ?? 0);
+    if (count($members) > 2 && isset($memberById[$legacyInitiatorId], $memberById[$legacyTargetId])) {
+        return;
+    }
+
+    $clearIds = array_values(array_unique(array_filter(
+        array_merge($memberIds, [$legacyInitiatorId, $legacyTargetId]),
+        fn(int $participantId): bool => $participantId > 0
+    )));
+    if ($clearIds) {
+        $placeholders = implode(',', array_fill(0, count($clearIds), '?'));
+        $pdo->prepare(
+            "UPDATE participants
+                SET linked_to_participant_id = NULL, link_mode = 'normal'
+              WHERE session_id = ?
+                AND (id IN ($placeholders) OR linked_to_participant_id IN ($placeholders))"
+        )->execute(array_merge([$sessionId], $clearIds, $clearIds));
+    }
+
+    if (count($members) !== 2) {
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET legacy_initiator_participant_id = NULL,
+                    legacy_target_participant_id = NULL, legacy_link_key = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([$relationshipDbId]);
+        return;
+    }
+
+    $orderedMembers = array_values($members);
+    usort($orderedMembers, fn(array $first, array $second): int =>
+        [(int)$first['member_order'], (int)$first['id']] <=> [(int)$second['member_order'], (int)$second['id']]
+    );
+    $lapMembers = array_values(array_filter(
+        $orderedMembers,
+        fn(array $member): bool => (string)$member['relationship_role'] === 'lap'
+    ));
+    $normalMembers = array_values(array_filter(
+        $orderedMembers,
+        fn(array $member): bool => (string)$member['relationship_role'] === 'normal'
+    ));
+
+    $mode = count($lapMembers) === 1 && count($normalMembers) === 1 ? 'lap' : 'normal';
+    if ($mode === 'lap') {
+        $initiator = $lapMembers[0];
+        $target = $normalMembers[0];
+        $pdo->prepare(
+            'UPDATE avatar_relationship_members
+                SET lap_host_participant_id = ?, member_role = CASE WHEN participant_id = ? THEN \'initiator\' ELSE \'target\' END,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE relationship_id = ?'
+        )->execute([(int)$target['participant_id'], (int)$initiator['participant_id'], $relationshipDbId]);
+    } else {
+        $creatorId = (int)($relationship['creator_participant_id'] ?? 0);
+        $initiator = $memberById[$creatorId] ?? $orderedMembers[0];
+        $target = (int)$orderedMembers[0]['participant_id'] === (int)$initiator['participant_id']
+            ? $orderedMembers[1]
+            : $orderedMembers[0];
+        $pdo->prepare(
+            "UPDATE avatar_relationship_members
+                SET lap_host_participant_id = NULL,
+                    member_role = CASE WHEN participant_id = ? THEN 'initiator' ELSE 'target' END,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE relationship_id = ?"
+        )->execute([(int)$initiator['participant_id'], $relationshipDbId]);
+    }
+
+    $initiatorId = (int)$initiator['participant_id'];
+    $targetId = (int)$target['participant_id'];
+    $capability = avatar_relationship_capability($mode);
+    $metadata = avatar_relationship_metadata(
+        $initiatorId,
+        $targetId,
+        $mode,
+        (string)$relationship['relationship_public_id']
+    );
+    $pdo->prepare(
+        "UPDATE participants
+            SET linked_to_participant_id = ?, link_mode = ?
+          WHERE id = ? AND session_id = ?"
+    )->execute([$targetId, $mode, $initiatorId, $sessionId]);
+    $pdo->prepare(
+        'UPDATE avatar_relationships
+            SET legacy_initiator_participant_id = ?, legacy_target_participant_id = ?,
+                legacy_link_key = ?, mode = ?, capability = ?, geometry_strategy = ?,
+                metadata_json = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?'
+    )->execute([
+        $initiatorId,
+        $targetId,
+        link_key_for($initiatorId, $targetId),
+        $mode,
+        $capability['capability'],
+        $capability['geometry_strategy'],
+        json_encode($metadata, JSON_UNESCAPED_SLASHES),
+        $relationshipDbId,
+    ]);
+}
+
+function avatar_relationship_emit_legacy_projection_events(
+    PDO $pdo,
+    int $sessionId,
+    array $participantIds,
+    array $relationship
+): void {
+    $participantIds = array_values(array_unique(array_filter(
+        array_map('intval', $participantIds),
+        fn(int $participantId): bool => $participantId > 0
+    )));
+    if (!$participantIds) return;
+    $placeholders = implode(',', array_fill(0, count($participantIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT id, linked_to_participant_id, link_mode
+           FROM participants
+          WHERE session_id = ? AND id IN ($placeholders)
+          ORDER BY id ASC"
+    );
+    $stmt->execute(array_merge([$sessionId], $participantIds));
+    foreach ($stmt->fetchAll() as $participant) {
+        emit_event($pdo, $sessionId, 'link', [
+            'participant_id' => (int)$participant['id'],
+            'linked_to' => $participant['linked_to_participant_id'] !== null
+                ? (int)$participant['linked_to_participant_id']
+                : null,
+            'link_mode' => avatar_relationship_mode((string)$participant['link_mode']),
+            'relationship_removed' => false,
+            'relationship_id' => (string)$relationship['id'],
+            'relationship_version' => (int)$relationship['version'],
+            'relationship_status' => (string)$relationship['status'],
+            'relationship' => $relationship,
+        ]);
+    }
+}
+
+function avatar_relationship_lifecycle_idempotent(
+    PDO $pdo,
+    int $relationshipDbId,
+    int $actorParticipantId,
+    int $targetParticipantId,
+    array $actions
+): bool {
+    $placeholders = implode(',', array_fill(0, count($actions), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT 1 FROM avatar_relationship_membership_history
+          WHERE relationship_id = ? AND participant_id = ?
+            AND actor_participant_id = ? AND action IN ($placeholders)
+          LIMIT 1"
+    );
+    $stmt->execute(array_merge(
+        [$relationshipDbId, $targetParticipantId, $actorParticipantId],
+        $actions
+    ));
+    return (bool)$stmt->fetchColumn();
+}
+
+function avatar_relationship_oldest_normal_member(array $members, ?string $permissionRole = null): ?array {
+    $eligible = array_values(array_filter(
+        $members,
+        fn(array $member): bool => (string)$member['relationship_role'] === 'normal'
+            && ($permissionRole === null || (string)$member['permission_role'] === $permissionRole)
+    ));
+    if (!$eligible) return null;
+    usort($eligible, fn(array $first, array $second): int =>
+        [
+            (string)($first['membership_effective_at'] ?? $first['created_at'] ?? ''),
+            (int)$first['member_order'],
+            (int)$first['id'],
+        ] <=> [
+            (string)($second['membership_effective_at'] ?? $second['created_at'] ?? ''),
+            (int)$second['member_order'],
+            (int)$second['id'],
+        ]
+    );
+    return $eligible[0];
+}
+
+function avatar_relationship_dissolve_locked(
+    PDO $pdo,
+    int $sessionId,
+    array $relationship,
+    array $members,
+    int $actorParticipantId,
+    string $reason,
+    array $memberOutcomes = [],
+    array $dependentRemovalEvents = []
+): array {
+    $nextVersion = max(1, (int)$relationship['version']) + 1;
+    $endedAt = gmdate('Y-m-d H:i:s');
+    foreach ($members as $member) {
+        $memberOutcome = $memberOutcomes[(int)$member['participant_id']] ?? [];
+        avatar_relationship_insert_history(
+            $pdo,
+            (int)$relationship['id'],
+            $member,
+            $actorParticipantId,
+            (string)($memberOutcome['action'] ?? 'group-dissolved'),
+            $nextVersion,
+            (string)($memberOutcome['reason'] ?? $reason),
+            $endedAt
+        );
+    }
+    avatar_relationship_refresh_legacy_projection_locked($pdo, $relationship, []);
+    $pdo->prepare('DELETE FROM avatar_relationship_members WHERE relationship_id = ?')
+        ->execute([(int)$relationship['id']]);
+    $pdo->prepare(
+        "UPDATE avatar_relationships
+            SET version = ?, status = 'dissolved', creator_participant_id = NULL,
+                legacy_initiator_participant_id = NULL,
+                legacy_target_participant_id = NULL, legacy_link_key = NULL,
+                divergence_status = 'synced', dissolved_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?"
+    )->execute([$nextVersion, $endedAt, (int)$relationship['id']]);
+    $relationship['version'] = $nextVersion;
+    $relationship['status'] = 'dissolved';
+    avatar_relationship_close_pending_requests_locked($pdo, $sessionId, $relationship, 'relationship-dissolved');
+    $tombstone = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+    $eventTombstone = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+    avatar_relationship_emit_lifecycle_event(
+        $pdo,
+        $sessionId,
+        'relationship-dissolved',
+        $eventTombstone,
+        ['resolution_reason' => $reason]
+    );
+    foreach ($dependentRemovalEvents as $removalEvent) {
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            'member-removed',
+            $eventTombstone,
+            [
+                'target_participant_id' => (int)$removalEvent['participant_id'],
+                'prior_relationship_role' => 'lap',
+                'resolution_reason' => (string)$removalEvent['reason'],
+            ]
+        );
+    }
+    foreach ($members as $member) {
+        emit_event($pdo, $sessionId, 'link', [
+            'participant_id' => (int)$member['participant_id'],
+            'linked_to' => null,
+            'link_mode' => 'normal',
+            'relationship_removed' => true,
+            'relationship_id' => (string)$relationship['relationship_public_id'],
+            'relationship_version' => $nextVersion,
+            'relationship_status' => 'dissolved',
+            'relationship' => $eventTombstone,
+        ]);
+    }
+    return [
+        'ok' => true,
+        'dissolved' => true,
+        'relationship' => $tombstone,
+    ];
+}
+
+function avatar_relationship_dissolve(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo, $sessionId, $actorParticipantId, $relationshipPublicId, $expectedVersion
+    ): array {
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship) return avatar_relationship_operation_error('RELATIONSHIP_NOT_FOUND', 'Relationship not found.', 'relationship-not-found', 404);
+        if ((string)$relationship['status'] === 'dissolved') {
+            $stmt = $pdo->prepare(
+                "SELECT 1 FROM avatar_relationship_membership_history
+                  WHERE relationship_id = ? AND actor_participant_id = ?
+                    AND action = 'group-dissolved' LIMIT 1"
+            );
+            $stmt->execute([(int)$relationship['id'], $actorParticipantId]);
+            if ($stmt->fetchColumn()) {
+                return [
+                    'ok' => true,
+                    'idempotent' => true,
+                    'dissolved' => true,
+                    'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+                ];
+            }
+            return avatar_relationship_operation_error('RELATIONSHIP_DISSOLVED', 'Relationship is dissolved.', 'relationship-dissolved', 409);
+        }
+        if ((string)$relationship['status'] !== 'active') return avatar_relationship_operation_error('RELATIONSHIP_NOT_ACTIVE', 'Relationship is not active.', 'relationship-not-active', 409);
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actorMember = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if (!avatar_relationship_permission_allows($actorMember)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'You cannot dissolve this relationship.', 'relationship-dissolve-permission-denied', 403);
+        }
+        return avatar_relationship_dissolve_locked(
+            $pdo,
+            $sessionId,
+            $relationship,
+            $members,
+            $actorParticipantId,
+            'relationship-dissolved-by-member'
+        );
+    });
+}
+
+function avatar_relationship_force_participant_departure(
+    PDO $pdo,
+    int $sessionId,
+    int $participantId,
+    string $reason
+): array {
+    $active = avatar_relationship_active_for_participant($pdo, $sessionId, $participantId, $participantId);
+    if (!$active) return ['ok' => true, 'idempotent' => true, 'relationship' => null];
+    return avatar_relationship_mutate_member(
+        $pdo,
+        $sessionId,
+        $participantId,
+        (string)$active['id'],
+        (int)$active['version'],
+        'leave',
+        0,
+        $reason
+    );
+}
+
+function avatar_relationship_mutate_member(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $action,
+    int $targetParticipantId = 0,
+    ?string $departureReason = null
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo, $sessionId, $actorParticipantId, $relationshipPublicId,
+        $expectedVersion, $action, $targetParticipantId, $departureReason
+    ): array {
+        if (!in_array($action, ['leave', 'remove', 'promote', 'demote'], true)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_CONFLICT', 'Unknown membership action.', 'unknown-membership-action', 400);
+        }
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship) return avatar_relationship_operation_error('RELATIONSHIP_NOT_FOUND', 'Relationship not found.', 'relationship-not-found', 404);
+        if ((string)$relationship['status'] === 'dissolved') {
+            $terminalTargetId = $action === 'leave' ? $actorParticipantId : $targetParticipantId;
+            $terminalActions = $action === 'leave'
+                ? ['member-left', 'group-dissolved']
+                : ['member-removed', 'group-dissolved'];
+            if (in_array($action, ['leave', 'remove'], true)
+                && avatar_relationship_lifecycle_idempotent(
+                    $pdo,
+                    (int)$relationship['id'],
+                    $actorParticipantId,
+                    $terminalTargetId,
+                    $terminalActions
+                )) {
+                return [
+                    'ok' => true,
+                    'idempotent' => true,
+                    'dissolved' => true,
+                    'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+                ];
+            }
+            return avatar_relationship_operation_error('RELATIONSHIP_DISSOLVED', 'Relationship is dissolved.', 'relationship-dissolved', 409);
+        }
+        if ((string)$relationship['status'] !== 'active') return avatar_relationship_operation_error('RELATIONSHIP_NOT_ACTIVE', 'Relationship is not active.', 'relationship-not-active', 409);
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actorMember = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        $targetParticipantId = $action === 'leave' ? $actorParticipantId : $targetParticipantId;
+        $targetMember = avatar_relationship_member_from_rows($members, $targetParticipantId);
+        if (!$targetMember) {
+            $idempotentActions = $action === 'leave' ? ['member-left'] : ['member-removed'];
+            if (in_array($action, ['leave', 'remove'], true)
+                && avatar_relationship_lifecycle_idempotent(
+                    $pdo,
+                    (int)$relationship['id'],
+                    $actorParticipantId,
+                    $targetParticipantId,
+                    $idempotentActions
+                )) {
+                return [
+                    'ok' => true,
+                    'idempotent' => true,
+                    'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+                ];
+            }
+            return avatar_relationship_operation_error('RELATIONSHIP_MEMBER_NOT_FOUND', 'Relationship member not found.', 'relationship-member-not-found', 404);
+        }
+        if (!$actorMember) {
+            return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'You cannot change this relationship.', 'relationship-actor-not-member', 403);
+        }
+
+        if ($action !== 'leave' && !avatar_relationship_permission_allows($actorMember)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'You cannot change relationship members.', 'membership-permission-denied', 403);
+        }
+
+        if ($action !== 'leave' && (string)$targetMember['permission_role'] === 'creator') {
+            return avatar_relationship_operation_error('RELATIONSHIP_CREATOR_PROTECTED', 'The relationship creator is protected.', 'relationship-creator-protected', 409);
+        }
+        if ($action === 'promote' && (string)$targetMember['permission_role'] === 'manager') {
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+        if ($action === 'demote' && (string)$targetMember['permission_role'] === 'member') {
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+        if ($action === 'promote' && (string)$targetMember['permission_role'] !== 'member') {
+            return avatar_relationship_operation_error('RELATIONSHIP_MEMBER_ALREADY_MANAGER', 'That member cannot be promoted.', 'relationship-member-already-manager', 409);
+        }
+        if ($action === 'demote' && (string)$targetMember['permission_role'] !== 'manager') {
+            return avatar_relationship_operation_error('RELATIONSHIP_MEMBER_NOT_MANAGER', 'That member is not a manager.', 'relationship-member-not-manager', 409);
+        }
+
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        if (in_array($action, ['promote', 'demote'], true)) {
+            $nextPermissionRole = $action === 'promote' ? 'manager' : 'member';
+            $pdo->prepare(
+                'UPDATE avatar_relationship_members
+                    SET permission_role = ?, updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?'
+            )->execute([$nextPermissionRole, (int)$targetMember['id']]);
+            $pdo->prepare(
+                'UPDATE avatar_relationships SET version = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+            )->execute([$nextVersion, (int)$relationship['id']]);
+            avatar_relationship_insert_history(
+                $pdo,
+                (int)$relationship['id'],
+                $targetMember,
+                $actorParticipantId,
+                'permission-' . ($action === 'promote' ? 'promoted' : 'demoted'),
+                $nextVersion,
+                'permission-role:' . (string)$targetMember['permission_role'] . '->' . $nextPermissionRole
+            );
+            $relationship['version'] = $nextVersion;
+            avatar_relationship_close_pending_requests_locked($pdo, $sessionId, $relationship, 'relationship-permission-changed');
+            $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+            $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+            avatar_relationship_emit_lifecycle_event($pdo, $sessionId, 'permission-changed', $eventPayload, [
+                'target_participant_id' => $targetParticipantId,
+            ]);
+            return ['ok' => true, 'relationship' => $viewerPayload];
+        }
+
+        $hostedLapMembers = array_values(array_filter(
+            $members,
+            fn(array $member): bool => (int)($member['lap_host_participant_id'] ?? 0) === $targetParticipantId
+                && (int)$member['participant_id'] !== $targetParticipantId
+        ));
+        $departingMembers = array_merge([$targetMember], $hostedLapMembers);
+        $departingIds = array_map(
+            fn(array $member): int => (int)$member['participant_id'],
+            $departingMembers
+        );
+        $remainingMembers = array_values(array_filter(
+            $members,
+            fn(array $member): bool => !in_array((int)$member['participant_id'], $departingIds, true)
+        ));
+        $targetHistoryAction = $action === 'leave' ? 'member-left' : 'member-removed';
+        $targetHistoryReason = $departureReason ?: $targetHistoryAction;
+        $dependentRemovalReason = $action === 'leave' ? 'lap-host-left' : 'lap-host-removed';
+        $dissolutionMemberOutcomes = [];
+        $dependentRemovalEvents = [];
+        if ($hostedLapMembers) {
+            $dissolutionMemberOutcomes[$targetParticipantId] = [
+                'action' => $targetHistoryAction,
+                'reason' => $targetHistoryReason,
+            ];
+            foreach ($hostedLapMembers as $hostedLapMember) {
+                $dependentParticipantId = (int)$hostedLapMember['participant_id'];
+                $dissolutionMemberOutcomes[$dependentParticipantId] = [
+                    'action' => 'member-removed',
+                    'reason' => $dependentRemovalReason,
+                ];
+                $dependentRemovalEvents[] = [
+                    'participant_id' => $dependentParticipantId,
+                    'reason' => $dependentRemovalReason,
+                ];
+            }
+        }
+        if (count($remainingMembers) < 2) {
+            return avatar_relationship_dissolve_locked(
+                $pdo,
+                $sessionId,
+                $relationship,
+                $members,
+                $actorParticipantId,
+                $departureReason ?: ($action === 'leave' ? 'minimum-members-after-leave' : 'minimum-members-after-removal'),
+                $dissolutionMemberOutcomes,
+                $dependentRemovalEvents
+            );
+        }
+
+        $successor = null;
+        if ((string)$targetMember['permission_role'] === 'creator') {
+            $successor = avatar_relationship_oldest_normal_member($remainingMembers, 'manager')
+                ?: avatar_relationship_oldest_normal_member($remainingMembers);
+            if (!$successor) {
+                return avatar_relationship_dissolve_locked(
+                    $pdo,
+                    $sessionId,
+                    $relationship,
+                    $members,
+                    $actorParticipantId,
+                    $departureReason ?: 'creator-departed-without-successor',
+                    $dissolutionMemberOutcomes,
+                    $dependentRemovalEvents
+                );
+            }
+        }
+
+        $endedAt = gmdate('Y-m-d H:i:s');
+        avatar_relationship_insert_history(
+            $pdo,
+            (int)$relationship['id'],
+            $targetMember,
+            $actorParticipantId,
+            $targetHistoryAction,
+            $nextVersion,
+            $targetHistoryReason,
+            $endedAt
+        );
+        foreach ($hostedLapMembers as $hostedLapMember) {
+            avatar_relationship_insert_history(
+                $pdo,
+                (int)$relationship['id'],
+                $hostedLapMember,
+                $actorParticipantId,
+                'member-removed',
+                $nextVersion,
+                $dependentRemovalReason,
+                $endedAt
+            );
+        }
+        if ($successor) {
+            avatar_relationship_insert_history(
+                $pdo,
+                (int)$relationship['id'],
+                $successor,
+                $actorParticipantId,
+                'creator-transferred',
+                $nextVersion,
+                'creator-succession:' . (string)$successor['permission_role'] . '->creator'
+            );
+            $pdo->prepare(
+                "UPDATE avatar_relationship_members
+                    SET permission_role = 'creator', updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?"
+            )->execute([(int)$successor['id']]);
+        }
+        $departingPlaceholders = implode(',', array_fill(0, count($departingIds), '?'));
+        $pdo->prepare(
+            "UPDATE participants
+                SET linked_to_participant_id = NULL, link_mode = 'normal'
+              WHERE session_id = ?
+                AND (id IN ($departingPlaceholders) OR linked_to_participant_id IN ($departingPlaceholders))"
+        )->execute(array_merge([$sessionId], $departingIds, $departingIds));
+        $pdo->prepare(
+            "DELETE FROM avatar_relationship_members
+              WHERE relationship_id = ? AND participant_id IN ($departingPlaceholders)"
+        )->execute(array_merge([(int)$relationship['id']], $departingIds));
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET version = ?, creator_participant_id = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([
+            $nextVersion,
+            $successor ? (int)$successor['participant_id'] : (int)$relationship['creator_participant_id'],
+            (int)$relationship['id'],
+        ]);
+        $relationship['version'] = $nextVersion;
+        if ($successor) $relationship['creator_participant_id'] = (int)$successor['participant_id'];
+        avatar_relationship_refresh_legacy_projection_locked($pdo, $relationship, $remainingMembers);
+        avatar_relationship_close_pending_requests_locked($pdo, $sessionId, $relationship, 'relationship-membership-changed');
+        $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+        $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            $action === 'leave' ? 'member-left' : 'member-removed',
+            $eventPayload,
+            [
+                'target_participant_id' => $targetParticipantId,
+                'prior_relationship_role' => (string)$targetMember['relationship_role'],
+                'resolution_reason' => $targetHistoryReason,
+            ]
+        );
+        foreach ($hostedLapMembers as $hostedLapMember) {
+            avatar_relationship_emit_lifecycle_event(
+                $pdo,
+                $sessionId,
+                'member-removed',
+                $eventPayload,
+                [
+                    'target_participant_id' => (int)$hostedLapMember['participant_id'],
+                    'prior_relationship_role' => 'lap',
+                    'resolution_reason' => $dependentRemovalReason,
+                ]
+            );
+        }
+        avatar_relationship_emit_legacy_projection_events(
+            $pdo,
+            $sessionId,
+            array_merge($departingIds, array_map(
+                fn(array $member): int => (int)$member['participant_id'],
+                $remainingMembers
+            )),
+            $eventPayload
+        );
+        if ($successor) {
+            avatar_relationship_emit_lifecycle_event(
+                $pdo,
+                $sessionId,
+                'creator-transferred',
+                $eventPayload,
+                ['creator_participant_id' => (int)$successor['participant_id']]
+            );
+        }
+        return ['ok' => true, 'relationship' => $viewerPayload];
+    });
+}
+
 function avatar_relationship_requests_for_actor(PDO $pdo, int $sessionId, int $actorParticipantId): array {
     $stmt = $pdo->prepare(
         "SELECT arr.*, ar.relationship_public_id
@@ -3742,9 +4464,13 @@ function cleanup_stale_participants(PDO $pdo, ?int $sessionId = null): void {
     $clearVoice = $pdo->prepare('DELETE FROM voice_sessions WHERE participant_id = ?');
     foreach ($stale as $row) {
         $participantId = (int)$row['id'];
+        avatar_relationship_force_participant_departure(
+            $pdo,
+            (int)$row['session_id'],
+            $participantId,
+            'stale-participant-cleanup'
+        );
         $clearParticipant->execute([$participantId, $participantId]);
-        $dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, (int)$row['session_id'], [$participantId]);
-        avatar_relationship_emit_dissolved_events($pdo, (int)$row['session_id'], $participantId, $dissolvedRelationships);
         $clearVoice->execute([$participantId]);
         $clearUser->execute([(int)$row['user_id']]);
         emit_event($pdo, (int)$row['session_id'], 'participant_leave', ['id' => $participantId, 'participant_id' => $participantId]);
@@ -3894,7 +4620,14 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
         if (count($matches) > 1) {
             $extraIds = array_map(fn($row) => (int)$row['id'], array_slice($matches, 1));
             $placeholders = implode(',', array_fill(0, count($extraIds), '?'));
-            avatar_relationship_clear_for_participants($pdo, $sessionId, $extraIds);
+            foreach ($extraIds as $extraId) {
+                avatar_relationship_force_participant_departure(
+                    $pdo,
+                    $sessionId,
+                    $extraId,
+                    'duplicate-participant-cleanup'
+                );
+            }
             $pdo->prepare("DELETE FROM participants WHERE id IN ($placeholders)")->execute($extraIds);
         }
         return $participant;

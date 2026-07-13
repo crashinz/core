@@ -36,6 +36,32 @@ $linkKeyExprB = db_concat($pdo, ['p.linked_to_participant_id', "':'", 'p.id']);
 session_write_close();
 
 $stmt = $pdo->prepare('SELECT id, type, payload FROM events WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT 200');
+$mapRoomEvent = function(array $event) use ($pdo, $sessionId, $me): array {
+    $payload = json_decode((string)$event['payload'], true) ?: [];
+    if ((string)$event['type'] === 'relationship'
+        && isset($payload['relationship'])
+        && !empty($payload['relationship_id'])
+        && !empty($payload['relationship_version'])) {
+        $relationshipStmt = $pdo->prepare(
+            'SELECT id, version FROM avatar_relationships
+              WHERE session_id = ? AND relationship_public_id = ? LIMIT 1'
+        );
+        $relationshipStmt->execute([$sessionId, (string)$payload['relationship_id']]);
+        $relationship = $relationshipStmt->fetch() ?: null;
+        if ($relationship && (int)$relationship['version'] === (int)$payload['relationship_version']) {
+            $payload['relationship'] = avatar_relationship_payload(
+                $pdo,
+                (int)$relationship['id'],
+                (int)$me['id']
+            );
+        }
+    }
+    return [
+        'id' => (int)$event['id'],
+        'type' => (string)$event['type'],
+        'payload' => $payload,
+    ];
+};
 $communityStmt = $pdo->prepare(
     "SELECT id, type, payload FROM community_events
      WHERE id > ?
@@ -87,11 +113,7 @@ for ($i = 0; $i < $pollAttempts; $i++) {
     $communityRows = $communityStmt->fetchAll();
     if ($rows || $communityRows) {
         json_out([
-        'events' => array_map(fn($e) => [
-            'id' => (int)$e['id'],
-            'type' => $e['type'],
-            'payload' => json_decode($e['payload'], true) ?: [],
-        ], $rows),
+        'events' => array_map($mapRoomEvent, $rows),
         'community_events' => array_map(fn($e) => [
             'id' => (int)$e['id'],
             'type' => $e['type'],

@@ -28,7 +28,7 @@ Those responsibilities remain outside the runtime.
 
 # Relationship Persistence Boundary
 
-Build 000044 Parts 1, 2A, and Part 2B Checkpoint 2B-1 establish the current
+Build 000044 Parts 1, 2A, and Part 2B Checkpoints 2B-1/2B-2 establish the current
 relationship boundary:
 
 - `AvatarRelationshipService.relationshipEligibility()` is the authoritative,
@@ -52,12 +52,20 @@ relationship boundary:
 - The dedicated relationship lifecycle API owns persistent requests,
   invitations, open/approval policy, version checks, and atomic add-member
   acceptance. `api/users.php` is not a second lifecycle owner.
+- The same lifecycle API owns member removal/leave, permission changes, creator
+  succession, and dissolution. Server transactions own history, request
+  cleanup, role protection, minimum membership, dependent removal when a lap
+  host departs, and
+  legacy pair projection.
 - `RoomEventRouter` routes versioned `relationship` events to
   `AvatarCoordinator`; the coordinator reconciles current snapshots through
   `AvatarRelationshipService` and leaves unsupported multi-member geometry
   unprojected.
+- Current members receive all relationship permission roles through
+  authenticated snapshots; non-members receive redacted roles. Dissolution
+  invalidation uses prior and incoming membership before installing a terminal
+  tombstone.
 
-Part 2B Checkpoint 2B-2 will add terminal membership and permission operations;
 Checkpoint 2B-3 will certify contention. Part 2C will add stable relationship
 group chat. Callers must not add independent `linked_to` eligibility,
 permission, request, or snapshot-version rules.

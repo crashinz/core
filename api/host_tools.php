@@ -69,10 +69,9 @@ if ($action === 'kick') {
     )->execute([(int)$room['id'], (int)$target['user_id'], (int)$user['id'], $minutes, $permanent ? 1 : 0, $expiresAt]);
     $ejectionId = (int)$pdo->lastInsertId();
 
+    avatar_relationship_force_participant_departure($pdo, $sessionId, (int)$target['id'], 'host-ejection');
     $pdo->prepare("UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, webcam_enabled = 0, linked_to_participant_id = NULL, link_mode = 'normal' WHERE session_id = ? AND user_id = ?")
         ->execute([$sessionId, (int)$target['user_id']]);
-    $dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$target['id']]);
-    avatar_relationship_emit_dissolved_events($pdo, $sessionId, (int)$target['id'], $dissolvedRelationships);
     $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')
         ->execute([(int)$target['user_id']]);
 
@@ -110,10 +109,9 @@ if ($action === 'community_eject') {
     )->execute([(int)$target['user_id'], (int)$user['id'], $minutes, $permanent ? 1 : 0, $reason, $expiresAt]);
     $ejectionId = (int)$pdo->lastInsertId();
 
+    avatar_relationship_force_participant_departure($pdo, $sessionId, (int)$target['id'], 'community-ejection');
     $pdo->prepare("UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, webcam_enabled = 0, linked_to_participant_id = NULL, link_mode = 'normal' WHERE user_id = ?")
         ->execute([(int)$target['user_id']]);
-    $dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$target['id']]);
-    avatar_relationship_emit_dissolved_events($pdo, $sessionId, (int)$target['id'], $dissolvedRelationships);
     $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')
         ->execute([(int)$target['user_id']]);
 

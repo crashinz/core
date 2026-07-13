@@ -1007,6 +1007,12 @@ export class AvatarCoordinator {
             return null;
         }
 
+        const relationshipId =
+            String(payload.relationship_id || relationship.id || "");
+        const previousRelationship =
+            relationshipId
+                ? this.#relationships.relationshipById(relationshipId)
+                : null;
         const reconciled =
             this.#relationships.upsertPersistedRelationship(relationship);
 
@@ -1022,8 +1028,12 @@ export class AvatarCoordinator {
         }
 
         const participantIds =
-            Array.from(relationship.members || [])
+            Array.from(new Set([
+                ...(previousRelationship?.memberIds || []),
+                ...Array.from(relationship.members || [])
                 .map(member => Number(member?.participantId || member?.participant_id || 0))
+            ]))
+                .map(Number)
                 .filter(participantId => participantId > 0);
 
         this.invalidatePendingLinkChoice(
