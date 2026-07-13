@@ -744,6 +744,9 @@ function configureRoomEventRouter() {
     onRemoteLink(payload) {
       avatarRuntime?.coordinator?.reconcileRemoteLink(payload);
     },
+    onRemoteRelationship(payload) {
+      avatarRuntime?.coordinator?.reconcileRemoteRelationship(payload);
+    },
     onRemoteLinkIcon(payload) {
       avatarRuntime?.coordinator?.reconcileRemoteLinkIcon(payload);
     },

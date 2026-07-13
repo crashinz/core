@@ -980,6 +980,75 @@ export class AvatarCoordinator {
     }
 
     /**
+     * Reconciles one versioned relationship lifecycle event.
+     *
+     * Request-only events intentionally carry no private membership snapshot.
+     * Snapshot reconciliation remains authoritative in
+     * AvatarRelationshipService and does not project unsupported multi-member
+     * geometry into the legacy pair presentation.
+     *
+     * @param {Object} payload
+     *
+     * @returns {Object|null}
+     */
+    reconcileRemoteRelationship(payload = {}) {
+
+        const relationship = payload.relationship;
+
+        if (!relationship) {
+            this.#context?.recordRelationshipDiagnostic?.({
+                event: "relationship-event-observed",
+                action: String(payload.action || "unknown"),
+                relationshipId: String(payload.relationship_id || "") || null,
+                relationshipVersion: Number(payload.relationship_version || 0) || null,
+                relationshipStatus: String(payload.relationship_status || "") || null,
+                snapshotIncluded: false
+            });
+            return null;
+        }
+
+        const reconciled =
+            this.#relationships.upsertPersistedRelationship(relationship);
+
+        if (!this.#relationships.isCurrentPersistedRelationshipSnapshot(relationship)) {
+            this.#context?.recordRelationshipDiagnostic?.({
+                event: "relationship-event-stale",
+                action: String(payload.action || "unknown"),
+                relationshipId: String(payload.relationship_id || relationship.id || "") || null,
+                relationshipVersion: Number(payload.relationship_version || relationship.version || 0) || null,
+                relationshipStatus: String(payload.relationship_status || relationship.status || "") || null
+            });
+            return null;
+        }
+
+        const participantIds =
+            Array.from(relationship.members || [])
+                .map(member => Number(member?.participantId || member?.participant_id || 0))
+                .filter(participantId => participantId > 0);
+
+        this.invalidatePendingLinkChoice(
+            "remote-relationship-change",
+            participantIds
+        );
+
+        this.#syncRelationshipPresentation();
+        this.#lifecycleOperationCount += 1;
+
+        this.#context?.recordRelationshipDiagnostic?.({
+            event: "relationship-event-reconciled",
+            action: String(payload.action || "unknown"),
+            relationshipId: String(payload.relationship_id || relationship.id || "") || null,
+            relationshipVersion: Number(payload.relationship_version || relationship.version || 0) || null,
+            relationshipStatus: String(payload.relationship_status || relationship.status || "") || null,
+            memberCount: participantIds.length,
+            snapshotIncluded: true
+        });
+
+        return reconciled;
+
+    }
+
+    /**
      * Applies a remote link icon event.
      *
      * @param {Object} payload

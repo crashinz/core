@@ -175,6 +175,7 @@ function mysqlize_schema(string $schema): string {
         'file_path' => 'VARCHAR(512)',
         'link_key' => 'VARCHAR(191)',
         'relationship_public_id' => 'VARCHAR(191)',
+        'request_public_id' => 'VARCHAR(191)',
         'conversation_public_id' => 'VARCHAR(191)',
         'legacy_link_key' => 'VARCHAR(191)',
         'mode' => 'VARCHAR(32)',
@@ -185,7 +186,11 @@ function mysqlize_schema(string $schema): string {
         'permission_role' => 'VARCHAR(32)',
         'membership_status' => 'VARCHAR(32)',
         'join_policy' => 'VARCHAR(32)',
+        'request_type' => 'VARCHAR(32)',
+        'requested_relationship_role' => 'VARCHAR(32)',
+        'active_request_key' => 'VARCHAR(191)',
         'outcome' => 'VARCHAR(32)',
+        'resolution_reason' => 'VARCHAR(512)',
         'divergence_status' => 'VARCHAR(32)',
         'scope' => 'VARCHAR(32)',
         'action' => 'VARCHAR(64)',
@@ -200,7 +205,7 @@ function mysqlize_schema(string $schema): string {
     foreach (['current_room_id'] as $intColumn) {
         $schema = preg_replace('/\b' . $intColumn . '\s+INT/', $intColumn . ' INT', $schema) ?? $schema;
     }
-    foreach (['last_seen_at', 'created_at', 'started_at', 'joined_at', 'updated_at', 'sent_at', 'edited_at', 'deleted_at', 'expires_at', 'cleared_at', 'last_attempt_at', 'locked_until', 'dissolved_at', 'membership_effective_at', 'membership_ended_at'] as $dateColumn) {
+    foreach (['last_seen_at', 'created_at', 'started_at', 'joined_at', 'updated_at', 'sent_at', 'edited_at', 'deleted_at', 'expires_at', 'resolved_at', 'cleared_at', 'last_attempt_at', 'locked_until', 'dissolved_at', 'membership_effective_at', 'membership_ended_at'] as $dateColumn) {
         $schema = preg_replace('/\b' . $dateColumn . '\s+VARCHAR\(1024\)/', $dateColumn . ' DATETIME', $schema) ?? $schema;
     }
     $schema = preg_replace('/CREATE TABLE IF NOT EXISTS ([^(]+)\s*\((.*?)\);/s', 'CREATE TABLE IF NOT EXISTS $1 ($2) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;', $schema) ?? $schema;
@@ -272,6 +277,9 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
         ['avatar_relationships', 'idx_avatar_relationships_status', false, 'session_id, status'],
         ['avatar_relationship_membership_history', 'idx_avatar_relationship_history_relationship', false, 'relationship_id, id'],
         ['avatar_relationship_membership_history', 'idx_avatar_relationship_history_participant', false, 'participant_id, id'],
+        ['avatar_relationship_requests', 'idx_avatar_relationship_requests_active_key', true, 'active_request_key'],
+        ['avatar_relationship_requests', 'idx_avatar_relationship_requests_relationship', false, 'relationship_id, status, id'],
+        ['avatar_relationship_requests', 'idx_avatar_relationship_requests_target', false, 'target_participant_id, status, id'],
     ];
     foreach ($indexes as [$table, $name, $unique, $columns]) {
         try {
@@ -585,6 +593,31 @@ function migrate(PDO $pdo): void {
             FOREIGN KEY(relationship_id) REFERENCES avatar_relationships(id) ON DELETE CASCADE,
             FOREIGN KEY(participant_id) REFERENCES participants(id) ON DELETE SET NULL,
             FOREIGN KEY(actor_participant_id) REFERENCES participants(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS avatar_relationship_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_public_id TEXT NOT NULL UNIQUE,
+            relationship_id INTEGER NOT NULL,
+            relationship_version INTEGER NOT NULL,
+            requester_participant_id INTEGER NOT NULL,
+            target_participant_id INTEGER NOT NULL,
+            request_type TEXT NOT NULL,
+            requested_relationship_role TEXT NOT NULL DEFAULT 'normal',
+            requested_lap_host_participant_id INTEGER DEFAULT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            active_request_key TEXT DEFAULT NULL UNIQUE,
+            resolution_actor_participant_id INTEGER DEFAULT NULL,
+            resolution_reason TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TEXT DEFAULT NULL,
+            expires_at TEXT DEFAULT NULL,
+            FOREIGN KEY(relationship_id) REFERENCES avatar_relationships(id) ON DELETE CASCADE,
+            FOREIGN KEY(requester_participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+            FOREIGN KEY(target_participant_id) REFERENCES participants(id) ON DELETE CASCADE,
+            FOREIGN KEY(requested_lap_host_participant_id) REFERENCES participants(id) ON DELETE SET NULL,
+            FOREIGN KEY(resolution_actor_participant_id) REFERENCES participants(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS link_icon_catalog (
@@ -2485,6 +2518,650 @@ function avatar_relationship_active_for_participant(PDO $pdo, int $sessionId, in
     return $relationshipDbId > 0
         ? avatar_relationship_payload($pdo, $relationshipDbId, $viewerParticipantId)
         : null;
+}
+
+function avatar_relationship_operation_error(string $code, string $message, string $reason, int $httpStatus = 409): array {
+    return [
+        'ok' => false,
+        'code' => $code,
+        'error' => $message,
+        'reason' => $reason,
+        'http_status' => $httpStatus,
+    ];
+}
+
+function avatar_relationship_transaction(PDO $pdo, callable $operation): array {
+    $ownsTransaction = !$pdo->inTransaction();
+    try {
+        if ($ownsTransaction) {
+            if (db_uses_mysql_syntax($pdo)) {
+                $pdo->beginTransaction();
+            } else {
+                $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+            }
+        }
+        $result = $operation();
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        return $result;
+    } catch (Throwable $error) {
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+}
+
+function avatar_relationship_locked_row(PDO $pdo, int $sessionId, string $relationshipPublicId): ?array {
+    $sql = 'SELECT * FROM avatar_relationships
+             WHERE session_id = ? AND relationship_public_id = ? LIMIT 1';
+    if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$sessionId, $relationshipPublicId]);
+    return $stmt->fetch() ?: null;
+}
+
+function avatar_relationship_locked_members(PDO $pdo, int $relationshipDbId): array {
+    $sql = "SELECT arm.*, p.user_id, p.session_id, p.last_seen_at
+              FROM avatar_relationship_members arm
+              JOIN participants p ON p.id = arm.participant_id
+             WHERE arm.relationship_id = ? AND arm.membership_status = 'active'
+             ORDER BY arm.member_order ASC, arm.membership_effective_at ASC, arm.id ASC";
+    if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$relationshipDbId]);
+    return $stmt->fetchAll();
+}
+
+function avatar_relationship_locked_participant(PDO $pdo, int $sessionId, int $participantId): ?array {
+    $sql = 'SELECT * FROM participants WHERE session_id = ? AND id = ? LIMIT 1';
+    if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$sessionId, $participantId]);
+    return $stmt->fetch() ?: null;
+}
+
+function avatar_relationship_member_from_rows(array $members, int $participantId): ?array {
+    foreach ($members as $member) {
+        if ((int)$member['participant_id'] === $participantId) return $member;
+    }
+    return null;
+}
+
+function avatar_relationship_permission_allows(?array $member, array $roles = ['creator', 'manager']): bool {
+    return $member !== null && in_array((string)($member['permission_role'] ?? ''), $roles, true);
+}
+
+function avatar_relationship_version_error(array $relationship, int $expectedVersion): ?array {
+    $currentVersion = max(1, (int)($relationship['version'] ?? 1));
+    if ($expectedVersion === $currentVersion) return null;
+    return avatar_relationship_operation_error(
+        'RELATIONSHIP_VERSION_STALE',
+        'The relationship changed. Refresh and try again.',
+        'relationship-version-stale',
+        409
+    ) + ['relationship_version' => $currentVersion];
+}
+
+function avatar_relationship_blocked_for_members(PDO $pdo, array $target, array $members): bool {
+    $targetUserId = (int)($target['user_id'] ?? 0);
+    $memberUserIds = array_values(array_unique(array_filter(array_map(
+        fn(array $member): int => (int)($member['user_id'] ?? 0),
+        $members
+    ), fn(int $id): bool => $id > 0 && $id !== $targetUserId)));
+    if ($targetUserId <= 0 || !$memberUserIds) return false;
+    $placeholders = implode(',', array_fill(0, count($memberUserIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT 1 FROM user_blocks
+          WHERE (blocker_user_id = ? AND blocked_user_id IN ($placeholders))
+             OR (blocked_user_id = ? AND blocker_user_id IN ($placeholders))
+          LIMIT 1"
+    );
+    $stmt->execute(array_merge([$targetUserId], $memberUserIds, [$targetUserId], $memberUserIds));
+    return (bool)$stmt->fetchColumn();
+}
+
+function avatar_relationship_request_payload(array $request): array {
+    return [
+        'id' => (string)$request['request_public_id'],
+        'relationshipId' => (string)($request['relationship_public_id'] ?? ''),
+        'relationshipVersion' => max(1, (int)$request['relationship_version']),
+        'requesterParticipantId' => (int)$request['requester_participant_id'],
+        'targetParticipantId' => (int)$request['target_participant_id'],
+        'type' => (string)$request['request_type'],
+        'requestedRelationshipRole' => (string)$request['requested_relationship_role'],
+        'requestedLapHostParticipantId' => $request['requested_lap_host_participant_id'] !== null
+            ? (int)$request['requested_lap_host_participant_id']
+            : null,
+        'status' => (string)$request['status'],
+        'resolutionActorParticipantId' => $request['resolution_actor_participant_id'] !== null
+            ? (int)$request['resolution_actor_participant_id']
+            : null,
+        'resolutionReason' => $request['resolution_reason'] ?? null,
+        'createdAt' => $request['created_at'] ?? null,
+        'updatedAt' => $request['updated_at'] ?? null,
+        'resolvedAt' => $request['resolved_at'] ?? null,
+        'expiresAt' => $request['expires_at'] ?? null,
+    ];
+}
+
+function avatar_relationship_locked_request(PDO $pdo, string $requestPublicId): ?array {
+    $sql = 'SELECT arr.*, ar.relationship_public_id, ar.session_id, ar.version AS current_relationship_version,
+                   ar.status AS relationship_status
+              FROM avatar_relationship_requests arr
+              JOIN avatar_relationships ar ON ar.id = arr.relationship_id
+             WHERE arr.request_public_id = ? LIMIT 1';
+    if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$requestPublicId]);
+    return $stmt->fetch() ?: null;
+}
+
+function avatar_relationship_public_event_snapshot(PDO $pdo, int $relationshipDbId): ?array {
+    return avatar_relationship_payload($pdo, $relationshipDbId, 0);
+}
+
+function avatar_relationship_emit_lifecycle_event(
+    PDO $pdo,
+    int $sessionId,
+    string $action,
+    array $relationship,
+    array $extra = []
+): void {
+    $payload = [
+        'action' => $action,
+        'relationship_id' => (string)($relationship['id'] ?? $relationship['relationship_id'] ?? ''),
+        'relationship_version' => max(1, (int)($relationship['version'] ?? 1)),
+        'relationship_status' => (string)($relationship['status'] ?? 'active'),
+    ] + $extra;
+    if (isset($relationship['members'])) $payload['relationship'] = $relationship;
+    emit_event($pdo, $sessionId, 'relationship', $payload);
+}
+
+function avatar_relationship_validate_requested_role(array $members, string $role, ?int $lapHostParticipantId): array {
+    if (!in_array($role, ['normal', 'lap'], true)) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFLICT',
+            'That relationship role is not available.',
+            'unsupported-relationship-role',
+            400
+        );
+    }
+    if ($role === 'normal') return ['ok' => true, 'lap_host_participant_id' => null];
+    if (!$lapHostParticipantId) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFLICT',
+            'A normal lap host is required.',
+            'lap-host-required',
+            400
+        );
+    }
+    $host = avatar_relationship_member_from_rows($members, $lapHostParticipantId);
+    if (!$host || (string)$host['relationship_role'] !== 'normal') {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFLICT',
+            'That lap host is not available.',
+            'lap-host-unavailable',
+            409
+        );
+    }
+    return ['ok' => true, 'lap_host_participant_id' => $lapHostParticipantId];
+}
+
+function avatar_relationship_target_membership(PDO $pdo, int $participantId): ?array {
+    $sql = "SELECT ar.id, ar.relationship_public_id, ar.status
+              FROM avatar_relationship_members arm
+              JOIN avatar_relationships ar ON ar.id = arm.relationship_id
+             WHERE arm.participant_id = ?
+               AND arm.membership_status IN ('active', 'conflicted')
+               AND ar.status IN ('active', 'conflicted')
+             LIMIT 1";
+    if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$participantId]);
+    return $stmt->fetch() ?: null;
+}
+
+function avatar_relationship_add_member_locked(
+    PDO $pdo,
+    array $relationship,
+    array $members,
+    array $target,
+    int $actorParticipantId,
+    string $relationshipRole,
+    ?int $lapHostParticipantId,
+    string $reason
+): array {
+    $relationshipDbId = (int)$relationship['id'];
+    $targetParticipantId = (int)$target['id'];
+    $occupied = avatar_relationship_target_membership($pdo, $targetParticipantId);
+    if ($occupied) {
+        $code = (int)$occupied['id'] === $relationshipDbId
+            ? 'RELATIONSHIP_ALREADY_MEMBER'
+            : 'RELATIONSHIP_MEMBER_ELSEWHERE';
+        return avatar_relationship_operation_error(
+            $code,
+            $code === 'RELATIONSHIP_ALREADY_MEMBER'
+                ? 'That participant is already a member.'
+                : 'That participant belongs to another relationship.',
+            strtolower(str_replace('_', '-', $code)),
+            409
+        );
+    }
+    if (avatar_relationship_blocked_for_members($pdo, $target, $members)) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_PERMISSION_DENIED',
+            'That participant cannot join this relationship.',
+            'blocked',
+            403
+        );
+    }
+    $roleDecision = avatar_relationship_validate_requested_role($members, $relationshipRole, $lapHostParticipantId);
+    if (empty($roleDecision['ok'])) return $roleDecision;
+
+    $nextOrder = $members
+        ? max(array_map(fn(array $member): int => (int)$member['member_order'], $members)) + 1
+        : 0;
+    $effectiveAt = gmdate('Y-m-d H:i:s');
+    $visibleAfterMessageId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM community_messages')->fetchColumn();
+    try {
+        $pdo->prepare(
+            "INSERT INTO avatar_relationship_members
+                (relationship_id, participant_id, member_role, relationship_role, permission_role,
+                 membership_status, active_participant_id, member_order, membership_effective_at,
+                 visible_after_message_id, lap_host_participant_id, options_json)
+             VALUES (?,?, 'member', ?, 'member', 'active', ?, ?, ?, ?, ?, ?)"
+        )->execute([
+            $relationshipDbId,
+            $targetParticipantId,
+            $relationshipRole,
+            $targetParticipantId,
+            $nextOrder,
+            $effectiveAt,
+            $visibleAfterMessageId,
+            $roleDecision['lap_host_participant_id'],
+            json_encode([], JSON_UNESCAPED_SLASHES),
+        ]);
+    } catch (PDOException $error) {
+        if ($error->getCode() !== '23000' && !str_contains(strtoupper($error->getMessage()), 'UNIQUE')) throw $error;
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_MEMBER_ELSEWHERE',
+            'That participant belongs to another relationship.',
+            'relationship-member-elsewhere',
+            409
+        );
+    }
+
+    $nextVersion = max(1, (int)$relationship['version']) + 1;
+    $pdo->prepare(
+        'UPDATE avatar_relationships SET version = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    )->execute([$nextVersion, $relationshipDbId]);
+    $pdo->prepare(
+        'INSERT INTO avatar_relationship_membership_history
+            (relationship_id, participant_id, user_id, actor_participant_id, action, outcome,
+             relationship_role, permission_role, member_order, membership_effective_at,
+             visible_after_message_id, relationship_version, reason)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    )->execute([
+        $relationshipDbId,
+        $targetParticipantId,
+        (int)$target['user_id'],
+        $actorParticipantId,
+        'member-added',
+        'applied',
+        $relationshipRole,
+        'member',
+        $nextOrder,
+        $effectiveAt,
+        $visibleAfterMessageId,
+        $nextVersion,
+        $reason,
+    ]);
+    return [
+        'ok' => true,
+        'relationship_version' => $nextVersion,
+        'relationship' => avatar_relationship_payload($pdo, $relationshipDbId, $actorParticipantId),
+        'event_relationship' => avatar_relationship_public_event_snapshot($pdo, $relationshipDbId),
+    ];
+}
+
+function avatar_relationship_create_request(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $requestType,
+    int $targetParticipantId,
+    string $requestedRelationshipRole = 'normal',
+    ?int $lapHostParticipantId = null
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo, $sessionId, $actorParticipantId, $relationshipPublicId, $expectedVersion,
+        $requestType, $targetParticipantId, $requestedRelationshipRole, $lapHostParticipantId
+    ): array {
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship) return avatar_relationship_operation_error('RELATIONSHIP_NOT_FOUND', 'Relationship not found.', 'relationship-not-found', 404);
+        if ((string)$relationship['status'] !== 'active') return avatar_relationship_operation_error('RELATIONSHIP_NOT_ACTIVE', 'Relationship is not active.', 'relationship-not-active', 409);
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        if (!in_array($requestType, ['join-request', 'invitation'], true)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_CONFLICT', 'Unknown request type.', 'unknown-request-type', 400);
+        }
+
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actor = avatar_relationship_locked_participant($pdo, $sessionId, $actorParticipantId);
+        $target = avatar_relationship_locked_participant($pdo, $sessionId, $targetParticipantId);
+        if (!$actor) return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'Relationship action unavailable.', 'actor-unavailable', 403);
+        if (!$target || empty($target['last_seen_at'])) return avatar_relationship_operation_error('RELATIONSHIP_CONFLICT', 'That participant is unavailable.', 'target-unavailable', 409);
+        $actorMember = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if ($requestType === 'join-request' && $actorParticipantId !== $targetParticipantId) {
+            return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'You may only request membership for yourself.', 'join-request-target-mismatch', 403);
+        }
+        if ($requestType === 'invitation' && !avatar_relationship_permission_allows($actorMember)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'You cannot invite members to this relationship.', 'invite-permission-denied', 403);
+        }
+        if (avatar_relationship_member_from_rows($members, $targetParticipantId)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_ALREADY_MEMBER', 'That participant is already a member.', 'relationship-already-member', 409);
+        }
+        if ($occupied = avatar_relationship_target_membership($pdo, $targetParticipantId)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_MEMBER_ELSEWHERE', 'That participant belongs to another relationship.', 'relationship-member-elsewhere', 409);
+        }
+        if (avatar_relationship_blocked_for_members($pdo, $target, $members)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'That participant cannot join this relationship.', 'blocked', 403);
+        }
+        $roleDecision = avatar_relationship_validate_requested_role($members, $requestedRelationshipRole, $lapHostParticipantId);
+        if (empty($roleDecision['ok'])) return $roleDecision;
+
+        $activeRequestKey = (int)$relationship['id'] . ':' . $targetParticipantId;
+        $existingStmt = $pdo->prepare(
+            "SELECT arr.*, ar.relationship_public_id
+               FROM avatar_relationship_requests arr
+               JOIN avatar_relationships ar ON ar.id = arr.relationship_id
+              WHERE arr.active_request_key = ? AND arr.status = 'pending' LIMIT 1"
+        );
+        $existingStmt->execute([$activeRequestKey]);
+        $existing = $existingStmt->fetch() ?: null;
+        if ($existing) {
+            $same = (string)$existing['request_type'] === $requestType
+                && (int)$existing['requester_participant_id'] === $actorParticipantId
+                && (string)$existing['requested_relationship_role'] === $requestedRelationshipRole
+                && (int)($existing['requested_lap_host_participant_id'] ?? 0) === (int)($roleDecision['lap_host_participant_id'] ?? 0)
+                && (int)$existing['relationship_version'] === $expectedVersion;
+            if (!$same) return avatar_relationship_operation_error('RELATIONSHIP_CONFLICT', 'A membership request is already pending.', 'relationship-request-conflict', 409);
+            return ['ok' => true, 'idempotent' => true, 'request' => avatar_relationship_request_payload($existing)];
+        }
+
+        $requestPublicId = uuid_v4();
+        $pdo->prepare(
+            'INSERT INTO avatar_relationship_requests
+                (request_public_id, relationship_id, relationship_version, requester_participant_id,
+                 target_participant_id, request_type, requested_relationship_role,
+                 requested_lap_host_participant_id, status, active_request_key)
+             VALUES (?,?,?,?,?,?,?,?,\'pending\',?)'
+        )->execute([
+            $requestPublicId,
+            (int)$relationship['id'],
+            $expectedVersion,
+            $actorParticipantId,
+            $targetParticipantId,
+            $requestType,
+            $requestedRelationshipRole,
+            $roleDecision['lap_host_participant_id'],
+            $activeRequestKey,
+        ]);
+
+        $request = avatar_relationship_locked_request($pdo, $requestPublicId);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            $requestType === 'invitation' ? 'invitation-created' : 'request-created',
+            [
+                'id' => $relationshipPublicId,
+                'version' => $expectedVersion,
+                'status' => 'active',
+            ]
+        );
+
+        if ($requestType === 'join-request' && (string)$relationship['join_policy'] === 'open') {
+            $add = avatar_relationship_add_member_locked(
+                $pdo,
+                $relationship,
+                $members,
+                $target,
+                $actorParticipantId,
+                $requestedRelationshipRole,
+                $roleDecision['lap_host_participant_id'],
+                'open-join-policy'
+            );
+            if (empty($add['ok'])) return $add;
+            $pdo->prepare(
+                "UPDATE avatar_relationship_requests
+                    SET status = 'accepted', active_request_key = NULL,
+                        resolution_actor_participant_id = ?, resolution_reason = 'open-join-policy',
+                        resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?"
+            )->execute([$actorParticipantId, (int)$request['id']]);
+            avatar_relationship_emit_lifecycle_event(
+                $pdo,
+                $sessionId,
+                'request-accepted',
+                [
+                    'id' => $relationshipPublicId,
+                    'version' => (int)$add['relationship_version'],
+                    'status' => 'active',
+                ]
+            );
+            avatar_relationship_emit_lifecycle_event(
+                $pdo,
+                $sessionId,
+                'member-added',
+                $add['event_relationship'],
+                ['request_outcome' => 'accepted']
+            );
+            $accepted = avatar_relationship_locked_request($pdo, $requestPublicId);
+            return [
+                'ok' => true,
+                'request' => avatar_relationship_request_payload($accepted),
+                'relationship' => $add['relationship'],
+            ];
+        }
+
+        return ['ok' => true, 'request' => avatar_relationship_request_payload($request)];
+    });
+}
+
+function avatar_relationship_resolve_request(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $requestPublicId,
+    int $expectedVersion,
+    string $resolution
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo, $sessionId, $actorParticipantId, $requestPublicId, $expectedVersion, $resolution
+    ): array {
+        $request = avatar_relationship_locked_request($pdo, $requestPublicId);
+        if (!$request || (int)$request['session_id'] !== $sessionId) {
+            return avatar_relationship_operation_error('RELATIONSHIP_REQUEST_NOT_FOUND', 'Membership request not found.', 'relationship-request-not-found', 404);
+        }
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, (string)$request['relationship_public_id']);
+        if (!$relationship || (string)$relationship['status'] !== 'active') {
+            return avatar_relationship_operation_error('RELATIONSHIP_NOT_ACTIVE', 'Relationship is not active.', 'relationship-not-active', 409);
+        }
+        if ((string)$request['status'] === 'accepted' && $resolution === 'accept') {
+            $active = avatar_relationship_target_membership($pdo, (int)$request['target_participant_id']);
+            if ($active && (int)$active['id'] === (int)$relationship['id']) {
+                return [
+                    'ok' => true,
+                    'idempotent' => true,
+                    'request' => avatar_relationship_request_payload($request),
+                    'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+                ];
+            }
+        }
+        if ((string)$request['status'] !== 'pending') {
+            return avatar_relationship_operation_error('RELATIONSHIP_REQUEST_ALREADY_RESOLVED', 'Membership request is already resolved.', 'relationship-request-already-resolved', 409)
+                + ['request_status' => (string)$request['status']];
+        }
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        if ((int)$request['relationship_version'] !== (int)$relationship['version']) {
+            $pdo->prepare(
+                "UPDATE avatar_relationship_requests
+                    SET status = 'expired', active_request_key = NULL,
+                        resolution_reason = 'relationship-version-stale', resolved_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?"
+            )->execute([(int)$request['id']]);
+            avatar_relationship_emit_lifecycle_event($pdo, $sessionId, 'request-expired', [
+                'id' => (string)$relationship['relationship_public_id'],
+                'version' => (int)$relationship['version'],
+                'status' => 'active',
+            ]);
+            return avatar_relationship_operation_error('RELATIONSHIP_REQUEST_STALE', 'Membership request is stale.', 'relationship-request-stale', 409);
+        }
+
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actorMember = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        $type = (string)$request['request_type'];
+        $isTarget = $actorParticipantId === (int)$request['target_participant_id'];
+        $isRequester = $actorParticipantId === (int)$request['requester_participant_id'];
+        $isManager = avatar_relationship_permission_allows($actorMember);
+        $allowed = match ($resolution) {
+            'accept', 'reject' => $type === 'invitation' ? $isTarget : $isManager,
+            'cancel' => $isRequester || ($type === 'invitation' && $isManager),
+            default => false,
+        };
+        if (!$allowed) return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'You cannot resolve this membership request.', 'request-resolution-permission-denied', 403);
+
+        if ($resolution === 'accept') {
+            $target = avatar_relationship_locked_participant($pdo, $sessionId, (int)$request['target_participant_id']);
+            if (!$target || empty($target['last_seen_at'])) return avatar_relationship_operation_error('RELATIONSHIP_CONFLICT', 'That participant is unavailable.', 'target-unavailable', 409);
+            $add = avatar_relationship_add_member_locked(
+                $pdo,
+                $relationship,
+                $members,
+                $target,
+                $actorParticipantId,
+                (string)$request['requested_relationship_role'],
+                $request['requested_lap_host_participant_id'] !== null ? (int)$request['requested_lap_host_participant_id'] : null,
+                $type === 'invitation' ? 'invitation-accepted' : 'join-request-approved'
+            );
+            if (empty($add['ok'])) return $add;
+            $pdo->prepare(
+                "UPDATE avatar_relationship_requests
+                    SET status = 'accepted', active_request_key = NULL,
+                        resolution_actor_participant_id = ?, resolution_reason = ?,
+                        resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?"
+            )->execute([
+                $actorParticipantId,
+                $type === 'invitation' ? 'invitation-accepted' : 'join-request-approved',
+                (int)$request['id'],
+            ]);
+            avatar_relationship_emit_lifecycle_event(
+                $pdo,
+                $sessionId,
+                'request-accepted',
+                [
+                    'id' => (string)$relationship['relationship_public_id'],
+                    'version' => (int)$add['relationship_version'],
+                    'status' => 'active',
+                ]
+            );
+            avatar_relationship_emit_lifecycle_event(
+                $pdo,
+                $sessionId,
+                'member-added',
+                $add['event_relationship'],
+                ['request_outcome' => 'accepted']
+            );
+            $resolved = avatar_relationship_locked_request($pdo, $requestPublicId);
+            return [
+                'ok' => true,
+                'request' => avatar_relationship_request_payload($resolved),
+                'relationship' => $add['relationship'],
+            ];
+        }
+
+        $status = $resolution === 'reject' ? 'rejected' : 'cancelled';
+        $pdo->prepare(
+            'UPDATE avatar_relationship_requests
+                SET status = ?, active_request_key = NULL,
+                    resolution_actor_participant_id = ?, resolution_reason = ?,
+                    resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([$status, $actorParticipantId, 'request-' . $status, (int)$request['id']]);
+        avatar_relationship_emit_lifecycle_event($pdo, $sessionId, 'request-' . $status, [
+            'id' => (string)$relationship['relationship_public_id'],
+            'version' => (int)$relationship['version'],
+            'status' => 'active',
+        ]);
+        $resolved = avatar_relationship_locked_request($pdo, $requestPublicId);
+        return ['ok' => true, 'request' => avatar_relationship_request_payload($resolved)];
+    });
+}
+
+function avatar_relationship_set_join_policy(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $joinPolicy
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo, $sessionId, $actorParticipantId, $relationshipPublicId, $expectedVersion, $joinPolicy
+    ): array {
+        if (!in_array($joinPolicy, ['approval-required', 'open'], true)) {
+            return avatar_relationship_operation_error('RELATIONSHIP_JOIN_POLICY_REJECTED', 'Unknown join policy.', 'invalid-join-policy', 400);
+        }
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship) return avatar_relationship_operation_error('RELATIONSHIP_NOT_FOUND', 'Relationship not found.', 'relationship-not-found', 404);
+        if ((string)$relationship['status'] !== 'active') return avatar_relationship_operation_error('RELATIONSHIP_NOT_ACTIVE', 'Relationship is not active.', 'relationship-not-active', 409);
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        if (!avatar_relationship_permission_allows(avatar_relationship_member_from_rows($members, $actorParticipantId))) {
+            return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'You cannot change this join policy.', 'join-policy-permission-denied', 403);
+        }
+        if ((string)$relationship['join_policy'] === $joinPolicy) {
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET join_policy = ?, version = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([$joinPolicy, $nextVersion, (int)$relationship['id']]);
+        $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+        $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event($pdo, $sessionId, 'join-policy-changed', $eventPayload);
+        return ['ok' => true, 'relationship' => $viewerPayload];
+    });
+}
+
+function avatar_relationship_requests_for_actor(PDO $pdo, int $sessionId, int $actorParticipantId): array {
+    $stmt = $pdo->prepare(
+        "SELECT arr.*, ar.relationship_public_id
+           FROM avatar_relationship_requests arr
+           JOIN avatar_relationships ar ON ar.id = arr.relationship_id
+          WHERE ar.session_id = ?
+            AND (
+              arr.requester_participant_id = ?
+              OR arr.target_participant_id = ?
+              OR arr.relationship_id IN (
+                SELECT arm.relationship_id
+                  FROM avatar_relationship_members arm
+                 WHERE arm.participant_id = ? AND arm.membership_status = 'active'
+                   AND arm.permission_role IN ('creator', 'manager')
+              )
+            )
+          ORDER BY arr.id DESC
+          LIMIT 200"
+    );
+    $stmt->execute([$sessionId, $actorParticipantId, $actorParticipantId, $actorParticipantId]);
+    return array_map('avatar_relationship_request_payload', $stmt->fetchAll());
 }
 
 function avatar_relationship_count(PDO $pdo, ?int $sessionId = null): array {

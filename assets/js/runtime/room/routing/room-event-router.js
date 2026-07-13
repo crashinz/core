@@ -227,6 +227,10 @@ export class RoomEventRouter {
                 this.#context?.onRemoteLink?.(payload, event);
                 return true;
 
+            case "relationship":
+                this.#context?.onRemoteRelationship?.(payload, event);
+                return true;
+
             case "link_icon":
                 this.#context?.onRemoteLinkIcon?.(payload, event);
                 return true;
