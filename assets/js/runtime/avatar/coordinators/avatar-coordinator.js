@@ -1007,8 +1007,37 @@ export class AvatarCoordinator {
             return null;
         }
 
-        const relationshipId =
-            String(payload.relationship_id || relationship.id || "");
+        const relationshipId = String(payload.relationship_id || "");
+        const snapshotRelationshipId =
+            String(relationship.id || relationship.relationship_id || "");
+        const relationshipVersion = Number(payload.relationship_version || 0);
+        const snapshotRelationshipVersion = Number(relationship.version || 0);
+        const relationshipStatus = String(payload.relationship_status || "");
+        const snapshotRelationshipStatus = String(relationship.status || "");
+
+        if (
+            !relationshipId ||
+            relationshipId !== snapshotRelationshipId ||
+            !Number.isInteger(relationshipVersion) ||
+            relationshipVersion < 1 ||
+            relationshipVersion !== snapshotRelationshipVersion ||
+            !relationshipStatus ||
+            relationshipStatus !== snapshotRelationshipStatus
+        ) {
+            this.#context?.recordRelationshipDiagnostic?.({
+                event: "relationship-event-invalid",
+                action: String(payload.action || "unknown"),
+                reason: "envelope-snapshot-mismatch",
+                relationshipId: relationshipId || null,
+                snapshotRelationshipId: snapshotRelationshipId || null,
+                relationshipVersion: relationshipVersion || null,
+                snapshotRelationshipVersion: snapshotRelationshipVersion || null,
+                relationshipStatus: relationshipStatus || null,
+                snapshotRelationshipStatus: snapshotRelationshipStatus || null
+            });
+            return null;
+        }
+
         const previousRelationship =
             relationshipId
                 ? this.#relationships.relationshipById(relationshipId)

@@ -28,7 +28,7 @@ Those responsibilities remain outside the runtime.
 
 # Relationship Persistence Boundary
 
-Build 000044 Parts 1, 2A, and Part 2B Checkpoints 2B-1/2B-2 establish the current
+Build 000044 Parts 1, 2A, and completed Part 2B establish the current
 relationship boundary:
 
 - `AvatarRelationshipService.relationshipEligibility()` is the authoritative,
@@ -61,13 +61,17 @@ relationship boundary:
   `AvatarCoordinator`; the coordinator reconciles current snapshots through
   `AvatarRelationshipService` and leaves unsupported multi-member geometry
   unprojected.
+- `AvatarCoordinator` validates that lifecycle event ID, version, and status
+  envelopes exactly match their embedded authoritative snapshots before any
+  cache mutation. Older events are stale no-ops, duplicate delivery is
+  idempotent, and exact authoritative snapshots safely bridge version gaps.
 - Current members receive all relationship permission roles through
   authenticated snapshots; non-members receive redacted roles. Dissolution
   invalidation uses prior and incoming membership before installing a terminal
   tombstone.
 
-Checkpoint 2B-3 will certify contention. Part 2C will add stable relationship
-group chat. Callers must not add independent `linked_to` eligibility,
+Part 2B contention and reconciliation are certified on SQLite, MariaDB, and
+Chrome. Part 2C will add stable relationship group chat. Callers must not add independent `linked_to` eligibility,
 permission, request, or snapshot-version rules.
 
 ---
