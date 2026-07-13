@@ -10,7 +10,8 @@ $p = auth_participant($pdo, $sessionId, $joinToken);
 
 $pdo->prepare("UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, webcam_enabled = 0, linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
     ->execute([(int)$p['id'], (int)$p['id']]);
-avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$p['id']]);
+$dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$p['id']]);
+avatar_relationship_emit_dissolved_events($pdo, $sessionId, (int)$p['id'], $dissolvedRelationships);
 $pdo->prepare('DELETE FROM voice_sessions WHERE participant_id = ?')->execute([(int)$p['id']]);
 $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$p['user_id']]);
 emit_event($pdo, $sessionId, 'voice', [
@@ -23,9 +24,4 @@ emit_event($pdo, $sessionId, 'presence_leave', [
     'participant_id' => (int)$p['id'],
     'display_name' => $p['display_name'],
 ]);
-emit_event($pdo, $sessionId, 'link', [
-    'participant_id' => (int)$p['id'],
-    'linked_to' => null,
-]);
-
 json_out(['ok' => true]);

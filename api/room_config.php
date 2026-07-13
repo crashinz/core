@@ -283,7 +283,11 @@ $stmt->execute([(int)$user['id']]);
 $blockedUserIds = array_map(fn(array $row): int => (int)$row['blocked_user_id'], $stmt->fetchAll());
 $roomEffects = array_values(room_effect_catalog());
 $activeRoomEffect = active_room_effect($pdo, (int)$session['id']);
-$relationships = avatar_relationship_payloads_for_session($pdo, (int)$session['id']);
+$relationships = avatar_relationship_payloads_for_session(
+    $pdo,
+    (int)$session['id'],
+    (int)$participant['id']
+);
 $relationshipRepairDiagnostics = avatar_relationship_repair($pdo, ['session_id' => (int)$session['id'], 'apply' => false]);
 $relationshipDivergence = $relationshipRepairDiagnostics['actions'] ?? [];
 
@@ -325,7 +329,7 @@ json_out([
             'summary' => $relationshipRepairDiagnostics['summary'] ?? [],
             'repairMode' => 'dry_run',
             'repairAvailable' => true,
-            'writeStrategy' => 'legacy-writes-with-relationship-record-synchronization',
+            'writeStrategy' => 'group-membership-authoritative-with-legacy-pair-projection',
         ],
     ],
     'messages' => $messages,

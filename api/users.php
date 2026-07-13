@@ -87,12 +87,17 @@ if ($action === 'unlink') {
 
     $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
         ->execute([(int)$p['id'], (int)$p['id']]);
-    avatar_relationship_clear_for_participants($pdo, $sessionId, $clearIds);
+    $dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, $sessionId, $clearIds);
+    $relationshipTombstone = $dissolvedRelationships[0] ?? null;
     emit_event($pdo, $sessionId, 'link', [
         'participant_id' => (int)$p['id'],
         'linked_to' => null,
         'link_mode' => 'normal',
         'relationship_removed' => true,
+        'relationship_id' => $relationshipTombstone['id'] ?? null,
+        'relationship_version' => $relationshipTombstone['version'] ?? null,
+        'relationship_status' => 'dissolved',
+        'relationship' => $relationshipTombstone,
     ]);
     foreach ($reverse as $row) {
         emit_event($pdo, $sessionId, 'link', [
@@ -100,9 +105,13 @@ if ($action === 'unlink') {
             'linked_to' => null,
             'link_mode' => 'normal',
             'relationship_removed' => true,
+            'relationship_id' => $relationshipTombstone['id'] ?? null,
+            'relationship_version' => $relationshipTombstone['version'] ?? null,
+            'relationship_status' => 'dissolved',
+            'relationship' => $relationshipTombstone,
         ]);
     }
-    json_out(['ok' => true]);
+    json_out(['ok' => true, 'relationships' => $dissolvedRelationships]);
 }
 
 if ($action === 'block_user' || $action === 'unblock_user') {
@@ -122,8 +131,13 @@ if ($action === 'block_user' || $action === 'unblock_user') {
             ->execute([(int)$p['user_id'], $targetUserId]);
         $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE (user_id = ? OR user_id = ?) AND session_id = ?")
             ->execute([(int)$p['user_id'], $targetUserId, $sessionId]);
-        avatar_relationship_clear_for_participants($pdo, $sessionId, $affectedParticipantIds);
-        emit_event($pdo, $sessionId, 'block', ['blocker_user_id' => (int)$p['user_id'], 'blocked_user_id' => $targetUserId]);
+        $dissolvedRelationships = avatar_relationship_clear_for_participants($pdo, $sessionId, $affectedParticipantIds);
+        avatar_relationship_emit_dissolved_events($pdo, $sessionId, (int)$p['id'], $dissolvedRelationships);
+        emit_event($pdo, $sessionId, 'block', [
+            'blocker_user_id' => (int)$p['user_id'],
+            'blocked_user_id' => $targetUserId,
+            'relationships' => $dissolvedRelationships,
+        ]);
         log_tool($pdo, (int)$p['user_id'], 'block_user', $targetUserId, null, 'User block');
     } else {
         $pdo->prepare('DELETE FROM user_blocks WHERE blocker_user_id = ? AND blocked_user_id = ?')
@@ -150,7 +164,8 @@ if ($action === 'link_icon') {
     if (!$stmt->fetch()) json_out(['error' => 'You are not linked to that participant'], 403);
 
     $linkKey = link_key_for((int)$p['id'], $targetId);
-    $relationshipId = avatar_relationship_public_id_for((int)$p['id'], $targetId);
+    $activeRelationship = avatar_relationship_active_for_participant($pdo, $sessionId, (int)$p['id'], (int)$p['id']);
+    $relationshipId = (string)($activeRelationship['id'] ?? avatar_relationship_public_id_for((int)$p['id'], $targetId));
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT INTO link_icons (session_id, link_key, icon_name, updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE icon_name = VALUES(icon_name), updated_at = CURRENT_TIMESTAMP'
         : 'INSERT INTO link_icons (session_id, link_key, icon_name, updated_at) VALUES (?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(session_id, link_key) DO UPDATE SET icon_name = excluded.icon_name, updated_at = CURRENT_TIMESTAMP'
@@ -159,6 +174,7 @@ if ($action === 'link_icon') {
     $payload = [
         'link_key' => $linkKey,
         'relationship_id' => $relationshipId,
+        'relationship_version' => $activeRelationship['version'] ?? null,
         'participant_id' => (int)$p['id'],
         'target_participant_id' => $targetId,
         'icon_name' => $iconName,

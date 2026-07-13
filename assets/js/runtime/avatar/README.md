@@ -26,26 +26,32 @@ Those responsibilities remain outside the runtime.
 
 ---
 
-# Relationship Eligibility Boundary
+# Relationship Persistence Boundary
 
-Build 000044 Part 1 establishes the current relationship-creation boundary:
+Build 000044 Parts 1 and 2A establish the current relationship boundary:
 
 - `AvatarRelationshipService.relationshipEligibility()` is the authoritative,
   side-effect-free client policy.
-- The policy considers outgoing and incoming legacy edges plus persisted
-  relationship membership. It returns structured reasons, allowed modes, and a
-  state fingerprint.
+- The policy uses active persisted relationship membership as authority and
+  retains legacy edges only as an unmigrated/divergent compatibility fallback.
+  It returns structured reasons, allowed modes, and a state fingerprint.
 - `AvatarCoordinator` owns pending choice identity, stale invalidation,
   completion-time revalidation, and server-acceptance-before-local-commit.
 - `AvatarDragController` consumes coordinator decisions and never owns a second
   relationship rule.
 - `room.js` may present or close modal DOM, but it does not own pending state or
   eligibility.
-- The server independently enforces the same current two-person constraints in
-  an atomic transaction and never replaces an existing relationship implicitly.
+- `AvatarRelationshipService` owns versioned persisted snapshots, stale update
+  rejection, terminal tombstones, and full current member queries.
+- Persisted group identity is stable across refresh, order, and role changes.
+  Valid multi-member membership is represented without creating additional
+  legacy pair edges.
+- The server independently enforces current creation constraints in an atomic
+  transaction and never replaces an existing relationship implicitly.
 
-Build 000044 Part 2 may extend this operation-oriented policy for multi-member
-relationships. Callers must not add independent `linked_to` eligibility rules.
+Build 000044 Part 2B will add versioned membership and permission operations;
+Part 2C will add stable relationship group chat. Callers must not add
+independent `linked_to` eligibility or snapshot-version rules.
 
 ---
 

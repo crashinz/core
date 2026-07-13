@@ -51,6 +51,10 @@
  *
  * Build 000044 Part 1
  * - Added authoritative structured relationship eligibility decisions.
+ *
+ * Build 000044 Part 2A
+ * - Made versioned persisted group snapshots authoritative for membership.
+ * - Added stale-version rejection and relationship tombstone handling.
  ******************************************************************************/
 
 /**
@@ -276,6 +280,20 @@ export class AvatarRelationshipService {
      */
     #persistedRelationshipsByLegacyKey = new Map();
 
+    /**
+     * Highest reconciled version for each persisted relationship.
+     *
+     * @type {Map<string, number>}
+     */
+    #persistedRelationshipVersions = new Map();
+
+    /**
+     * Number of stale persisted snapshots rejected.
+     *
+     * @type {number}
+     */
+    #stalePersistedSnapshotCount = 0;
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -311,6 +329,8 @@ export class AvatarRelationshipService {
         this.#relationshipEventListeners.clear();
         this.#persistedRelationships.clear();
         this.#persistedRelationshipsByLegacyKey.clear();
+        this.#persistedRelationshipVersions.clear();
+        this.#stalePersistedSnapshotCount = 0;
 
     }
 
@@ -383,6 +403,7 @@ export class AvatarRelationshipService {
 
         this.#persistedRelationships.clear();
         this.#persistedRelationshipsByLegacyKey.clear();
+        this.#persistedRelationshipVersions.clear();
 
         Array.from(relationships || [])
             .forEach(relationship => {
@@ -407,6 +428,46 @@ export class AvatarRelationshipService {
             return null;
         }
 
+        const currentVersion =
+            this.#persistedRelationshipVersions.get(normalized.id) || 0;
+
+        if (
+            normalized.version < currentVersion ||
+            (
+                normalized.version === currentVersion &&
+                currentVersion > 0 &&
+                !this.#persistedRelationships.has(normalized.id) &&
+                normalized.status === "active"
+            )
+        ) {
+            this.#stalePersistedSnapshotCount += 1;
+            return this.#persistedRelationships.get(normalized.id) || null;
+        }
+
+        const previous =
+            this.#persistedRelationships.get(normalized.id) || null;
+
+        if (previous?.legacyLinkKey) {
+            this.#persistedRelationshipsByLegacyKey.delete(
+                previous.legacyLinkKey
+            );
+        }
+
+        this.#persistedRelationshipVersions.set(
+            normalized.id,
+            normalized.version
+        );
+
+        if (normalized.status !== "active") {
+            this.#persistedRelationships.delete(normalized.id);
+            if (normalized.legacyLinkKey) {
+                this.#persistedRelationshipsByLegacyKey.delete(
+                    normalized.legacyLinkKey
+                );
+            }
+            return normalized;
+        }
+
         this.#persistedRelationships.set(
             normalized.id,
             normalized
@@ -420,6 +481,38 @@ export class AvatarRelationshipService {
         }
 
         return normalized;
+
+    }
+
+    /**
+     * Returns whether a snapshot matches the currently reconciled generation.
+     *
+     * @param {Object} relationship
+     *
+     * @returns {boolean}
+     */
+    isCurrentPersistedRelationshipSnapshot(relationship) {
+
+        const id =
+            String(
+                relationship?.id ||
+                relationship?.relationship_id ||
+                ""
+            );
+
+        const version =
+            Math.max(1, Number(relationship?.version || 1));
+
+        const status =
+            String(relationship?.status || "active");
+
+        if (!id || this.#persistedRelationshipVersions.get(id) !== version) {
+            return false;
+        }
+
+        return status === "active"
+            ? this.#persistedRelationships.get(id)?.version === version
+            : !this.#persistedRelationships.has(id);
 
     }
 
@@ -730,13 +823,31 @@ export class AvatarRelationshipService {
      */
     relationships() {
 
-        return Object.freeze(
-            this.linkedPairs()
-                .map(([, first, second]) =>
-                    this.#relationshipFromPair(first, second)
-                )
-                .filter(Boolean)
-        );
+        const relationships =
+            Array.from(this.#persistedRelationships.values());
+
+        const persistedLegacyKeys =
+            new Set(
+                relationships
+                    .map(relationship => relationship.legacyLinkKey)
+                    .filter(Boolean)
+            );
+
+        this.linkedPairs()
+            .forEach(([key, first, second]) => {
+                if (persistedLegacyKeys.has(key)) {
+                    return;
+                }
+
+                const relationship =
+                    this.#relationshipFromPair(first, second);
+
+                if (relationship) {
+                    relationships.push(relationship);
+                }
+            });
+
+        return Object.freeze(relationships);
 
     }
 
@@ -752,8 +863,10 @@ export class AvatarRelationshipService {
         const id =
             String(relationshipId || "");
 
-        return this.relationships()
-            .find(relationship => relationship.id === id) || null;
+        return this.#persistedRelationships.get(id) ||
+            this.relationships()
+                .find(relationship => relationship.id === id) ||
+            null;
 
     }
 
@@ -974,7 +1087,8 @@ export class AvatarRelationshipService {
             return false;
         }
 
-        return Boolean(participant.linked_to) ||
+        return Boolean(this.#relationshipMembership(participant.id)) ||
+            Boolean(participant.linked_to) ||
             this.followersOf(participant.id).length > 0;
 
     }
@@ -1586,6 +1700,12 @@ export class AvatarRelationshipService {
             persistedRelationshipCount:
                 this.#persistedRelationships.size,
 
+            persistedRelationshipVersionCount:
+                this.#persistedRelationshipVersions.size,
+
+            stalePersistedSnapshotCount:
+                this.#stalePersistedSnapshotCount,
+
             relationshipCount:
                 relationships.length,
 
@@ -2040,10 +2160,38 @@ export class AvatarRelationshipService {
                         ),
                     role:
                         String(member?.role || member?.member_role || ""),
+                    relationshipRole:
+                        String(
+                            member?.relationshipRole ||
+                            member?.relationship_role ||
+                            "normal"
+                        ),
+                    permissionRole:
+                        member?.permissionRole ||
+                        member?.permission_role ||
+                        null,
+                    status:
+                        String(member?.status || "active"),
                     order:
                         Number.isFinite(Number(member?.order ?? member?.member_order))
                             ? Number(member?.order ?? member?.member_order)
                             : index,
+                    userId:
+                        Number(member?.userId || member?.user_id || 0) || null,
+                    effectiveAt:
+                        member?.effectiveAt ||
+                        member?.membership_effective_at ||
+                        null,
+                    visibleAfterMessageId:
+                        member?.visibleAfterMessageId ??
+                        member?.visible_after_message_id ??
+                        null,
+                    lapHostParticipantId:
+                        Number(
+                            member?.lapHostParticipantId ||
+                            member?.lap_host_participant_id ||
+                            0
+                        ) || null,
                     anchor:
                         member?.anchor || null,
                     options:
@@ -2062,6 +2210,28 @@ export class AvatarRelationshipService {
 
         return Object.freeze({
             id,
+            version:
+                Math.max(1, Number(relationship.version || 1)),
+            status:
+                String(relationship.status || "active"),
+            creatorParticipantId:
+                Number(
+                    relationship.creatorParticipantId ||
+                    relationship.creator_participant_id ||
+                    0
+                ) || null,
+            joinPolicy:
+                String(
+                    relationship.joinPolicy ||
+                    relationship.join_policy ||
+                    "approval-required"
+                ),
+            conversationId:
+                String(
+                    relationship.conversationId ||
+                    relationship.conversation_public_id ||
+                    id
+                ),
             legacyLinkKey,
             mode,
             capability:
@@ -2072,12 +2242,35 @@ export class AvatarRelationshipService {
                 capability.geometryStrategy,
             members:
                 Object.freeze(members),
+            memberIds:
+                Object.freeze(
+                    members.map(member => member.participantId)
+                ),
+            order:
+                Object.freeze(
+                    members
+                        .slice()
+                        .sort((first, second) => first.order - second.order)
+                        .map(member => member.participantId)
+                ),
             metadata:
                 relationship.metadata || {},
             anchors:
                 relationship.anchors || relationship.metadata?.anchors || null,
             options:
-                relationship.options || relationship.metadata?.options || {}
+                relationship.options || relationship.metadata?.options || {},
+            divergenceStatus:
+                relationship.divergence_status ||
+                relationship.divergenceStatus ||
+                "synced",
+            legacyProjection:
+                relationship.legacyProjection ||
+                relationship.legacy_projection ||
+                null,
+            source:
+                "persisted",
+            stable:
+                true
         });
 
     }

@@ -894,19 +894,23 @@ export class AvatarCoordinator {
      */
     reconcileRemoteLink(payload = {}) {
 
+        if (payload.relationship) {
+            this.#relationships.upsertPersistedRelationship(payload.relationship);
+            if (!this.#relationships.isCurrentPersistedRelationshipSnapshot(payload.relationship)) {
+                return null;
+            }
+        }
+
         const person =
             this.#participant(payload.participant_id);
 
         if (!person) {
+            this.#syncRelationshipPresentation();
             return null;
         }
 
         const previousPartnerId =
             Number(person.linked_to || 0);
-
-        if (payload.relationship) {
-            this.#relationships.upsertPersistedRelationship(payload.relationship);
-        }
 
         this.#relationships.setParticipantRelationship(
             person.id,
