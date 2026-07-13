@@ -58,6 +58,7 @@ let runtimeRequestClient = null;
 const runtimeRequestAbortController = new AbortController();
 window.addEventListener('pagehide', () => {
   runtimeRequestAbortController.abort('page-hide');
+  avatarRuntime?.coordinator?.cancelPendingLinkChoice('page-hide');
 }, { once: true });
 let frameQueued = false;
 let pendingLayout = false;
@@ -318,6 +319,15 @@ function configureAvatarCoordinator() {
     closeLinkChoiceModal,
     openLinkChoiceModal() {
       linkChoiceModal?.classList.add('open');
+    },
+    isRelationshipBlocked(first, second) {
+      const firstIsCurrent = Number(first?.id) === Number(cfg?.myParticipantId);
+      const secondIsCurrent = Number(second?.id) === Number(cfg?.myParticipantId);
+      return (firstIsCurrent && isUserBlocked(second?.user_id))
+        || (secondIsCurrent && isUserBlocked(first?.user_id));
+    },
+    recordRelationshipDiagnostic(entry = {}) {
+      recordRuntimeDiagnostic('relationships', entry.event || 'relationship-eligibility', entry);
     },
     animateLinkedPair(pair) {
       pair.forEach(participant => {
@@ -741,6 +751,12 @@ function configureRoomEventRouter() {
       if (Number(payload.blocker_user_id) !== cfg.myUserId) return;
 
       blockedUserIds.add(Number(payload.blocked_user_id));
+      avatarRuntime?.coordinator?.invalidatePendingLinkChoice(
+        'block-state-change',
+        [cfg.myParticipantId, ...[...participants.values()]
+          .filter(person => Number(person.user_id) === Number(payload.blocked_user_id))
+          .map(person => person.id)]
+      );
       participants.forEach(person => {
         if (Number(person.user_id) === Number(payload.blocked_user_id) || person.linked_to && Number(participants.get(person.linked_to)?.user_id) === Number(payload.blocked_user_id)) {
           avatarRuntime?.coordinator?.clearBlockedRelationship(person);
@@ -1885,6 +1901,7 @@ function removeParticipant(participantId, options = {}) {
   const id = Number(participantId);
   const person = participants.get(id);
   if (!person) return Promise.resolve();
+  avatarRuntime?.coordinator?.invalidatePendingLinkChoice('participant-removed', [id]);
   participants.clearParticipantTimers(id);
   pendingRemoteVideoStreams.delete(id);
   voiceRuntime?.media?.closePeer(id);
@@ -2132,12 +2149,6 @@ function snapLappedPair(initiator, target, animate = true) {
 
 function closeLinkChoiceModal() {
   linkChoiceModal?.classList.remove('open');
-}
-
-function openLinkChoiceModal(initiator, target) {
-  if (!linkChoiceModal || !initiator || !target) return;
-  avatarRuntime?.coordinator?.beginLinkChoice(initiator, target);
-  linkChoiceModal.classList.add('open');
 }
 
 async function completePendingLinkChoice(mode) {
@@ -3259,6 +3270,7 @@ function leaveRoomNow() {
 async function leaveRoomWithLocalExit(href, afterLeave) {
   if (roomExitInProgress) return;
   roomExitInProgress = true;
+  avatarRuntime?.coordinator?.cancelPendingLinkChoice('room-exit');
   runtimeRequestAbortController.abort('room-exit');
   closeRoomMenu();
   closeContextMenu();
@@ -4223,6 +4235,10 @@ document.getElementById('ctx-tools')?.addEventListener('click', e => {
 async function setBlockState(participant, blocked) {
   if (!participant || participant.id === cfg.myParticipantId) return;
   const action = blocked ? 'block_user' : 'unblock_user';
+  avatarRuntime?.coordinator?.invalidatePendingLinkChoice(
+    'block-state-change',
+    [cfg.myParticipantId, participant.id]
+  );
   if (blocked) {
     blockedUserIds.add(Number(participant.user_id));
     const relationshipFollowers = avatarRuntime?.coordinator?.unlinkFollowersOf(participant.id) || [];

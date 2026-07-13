@@ -56,6 +56,10 @@
  *
  * Build 000038
  * - Reconciled persisted relationship payloads from remote link events.
+ *
+ * Build 000044 Part 1
+ * - Added authoritative eligibility consumption and pending-choice lifecycle.
+ * - Changed link completion to commit local state only after server acceptance.
  ******************************************************************************/
 
 /**
@@ -133,6 +137,27 @@ export class AvatarCoordinator {
      * @type {Set<number>}
      */
     #suppressedLinkChoiceParticipantIds = new Set();
+
+    /**
+     * Suppression timers keyed by participant id.
+     *
+     * @type {Map<number, *>}
+     */
+    #linkChoiceSuppressionTimers = new Map();
+
+    /**
+     * Count of eligibility decisions by reason.
+     *
+     * @type {Map<string, number>}
+     */
+    #relationshipEligibilityReasonCounts = new Map();
+
+    /**
+     * Count of pending-choice invalidations.
+     *
+     * @type {number}
+     */
+    #pendingLinkChoiceInvalidationCount = 0;
 
     /**
      * Relationship lifecycle operation count.
@@ -222,11 +247,15 @@ export class AvatarCoordinator {
      */
     destroy() {
 
+        this.cancelPendingLinkChoice("runtime-destroy");
+        this.#linkChoiceSuppressionTimers.forEach(timer => clearTimeout(timer));
+        this.#linkChoiceSuppressionTimers.clear();
         this.#context = null;
         this.#linkGroups.clear();
         this.#linkIcons.clear();
         this.#pendingLinkChoice = null;
         this.#suppressedLinkChoiceParticipantIds.clear();
+        this.#relationshipEligibilityReasonCounts.clear();
         this.#scheduledRelationshipRefresh = null;
         this.#scheduledRelationshipRefreshAll = false;
         this.#scheduledRelationshipRefreshParticipantIds.clear();
@@ -435,10 +464,12 @@ export class AvatarCoordinator {
      *
      * @returns {Object|null}
      */
-    beginLinkChoice(initiator, target) {
+    beginLinkChoice(initiator, target, eligibility = null) {
 
-        if (!initiator || !target) {
-            this.#pendingLinkChoice = null;
+        const decision = eligibility || this.relationshipEligibility(initiator, target);
+
+        if (!decision.allowed) {
+            this.cancelPendingLinkChoice(decision.reason);
             return null;
         }
 
@@ -448,11 +479,134 @@ export class AvatarCoordinator {
                 Number(initiator.id),
 
             targetId:
-                Number(target.id)
+                Number(target.id),
+
+            allowedModes:
+                Object.freeze(Array.from(decision.allowedModes || [])),
+
+            stateFingerprint:
+                decision.stateFingerprint,
+
+            createdAt:
+                Date.now()
 
         });
 
         return this.#pendingLinkChoice;
+
+    }
+
+    /**
+     * Returns the authoritative relationship eligibility decision.
+     *
+     * @param {Object|number|string} initiator
+     * @param {Object|number|string} target
+     *
+     * @returns {Object}
+     */
+    relationshipEligibility(initiator, target) {
+
+        const decision = this.#relationships.relationshipEligibility(
+            initiator,
+            target,
+            {
+                isBlocked: (first, second) =>
+                    Boolean(this.#context?.isRelationshipBlocked?.(first, second)),
+                isAvailable: participant =>
+                    participant?.online !== false && !participant?.exiting
+            }
+        );
+
+        this.#recordEligibilityDiagnostic(decision, "evaluate");
+
+        return decision;
+
+    }
+
+    /**
+     * Cancels the current pending relationship choice.
+     *
+     * @param {string} reason
+     * @param {Object} options
+     *
+     * @returns {boolean}
+     */
+    cancelPendingLinkChoice(reason = "cancelled", options = {}) {
+
+        if (!this.#pendingLinkChoice) {
+            if (options.close !== false) {
+                this.#context?.closeLinkChoiceModal?.();
+            }
+            return false;
+        }
+
+        const pending = this.#pendingLinkChoice;
+        this.#pendingLinkChoice = null;
+
+        if (options.close !== false) {
+            this.#context?.closeLinkChoiceModal?.();
+        }
+
+        if (options.warning) {
+            this.#context?.showWarning?.(options.warning);
+        }
+
+        if (reason !== "cancelled" && reason !== "user-cancel") {
+            this.#pendingLinkChoiceInvalidationCount += 1;
+        }
+
+        this.#recordEligibilityDiagnostic({
+            reason,
+            initiatorParticipantId: pending.initiatorId,
+            targetParticipantId: pending.targetId,
+            allowed: false
+        }, "pending-choice-closed");
+
+        return true;
+
+    }
+
+    /**
+     * Invalidates a pending choice when participant or relationship state
+     * changes.
+     *
+     * @param {string} reason
+     * @param {Array<number|string>} participantIds
+     *
+     * @returns {boolean}
+     */
+    invalidatePendingLinkChoice(reason, participantIds = []) {
+
+        const pending = this.#pendingLinkChoice;
+
+        if (!pending) {
+            return false;
+        }
+
+        const changedIds = new Set(
+            Array.from(participantIds || []).map(id => Number(id)).filter(Boolean)
+        );
+
+        const explicitlyAffected = changedIds.size > 0 && (
+            changedIds.has(pending.initiatorId) || changedIds.has(pending.targetId)
+        );
+
+        const decision = this.relationshipEligibility(
+            pending.initiatorId,
+            pending.targetId
+        );
+
+        if (
+            !explicitlyAffected &&
+            decision.allowed &&
+            decision.stateFingerprint === pending.stateFingerprint
+        ) {
+            return false;
+        }
+
+        return this.cancelPendingLinkChoice(reason || decision.reason, {
+            warning: "That relationship choice is no longer available."
+        });
 
     }
 
@@ -472,52 +626,42 @@ export class AvatarCoordinator {
             return false;
         }
 
-        this.#pendingLinkChoice = null;
-        this.#context?.closeLinkChoiceModal?.();
-
         const initiator =
             this.#participant(pending.initiatorId);
 
         const target =
             this.#participant(pending.targetId);
 
-        if (!initiator || !target) {
-            return false;
-        }
-
         if (mode === "cancel") {
+            this.cancelPendingLinkChoice("user-cancel");
+            if (!initiator) {
+                return false;
+            }
             await this.#context?.persistPosition?.(initiator);
             return true;
+        }
+
+        const decision = this.relationshipEligibility(initiator, target);
+
+        if (
+            !decision.allowed ||
+            decision.stateFingerprint !== pending.stateFingerprint ||
+            !pending.allowedModes.includes(mode)
+        ) {
+            this.cancelPendingLinkChoice(decision.reason, {
+                warning: "That relationship choice is no longer available."
+            });
+            return false;
         }
 
         const linkMode =
             this.#relationships.normalizeLinkMode(mode);
 
-        this.#relationships.link(
-            initiator.id,
-            target.id,
-            linkMode
-        );
-
-        this.refreshRelationship(
-            initiator,
-            target,
-            {
-                animate: true,
-                persist: false
-            }
-        );
-
-        this.#renderParticipants([
-            target,
-            initiator
-        ]);
-
-        this.#syncRelationshipPresentation();
+        this.cancelPendingLinkChoice("submitted");
 
         try {
 
-            await this.#context?.persistLink?.({
+            const response = await this.#context?.persistLink?.({
 
                 initiator,
                 target,
@@ -525,21 +669,64 @@ export class AvatarCoordinator {
 
             });
 
+            const freshInitiator = this.#participant(pending.initiatorId);
+            const freshTarget = this.#participant(pending.targetId);
+
+            if (!freshInitiator || !freshTarget) {
+                return false;
+            }
+
+            const existingPair = this.#relationships.relationshipForPair(
+                freshInitiator,
+                freshTarget
+            );
+
+            if (!existingPair) {
+                const postRequestDecision = this.relationshipEligibility(
+                    freshInitiator,
+                    freshTarget
+                );
+
+                if (!postRequestDecision.allowed) {
+                    this.#context?.showWarning?.(
+                        "The relationship changed before it could be displayed."
+                    );
+                    return false;
+                }
+
+                this.#relationships.link(
+                    freshInitiator.id,
+                    freshTarget.id,
+                    linkMode
+                );
+            }
+
+            if (response?.relationship) {
+                this.#relationships.upsertPersistedRelationship(response.relationship);
+            }
+
+            this.refreshRelationship(
+                freshInitiator,
+                freshTarget,
+                {
+                    animate: true,
+                    persist: false,
+                    reason: "local-link-accepted"
+                }
+            );
+
+            this.#renderParticipants([
+                freshTarget,
+                freshInitiator
+            ]);
+
+            this.#syncRelationshipPresentation();
+
             this.#lifecycleOperationCount += 1;
 
             return true;
 
         } catch (error) {
-
-            this.#relationships.clearParticipant(initiator.id);
-            this.#relationships.clearParticipant(target.id);
-
-            this.#renderParticipants([
-                initiator,
-                target
-            ]);
-
-            this.#syncRelationshipPresentation();
 
             this.#context?.showWarning?.(
                 error?.message || "You cannot link with this user."
@@ -725,6 +912,11 @@ export class AvatarCoordinator {
             person.id,
             payload.linked_to,
             payload.link_mode
+        );
+
+        this.invalidatePendingLinkChoice(
+            "remote-relationship-change",
+            [person.id, payload.linked_to, previousPartnerId]
         );
 
         if (payload.initiator_position) {
@@ -1069,7 +1261,13 @@ export class AvatarCoordinator {
      */
     requestLinkChoiceForDrag(participant, target) {
 
-        if (!participant || !target || participant.linked_to) {
+        if (!participant || !target) {
+            return false;
+        }
+
+        const decision = this.relationshipEligibility(participant, target);
+
+        if (!decision.allowed) {
             return false;
         }
 
@@ -1082,7 +1280,8 @@ export class AvatarCoordinator {
 
         this.beginLinkChoice(
             participant,
-            target
+            target,
+            decision
         );
 
         this.#context?.openLinkChoiceModal?.(
@@ -1092,9 +1291,17 @@ export class AvatarCoordinator {
 
         this.#suppressedLinkChoiceParticipantIds.add(participantId);
 
-        setTimeout(() => {
+        const previousTimer = this.#linkChoiceSuppressionTimers.get(participantId);
+        if (previousTimer) {
+            clearTimeout(previousTimer);
+        }
+
+        const timer = setTimeout(() => {
             this.#suppressedLinkChoiceParticipantIds.delete(participantId);
+            this.#linkChoiceSuppressionTimers.delete(participantId);
         }, LINK_CHOICE_SUPPRESS_MS);
+
+        this.#linkChoiceSuppressionTimers.set(participantId, timer);
 
         return true;
 
@@ -1194,6 +1401,11 @@ export class AvatarCoordinator {
      */
     clearParticipantRelationship(participantId) {
 
+        this.invalidatePendingLinkChoice(
+            "participant-relationship-cleared",
+            [participantId]
+        );
+
         const participant =
             this.#relationships.clearParticipant(participantId);
 
@@ -1214,6 +1426,11 @@ export class AvatarCoordinator {
      * @returns {Object[]}
      */
     unlinkFollowersOf(participantId) {
+
+        this.invalidatePendingLinkChoice(
+            "participant-removed",
+            [participantId]
+        );
 
         const changed =
             this.#relationships.unlinkFollowersOf(participantId);
@@ -1241,6 +1458,11 @@ export class AvatarCoordinator {
         if (!participant) {
             return null;
         }
+
+        this.invalidatePendingLinkChoice(
+            "block-state-change",
+            [participant.id]
+        );
 
         const changed =
             this.#relationships.clearParticipant(participant.id);
@@ -1275,6 +1497,12 @@ export class AvatarCoordinator {
 
             pendingLinkChoice:
                 this.#pendingLinkChoice,
+
+            pendingLinkChoiceInvalidations:
+                this.#pendingLinkChoiceInvalidationCount,
+
+            relationshipEligibilityReasons:
+                Object.fromEntries(this.#relationshipEligibilityReasonCounts.entries()),
 
             linkedGroups:
                 this.#linkGroups.size,
@@ -1516,6 +1744,31 @@ export class AvatarCoordinator {
             layout:
                 this.#layout.getDiagnostics?.().lastRelationshipStrategy ||
                 null
+        });
+
+    }
+
+    /**
+     * Records bounded eligibility lifecycle evidence through RuntimeDiagnostics.
+     *
+     * @param {Object} decision
+     * @param {string} event
+     */
+    #recordEligibilityDiagnostic(decision = {}, event = "eligibility") {
+
+        const reason = String(decision.reason || "unknown");
+
+        this.#relationshipEligibilityReasonCounts.set(
+            reason,
+            (this.#relationshipEligibilityReasonCounts.get(reason) || 0) + 1
+        );
+
+        this.#context?.recordRelationshipDiagnostic?.({
+            event,
+            reason,
+            allowed: Boolean(decision.allowed),
+            initiatorParticipantId: Number(decision.initiatorParticipantId || 0) || null,
+            targetParticipantId: Number(decision.targetParticipantId || 0) || null
         });
 
     }

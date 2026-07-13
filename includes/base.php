@@ -1621,7 +1621,7 @@ function avatar_relationship_clear_for_participants(PDO $pdo, int $sessionId, ar
     $pdo->prepare("DELETE FROM avatar_relationships WHERE id IN ($deletePlaceholders)")->execute($relationshipIds);
 }
 
-function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiatorId, int $targetId, string $mode): ?array {
+function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiatorId, int $targetId, string $mode, bool $clearExisting = true): ?array {
     if ($initiatorId <= 0 || $targetId <= 0 || $initiatorId === $targetId) return null;
     $mode = avatar_relationship_mode($mode);
     $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND id IN (?,?)');
@@ -1629,7 +1629,9 @@ function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiato
     $found = array_map(fn(array $row): int => (int)$row['id'], $stmt->fetchAll());
     if (count(array_unique($found)) !== 2) return null;
 
-    avatar_relationship_clear_for_participants($pdo, $sessionId, [$initiatorId, $targetId]);
+    if ($clearExisting) {
+        avatar_relationship_clear_for_participants($pdo, $sessionId, [$initiatorId, $targetId]);
+    }
 
     $capability = avatar_relationship_capability($mode);
     $relationshipId = avatar_relationship_public_id_for($initiatorId, $targetId);
@@ -1655,6 +1657,215 @@ function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiato
         $memberInsert->execute([$dbRelationshipId, (int)$member['participantId'], (string)$member['role'], (int)$member['order'], null, json_encode([], JSON_UNESCAPED_SLASHES)]);
     }
     return avatar_relationship_payload($pdo, $dbRelationshipId);
+}
+
+function avatar_relationship_creation_eligibility(
+    PDO $pdo,
+    int $sessionId,
+    int $initiatorId,
+    int $targetId,
+    bool $lockParticipants = false
+): array {
+    $decision = static function(string $reason, bool $allowed = false) use ($initiatorId, $targetId): array {
+        return [
+            'allowed' => $allowed,
+            'reason' => $reason,
+            'initiator_participant_id' => $initiatorId > 0 ? $initiatorId : null,
+            'target_participant_id' => $targetId > 0 ? $targetId : null,
+            'allowed_modes' => $allowed ? ['normal', 'lap'] : [],
+        ];
+    };
+
+    if ($initiatorId <= 0) return $decision('missing-initiator');
+    if ($targetId <= 0) return $decision('missing-target');
+    if ($initiatorId === $targetId) return $decision('self');
+
+    $orderedIds = [$initiatorId, $targetId];
+    sort($orderedIds, SORT_NUMERIC);
+    $participantSql = 'SELECT id, user_id, linked_to_participant_id, link_mode, last_seen_at
+                         FROM participants
+                        WHERE session_id = ? AND id IN (?,?)
+                        ORDER BY id ASC';
+    if ($lockParticipants && db_uses_mysql_syntax($pdo)) {
+        $participantSql .= ' FOR UPDATE';
+    }
+    $stmt = $pdo->prepare($participantSql);
+    $stmt->execute([$sessionId, $orderedIds[0], $orderedIds[1]]);
+    $participants = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $participants[(int)$row['id']] = $row;
+    }
+
+    $initiator = $participants[$initiatorId] ?? null;
+    $target = $participants[$targetId] ?? null;
+    if (!$initiator) return $decision('missing-initiator');
+    if (!$target) return $decision('missing-target');
+    if (empty($initiator['last_seen_at'])) return $decision('initiator-unavailable');
+    if (empty($target['last_seen_at'])) return $decision('target-unavailable');
+
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM user_blocks
+          WHERE (blocker_user_id = ? AND blocked_user_id = ?)
+             OR (blocker_user_id = ? AND blocked_user_id = ?)
+          LIMIT 1'
+    );
+    $stmt->execute([
+        (int)$initiator['user_id'],
+        (int)$target['user_id'],
+        (int)$target['user_id'],
+        (int)$initiator['user_id'],
+    ]);
+    if ($stmt->fetchColumn()) return $decision('blocked');
+
+    $legacyMembership = static function(PDO $pdo, int $sessionId, int $participantId): bool {
+        $stmt = $pdo->prepare(
+            'SELECT 1 FROM participants
+              WHERE session_id = ?
+                AND ((id = ? AND linked_to_participant_id IS NOT NULL)
+                  OR linked_to_participant_id = ?)
+              LIMIT 1'
+        );
+        $stmt->execute([$sessionId, $participantId, $participantId]);
+        return (bool)$stmt->fetchColumn();
+    };
+
+    $persistedMembership = static function(PDO $pdo, int $sessionId, int $participantId): bool {
+        $stmt = $pdo->prepare(
+            'SELECT 1
+               FROM avatar_relationships ar
+               LEFT JOIN avatar_relationship_members arm ON arm.relationship_id = ar.id
+              WHERE ar.session_id = ?
+                AND (arm.participant_id = ?
+                  OR ar.legacy_initiator_participant_id = ?
+                  OR ar.legacy_target_participant_id = ?)
+              LIMIT 1'
+        );
+        $stmt->execute([$sessionId, $participantId, $participantId, $participantId]);
+        return (bool)$stmt->fetchColumn();
+    };
+
+    $initiatorOccupied = $legacyMembership($pdo, $sessionId, $initiatorId)
+        || $persistedMembership($pdo, $sessionId, $initiatorId);
+    $targetOccupied = $legacyMembership($pdo, $sessionId, $targetId)
+        || $persistedMembership($pdo, $sessionId, $targetId);
+
+    if ($initiatorOccupied && $targetOccupied) return $decision('already-related');
+    if ($initiatorOccupied) return $decision('initiator-relationship');
+    if ($targetOccupied) return $decision('target-relationship');
+
+    return $decision('eligible', true);
+}
+
+function avatar_relationship_create_pair_atomic(
+    PDO $pdo,
+    int $sessionId,
+    int $initiatorId,
+    int $targetId,
+    string $mode,
+    array $positions = []
+): array {
+    $ownsTransaction = !$pdo->inTransaction();
+
+    try {
+        if ($ownsTransaction) {
+            if (db_uses_mysql_syntax($pdo)) {
+                $pdo->beginTransaction();
+            } else {
+                $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+            }
+        }
+
+        $eligibility = avatar_relationship_creation_eligibility(
+            $pdo,
+            $sessionId,
+            $initiatorId,
+            $targetId,
+            true
+        );
+
+        if (empty($eligibility['allowed'])) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return ['ok' => false, 'code' => 'RELATIONSHIP_CONFLICT'] + $eligibility;
+        }
+
+        $mode = avatar_relationship_mode($mode);
+        $pdo->prepare(
+            'UPDATE participants
+                SET linked_to_participant_id = ?, link_mode = ?
+              WHERE id = ? AND session_id = ?'
+        )->execute([$targetId, $mode, $initiatorId, $sessionId]);
+
+        $relationship = avatar_relationship_sync_legacy(
+            $pdo,
+            $sessionId,
+            $initiatorId,
+            $targetId,
+            $mode,
+            false
+        );
+
+        if (!$relationship) {
+            throw new RuntimeException('Relationship persistence failed.');
+        }
+
+        $hasPositions = isset(
+            $positions['initiator_x'],
+            $positions['initiator_y'],
+            $positions['target_x'],
+            $positions['target_y']
+        );
+
+        if ($hasPositions) {
+            $update = $pdo->prepare(
+                'UPDATE participants SET position_x = ?, position_y = ?
+                  WHERE id = ? AND session_id = ?'
+            );
+            $update->execute([
+                max(0, min(1, (float)$positions['initiator_x'])),
+                max(0, min(1, (float)$positions['initiator_y'])),
+                $initiatorId,
+                $sessionId,
+            ]);
+            $update->execute([
+                max(0, min(1, (float)$positions['target_x'])),
+                max(0, min(1, (float)$positions['target_y'])),
+                $targetId,
+                $sessionId,
+            ]);
+        }
+
+        $payload = [
+            'participant_id' => $initiatorId,
+            'linked_to' => $targetId,
+            'link_mode' => $mode,
+            'relationship_id' => $relationship['id'] ?? null,
+            'relationship' => $relationship,
+        ];
+        if ($hasPositions) {
+            $payload['initiator_position'] = [
+                'x' => max(0, min(1, (float)$positions['initiator_x'])),
+                'y' => max(0, min(1, (float)$positions['initiator_y'])),
+            ];
+            $payload['target_position'] = [
+                'x' => max(0, min(1, (float)$positions['target_x'])),
+                'y' => max(0, min(1, (float)$positions['target_y'])),
+            ];
+        }
+
+        emit_event($pdo, $sessionId, 'link', $payload);
+
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+
+        return [
+            'ok' => true,
+            'link_key' => link_key_for($initiatorId, $targetId),
+            'relationship_id' => $relationship['id'] ?? null,
+            'relationship' => $relationship,
+        ];
+    } catch (Throwable $error) {
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
 }
 
 function avatar_relationship_payload(PDO $pdo, int $relationshipDbId): ?array {

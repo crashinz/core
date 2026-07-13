@@ -32,6 +32,9 @@
  * Build 000032
  * - Updated drag bounds and spacing to consume authoritative rendered avatar
  *   dimensions.
+ *
+ * Build 000044 Part 1
+ * - Filtered drag targets through authoritative relationship eligibility.
  ******************************************************************************/
 
 /**
@@ -229,6 +232,9 @@ export class AvatarDragController {
             relationshipBroken:
                 false,
 
+            relationshipBoundAtStart:
+                false,
+
             offsetX:
                 0,
 
@@ -364,6 +370,9 @@ export class AvatarDragController {
             this.#coordinator?.linkedGroupForParticipant(participant?.id) || [
                 participant
             ];
+        state.relationshipBoundAtStart = Boolean(
+            this.#runtime.relationships?.isLinked(participant)
+        );
         state.offsetX =
             event.clientX - element.getBoundingClientRect().left;
         state.offsetY =
@@ -427,13 +436,13 @@ export class AvatarDragController {
             return;
         }
 
-        state.relationshipBroken = false;
-
         const target =
-            this.#nearestLinkTarget(
-                element,
-                participant
-            );
+            state.relationshipBoundAtStart
+                ? null
+                : this.#nearestLinkTarget(
+                    element,
+                    participant
+                );
 
         this.#scheduleLinkChoice(
             target
@@ -620,16 +629,24 @@ export class AvatarDragController {
                     DEFAULT_LINK_TARGET_DISTANCE
             );
 
-        let target =
-            null;
+        let target = null;
+        let nearestDistance = Number.POSITIVE_INFINITY;
 
         this.#participants.forEach(other => {
 
             if (
                 Number(other.id) === Number(participant.id) ||
-                !other.avatarEl ||
-                this.#context?.isUserBlocked?.(other.user_id)
+                !other.avatarEl
             ) {
+                return;
+            }
+
+            const eligibility = this.#coordinator?.relationshipEligibility(
+                participant,
+                other
+            );
+
+            if (!eligibility?.allowed) {
                 return;
             }
 
@@ -642,8 +659,9 @@ export class AvatarDragController {
                     center.y - (otherRect.top + otherRect.height / 2)
                 );
 
-            if (distance < threshold) {
+            if (distance < threshold && distance < nearestDistance) {
                 target = other;
+                nearestDistance = distance;
             }
 
         });
@@ -710,6 +728,7 @@ export class AvatarDragController {
     #resetDragState(state) {
 
         state.relationshipBroken = false;
+        state.relationshipBoundAtStart = false;
         state.group = null;
 
     }

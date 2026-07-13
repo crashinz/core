@@ -26,6 +26,29 @@ Those responsibilities remain outside the runtime.
 
 ---
 
+# Relationship Eligibility Boundary
+
+Build 000044 Part 1 establishes the current relationship-creation boundary:
+
+- `AvatarRelationshipService.relationshipEligibility()` is the authoritative,
+  side-effect-free client policy.
+- The policy considers outgoing and incoming legacy edges plus persisted
+  relationship membership. It returns structured reasons, allowed modes, and a
+  state fingerprint.
+- `AvatarCoordinator` owns pending choice identity, stale invalidation,
+  completion-time revalidation, and server-acceptance-before-local-commit.
+- `AvatarDragController` consumes coordinator decisions and never owns a second
+  relationship rule.
+- `room.js` may present or close modal DOM, but it does not own pending state or
+  eligibility.
+- The server independently enforces the same current two-person constraints in
+  an atomic transaction and never replaces an existing relationship implicitly.
+
+Build 000044 Part 2 may extend this operation-oriented policy for multi-member
+relationships. Callers must not add independent `linked_to` eligibility rules.
+
+---
+
 # Public Entry Point
 
 The Avatar Runtime exposes a single runtime module.

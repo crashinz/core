@@ -48,6 +48,9 @@
  *
  * Build 000038
  * - Added persisted relationship payload ingestion and cache reconciliation.
+ *
+ * Build 000044 Part 1
+ * - Added authoritative structured relationship eligibility decisions.
  ******************************************************************************/
 
 /**
@@ -211,6 +214,24 @@ const RELATIONSHIP_EVENT_CONTRACT = Object.freeze({
             source: "runtime"
         })
 });
+
+export const RELATIONSHIP_ELIGIBILITY_REASONS = Object.freeze({
+    ELIGIBLE: "eligible",
+    MISSING_INITIATOR: "missing-initiator",
+    MISSING_TARGET: "missing-target",
+    SELF: "self",
+    BLOCKED: "blocked",
+    INITIATOR_UNAVAILABLE: "initiator-unavailable",
+    TARGET_UNAVAILABLE: "target-unavailable",
+    ALREADY_RELATED: "already-related",
+    INITIATOR_RELATIONSHIP: "initiator-relationship",
+    TARGET_RELATIONSHIP: "target-relationship"
+});
+
+const CURRENT_RELATIONSHIP_CREATION_MODES = Object.freeze([
+    "normal",
+    "lap"
+]);
 
 //--------------------------------------------------
 // Avatar Relationship Service
@@ -959,6 +980,106 @@ export class AvatarRelationshipService {
     }
 
     /**
+     * Evaluates whether two participants may start a relationship.
+     *
+     * The decision is side-effect free and deliberately operation-oriented so
+     * the future multi-member policy can extend capacity without changing
+     * callers.
+     *
+     * @param {number|string|Object} initiatorOrId
+     * @param {number|string|Object} targetOrId
+     * @param {Object} options
+     *
+     * @returns {Object}
+     */
+    relationshipEligibility(initiatorOrId, targetOrId, options = {}) {
+
+        const initiator =
+            typeof initiatorOrId === "object"
+                ? this.#participant(initiatorOrId?.id)
+                : this.#participant(initiatorOrId);
+
+        const target =
+            typeof targetOrId === "object"
+                ? this.#participant(targetOrId?.id)
+                : this.#participant(targetOrId);
+
+        const initiatorId = Number(initiator?.id || initiatorOrId?.id || initiatorOrId || 0);
+        const targetId = Number(target?.id || targetOrId?.id || targetOrId || 0);
+        const initiatorRelationship = this.#relationshipMembership(initiatorId);
+        const targetRelationship = this.#relationshipMembership(targetId);
+        const sameRelationship = Boolean(
+            initiatorRelationship &&
+            targetRelationship &&
+            initiatorRelationship.id === targetRelationship.id
+        );
+        const isBlocked = typeof options.isBlocked === "function"
+            ? options.isBlocked
+            : () => false;
+        const blocked = Boolean(
+            initiator &&
+            target &&
+            (isBlocked(initiator, target) || isBlocked(target, initiator))
+        );
+
+        const decision = reason => Object.freeze({
+            allowed: reason === RELATIONSHIP_ELIGIBILITY_REASONS.ELIGIBLE,
+            reason,
+            initiatorParticipantId: initiatorId || null,
+            targetParticipantId: targetId || null,
+            initiatorRelationshipId: initiatorRelationship?.id || null,
+            targetRelationshipId: targetRelationship?.id || null,
+            allowedModes: reason === RELATIONSHIP_ELIGIBILITY_REASONS.ELIGIBLE
+                ? CURRENT_RELATIONSHIP_CREATION_MODES
+                : Object.freeze([]),
+            stateFingerprint: this.#relationshipEligibilityFingerprint(
+                initiator,
+                target,
+                initiatorRelationship,
+                targetRelationship,
+                blocked
+            )
+        });
+
+        if (!initiator) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.MISSING_INITIATOR);
+        }
+        if (!target) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.MISSING_TARGET);
+        }
+        if (initiatorId === targetId) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.SELF);
+        }
+
+        if (blocked) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.BLOCKED);
+        }
+
+        const isAvailable = typeof options.isAvailable === "function"
+            ? options.isAvailable
+            : participant => participant?.online !== false && !participant?.exiting;
+
+        if (!isAvailable(initiator)) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.INITIATOR_UNAVAILABLE);
+        }
+        if (!isAvailable(target)) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.TARGET_UNAVAILABLE);
+        }
+        if (sameRelationship) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.ALREADY_RELATED);
+        }
+        if (initiatorRelationship) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.INITIATOR_RELATIONSHIP);
+        }
+        if (targetRelationship) {
+            return decision(RELATIONSHIP_ELIGIBILITY_REASONS.TARGET_RELATIONSHIP);
+        }
+
+        return decision(RELATIONSHIP_ELIGIBILITY_REASONS.ELIGIBLE);
+
+    }
+
+    /**
      * Returns the initiator for a participant pair.
      *
      * @param {Object} firstParticipant
@@ -1561,6 +1682,76 @@ export class AvatarRelationshipService {
     #participant(participantId) {
 
         return this.#participants.get(participantId) || null;
+
+    }
+
+    /**
+     * Returns legacy or persisted relationship membership for a participant.
+     *
+     * @param {number|string} participantId
+     *
+     * @returns {Object|null}
+     */
+    #relationshipMembership(participantId) {
+
+        const id = Number(participantId);
+
+        if (!Number.isFinite(id) || id <= 0) {
+            return null;
+        }
+
+        const runtimeRelationship = this.relationshipForParticipant(id);
+
+        if (runtimeRelationship) {
+            return runtimeRelationship;
+        }
+
+        for (const relationship of this.#persistedRelationships.values()) {
+            if (relationship.members.some(member => Number(member.participantId) === id)) {
+                return relationship;
+            }
+        }
+
+        return null;
+
+    }
+
+    /**
+     * Builds a stable identity for pending-choice revalidation.
+     *
+     * @returns {string}
+     */
+    #relationshipEligibilityFingerprint(
+        initiator,
+        target,
+        initiatorRelationship,
+        targetRelationship,
+        blocked
+    ) {
+
+        return JSON.stringify({
+            initiator: initiator
+                ? [
+                    Number(initiator.id),
+                    Number(initiator.linked_to || 0),
+                    this.normalizeLinkMode(initiator.link_mode),
+                    initiator.online !== false,
+                    Boolean(initiator.exiting),
+                    initiatorRelationship?.id || null
+                ]
+                : null,
+            target: target
+                ? [
+                    Number(target.id),
+                    Number(target.linked_to || 0),
+                    this.normalizeLinkMode(target.link_mode),
+                    target.online !== false,
+                    Boolean(target.exiting),
+                    targetRelationship?.id || null
+                ]
+                : null,
+            blocked
+        });
 
     }
 

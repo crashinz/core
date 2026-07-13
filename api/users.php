@@ -50,67 +50,33 @@ if ($action === 'link') {
     $targetId = (int)($body['target_participant_id'] ?? 0);
     $linkMode = (string)($body['link_mode'] ?? 'normal');
     if (!in_array($linkMode, ['normal', 'lap'], true)) $linkMode = 'normal';
-    if (!$targetId || $targetId === (int)$p['id']) json_out(['error' => 'Target participant required'], 400);
-
-    $stmt = $pdo->prepare('SELECT id, user_id FROM participants WHERE id = ? AND session_id = ? LIMIT 1');
-    $stmt->execute([$targetId, $sessionId]);
-    $targetParticipant = $stmt->fetch();
-    if (!$targetParticipant) json_out(['error' => 'Target not in room'], 403);
-    $stmt = $pdo->prepare(
-        'SELECT 1 FROM user_blocks
-         WHERE (blocker_user_id = ? AND blocked_user_id = ?)
-            OR (blocker_user_id = ? AND blocked_user_id = ?)
-         LIMIT 1'
+    $result = avatar_relationship_create_pair_atomic(
+        $pdo,
+        $sessionId,
+        (int)$p['id'],
+        $targetId,
+        $linkMode,
+        $body
     );
-    $stmt->execute([(int)$p['user_id'], (int)$targetParticipant['user_id'], (int)$targetParticipant['user_id'], (int)$p['user_id']]);
-    if ($stmt->fetch()) json_out(['error' => 'You cannot link with this user.'], 403);
 
-    $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
-        ->execute([(int)$p['id'], (int)$p['id']]);
-    $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
-        ->execute([$targetId, $targetId]);
-    avatar_relationship_clear_for_participants($pdo, $sessionId, [(int)$p['id'], $targetId]);
-    $pdo->prepare('UPDATE participants SET linked_to_participant_id = ?, link_mode = ? WHERE id = ?')->execute([$targetId, $linkMode, (int)$p['id']]);
-    $relationship = avatar_relationship_sync_legacy($pdo, $sessionId, (int)$p['id'], $targetId, $linkMode);
-
-    if (isset($body['initiator_x'], $body['initiator_y'], $body['target_x'], $body['target_y'])) {
-        $pdo->prepare('UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?')
-            ->execute([
-                max(0, min(1, (float)$body['initiator_x'])),
-                max(0, min(1, (float)$body['initiator_y'])),
-                (int)$p['id'],
-                $sessionId,
-            ]);
-        $pdo->prepare('UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?')
-            ->execute([
-                max(0, min(1, (float)$body['target_x'])),
-                max(0, min(1, (float)$body['target_y'])),
-                $targetId,
-                $sessionId,
-            ]);
-    }
-
-    $payload = [
-        'participant_id' => (int)$p['id'],
-        'linked_to' => $targetId,
-        'link_mode' => $linkMode,
-    ];
-    if ($relationship) {
-        $payload['relationship_id'] = $relationship['id'];
-        $payload['relationship'] = $relationship;
-    }
-    if (isset($body['initiator_x'], $body['initiator_y'], $body['target_x'], $body['target_y'])) {
-        $payload['initiator_position'] = [
-            'x' => max(0, min(1, (float)$body['initiator_x'])),
-            'y' => max(0, min(1, (float)$body['initiator_y'])),
+    if (empty($result['ok'])) {
+        $reason = (string)($result['reason'] ?? 'relationship-conflict');
+        $status = $reason === 'blocked' ? 403 : ($reason === 'self' ? 400 : 409);
+        $messages = [
+            'blocked' => 'You cannot link with this user.',
+            'missing-initiator' => 'Your room participant is unavailable.',
+            'missing-target' => 'That participant is no longer in the room.',
+            'initiator-unavailable' => 'Your room participant is unavailable.',
+            'target-unavailable' => 'That participant is no longer available.',
+            'already-related' => 'One of these participants is already in a relationship.',
+            'initiator-relationship' => 'You are already in a relationship.',
+            'target-relationship' => 'That participant is already in a relationship.',
+            'self' => 'Target participant required.',
         ];
-        $payload['target_position'] = [
-            'x' => max(0, min(1, (float)$body['target_x'])),
-            'y' => max(0, min(1, (float)$body['target_y'])),
-        ];
+        json_out(['error' => $messages[$reason] ?? 'That relationship is no longer available.'] + $result, $status);
     }
-    emit_event($pdo, $sessionId, 'link', $payload);
-    json_out(['ok' => true, 'link_key' => link_key_for((int)$p['id'], $targetId), 'relationship_id' => $relationship['id'] ?? null, 'relationship' => $relationship]);
+
+    json_out($result);
 }
 
 if ($action === 'unlink') {
