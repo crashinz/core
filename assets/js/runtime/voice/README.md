@@ -64,7 +64,13 @@ lifecycle hook is synchronous; stale browser promises may only release their
 own result after destruction. `getResourceSnapshot()` and
 `verifyResourceInvariants()` expose verification-safe ownership assertions.
 
-Part 5 remains reserved for the hardened shared API/error boundary, device
-snapshot redesign, fault injection, and remaining shared runtime boundaries.
-Part 6 remains reserved for harness optimization, parallel equivalence,
-performance telemetry, and final Build 000043 certification.
+Build 000043 Part 5 completes immutable, generation-numbered device snapshots
+behind VoiceDeviceService. The service now owns selected input/output IDs,
+permission state, selection fallback, sink capability, stale-completion
+rejection, and snapshot publication. `room.js` renders the host modal from the
+snapshot and forwards explicit selection UI events; it owns no second device
+collection.
+
+Part 5 closes Build 000043. Harness optimization, parallel equivalence,
+performance telemetry, and cross-browser certification are deferred intact to
+Build 000044 Part 4.

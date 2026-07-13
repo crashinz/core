@@ -401,16 +401,7 @@ export class VoiceMediaService {
             navigator: context.navigator,
             HTMLMediaElement: context.HTMLMediaElement,
             canPopulateDevices: context.canPopulateDevices,
-            getInputDeviceId: context.getInputDeviceId,
-            getOutputDeviceId: context.getOutputDeviceId,
-            setInputDeviceOptions: context.setInputDeviceOptions,
-            setOutputDeviceOptions: context.setOutputDeviceOptions,
-            setOutputDeviceDisabled: context.setOutputDeviceDisabled,
-            restoreInputDevice: context.restoreInputDevice,
-            restoreOutputDevice: context.restoreOutputDevice,
-            deviceOption: context.deviceOption,
-            setDeviceStatus: context.setDeviceStatus,
-            setDevicePermissionRequired: context.setDevicePermissionRequired,
+            onSnapshot: context.onDeviceSnapshot,
             hasActiveVoiceStream: () => Boolean(this.#voiceStream),
             recordDiagnostic: entry => this.#recordAudioPathDiagnostic(entry),
             warn: error => this.#warn(error)
@@ -450,6 +441,20 @@ export class VoiceMediaService {
         if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
 
         return this.#devices.requestPermissionAndPopulate();
+
+    }
+
+    getDeviceSnapshot() {
+
+        return this.#devices.getSnapshot();
+
+    }
+
+    selectDevices(selection) {
+
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
+
+        return this.#devices.selectDevices(selection);
 
     }
 

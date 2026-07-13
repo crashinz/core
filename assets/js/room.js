@@ -54,6 +54,11 @@ let pollingRuntime = null;
 let runtimeDiagnosticsInstallation = null;
 let runtimeDiagnostics = null;
 let runtimeVerificationControls = null;
+let runtimeRequestClient = null;
+const runtimeRequestAbortController = new AbortController();
+window.addEventListener('pagehide', () => {
+  runtimeRequestAbortController.abort('page-hide');
+}, { once: true });
 let frameQueued = false;
 let pendingLayout = false;
 let layoutLocked = false;
@@ -187,7 +192,7 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
@@ -198,6 +203,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
     import(appUrl('/assets/js/core/runtime-diagnostics.js')),
+    import(appUrl('/assets/js/core/runtime-request-client.js')),
   ]);
 
   if (!runtimeDiagnosticsInstallation) {
@@ -224,8 +230,22 @@ async function initializeAvatarRuntime() {
     });
   }
 
+  runtimeRequestClient = new RuntimeRequestClient({
+    resolveUrl: appUrl,
+    csrfToken: CSRF_TOKEN,
+    lifecycleSignal: runtimeRequestAbortController.signal,
+    onFailure(error) {
+      recordRuntimeDiagnostic('requests', 'runtime-request-failure', {
+        code: error.code,
+        message: error.message,
+        ...error.details,
+      });
+    },
+  });
+
   chatRuntimeCore = new Core();
   chatRuntimeCore.registerService('runtime-diagnostics', runtimeDiagnostics);
+  chatRuntimeCore.registerService('runtime-request-client', runtimeRequestClient);
   chatRuntime = new ChatRuntime();
   roomRuntime = new RoomRuntime();
   voiceRuntime = new VoiceRuntime();
@@ -335,7 +355,7 @@ function configureAvatarCoordinator() {
         action: 'unlink',
         session_id: cfg.sessionId,
         join_token: cfg.myJoinToken,
-      }).catch(console.warn);
+      }).catch(warnRuntimeRequest);
     },
     persistPosition(participant) {
       return apiPost('/api/users.php', {
@@ -344,7 +364,7 @@ function configureAvatarCoordinator() {
         join_token: cfg.myJoinToken,
         x: participant.position_x,
         y: participant.position_y,
-      }).catch(console.warn);
+      }).catch(warnRuntimeRequest);
     },
     persistPositions(list) {
       return apiPost('/api/users.php', {
@@ -352,7 +372,7 @@ function configureAvatarCoordinator() {
         session_id: cfg.sessionId,
         join_token: cfg.myJoinToken,
         positions: list.map(p => ({ participant_id: p.id, x: p.position_x, y: p.position_y })),
-      }).catch(console.warn);
+      }).catch(warnRuntimeRequest);
     },
     persistLinkIcon({ targetId, iconName }) {
       return apiPost('/api/users.php', {
@@ -394,10 +414,13 @@ function configureAvatarAura() {
     getConfig: () => cfg,
     getParticipants: () => participants,
     fetchJson(path) {
-      return fetch(appUrl(path)).then(r => r.json());
+      return runtimeRequestClient.getJson(path, {
+        operation: 'load-avatar-aura-catalog',
+        endpointCategory: 'avatar-aura',
+      });
     },
     onError(error) {
-      console.warn(error);
+      warnRuntimeRequest(error);
     },
   });
 }
@@ -591,10 +614,13 @@ function configureChatGameChat() {
     addMessageToChannel,
     renderGameStagePlayers: updateGameStagePlayers,
     fetchGameChat(query) {
-      return fetch(appUrl('/api/game_chat.php?' + query)).then(r => r.json());
+      return runtimeRequestClient.getJson('/api/game_chat.php?' + query, {
+        operation: 'poll-game-chat',
+        endpointCategory: 'game-chat',
+      });
     },
     warnError(error) {
-      console.warn(error);
+      warnRuntimeRequest(error);
     },
   });
 }
@@ -804,42 +830,11 @@ function configureVoiceRuntime() {
     canPopulateDevices() {
       return Boolean(voiceInputDevice && voiceOutputDevice);
     },
-    getInputDeviceId() {
-      return voiceInputDevice?.value || '';
-    },
-    getOutputDeviceId() {
-      return voiceOutputDevice?.value || '';
-    },
+    onDeviceSnapshot: renderVoiceDeviceSnapshot,
     getVoiceSourceHint() {
       if (!runtimeVerificationControls?.isEnabled()) return '';
       const params = new URLSearchParams(window.location.search);
       return params.get('runtime_diagnostics_audio_source') || '';
-    },
-    setInputDeviceOptions(html) {
-      if (voiceInputDevice) voiceInputDevice.innerHTML = html;
-    },
-    setOutputDeviceOptions(html) {
-      if (voiceOutputDevice) voiceOutputDevice.innerHTML = html;
-    },
-    setOutputDeviceDisabled(disabled) {
-      if (voiceOutputDevice) voiceOutputDevice.disabled = Boolean(disabled);
-    },
-    restoreInputDevice(deviceId) {
-      if (deviceId && voiceInputDevice && Array.from(voiceInputDevice.options).some(option => option.value === deviceId)) {
-        voiceInputDevice.value = deviceId;
-      }
-    },
-    restoreOutputDevice(deviceId) {
-      if (deviceId && voiceOutputDevice && Array.from(voiceOutputDevice.options).some(option => option.value === deviceId)) {
-        voiceOutputDevice.value = deviceId;
-      }
-    },
-    deviceOption,
-    setDeviceStatus: setVoiceDeviceStatus,
-    setDevicePermissionRequired(required) {
-      if (voiceDeviceRefresh) {
-        voiceDeviceRefresh.textContent = required ? 'Allow microphone & refresh' : 'Refresh devices';
-      }
     },
     closeDeviceModal: closeVoiceDeviceModal,
     getAudioElements() {
@@ -865,7 +860,10 @@ function configureVoiceRuntime() {
       document.querySelectorAll('audio[id^="voice-audio-"]').forEach(audio => audio.remove());
     },
     fetchMediaSignals(query) {
-      return fetch(appUrl('/api/media_signal.php?' + query)).then(r => r.json());
+      return runtimeRequestClient.getJson('/api/media_signal.php?' + query, {
+        operation: 'poll-media-signals',
+        endpointCategory: 'voice-signaling',
+      });
     },
     recordVoiceSignalDiagnostic(entry) {
       recordRuntimeDiagnostic(
@@ -879,7 +877,7 @@ function configureVoiceRuntime() {
       return runtimeDiagnostics?.isEnabled() || false;
     },
     warn(error) {
-      console.warn(error);
+      warnRuntimeRequest(error);
     },
   });
 }
@@ -893,6 +891,10 @@ function recordVoiceLifecycleDiagnostic(entry = {}) {
 
 function recordRuntimeDiagnostic(category, event, details = {}) {
   return runtimeDiagnostics?.record(category, event, details) || false;
+}
+
+function warnRuntimeRequest(error) {
+  if (error?.code !== 'REQUEST_ABORTED') console.warn(error);
 }
 
 function configureGameRuntime() {
@@ -916,7 +918,10 @@ function configureGameRuntime() {
       return chatGameChat().isTyping(participantId);
     },
     fetchGames(query) {
-      return fetch(appUrl('/api/games.php?' + query)).then(r => r.json());
+      return runtimeRequestClient.getJson('/api/games.php?' + query, {
+        operation: 'load-game-catalog',
+        endpointCategory: 'games',
+      });
     },
     getGameListElement() {
       return gameListEl;
@@ -943,7 +948,7 @@ function configureGameRuntime() {
       return window.location.origin;
     },
     warnError(error) {
-      console.warn(error);
+      warnRuntimeRequest(error);
     },
   });
 }
@@ -971,7 +976,10 @@ function configureRoomEffectsRuntime() {
     renderRoomEffectsModal,
     addSystemMessage,
     fetchEffectsState(query) {
-      return fetch(appUrl('/api/room_admin.php?' + query)).then(r => r.json());
+      return runtimeRequestClient.getJson('/api/room_admin.php?' + query, {
+        operation: 'load-room-effects',
+        endpointCategory: 'room-effects',
+      });
     },
   });
 }
@@ -1044,7 +1052,10 @@ function configureChatPoll() {
     shouldStop: () => roomExitInProgress,
     pollInterval: 25,
     fetchPoll(query) {
-      return fetch(appUrl('/api/poll.php?' + query)).then(r => r.json());
+      return runtimeRequestClient.getJson('/api/poll.php?' + query, {
+        operation: 'poll-room-events',
+        endpointCategory: 'room-poll',
+      });
     },
     handleRoomEvent(event) {
       roomRuntime?.events?.routeRoomEvent(event);
@@ -1053,29 +1064,23 @@ function configureChatPoll() {
       roomRuntime?.events?.routeCommunityEvent(event);
     },
     warnError(error) {
-      console.warn(error);
+      warnRuntimeRequest(error);
     },
   });
 }
 
 function apiPost(url, body) {
-  const payload = Object.assign({}, body || {}, { _csrf: CSRF_TOKEN });
-  return fetch(appUrl(url), { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN }, body: JSON.stringify(payload) })
-    .then(async r => {
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok || data.error) throw new Error(data.error || 'Request failed');
-      return data;
-    });
+  return runtimeRequestClient.postJson(url, body, {
+    operation: 'mutate-room-state',
+    endpointCategory: 'room-mutation',
+  });
 }
 
 function apiUpload(url, formData) {
-  if (formData && !formData.has('_csrf')) formData.append('_csrf', CSRF_TOKEN);
-  return fetch(appUrl(url), { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN }, body: formData })
-    .then(async r => {
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok || data.error) throw new Error(data.error || 'Upload failed');
-      return data;
-    });
+  return runtimeRequestClient.postForm(url, formData, {
+    operation: 'upload-room-media',
+    endpointCategory: 'room-upload',
+  });
 }
 
 function setUploadProgress(progressEl, pct, message) {
@@ -2961,14 +2966,16 @@ async function checkLatency() {
     });
     const startedAt = performance.now();
     qs.set('mode', 'latency');
-    const response = await fetch(appUrl('/api/heartbeat.php?' + qs), { cache: 'no-store' });
-    if (!response.ok) throw new Error('Latency check failed.');
-    await response.json();
+    await runtimeRequestClient.getJson('/api/heartbeat.php?' + qs, {
+      operation: 'measure-room-latency',
+      endpointCategory: 'heartbeat',
+      cache: 'no-store',
+    });
     const elapsed = performance.now() - startedAt;
     lastLatencyMs = lastLatencyMs === null ? elapsed : (lastLatencyMs * .65) + (elapsed * .35);
     renderLatency(lastLatencyMs);
   } catch (err) {
-    console.warn(err);
+    warnRuntimeRequest(err);
     renderLatency(Number.POSITIVE_INFINITY);
   }
 }
@@ -3252,6 +3259,7 @@ function leaveRoomNow() {
 async function leaveRoomWithLocalExit(href, afterLeave) {
   if (roomExitInProgress) return;
   roomExitInProgress = true;
+  runtimeRequestAbortController.abort('room-exit');
   closeRoomMenu();
   closeContextMenu();
   closeTextContextMenu();
@@ -3293,7 +3301,10 @@ async function refreshPresence() {
   });
   try {
     const qs = new URLSearchParams({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, mode: 'presence' });
-    const data = await fetch(appUrl('/api/heartbeat.php?' + qs)).then(r => r.json());
+    const data = await runtimeRequestClient.getJson('/api/heartbeat.php?' + qs, {
+      operation: 'refresh-room-presence',
+      endpointCategory: 'heartbeat',
+    });
     (data.participants || []).forEach(p => {
       const existing = participants.get(p.id);
       if (existing) {
@@ -3589,8 +3600,10 @@ async function searchGifs(query) {
       q,
       provider: cfg.gifPicker.defaultProvider || 'giphy',
     });
-    const data = await fetch(appUrl(`/api/gif_search.php?${qs}`)).then(r => r.json());
-    if (data.error) throw new Error(data.error);
+    const data = await runtimeRequestClient.getJson(`/api/gif_search.php?${qs}`, {
+      operation: 'search-gifs',
+      endpointCategory: 'gif-search',
+    });
     const results = data.results || [];
     if (!results.length) {
       gifResults.innerHTML = '<div class="minor">No GIFs found.</div>';
@@ -3645,8 +3658,10 @@ async function loadGestures() {
       page: String(gesturePage),
       q: currentGestureQuery(),
     });
-    const data = await fetch(appUrl(`/api/gestures.php?${qs}`)).then(r => r.json());
-    if (data.error) throw new Error(data.error);
+    const data = await runtimeRequestClient.getJson(`/api/gestures.php?${qs}`, {
+      operation: 'load-gestures',
+      endpointCategory: 'gestures',
+    });
     gestureHasMore = Boolean(data.has_more);
     gestureOwnedCount = Number(data.owned_count || 0);
     gestureOwnedLimit = Number(data.owned_limit ?? 50);
@@ -4266,9 +4281,10 @@ avatarFileInput.addEventListener('change', async () => {
       renderParticipant(me);
     }
     fd.append('avatar', preparedFile);
-    const resp = await fetch(appUrl('/api/avatar.php'), { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN }, body: fd });
-    const data = await resp.json();
-    if (!resp.ok || data.error) throw new Error(data.error || 'Avatar upload failed');
+    const data = await runtimeRequestClient.postForm('/api/avatar.php', fd, {
+      operation: 'upload-avatar',
+      endpointCategory: 'avatar',
+    });
     const updated = participants.get(cfg.myParticipantId);
     participants.update(cfg.myParticipantId, {
       avatar_path: data.avatar_path,
@@ -4878,7 +4894,10 @@ async function loadRoomEjections() {
   list.innerHTML = '<div class="minor">Loading...</div>';
   try {
     const qs = new URLSearchParams({ action: 'ejections', session_id: cfg.sessionId });
-    const data = await fetch(appUrl('/api/room_admin.php?' + qs)).then(r => r.json());
+    const data = await runtimeRequestClient.getJson('/api/room_admin.php?' + qs, {
+      operation: 'load-room-ejections',
+      endpointCategory: 'room-admin',
+    });
     list.innerHTML = '';
     if (!(data.ejections || []).length) {
       list.innerHTML = '<div class="minor">No active kicks.</div>';
@@ -5021,7 +5040,10 @@ async function loadFriends() {
   loadingEl.style.display = 'flex';
   friendListEl.innerHTML = '';
   try {
-    const data = await fetch(appUrl('/api/locate.php?q=' + encodeURIComponent(q))).then(r => r.json());
+    const data = await runtimeRequestClient.getJson('/api/locate.php?q=' + encodeURIComponent(q), {
+      operation: 'locate-friends',
+      endpointCategory: 'friends',
+    });
     if (document.getElementById('friend-search').value !== q) return;
     (data.friends || []).forEach(f => {
       const knownParticipant = [...participants.values()].find(p => Number(p.user_id) === Number(f.id));
@@ -5083,7 +5105,11 @@ function setSeenAppVersion(version) {
 
 async function pollAppVersion() {
   try {
-    const data = await fetch(appUrl('/api/version.php'), { cache: 'no-store' }).then(r => r.json());
+    const data = await runtimeRequestClient.getJson('/api/version.php', {
+      operation: 'poll-application-version',
+      endpointCategory: 'version',
+      cache: 'no-store',
+    });
     const version = String(data.version || '').trim();
     if (!version) return;
     latestAppVersion = version;
@@ -5149,8 +5175,37 @@ function setVoiceDeviceStatus(message, state = '') {
   if (state) voiceDeviceStatus.classList.add(state);
 }
 
-function deviceOption(device, fallback) {
-  return `<option value="${esc(device.deviceId || '')}">${esc(device.label || fallback)}</option>`;
+function renderVoiceDeviceOptions(select, devices, defaultLabel, itemLabel, selectedId) {
+  if (!select) return;
+  const options = [new Option(defaultLabel, '')];
+  (devices || []).forEach((device, index) => {
+    options.push(new Option(device.label || `${itemLabel} ${index + 1}`, device.deviceId || ''));
+  });
+  select.replaceChildren(...options);
+  select.value = options.some(option => option.value === selectedId) ? selectedId : '';
+}
+
+function renderVoiceDeviceSnapshot(snapshot) {
+  if (!snapshot) return;
+  renderVoiceDeviceOptions(voiceInputDevice, snapshot.inputs, 'Default microphone', 'Microphone', snapshot.selectedInputId);
+  renderVoiceDeviceOptions(voiceOutputDevice, snapshot.outputs, 'Default speaker', 'Speaker', snapshot.selectedOutputId);
+  if (voiceOutputDevice) voiceOutputDevice.disabled = !snapshot.sinkSelectionSupported;
+  if (voiceDeviceRefresh) {
+    voiceDeviceRefresh.textContent = ['prompt', 'denied', 'unknown'].includes(snapshot.permissionState)
+      ? 'Allow microphone & refresh'
+      : 'Refresh devices';
+  }
+  if (snapshot.refreshing) {
+    setVoiceDeviceStatus('Loading audio devices...', 'working');
+  } else if (snapshot.error) {
+    setVoiceDeviceStatus(snapshot.error.message || 'Could not load audio devices. Default devices can still be used.', 'error');
+  } else if (snapshot.permissionState === 'prompt') {
+    setVoiceDeviceStatus('Microphone permission is required to list named devices.', 'working');
+  } else if (!snapshot.sinkSelectionSupported) {
+    setVoiceDeviceStatus('Speaker selection is not supported by this browser.', 'working');
+  } else {
+    setVoiceDeviceStatus('', '');
+  }
 }
 
 async function populateVoiceDevices() {
@@ -5204,8 +5259,26 @@ document.getElementById('voice-toggle').addEventListener('click', async () => {
 
 voiceDeviceForm?.addEventListener('submit', async e => {
   e.preventDefault();
+  voiceRuntime?.media?.selectDevices({
+    inputId: voiceInputDevice?.value || '',
+    outputId: voiceOutputDevice?.value || '',
+  });
   setVoiceDeviceStatus('Joining voice...', 'working');
   await joinVoice();
+});
+
+voiceInputDevice?.addEventListener('change', () => {
+  voiceRuntime?.media?.selectDevices({
+    inputId: voiceInputDevice.value,
+    outputId: voiceOutputDevice?.value || '',
+  });
+});
+
+voiceOutputDevice?.addEventListener('change', () => {
+  voiceRuntime?.media?.selectDevices({
+    inputId: voiceInputDevice?.value || '',
+    outputId: voiceOutputDevice.value,
+  });
 });
 
 bindModalCloseButtons(['voice-device-close', 'voice-device-cancel'], closeVoiceDeviceModal);
@@ -5274,8 +5347,10 @@ async function bootRoom() {
   await initializeAvatarRuntime();
 
   const roomId = document.body.dataset.roomId;
-  cfg = await fetch(appUrl(`/api/room_config.php?id=${encodeURIComponent(roomId)}`)).then(r => r.json());
-  if (cfg.error) throw new Error(cfg.error);
+  cfg = await runtimeRequestClient.getJson(`/api/room_config.php?id=${encodeURIComponent(roomId)}`, {
+    operation: 'bootstrap-room',
+    endpointCategory: 'room-config',
+  });
   cfg.innerTranquillityPlayer = innerTranquillityPlayerCapability();
   importedRoomRuntime?.layout?.render(cfg.importLayout);
   importedRoomRuntime?.music?.renderPlayer(cfg.musicPlaylist);
