@@ -5,7 +5,9 @@ VoiceRuntime owns voice workflow behavior for ChatSpace rooms.
 Current ownership:
 
 - voice state
-- join/leave voice workflow
+- facade, participation, and microphone-acquisition lifecycle state through
+  VoiceLifecycleService
+- idempotent join/leave/destroy workflow
 - mute/deafen state
 - speaking detection state
 - voice participant polling
@@ -41,9 +43,28 @@ enumeration generations, and the devicechange listener. VoiceMediaService
 remains the public facade and injects only the required browser and host
 callbacks.
 
-Peer records, signal inbox and outcomes, canonical transceivers, negotiation,
-local streams, speaking analysis, remote audio, webcam coordination, polling,
-recovery, and coordinated cleanup remain in VoiceMediaService. These resources
-must not be split before Build 000043 Part 4 defines lifecycle and resource
-ownership. Part 5 remains reserved for the hardened shared API and any device
-snapshot/generation redesign.
+Build 000043 Part 4 establishes a multidimensional lifecycle rather than
+conflating webcam and voice participation. VoiceLifecycleService owns facade,
+participation, microphone intent/acquisition, and operation-generation state.
+The room host retains independent local webcam capture intent and stream
+ownership, consuming its own acquisition generation before it publishes a
+capture to VoiceMediaService.
+
+VoiceMediaService owns typed resource scopes for the local microphone,
+speaking graph, peers, peer operation generations, signal drain, remote audio,
+recovery timers, polling, and diagnostic probes. Peer replacement invalidates
+the active map entry before listeners, media references, and the connection are
+released. Pending and attached remote audio are bound to participant, peer
+instance, peer generation, canonical transceiver, and receiver-track identity.
+
+`join()` and `leave()` expose shared readiness promises while in progress.
+Leave resolves after pending join work is neutralized and voice resources are
+released. `destroy()` is synchronous, idempotent, and terminal because the Core
+lifecycle hook is synchronous; stale browser promises may only release their
+own result after destruction. `getResourceSnapshot()` and
+`verifyResourceInvariants()` expose verification-safe ownership assertions.
+
+Part 5 remains reserved for the hardened shared API/error boundary, device
+snapshot redesign, fault injection, and remaining shared runtime boundaries.
+Part 6 remains reserved for harness optimization, parallel equivalence,
+performance telemetry, and final Build 000043 certification.

@@ -25,6 +25,9 @@
  * - Transferred voice/WebRTC/media signaling ownership from room.js.
  * - Build 000043 Part 2 gates verification-only transport/RTP diagnostics
  *   through the generic RuntimeDiagnostics capability.
+ * - Build 000043 Part 3 delegates device workflow to VoiceDeviceService.
+ * - Build 000043 Part 4 adds explicit lifecycle generations, peer/resource
+ *   scopes, idempotent cleanup, and executable invariants.
  ******************************************************************************/
 
 import {
@@ -33,15 +36,17 @@ import {
 
 } from "./voice-device-service.js";
 
+import {
+
+    VoiceLifecycleService
+
+} from "./voice-lifecycle-service.js";
+
 /**
  * @file voice-media-service.js
  *
  * Defines the Voice Media Service.
  */
-
-//
-// No imports required.
-//
 
 //--------------------------------------------------
 // Constants
@@ -121,7 +126,11 @@ export class VoiceMediaService {
 
     #voiceStream = null;
 
-    #joined = false;
+    #lifecycle;
+
+    #joinPromise = null;
+
+    #leavePromise = null;
 
     #pollTimer = null;
 
@@ -179,7 +188,11 @@ export class VoiceMediaService {
 
     #pendingRemoteAudioTracks = new Map();
 
+    #remoteAudioResources = new Map();
+
     #remoteVideoPresentations = new Map();
+
+    #recoveryTimers = new Map();
 
     #mediaObjectIds = new WeakMap();
 
@@ -213,6 +226,7 @@ export class VoiceMediaService {
 
         this.#runtime = runtime;
         this.#devices = new VoiceDeviceService();
+        this.#lifecycle = new VoiceLifecycleService();
 
     }
 
@@ -232,24 +246,48 @@ export class VoiceMediaService {
      */
     destroy() {
 
+        const transition =
+            this.#lifecycle.destroy();
+
+        if (transition.status === "duplicate") return transition;
+
+        this.#recordLifecycleTransition(transition);
+
         this.stopPolling();
         this.#stopAnalyser();
         this.#stopVoiceStream();
         this.#removeAllAudioElements();
         this.#closeAllPeers();
+        this.#clearRecoveryTimers();
         this.#devices.destroy();
-        this.#context = null;
         this.#voiceParticipants = [];
         this.#lastStatusSignature = "";
         this.#signalFetchCursor = 0;
         this.#signalInbox.clear();
         this.#terminalSignalIds.clear();
         this.#processingSignalIds.clear();
+        this.#drainingSignalInbox = false;
         this.#clientEpoch = null;
         this.#clientEpochRegistered = false;
         this.#remoteWebcamReadinessRequests.clear();
         this.#pendingRemoteAudioTracks.clear();
+        this.#remoteAudioResources.clear();
         this.#remoteVideoPresentations.clear();
+        this.#muted = false;
+        this.#deafened = false;
+        this.#speaking = false;
+        this.#joinPromise = null;
+        this.#leavePromise = null;
+
+        const invariantResult =
+            this.verifyResourceInvariants("destroy");
+
+        this.#context = null;
+
+        return Object.freeze({
+            ...transition,
+            invariants: invariantResult
+        });
 
     }
 
@@ -275,7 +313,7 @@ export class VoiceMediaService {
      */
     isJoined() {
 
-        return this.#joined;
+        return this.#lifecycle.isJoined();
 
     }
 
@@ -322,7 +360,7 @@ export class VoiceMediaService {
         return Object.freeze({
 
             joined:
-                this.#joined,
+                this.#lifecycle.isJoined(),
 
             muted:
                 this.#muted,
@@ -351,6 +389,11 @@ export class VoiceMediaService {
      */
     configure(context = {}) {
 
+        const transition =
+            this.#lifecycle.activate();
+
+        if (transition.status === "destroyed") return transition;
+
         this.#context = context;
         this.#clientEpoch =
             this.#clientEpoch || this.#createClientEpoch();
@@ -373,6 +416,10 @@ export class VoiceMediaService {
             warn: error => this.#warn(error)
         });
 
+        this.#recordLifecycleTransition(transition);
+
+        return transition;
+
     }
 
     //--------------------------------------------------
@@ -386,6 +433,8 @@ export class VoiceMediaService {
      */
     async populateDevices(reason = "manual") {
 
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
+
         return this.#devices.populate(reason);
 
     }
@@ -398,6 +447,8 @@ export class VoiceMediaService {
      */
     async requestDevicePermissionAndPopulate() {
 
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
+
         return this.#devices.requestPermissionAndPopulate();
 
     }
@@ -407,103 +458,35 @@ export class VoiceMediaService {
      *
      * @returns {Promise<void>}
      */
-    async join() {
+    join() {
 
-        if (this.#joined) return;
+        if (this.#joinPromise) return this.#joinPromise;
 
-        try {
+        const transition =
+            this.#lifecycle.beginJoin();
 
-            this.#devices.captureSelectedOutputDevice();
+        this.#recordLifecycleTransition(transition);
 
-            const mediaDevices =
-                this.#context?.navigator?.mediaDevices;
+        if (transition.status !== "started") return transition;
 
-            this.#recordAudioPathDiagnostic({
+        const operation =
+            this.#runJoin(transition.token);
 
-                event:
-                    "audio-source-acquire-start",
+        const trackedOperation =
+            operation.finally(() => {
 
-                selectedInputDeviceId:
-                    this.#context?.getInputDeviceId?.() || null,
+                if (this.#joinPromise === trackedOperation) {
 
-                selectedOutputDeviceId:
-                    this.#devices.selectedOutputDeviceId || null
+                    this.#joinPromise = null;
 
-            });
-
-            this.#voiceStream =
-                await mediaDevices.getUserMedia({
-
-                    audio:
-                        this.#devices.selectedInputConstraints(),
-
-                    video:
-                        false
-
-                });
-
-            const audioTrack =
-                this.#voiceStream?.getAudioTracks?.()[0] || null;
-
-            this.#recordAudioPathDiagnostic({
-
-                event:
-                    "audio-source-acquired",
-
-                sourceType:
-                    this.#audioSourceType(audioTrack),
-
-                stream:
-                    this.#streamSnapshot(this.#voiceStream),
-
-                track:
-                    this.#trackSnapshot(audioTrack),
-
-                selectedInputDeviceId:
-                    this.#context?.getInputDeviceId?.() || null
-
-            });
-
-            this.#muted = false;
-            this.#deafened = false;
-            this.#speaking = false;
-            this.#joined = true;
-            this.#attachPendingRemoteAudioTracks();
-
-            this.#context?.updateToggleButton?.();
-            await this.populateDevices("after-permission").catch(() => {});
-
-            await this.#context?.apiPost?.(
-                "/api/media_signal.php",
-                {
-                    action: "join",
-                    media: "voice",
-                    session_id: this.#config()?.sessionId,
-                    participant_id: this.#config()?.myParticipantId,
-                    client_epoch: this.#clientEpoch,
-                    join_token: this.#config()?.myJoinToken
                 }
-            );
 
-            await this.syncStatus(true);
-            this.#startAnalyser();
-            this.#forEachAudioElement(audio => this.applyAudioOutput(audio));
-            await this.connectMediaPeers();
-            this.startPolling(0);
-            this.#context?.closeDeviceModal?.();
-            this.populateDevices("after-join").catch(() => {});
+            });
 
-        } catch (error) {
+        this.#joinPromise =
+            trackedOperation;
 
-            this.#joined = false;
-            this.#context?.updateToggleButton?.();
-            this.#stopVoiceStream();
-            this.#context?.setDeviceStatus?.(
-                error.message || "Could not join voice chat.",
-                "error"
-            );
-
-        }
+        return this.#joinPromise;
 
     }
 
@@ -512,53 +495,38 @@ export class VoiceMediaService {
      *
      * @returns {Promise<void>}
      */
-    async leave() {
+    leave() {
 
-        if (!this.#joined) return;
+        if (this.#leavePromise) return this.#leavePromise;
 
-        this.#joined = false;
-        this.#muted = false;
-        this.#deafened = false;
-        this.#speaking = false;
-        this.#lastStatusSignature = "";
-        this.#stopAnalyser();
-        this.#context?.updateToggleButton?.();
-        this.#removeAllAudioElements();
-        this.#pendingRemoteAudioTracks.clear();
-        this.#stopVoiceStream();
+        const transition =
+            this.#lifecycle.beginLeave();
 
-        if (this.#webcamStream()) {
+        this.#recordLifecycleTransition(transition);
 
-            await this.renegotiateMediaPeers();
+        if (transition.status !== "started") return transition;
 
-        } else {
+        const pendingJoin =
+            this.#joinPromise;
 
-            this.#closeAllPeers();
+        const operation =
+            this.#runLeave(transition.token, pendingJoin);
 
-        }
+        const trackedOperation =
+            operation.finally(() => {
 
-        await this.#context?.apiPost?.(
-            "/api/media_signal.php",
-            {
-                action: "leave",
-                media: "voice",
-                session_id: this.#config()?.sessionId,
-                participant_id: this.#config()?.myParticipantId,
-                client_epoch: this.#clientEpoch,
-                join_token: this.#config()?.myJoinToken
-            }
-        ).catch(() => {});
+                if (this.#leavePromise === trackedOperation) {
 
-        this.#voiceParticipants =
-            this.#voiceParticipants.filter(participant =>
-                Number(participant.id) !== Number(this.#config()?.myParticipantId)
-            );
+                    this.#leavePromise = null;
 
-        this.#renderVoiceList(
-            this.#voiceParticipants
-        );
+                }
 
-        this.startPolling(0);
+            });
+
+        this.#leavePromise =
+            trackedOperation;
+
+        return this.#leavePromise;
 
     }
 
@@ -568,6 +536,8 @@ export class VoiceMediaService {
      * @param {boolean} muted
      */
     setMuted(muted) {
+
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
 
         this.#muted =
             Boolean(muted);
@@ -592,6 +562,8 @@ export class VoiceMediaService {
         this.renderCurrentVoiceList();
         this.syncStatus(true);
 
+        return this.getState();
+
     }
 
     /**
@@ -601,12 +573,16 @@ export class VoiceMediaService {
      */
     setDeafened(deafened) {
 
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
+
         this.#deafened =
             Boolean(deafened);
 
         this.#setRemoteAudioDeafened();
         this.renderCurrentVoiceList();
         this.syncStatus(true);
+
+        return this.getState();
 
     }
 
@@ -619,7 +595,9 @@ export class VoiceMediaService {
      */
     syncStatus(force = false) {
 
-        if (!this.#joined) return Promise.resolve();
+        if (this.#lifecycle.isDestroyed()) return Promise.resolve({ status: "destroyed" });
+
+        if (!this.#lifecycle.isJoined()) return Promise.resolve();
 
         const signature =
             `${this.#muted ? 1 : 0}:${this.#deafened ? 1 : 0}:${this.#speaking ? 1 : 0}`;
@@ -672,6 +650,8 @@ export class VoiceMediaService {
      */
     startPolling(delay = 0) {
 
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
+
         this.stopPolling();
 
         const setTimer =
@@ -682,6 +662,8 @@ export class VoiceMediaService {
                 () => this.poll(),
                 delay
             );
+
+        return Object.freeze({ status: "scheduled", delay });
 
     }
 
@@ -710,8 +692,10 @@ export class VoiceMediaService {
      */
     mediaActive() {
 
+        if (this.#lifecycle.isDestroyed()) return false;
+
         return Boolean(
-            this.#joined ||
+            this.#lifecycle.isJoined() ||
             this.#webcamStream()
         );
 
@@ -742,6 +726,8 @@ export class VoiceMediaService {
      */
     async applyAudioOutput(audio) {
 
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
+
         return this.#devices.applyAudioOutput(audio);
 
     }
@@ -754,6 +740,8 @@ export class VoiceMediaService {
      * @returns {Promise<void>}
      */
     async connectMediaPeer(participantId, options = {}) {
+
+        if (this.#lifecycle.isDestroyed()) return SIGNAL_OUTCOME.STALE_GENERATION;
 
         const id =
             Number(participantId);
@@ -897,6 +885,8 @@ export class VoiceMediaService {
      */
     async connectMediaPeers(options = {}) {
 
+        if (this.#lifecycle.isDestroyed()) return SIGNAL_OUTCOME.STALE_GENERATION;
+
         if (!this.mediaActive()) return;
 
         await Promise.all(
@@ -923,6 +913,8 @@ export class VoiceMediaService {
      */
     async renegotiateMediaPeers(options = {}) {
 
+        if (this.#lifecycle.isDestroyed()) return SIGNAL_OUTCOME.STALE_GENERATION;
+
         for (const [id, pc] of this.#peers) {
 
             await this.#requestPeerNegotiation(
@@ -947,6 +939,8 @@ export class VoiceMediaService {
      * @returns {boolean}
      */
     reconcileRemoteWebcamPresentation(participantId, enabled, reason = "participant-state") {
+
+        if (this.#lifecycle.isDestroyed()) return false;
 
         const id =
             Number(participantId);
@@ -1056,6 +1050,8 @@ export class VoiceMediaService {
     }
 
     async reconcileRemoteWebcamReadiness(participantId, enabled, reason = "participant-state") {
+
+        if (this.#lifecycle.isDestroyed()) return SIGNAL_OUTCOME.STALE_GENERATION;
 
         const id =
             Number(participantId);
@@ -1168,6 +1164,8 @@ export class VoiceMediaService {
      */
     closePeer(participantId) {
 
+        if (this.#lifecycle.isDestroyed()) return;
+
         const id =
             Number(participantId);
 
@@ -1176,27 +1174,7 @@ export class VoiceMediaService {
         const pc =
             this.#peers.get(id);
 
-        this.#recordVideoLifecycleDiagnostic({
-
-            event:
-                "peer-close",
-
-            reason:
-                "closePeer",
-
-            remoteParticipantId:
-                id,
-
-            ...this.#peerSnapshot(pc)
-
-        });
-
-        this.#clearTransportProbeTimers(pc);
-        pc.close();
-        this.#peers.delete(id);
-        this.#pendingRemoteAudioTracks.delete(id);
-        this.#remoteVideoPresentations.delete(id);
-        this.#remoteWebcamReadinessRequests.delete(id);
+        this.#releasePeer(pc, "closePeer");
 
     }
 
@@ -1206,6 +1184,8 @@ export class VoiceMediaService {
      * @returns {Promise<void>}
      */
     async poll() {
+
+        if (this.#lifecycle.isDestroyed()) return Object.freeze({ status: "destroyed" });
 
         if (this.#pollInProgress) {
 
@@ -1219,6 +1199,11 @@ export class VoiceMediaService {
             return;
 
         }
+
+        const pollToken =
+            this.#lifecycle.beginOperation("poll");
+
+        if (!pollToken) return Object.freeze({ status: "destroyed" });
 
         this.#pollInProgress =
             true;
@@ -1250,6 +1235,16 @@ export class VoiceMediaService {
 
             const data =
                 await this.#context?.fetchMediaSignals?.(qs);
+
+            if (!this.#lifecycle.isCurrent(pollToken)) {
+
+                return this.#cancelledOperationResult(
+                    "poll",
+                    pollToken,
+                    "fetch-media-signals"
+                );
+
+            }
 
             const clientEpochWasRegistered =
                 this.#clientEpochRegistered;
@@ -1306,9 +1301,13 @@ export class VoiceMediaService {
 
         }
 
-        this.startPolling(
-            this.shouldPollFast() ? 800 : 2000
-        );
+        if (!this.#lifecycle.isDestroyed()) {
+
+            this.startPolling(
+                this.shouldPollFast() ? 800 : 2000
+            );
+
+        }
 
     }
 
@@ -1335,7 +1334,7 @@ export class VoiceMediaService {
                 Boolean(this.#context),
 
             joined:
-                this.#joined,
+                this.#lifecycle.isJoined(),
 
             muted:
                 this.#muted,
@@ -1374,19 +1373,570 @@ export class VoiceMediaService {
                 Array.from(this.#transportProbeTimers.values())
                     .reduce((count, timers) => count + timers.size, 0),
 
+            recoveryTimerCount:
+                this.#recoveryTimers.size,
+
+            remoteAudioResourceCount:
+                this.#remoteAudioResources.size,
+
+            pendingRemoteAudioCount:
+                this.#pendingRemoteAudioTracks.size,
+
             devices:
                 this.#devices.getDiagnostics(),
 
             polling:
-                this.#pollTimer !== null
+                this.#pollTimer !== null,
+
+            lifecycle:
+                this.#lifecycle.getSnapshot(),
+
+            joinOperationPending:
+                this.#joinPromise !== null,
+
+            leaveOperationPending:
+                this.#leavePromise !== null
 
         });
+
+    }
+
+    /**
+     * Returns an identity-aware snapshot of resources owned by voice.
+     * Host-owned webcam capture and AvatarRenderer presentation are reported
+     * separately and are not counted as voice-owned resources.
+     */
+    getResourceSnapshot() {
+
+        const peers =
+            Array.from(this.#peers.values());
+
+        const deviceDiagnostics =
+            this.#devices.getDiagnostics();
+
+        return Object.freeze({
+
+            lifecycle:
+                this.#lifecycle.getSnapshot(),
+
+            liveOwnedCaptureTrackCount:
+                this.#voiceStream?.getTracks?.().filter(
+                    track => track.readyState !== "ended"
+                ).length || 0,
+
+            activePeerConnectionCount:
+                peers.filter(pc => pc.connectionState !== "closed").length,
+
+            peerOperationCount:
+                peers.filter(pc => pc.__voiceOperationTail).length,
+
+            peerTrackListenerCount:
+                peers.reduce(
+                    (count, pc) => count + (pc.__voiceTrackListeners?.length || 0),
+                    0
+                ),
+
+            remoteAudioElementCount:
+                this.#context?.getAudioElements?.().length || 0,
+
+            remoteAudioResourceCount:
+                this.#remoteAudioResources.size,
+
+            pendingRemoteAudioCount:
+                this.#pendingRemoteAudioTracks.size,
+
+            pendingSignalOperationCount:
+                this.#signalInbox.size +
+                this.#processingSignalIds.size +
+                (this.#drainingSignalInbox ? 1 : 0),
+
+            delayedProbeCount:
+                Array.from(this.#transportProbeTimers.values())
+                    .reduce((count, timers) => count + timers.size, 0),
+
+            recoveryTimerCount:
+                this.#recoveryTimers.size,
+
+            pollTimerCount:
+                this.#pollTimer === null ? 0 : 1,
+
+            analyserIntervalCount:
+                this.#analyserTimer === null ? 0 : 1,
+
+            joinOperationCount:
+                this.#joinPromise === null ? 0 : 1,
+
+            leaveOperationCount:
+                this.#leavePromise === null ? 0 : 1,
+
+            activeDeviceListenerCount:
+                deviceDiagnostics.deviceChangeListening ? 1 : 0,
+
+            mutationCapablePublicOperationCount:
+                this.#lifecycle.isDestroyed() ? 0 : 1,
+
+            hostWebcam:
+                Object.freeze({
+                    ...(this.#context?.getWebcamLifecycleState?.() || {}),
+                    ownership: "room-host"
+                }),
+
+            peers:
+                Object.freeze(peers.map(pc => Object.freeze({
+                    ...this.#peerSnapshot(pc),
+                    associatedTransceiverCount:
+                        pc.getTransceivers?.().filter(transceiver =>
+                            transceiver === pc.__voiceTransceivers?.audio ||
+                            transceiver === pc.__voiceTransceivers?.video
+                        ).length || 0
+                })))
+
+        });
+
+    }
+
+    verifyResourceInvariants(phase = "active", options = {}) {
+
+        const resources =
+            this.getResourceSnapshot();
+
+        const violations =
+            [];
+
+        for (const peer of resources.peers) {
+
+            if (peer.connectionState !== "connected") continue;
+
+            if (peer.transceivers.length !== 2) {
+                violations.push(`peer:${peer.peerInstanceId}:transceiver-count`);
+            }
+            if (peer.associatedTransceiverCount !== 2) {
+                violations.push(`peer:${peer.peerInstanceId}:associated-transceivers`);
+            }
+            if (String(peer.canonicalTransceiverMids.audio) !== "0") {
+                violations.push(`peer:${peer.peerInstanceId}:audio-mid`);
+            }
+            if (String(peer.canonicalTransceiverMids.video) !== "1") {
+                violations.push(`peer:${peer.peerInstanceId}:video-mid`);
+            }
+
+        }
+
+        for (const resource of this.#remoteAudioResources.values()) {
+
+            if (!this.#isRemoteAudioResourceCurrent(resource)) {
+                violations.push(`remote-audio:${resource.participantId}:stale-owner`);
+            }
+
+        }
+
+        if (phase === "leave") {
+
+            if (resources.lifecycle.participationState !== "not-joined") {
+                violations.push("leave:participation");
+            }
+            if (resources.liveOwnedCaptureTrackCount !== 0) {
+                violations.push("leave:live-capture-tracks");
+            }
+            if (resources.remoteAudioElementCount !== 0) {
+                violations.push("leave:remote-audio-elements");
+            }
+            if (resources.remoteAudioResourceCount !== 0) {
+                violations.push("leave:remote-audio-resources");
+            }
+            if (resources.pendingRemoteAudioCount !== 0) {
+                violations.push("leave:pending-remote-audio");
+            }
+            if (resources.analyserIntervalCount !== 0 || this.#speaking) {
+                violations.push("leave:speaking-analyser");
+            }
+
+        }
+
+        if (phase === "destroy") {
+
+            const requiredZero = [
+                "liveOwnedCaptureTrackCount",
+                "activePeerConnectionCount",
+                "peerOperationCount",
+                "peerTrackListenerCount",
+                "remoteAudioElementCount",
+                "remoteAudioResourceCount",
+                "pendingRemoteAudioCount",
+                "pendingSignalOperationCount",
+                "delayedProbeCount",
+                "recoveryTimerCount",
+                "pollTimerCount",
+                "analyserIntervalCount",
+                "joinOperationCount",
+                "leaveOperationCount",
+                "activeDeviceListenerCount",
+                "mutationCapablePublicOperationCount"
+            ];
+
+            requiredZero.forEach(name => {
+                if (resources[name] !== 0) violations.push(`destroy:${name}`);
+            });
+
+            if (resources.lifecycle.facadeState !== "destroyed") {
+                violations.push("destroy:facade-state");
+            }
+
+        }
+
+        const result =
+            Object.freeze({
+                ok: violations.length === 0,
+                phase,
+                violations: Object.freeze(violations),
+                resources
+            });
+
+        this.#recordVideoLifecycleDiagnostic({
+            event: "voice-resource-invariant",
+            phase,
+            ok: result.ok,
+            violations
+        });
+
+        if (!result.ok && options.throwOnFailure) {
+
+            throw new Error(
+                `Voice resource invariant failed (${phase}): ${violations.join(", ")}`
+            );
+
+        }
+
+        return result;
 
     }
 
     //--------------------------------------------------
     // Private Methods
     //--------------------------------------------------
+
+    async #runJoin(token) {
+
+        let acquiredStream = null;
+
+        try {
+
+            this.#devices.captureSelectedOutputDevice();
+
+            const mediaDevices =
+                this.#context?.navigator?.mediaDevices;
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "audio-source-acquire-start",
+
+                operationGeneration:
+                    token.generation,
+
+                selectedInputDeviceId:
+                    this.#context?.getInputDeviceId?.() || null,
+
+                selectedOutputDeviceId:
+                    this.#devices.selectedOutputDeviceId || null
+
+            });
+
+            acquiredStream =
+                await mediaDevices.getUserMedia({
+
+                    audio:
+                        this.#devices.selectedInputConstraints(),
+
+                    video:
+                        false
+
+                });
+
+            if (!this.#lifecycle.isCurrent(token)) {
+
+                this.#releaseMediaStream(acquiredStream);
+                return this.#cancelledOperationResult(
+                    "join",
+                    token,
+                    "microphone-acquisition"
+                );
+
+            }
+
+            this.#voiceStream = acquiredStream;
+            this.#recordLifecycleTransition(
+                this.#lifecycle.markMicrophoneReady(token)
+            );
+
+            const audioTrack =
+                this.#voiceStream?.getAudioTracks?.()[0] || null;
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "audio-source-acquired",
+
+                operationGeneration:
+                    token.generation,
+
+                sourceType:
+                    this.#audioSourceType(audioTrack),
+
+                stream:
+                    this.#streamSnapshot(this.#voiceStream),
+
+                track:
+                    this.#trackSnapshot(audioTrack),
+
+                selectedInputDeviceId:
+                    this.#context?.getInputDeviceId?.() || null
+
+            });
+
+            this.#muted = false;
+            this.#deafened = false;
+            this.#speaking = false;
+            this.#recordLifecycleTransition(
+                this.#lifecycle.completeJoin(token)
+            );
+            this.#attachPendingRemoteAudioTracks();
+            this.#context?.updateToggleButton?.();
+
+            await this.populateDevices("after-permission").catch(() => {});
+            if (!this.#lifecycle.isCurrent(token)) {
+                return this.#cancelledOperationResult(
+                    "join",
+                    token,
+                    "post-permission-refresh"
+                );
+            }
+
+            await this.#context?.apiPost?.(
+                "/api/media_signal.php",
+                {
+                    action: "join",
+                    media: "voice",
+                    session_id: this.#config()?.sessionId,
+                    participant_id: this.#config()?.myParticipantId,
+                    client_epoch: this.#clientEpoch,
+                    join_token: this.#config()?.myJoinToken
+                }
+            );
+
+            if (!this.#lifecycle.isCurrent(token)) {
+                return this.#cancelledOperationResult(
+                    "join",
+                    token,
+                    "server-join"
+                );
+            }
+
+            await this.syncStatus(true);
+            this.#startAnalyser(token);
+            this.#forEachAudioElement(audio => this.applyAudioOutput(audio));
+            await this.connectMediaPeers();
+
+            if (!this.#lifecycle.isCurrent(token)) {
+                return this.#cancelledOperationResult(
+                    "join",
+                    token,
+                    "peer-connect"
+                );
+            }
+
+            this.startPolling(0);
+            this.#context?.closeDeviceModal?.();
+            this.populateDevices("after-join").catch(() => {});
+
+            this.verifyResourceInvariants("active");
+
+            return Object.freeze({
+                status: "completed",
+                operation: "join",
+                generation: token.generation,
+                readiness: "local-source-status-peers-polling"
+            });
+
+        } catch (error) {
+
+            if (!this.#lifecycle.isCurrent(token)) {
+
+                if (acquiredStream !== this.#voiceStream) {
+                    this.#releaseMediaStream(acquiredStream);
+                }
+
+                return this.#cancelledOperationResult(
+                    "join",
+                    token,
+                    "failure-after-cancellation"
+                );
+
+            }
+
+            this.#recordLifecycleTransition(
+                this.#lifecycle.failJoin(token)
+            );
+            this.#context?.updateToggleButton?.();
+            this.#stopVoiceStream();
+            this.#context?.setDeviceStatus?.(
+                error.message || "Could not join voice chat.",
+                "error"
+            );
+
+            return Object.freeze({
+                status: "failed",
+                operation: "join",
+                generation: token.generation,
+                errorName: error?.name || null
+            });
+
+        }
+
+    }
+
+    async #runLeave(token, pendingJoin) {
+
+        let reconciliationError =
+            null;
+
+        this.#muted = false;
+        this.#deafened = false;
+        this.#speaking = false;
+        this.#lastStatusSignature = "";
+        this.#stopAnalyser();
+        this.#context?.updateToggleButton?.();
+        this.#removeAllAudioElements();
+        this.#pendingRemoteAudioTracks.clear();
+        this.#stopVoiceStream();
+
+        await pendingJoin?.catch?.(() => {});
+
+        if (!this.#lifecycle.isCurrent(token)) {
+            return this.#cancelledOperationResult(
+                "leave",
+                token,
+                "pending-join"
+            );
+        }
+
+        try {
+
+            if (this.#webcamStream()) {
+                await this.renegotiateMediaPeers();
+            } else {
+                this.#closeAllPeers();
+            }
+
+        } catch (error) {
+
+            reconciliationError = error;
+            this.#recordVideoLifecycleDiagnostic({
+                event: "voice-leave-peer-reconciliation-failed",
+                operationGeneration: token.generation,
+                errorName: error?.name || null,
+                message: error?.message || String(error)
+            });
+            this.#warn(error);
+
+        }
+
+        if (!this.#lifecycle.isCurrent(token)) {
+            return this.#cancelledOperationResult(
+                "leave",
+                token,
+                "peer-cleanup"
+            );
+        }
+
+        await this.#context?.apiPost?.(
+            "/api/media_signal.php",
+            {
+                action: "leave",
+                media: "voice",
+                session_id: this.#config()?.sessionId,
+                participant_id: this.#config()?.myParticipantId,
+                client_epoch: this.#clientEpoch,
+                join_token: this.#config()?.myJoinToken
+            }
+        ).catch(() => {});
+
+        if (!this.#lifecycle.isCurrent(token)) {
+            return this.#cancelledOperationResult(
+                "leave",
+                token,
+                "server-leave"
+            );
+        }
+
+        this.#voiceParticipants =
+            this.#voiceParticipants.filter(participant =>
+                Number(participant.id) !== Number(this.#config()?.myParticipantId)
+            );
+
+        this.#renderVoiceList(this.#voiceParticipants);
+        this.#recordLifecycleTransition(
+            this.#lifecycle.completeLeave(token)
+        );
+        this.startPolling(0);
+
+        this.verifyResourceInvariants("leave");
+
+        return Object.freeze({
+            status: reconciliationError ? "completed-with-warning" : "completed",
+            operation: "leave",
+            generation: token.generation,
+            readiness: "voice-resources-released",
+            peerReconciliationCompleted: reconciliationError === null
+        });
+
+    }
+
+    #releaseMediaStream(stream) {
+
+        stream?.getTracks?.().forEach(track => {
+
+            if (track.readyState !== "ended") track.stop();
+
+        });
+
+    }
+
+    #cancelledOperationResult(operation, token, phase) {
+
+        const status =
+            this.#lifecycle.isDestroyed() ? "destroyed" : "stale-generation";
+
+        this.#recordVideoLifecycleDiagnostic({
+            event: "voice-operation-cancelled",
+            operation,
+            operationGeneration: token?.generation || null,
+            phase,
+            outcome: status
+        });
+
+        return Object.freeze({
+            status,
+            operation,
+            generation: token?.generation || null,
+            phase
+        });
+
+    }
+
+    #recordLifecycleTransition(transition) {
+
+        if (!transition) return;
+
+        this.#recordVideoLifecycleDiagnostic({
+            event: "voice-lifecycle-transition",
+            operation: transition.operation || null,
+            outcome: transition.status || null,
+            previous: transition.previous || null,
+            current: transition.current || this.#lifecycle.getSnapshot()
+        });
+
+    }
 
     async #reconcileKnownRemoteWebcams(reason) {
 
@@ -1481,6 +2031,7 @@ export class VoiceMediaService {
                 "remove-all-remote-audio"
             );
         });
+        this.#remoteAudioResources.clear();
         this.#context?.removeAllAudioElements?.();
 
     }
@@ -1489,47 +2040,259 @@ export class VoiceMediaService {
 
         if (!this.#voiceStream) return;
 
-        this.#voiceStream.getTracks().forEach(track => {
-
-            track.stop();
-
-        });
-
+        this.#releaseMediaStream(this.#voiceStream);
         this.#voiceStream = null;
 
     }
 
     #closeAllPeers() {
 
-        for (const [id, pc] of this.#peers.entries()) {
+        for (const pc of Array.from(this.#peers.values())) {
 
-            this.#recordVideoLifecycleDiagnostic({
-
-                event:
-                    "peer-close",
-
-                reason:
-                    "closeAllPeers",
-
-                remoteParticipantId:
-                    id,
-
-                ...this.#peerSnapshot(pc)
-
-            });
-
-            this.#clearTransportProbeTimers(pc);
-            pc.close();
+            this.#releasePeer(pc, "closeAllPeers");
 
         }
 
-        this.#clearTransportProbeTimers();
-        this.#peers.clear();
         this.#processingSignalIds.clear();
+        this.#drainingSignalInbox = false;
         this.#pollInProgress = false;
         this.#pendingRemoteAudioTracks.clear();
+        this.#remoteAudioResources.clear();
         this.#remoteVideoPresentations.clear();
         this.#remoteWebcamReadinessRequests.clear();
+
+    }
+
+    #releasePeer(pc, reason, options = {}) {
+
+        if (!pc || pc.__voiceLifecycleState === "closed") {
+
+            return Object.freeze({ status: "duplicate", reason });
+
+        }
+
+        const participantId =
+            Number(pc.__voiceRemoteParticipantId);
+
+        const wasActive =
+            this.#peers.get(participantId) === pc;
+
+        const snapshot =
+            this.#peerSnapshot(pc);
+
+        pc.__voiceLifecycleState =
+            options.replacing ? "replacing" : "closing";
+
+        pc.__voiceOperationGeneration =
+            Number(pc.__voiceOperationGeneration || 0) + 1;
+
+        if (wasActive) {
+
+            this.#peers.delete(participantId);
+
+        }
+
+        this.#clearRecoveryTimer(participantId);
+        this.#clearTransportProbeTimers(pc);
+        this.#removePeerTrackListeners(pc);
+
+        pc.ontrack = null;
+        pc.onicecandidate = null;
+        pc.onconnectionstatechange = null;
+        pc.oniceconnectionstatechange = null;
+        pc.onicegatheringstatechange = null;
+        pc.onnegotiationneeded = null;
+        pc.__voiceDeferredTrackEvents = [];
+        pc.__voicePendingIceSignals = [];
+        pc.__voiceAdoptingRemoteDescription = false;
+        pc.__voicePendingNegotiation = false;
+        pc.__voicePendingRenegotiationRequest = null;
+
+        const pendingAudio =
+            this.#pendingRemoteAudioTracks.get(participantId) || null;
+
+        if (!pendingAudio || pendingAudio.peer === pc) {
+
+            this.#pendingRemoteAudioTracks.delete(participantId);
+
+        }
+
+        const videoPresentation =
+            this.#remoteVideoPresentations.get(participantId) || null;
+
+        if (!videoPresentation || videoPresentation.peer === pc) {
+
+            this.#remoteVideoPresentations.delete(participantId);
+
+        }
+
+        this.#remoteWebcamReadinessRequests.delete(participantId);
+        this.#releaseRemoteAudioResource(participantId, reason, pc);
+
+        if (options.detachVideo) {
+
+            this.#context?.detachParticipantVideo?.(participantId);
+
+        }
+
+        try {
+
+            if (pc.connectionState !== "closed") pc.close();
+
+        } catch (error) {
+
+            this.#warn(error);
+
+        }
+
+        pc.__voiceLifecycleState =
+            "closed";
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "peer-close",
+
+            reason,
+
+            remoteParticipantId:
+                participantId,
+
+            invalidatedBeforeClose:
+                wasActive,
+
+            previous:
+                snapshot,
+
+            ...this.#peerSnapshot(pc)
+
+        });
+
+        return Object.freeze({
+
+            status:
+                "completed",
+
+            reason,
+
+            participantId,
+
+            peerInstanceId:
+                pc.__voicePeerInstanceId || null
+
+        });
+
+    }
+
+    #listenToPeerTrack(pc, track, eventName, handler, options = undefined) {
+
+        if (!pc || !track?.addEventListener) return;
+
+        const guardedHandler =
+            event => {
+
+                if (!this.#isActivePeer(pc)) return;
+                handler(event);
+
+            };
+
+        track.addEventListener(eventName, guardedHandler, options);
+        pc.__voiceTrackListeners.push({
+            track,
+            eventName,
+            handler: guardedHandler,
+            options
+        });
+
+    }
+
+    #removePeerTrackListeners(pc) {
+
+        for (const listener of pc?.__voiceTrackListeners || []) {
+
+            listener.track?.removeEventListener?.(
+                listener.eventName,
+                listener.handler,
+                listener.options
+            );
+
+        }
+
+        if (pc) pc.__voiceTrackListeners = [];
+
+    }
+
+    #schedulePeerRecovery(participantId, failedPeer) {
+
+        this.#clearRecoveryTimer(participantId);
+
+        const setTimer =
+            this.#context?.setTimeout || setTimeout;
+
+        let timerId = null;
+
+        timerId = setTimer(() => {
+
+            const active =
+                this.#recoveryTimers.get(participantId);
+
+            if (active?.timerId !== timerId) return;
+
+            this.#recoveryTimers.delete(participantId);
+
+            if (
+                this.#lifecycle.isDestroyed() ||
+                this.#peers.has(participantId) ||
+                !this.mediaActive()
+            ) {
+
+                return;
+
+            }
+
+            this.connectMediaPeer(participantId).catch(error =>
+                this.#recordCriticalFailure(null, error, {
+
+                    operation:
+                        "rebuild-failed-peer",
+
+                    remoteParticipantId:
+                        participantId
+
+                })
+            );
+
+        }, 0);
+
+        this.#recoveryTimers.set(participantId, {
+            timerId,
+            failedPeerInstanceId: failedPeer?.__voicePeerInstanceId || null
+        });
+
+    }
+
+    #clearRecoveryTimer(participantId) {
+
+        const entry =
+            this.#recoveryTimers.get(Number(participantId));
+
+        if (!entry) return;
+
+        const clearTimer =
+            this.#context?.clearTimeout || clearTimeout;
+
+        clearTimer(entry.timerId);
+        this.#recoveryTimers.delete(Number(participantId));
+
+    }
+
+    #clearRecoveryTimers() {
+
+        for (const participantId of Array.from(this.#recoveryTimers.keys())) {
+
+            this.#clearRecoveryTimer(participantId);
+
+        }
 
     }
 
@@ -1608,37 +2371,17 @@ export class VoiceMediaService {
 
         if (this.#isActivePeer(pc)) {
 
-            this.#clearTransportProbeTimers(pc);
-            pc.close();
-            this.#peers.delete(participantId);
-            this.#pendingRemoteAudioTracks.delete(participantId);
-            this.#remoteVideoPresentations.delete(participantId);
-            this.#remoteWebcamReadinessRequests.delete(participantId);
-            this.#removeAudioElement(
-                participantId,
-                "peer-replacement"
-            );
-            this.#context?.detachParticipantVideo?.(participantId);
+            pc.__voiceLifecycleState =
+                "failed";
+
+            this.#releasePeer(pc, "peer-replacement", {
+                replacing: true,
+                detachVideo: true
+            });
 
             if (this.mediaActive() && this.#ownsOffer(participantId)) {
 
-                const setTimer =
-                    this.#context?.setTimeout || setTimeout;
-
-                setTimer(
-                    () => this.connectMediaPeer(participantId).catch(nextError =>
-                        this.#recordCriticalFailure(null, nextError, {
-
-                            operation:
-                                "rebuild-failed-peer",
-
-                            remoteParticipantId:
-                                participantId
-
-                        })
-                    ),
-                    0
-                );
+                this.#schedulePeerRecovery(participantId, pc);
 
             }
 
@@ -1681,7 +2424,7 @@ export class VoiceMediaService {
 
     }
 
-    #startAnalyser() {
+    #startAnalyser(operationToken = null) {
 
         this.#stopAnalyser();
 
@@ -1718,12 +2461,33 @@ export class VoiceMediaService {
                     this.#analyser.fftSize
                 );
 
+            const sourceTrack =
+                this.#voiceStream.getAudioTracks?.()[0] || null;
+
             const setIntervalFn =
                 this.#context?.setInterval || setInterval;
 
             this.#analyserTimer =
                 setIntervalFn(
-                    () => this.#detectSpeaking(samples),
+                    () => {
+
+                        if (
+                            this.#lifecycle.isDestroyed() ||
+                            (
+                                operationToken &&
+                                !this.#lifecycle.isCurrent(operationToken)
+                            ) ||
+                            this.#voiceStream?.getAudioTracks?.()[0] !== sourceTrack
+                        ) {
+
+                            this.#stopAnalyser();
+                            return;
+
+                        }
+
+                        this.#detectSpeaking(samples);
+
+                    },
                     140
                 );
 
@@ -1971,6 +2735,8 @@ export class VoiceMediaService {
 
                     sender.replaceTrack(track).then(() => {
 
+                        if (!this.#isActivePeer(pc)) return;
+
                         this.#recordVideoLifecycleDiagnostic({
 
                             event:
@@ -1988,6 +2754,8 @@ export class VoiceMediaService {
                         });
 
                     }).catch(error => {
+
+                        if (!this.#isActivePeer(pc)) return;
 
                         this.#recordVideoLifecycleDiagnostic({
 
@@ -2141,6 +2909,15 @@ export class VoiceMediaService {
             generation:
                 pc.__voiceGeneration || null,
 
+            lifecycleState:
+                pc.__voiceLifecycleState || null,
+
+            operationGeneration:
+                Number(pc.__voiceOperationGeneration || 0),
+
+            trackListenerCount:
+                pc.__voiceTrackListeners?.length || 0,
+
             previousTrack:
                 this.#trackSnapshot(sender.track),
 
@@ -2164,6 +2941,12 @@ export class VoiceMediaService {
         try {
 
             await sender.replaceTrack(track);
+
+            if (!this.#isActivePeer(pc)) {
+
+                return SIGNAL_OUTCOME.STALE_GENERATION;
+
+            }
 
             this.#recordVideoLifecycleDiagnostic({
 
@@ -2304,9 +3087,18 @@ export class VoiceMediaService {
 
         }
 
+        const operationGeneration =
+            Number(pc.__voiceOperationGeneration || 0);
+
+        const isCurrent =
+            () => Boolean(
+                this.#isActivePeer(pc) &&
+                Number(pc.__voiceOperationGeneration || 0) === operationGeneration
+            );
+
         const run = async () => {
 
-            if (!this.#isActivePeer(pc)) {
+            if (!isCurrent()) {
 
                 this.#recordNegotiationDiagnostic({
 
@@ -2338,7 +3130,23 @@ export class VoiceMediaService {
             });
 
             const result =
-                await callback();
+                await callback(Object.freeze({
+                    generation: operationGeneration,
+                    isCurrent
+                }));
+
+            if (!isCurrent()) {
+
+                this.#recordNegotiationDiagnostic({
+                    event: "peer-operation-completion-stale-generation-skipped",
+                    operation,
+                    operationGeneration,
+                    ...this.#peerSnapshot(pc)
+                });
+
+                return SIGNAL_OUTCOME.STALE_GENERATION;
+
+            }
 
             this.#recordNegotiationDiagnostic({
 
@@ -2606,6 +3414,9 @@ export class VoiceMediaService {
         pc.__makingOffer =
             true;
 
+        pc.__voiceLifecycleState =
+            "offering";
+
         const negotiationId =
             this.#nextNegotiationId(
                 participantId,
@@ -2646,6 +3457,8 @@ export class VoiceMediaService {
             const offer =
                 await pc.createOffer();
 
+            if (!this.#isActivePeer(pc)) return SIGNAL_OUTCOME.STALE_GENERATION;
+
             this.#recordNegotiationDiagnostic({
 
                 event:
@@ -2670,6 +3483,8 @@ export class VoiceMediaService {
             await pc.setLocalDescription(
                 offer
             );
+
+            if (!this.#isActivePeer(pc)) return SIGNAL_OUTCOME.STALE_GENERATION;
 
             this.#reconcileCanonicalTransceivers(
                 pc,
@@ -2731,6 +3546,13 @@ export class VoiceMediaService {
                 }
             );
 
+            if (this.#isActivePeer(pc)) {
+
+                pc.__voiceLifecycleState =
+                    "connecting";
+
+            }
+
         } catch (error) {
 
             this.#recoverFailedPeer(pc, "create-local-offer", error);
@@ -2779,6 +3601,15 @@ export class VoiceMediaService {
 
         pc.__voiceGeneration =
             pc.__voicePeerInstanceId;
+
+        pc.__voiceLifecycleState =
+            "creating";
+
+        pc.__voiceOperationGeneration =
+            1;
+
+        pc.__voiceTrackListeners =
+            [];
 
         pc.__voicePendingLocalOffer =
             null;
@@ -2834,6 +3665,8 @@ export class VoiceMediaService {
 
         pc.onicecandidate =
             event => {
+
+                if (!this.#isActivePeer(pc)) return;
 
                 if (event.candidate) {
 
@@ -2897,6 +3730,22 @@ export class VoiceMediaService {
         pc.onconnectionstatechange =
             () => {
 
+                if (!this.#isActivePeer(pc)) return;
+
+                if (pc.connectionState === "connected") {
+
+                    pc.__voiceLifecycleState = "connected";
+
+                } else if (pc.connectionState === "failed") {
+
+                    pc.__voiceLifecycleState = "failed";
+
+                } else if (pc.connectionState === "connecting") {
+
+                    pc.__voiceLifecycleState = "connecting";
+
+                }
+
                 this.#recordTransportStateDiagnostic(
                     pc,
                     "connectionstatechange"
@@ -2911,6 +3760,8 @@ export class VoiceMediaService {
 
         pc.oniceconnectionstatechange =
             () => {
+
+                if (!this.#isActivePeer(pc)) return;
 
                 this.#recordTransportStateDiagnostic(
                     pc,
@@ -2927,6 +3778,8 @@ export class VoiceMediaService {
         pc.onicegatheringstatechange =
             () => {
 
+                if (!this.#isActivePeer(pc)) return;
+
                 this.#recordTransportStateDiagnostic(
                     pc,
                     "icegatheringstatechange"
@@ -2936,6 +3789,8 @@ export class VoiceMediaService {
 
         pc.onnegotiationneeded =
             () => {
+
+                if (!this.#isActivePeer(pc)) return;
 
                 pc.__voicePendingNegotiation =
                     true;
@@ -2992,6 +3847,9 @@ export class VoiceMediaService {
             `accept-offer:${signal.id}`,
             async () => {
 
+                pc.__voiceLifecycleState =
+                    "answering";
+
                 const offerCollision =
                     pc.__makingOffer || pc.signalingState !== "stable";
 
@@ -3006,6 +3864,12 @@ export class VoiceMediaService {
                     try {
 
                         await pc.setLocalDescription({ type: "rollback" });
+
+                        if (!this.#isActivePeer(pc)) {
+
+                            return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                        }
 
                     } catch (error) {
 
@@ -3037,6 +3901,13 @@ export class VoiceMediaService {
                         true;
 
                     await pc.setRemoteDescription(description);
+
+                    if (!this.#isActivePeer(pc)) {
+
+                        return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                    }
+
                     pc.__voiceRemotePeerInstanceId =
                         signal.data?.peer_instance_id || null;
 
@@ -3052,6 +3923,12 @@ export class VoiceMediaService {
                     this.#drainDeferredTrackEvents(pc);
 
                     await this.#syncPeerLocalTracks(pc);
+
+                    if (!this.#isActivePeer(pc)) {
+
+                        return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                    }
 
                     const completedRequest =
                         pc.__voicePendingRenegotiationRequest || null;
@@ -3105,7 +3982,19 @@ export class VoiceMediaService {
                     const answer =
                         await pc.createAnswer();
 
+                    if (!this.#isActivePeer(pc)) {
+
+                        return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                    }
+
                     await pc.setLocalDescription(answer);
+
+                    if (!this.#isActivePeer(pc)) {
+
+                        return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                    }
 
                     this.#reconcileCanonicalTransceivers(
                         pc,
@@ -3133,6 +4022,13 @@ export class VoiceMediaService {
 
                         }
                     );
+
+                    if (this.#isActivePeer(pc)) {
+
+                        pc.__voiceLifecycleState =
+                            "connecting";
+
+                    }
 
                     this.#scheduleTransportRtpProbe(
                         pc,
@@ -3227,6 +4123,13 @@ export class VoiceMediaService {
                 try {
 
                     await pc.setRemoteDescription(description);
+
+                    if (!this.#isActivePeer(pc)) {
+
+                        return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                    }
+
                     pc.__voiceRemotePeerInstanceId =
                         signal.data?.peer_instance_id || null;
 
@@ -3330,6 +4233,12 @@ export class VoiceMediaService {
                 try {
 
                     await pc.addIceCandidate(candidate);
+
+                    if (!this.#isActivePeer(pc)) {
+
+                        return SIGNAL_OUTCOME.STALE_GENERATION;
+
+                    }
 
                     this.#recordNegotiationDiagnostic({
 
@@ -3779,7 +4688,9 @@ export class VoiceMediaService {
 
         if (track.kind === "video") {
 
-            track.addEventListener(
+            this.#listenToPeerTrack(
+                pc,
+                track,
                 "mute",
                 () => this.#recordVideoLifecycleDiagnostic({
 
@@ -3797,7 +4708,9 @@ export class VoiceMediaService {
                 })
             );
 
-            track.addEventListener(
+            this.#listenToPeerTrack(
+                pc,
+                track,
                 "unmute",
                 () => this.#recordVideoLifecycleDiagnostic({
 
@@ -3815,7 +4728,9 @@ export class VoiceMediaService {
                 })
             );
 
-            track.addEventListener(
+            this.#listenToPeerTrack(
+                pc,
+                track,
                 "ended",
                 () => this.#recordVideoLifecycleDiagnostic({
 
@@ -3885,7 +4800,9 @@ export class VoiceMediaService {
 
             });
 
-            track.addEventListener(
+            this.#listenToPeerTrack(
+                pc,
+                track,
                 "ended",
                 () => {
 
@@ -3920,7 +4837,33 @@ export class VoiceMediaService {
 
         if (track.kind !== "audio") return;
 
-        if (!this.#joined) {
+        this.#listenToPeerTrack(
+            pc,
+            track,
+            "ended",
+            () => {
+
+                const pending =
+                    this.#pendingRemoteAudioTracks.get(Number(id));
+
+                if (pending?.track === track && pending?.peer === pc) {
+
+                    this.#pendingRemoteAudioTracks.delete(Number(id));
+
+                }
+
+                this.#releaseRemoteAudioResource(
+                    Number(id),
+                    "remote-audio-track-ended",
+                    pc,
+                    track
+                );
+
+            },
+            { once: true }
+        );
+
+        if (!this.#lifecycle.isJoined()) {
 
             this.#pendingRemoteAudioTracks.set(
                 Number(id),
@@ -3939,6 +4882,9 @@ export class VoiceMediaService {
 
                     generation:
                         pc.__voiceGeneration,
+
+                    receiverTrackId:
+                        track.id || null,
 
                     transceiver:
                         event.transceiver
@@ -3993,7 +4939,10 @@ export class VoiceMediaService {
                 !this.#isActivePeer(entry.peer) ||
                 entry.peer.__voicePeerInstanceId !== entry.peerInstanceId ||
                 entry.peer.__voiceGeneration !== entry.generation ||
-                entry.peer.__voiceTransceivers?.audio !== entry.transceiver
+                entry.peer.__voiceTransceivers?.audio !== entry.transceiver ||
+                entry.transceiver?.receiver?.track !== entry.track ||
+                entry.receiverTrackId !== (entry.track?.id || null) ||
+                entry.track?.readyState === "ended"
             ) {
 
                 this.#recordAudioPathDiagnostic({
@@ -4077,6 +5026,28 @@ export class VoiceMediaService {
         audio.muted =
             this.#deafened;
 
+        const existingResource =
+            this.#remoteAudioResources.get(Number(id)) || null;
+
+        if (
+            existingResource &&
+            (
+                existingResource.peer !== pc ||
+                existingResource.track !== track ||
+                existingResource.transceiver !== transceiver
+            )
+        ) {
+
+            this.#releaseRemoteAudioResource(
+                Number(id),
+                "remote-track-replacement",
+                existingResource.peer,
+                existingResource.track,
+                { preserveElement: true }
+            );
+
+        }
+
         const nextStream =
             new MediaStreamClass([track]);
 
@@ -4088,6 +5059,21 @@ export class VoiceMediaService {
         }
 
         audio.srcObject = nextStream;
+
+        const resource = {
+            participantId: Number(id),
+            peer: pc,
+            peerInstanceId: pc.__voicePeerInstanceId || null,
+            generation: pc.__voiceGeneration || null,
+            transceiver,
+            receiverTrackId: track.id || null,
+            track,
+            audio,
+            stream: nextStream
+        };
+
+        this.#remoteAudioResources.set(Number(id), resource);
+        this.#pendingRemoteAudioTracks.delete(Number(id));
 
         this.#recordAudioPathDiagnostic({
 
@@ -4133,6 +5119,8 @@ export class VoiceMediaService {
             audio
         ).then(() => {
 
+            if (!this.#isRemoteAudioResourceCurrent(resource)) return;
+
             this.#recordAudioPathDiagnostic({
 
                 event:
@@ -4161,6 +5149,13 @@ export class VoiceMediaService {
             this.#beginAudioPlayback(audio);
 
         audio.play?.().then(() => {
+
+            if (!this.#isRemoteAudioResourceCurrent(resource)) {
+
+                this.#finishAudioPlayback(audio, playSequence);
+                return;
+
+            }
 
             this.#finishAudioPlayback(
                 audio,
@@ -4208,6 +5203,12 @@ export class VoiceMediaService {
 
             const intentionalAbort =
                 error?.name === "AbortError" && Boolean(interruptionReason);
+
+            if (!this.#isRemoteAudioResourceCurrent(resource) && intentionalAbort) {
+
+                return;
+
+            }
 
             this.#recordAudioPathDiagnostic({
 
@@ -4459,6 +5460,11 @@ export class VoiceMediaService {
 
         if (this.#drainingSignalInbox) return;
 
+        const drainToken =
+            this.#lifecycle.beginOperation("signal-drain");
+
+        if (!drainToken) return;
+
         this.#drainingSignalInbox =
             true;
 
@@ -4513,6 +5519,12 @@ export class VoiceMediaService {
 
                             outcome =
                                 await this.#handleSignal(entry.signal);
+
+                            if (!this.#lifecycle.isCurrent(drainToken)) {
+
+                                return;
+
+                            }
 
                         }
 
@@ -4620,6 +5632,12 @@ export class VoiceMediaService {
 
     async #handleSignal(signal) {
 
+        if (this.#lifecycle.isDestroyed()) {
+
+            return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        }
+
         const from =
             Number(signal.from_participant_id);
 
@@ -4643,7 +5661,7 @@ export class VoiceMediaService {
 
         const shouldHandleMedia =
             Boolean(
-                this.#joined ||
+                this.#lifecycle.isJoined() ||
                 this.#webcamStream() ||
                 remoteHasWebcam ||
                 signalHasVideo
@@ -4690,26 +5708,10 @@ export class VoiceMediaService {
                     from
                 );
 
-                this.#recordVideoLifecycleDiagnostic({
-
-                    event:
-                        "peer-close",
-
-                    reason:
-                        "remote-leave-no-webcam",
-
-                    remoteParticipantId:
-                        from,
-
-                    ...this.#peerSnapshot(leavingPeer)
-
-                });
-
-                this.#clearTransportProbeTimers(leavingPeer);
-                leavingPeer.close();
-                this.#peers.delete(from);
-                this.#remoteVideoPresentations.delete(from);
-                this.#remoteWebcamReadinessRequests.delete(from);
+                this.#releasePeer(
+                    leavingPeer,
+                    "remote-leave-no-webcam"
+                );
 
             }
 
@@ -4719,7 +5721,7 @@ export class VoiceMediaService {
 
         if (signal.type === "join") {
 
-            if (!this.#joined && !this.#webcamStream()) {
+            if (!this.#lifecycle.isJoined() && !this.#webcamStream()) {
 
                 return SIGNAL_OUTCOME.DEFERRED;
 
@@ -4786,11 +5788,11 @@ export class VoiceMediaService {
 
                 });
 
-                this.#clearTransportProbeTimers(pc);
-                pc.close();
-                this.#peers.delete(from);
-                this.#pendingRemoteAudioTracks.delete(from);
-                this.#remoteVideoPresentations.delete(from);
+                this.#releasePeer(
+                    pc,
+                    "late-join-stale-offer-replaced",
+                    { replacing: true }
+                );
                 pc = null;
 
             }
@@ -5115,7 +6117,17 @@ export class VoiceMediaService {
 
     #isActivePeer(pc) {
 
-        if (!pc?.__voiceRemoteParticipantId) return false;
+        if (
+            this.#lifecycle.isDestroyed() ||
+            !pc?.__voiceRemoteParticipantId ||
+            ["closing", "closed", "replacing"].includes(
+                pc.__voiceLifecycleState
+            )
+        ) {
+
+            return false;
+
+        }
 
         return this.#peers.get(
             Number(pc.__voiceRemoteParticipantId)
@@ -5704,6 +6716,20 @@ export class VoiceMediaService {
             const report =
                 await pc.getStats();
 
+            if (!this.#isActivePeer(pc)) {
+
+                this.#recordAudioPathDiagnostic({
+                    event: "transport-rtp-probe-completion-stale-peer-skipped",
+                    reason,
+                    delay,
+                    remoteParticipantId: pc?.__voiceRemoteParticipantId || null,
+                    peerInstanceId: pc?.__voicePeerInstanceId || null,
+                    generation: pc?.__voiceGeneration || null
+                });
+                return;
+
+            }
+
             const summary =
                 this.#summarizePeerStats(
                     pc,
@@ -6202,12 +7228,86 @@ export class VoiceMediaService {
 
     }
 
-    #removeAudioElement(participantId, reason) {
+    #isRemoteAudioResourceCurrent(resource) {
+
+        if (!resource) return false;
+
+        return Boolean(
+            this.#remoteAudioResources.get(resource.participantId) === resource &&
+            this.#isActivePeer(resource.peer) &&
+            resource.peer.__voicePeerInstanceId === resource.peerInstanceId &&
+            resource.peer.__voiceGeneration === resource.generation &&
+            resource.peer.__voiceTransceivers?.audio === resource.transceiver &&
+            resource.transceiver?.receiver?.track === resource.track &&
+            resource.track?.id === resource.receiverTrackId &&
+            resource.track?.readyState !== "ended" &&
+            resource.audio?.srcObject === resource.stream
+        );
+
+    }
+
+    #releaseRemoteAudioResource(
+        participantId,
+        reason,
+        expectedPeer = null,
+        expectedTrack = null,
+        options = {}
+    ) {
+
+        const id =
+            Number(participantId);
+
+        const resource =
+            this.#remoteAudioResources.get(id) || null;
+
+        if (
+            resource &&
+            (
+                (expectedPeer && resource.peer !== expectedPeer) ||
+                (expectedTrack && resource.track !== expectedTrack)
+            )
+        ) {
+
+            return Object.freeze({ status: "stale-generation", reason });
+
+        }
 
         const audioElement =
-            this.#context?.getAudioElement?.(participantId) || null;
+            resource?.audio || this.#context?.getAudioElement?.(id) || null;
+
         this.#prepareAudioElementRemoval(audioElement, reason);
-        this.#context?.removeAudioElement?.(participantId);
+
+        if (resource) {
+
+            this.#remoteAudioResources.delete(id);
+
+            this.#recordAudioPathDiagnostic({
+                event: "remote-audio-resource-released",
+                reason,
+                remoteParticipantId: id,
+                peerInstanceId: resource.peerInstanceId,
+                generation: resource.generation,
+                receiverTrackId: resource.receiverTrackId
+            });
+
+        }
+
+        if (!options.preserveElement) {
+
+            this.#context?.removeAudioElement?.(id);
+
+        }
+
+        return Object.freeze({ status: "completed", reason });
+
+    }
+
+    #removeAudioElement(participantId, reason) {
+
+        return this.#releaseRemoteAudioResource(
+            participantId,
+            reason
+        );
 
     }
 

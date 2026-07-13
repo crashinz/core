@@ -145,6 +145,9 @@ let tabCtxTargetChat = null;
 let pendingDeleteMessageId = null;
 let pendingDeleteChatKey = null;
 let webcamStream = null;
+let webcamIntent = false;
+let webcamAcquisitionState = 'idle';
+let webcamOperationGeneration = 0;
 const pendingRemoteVideoStreams = new Map();
 const AVATAR_STAGE_SIZE = 150;
 const blockedUserIds = new Set();
@@ -208,11 +211,16 @@ async function initializeAvatarRuntime() {
     runtimeDiagnostics = runtimeDiagnosticsInstallation.diagnostics;
     runtimeVerificationControls = runtimeDiagnosticsInstallation.controls;
     runtimeVerificationControls.register('replace-local-webcam-capture', async () => {
-      const replacement = await navigator.mediaDevices.getUserMedia({
+      const acquisition = await acquireLocalWebcamCapture({
         video: { width: { ideal: 640 }, height: { ideal: 640 }, frameRate: { ideal: 30, max: 30 } },
         audio: false,
-      });
-      return replaceLocalWebcamCapture(replacement, 'replace');
+      }, 'replace');
+      if (!acquisition.stream) return acquisition;
+      return replaceLocalWebcamCapture(
+        acquisition.stream,
+        'replace',
+        acquisition.token,
+      );
     });
   }
 
@@ -783,6 +791,12 @@ function configureVoiceRuntime() {
     getConfig: () => cfg,
     getParticipants: () => participants,
     getWebcamStream: () => webcamStream,
+    getWebcamLifecycleState: () => ({
+      intent: webcamIntent,
+      acquisitionState: webcamAcquisitionState,
+      operationGeneration: webcamOperationGeneration,
+      trackId: webcamStream?.getVideoTracks?.()[0]?.id || null,
+    }),
     updateToggleButton: updateVoiceToggleButton,
     renderVoiceList,
     attachParticipantVideo,
@@ -3327,7 +3341,7 @@ function openAvatarContextMenu(x, y, participant) {
   document.getElementById('ctx-block').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   document.getElementById('ctx-unblock').style.display = !isOwn && isBlocked ? 'block' : 'none';
   document.getElementById('ctx-unlink').style.display = isLinked && !isBlocked ? 'block' : 'none';
-  ctxToggleWebcam.textContent = webcamStream ? 'Disable Webcam' : 'Enable Webcam';
+  ctxToggleWebcam.textContent = (webcamIntent || webcamStream) ? 'Disable Webcam' : 'Enable Webcam';
   ctxMenu.style.left = `${x}px`;
   ctxMenu.style.top = `${y}px`;
   ctxMenu.classList.add('visible');
@@ -4271,12 +4285,79 @@ avatarFileInput.addEventListener('change', async () => {
   }
 });
 
-function watchLocalWebcamStream(stream) {
+function beginWebcamOperation(intent, operation) {
+  webcamOperationGeneration += 1;
+  webcamIntent = Boolean(intent);
+  webcamAcquisitionState = intent ? 'pending' : 'idle';
+  const token = Object.freeze({
+    operation,
+    generation: webcamOperationGeneration,
+  });
+  recordVoiceLifecycleDiagnostic({
+    event: 'local-webcam-operation-start',
+    participantId: Number(cfg.myParticipantId),
+    webcamOperation: operation,
+    operationGeneration: token.generation,
+    intent: webcamIntent,
+  });
+  return token;
+}
+
+function isCurrentWebcamOperation(token) {
+  return Boolean(
+    token
+    && webcamIntent
+    && token.generation === webcamOperationGeneration
+  );
+}
+
+function releaseWebcamStream(stream) {
+  stream?.getTracks?.().forEach(track => track.stop());
+}
+
+async function acquireLocalWebcamCapture(constraints, operation = 'enable') {
+  const token = beginWebcamOperation(true, operation);
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (error) {
+    if (token.generation === webcamOperationGeneration) {
+      webcamAcquisitionState = 'failed';
+    }
+    error.webcamOperationToken = token;
+    throw error;
+  }
+  if (!isCurrentWebcamOperation(token)) {
+    releaseWebcamStream(stream);
+    recordVoiceLifecycleDiagnostic({
+      event: 'local-webcam-acquisition-cancelled',
+      participantId: Number(cfg.myParticipantId),
+      webcamOperation: operation,
+      operationGeneration: token.generation,
+      activeOperationGeneration: webcamOperationGeneration,
+      outcome: webcamIntent ? 'superseded' : 'cancelled',
+    });
+    return Object.freeze({
+      status: webcamIntent ? 'superseded' : 'cancelled',
+      operation,
+      token,
+      stream: null,
+    });
+  }
+  webcamAcquisitionState = 'ready';
+  return Object.freeze({ status: 'completed', operation, token, stream });
+}
+
+function watchLocalWebcamStream(stream, operationToken = null) {
   const localVideoTrack = stream?.getVideoTracks?.()[0] || null;
   localVideoTrack?.addEventListener('ended', () => {
     if (!webcamStream?.getVideoTracks?.().includes(localVideoTrack)) return;
+    if (operationToken && operationToken.generation !== webcamOperationGeneration) return;
     const endedStream = webcamStream;
     webcamStream = null;
+    webcamIntent = false;
+    webcamAcquisitionState = 'idle';
+    webcamOperationGeneration += 1;
     recordVoiceLifecycleDiagnostic({
       event: 'local-webcam-track-ended',
       participantId: Number(cfg.myParticipantId),
@@ -4302,13 +4383,23 @@ function watchLocalWebcamStream(stream) {
   return localVideoTrack;
 }
 
-async function replaceLocalWebcamCapture(nextStream, operation = 'replace') {
+async function replaceLocalWebcamCapture(nextStream, operation = 'replace', operationToken = null) {
   const nextTrack = nextStream?.getVideoTracks?.().find(track => track.readyState === 'live') || null;
   if (!nextTrack) throw new Error('Replacement webcam stream has no live video track.');
+  const token = operationToken || beginWebcamOperation(true, operation);
+  if (!isCurrentWebcamOperation(token)) {
+    releaseWebcamStream(nextStream);
+    return Object.freeze({
+      status: webcamIntent ? 'superseded' : 'cancelled',
+      operation,
+      generation: token.generation,
+    });
+  }
   const previousStream = webcamStream;
   const previousTrack = previousStream?.getVideoTracks?.()[0] || null;
   webcamStream = nextStream;
-  watchLocalWebcamStream(nextStream);
+  webcamAcquisitionState = 'ready';
+  watchLocalWebcamStream(nextStream, token);
   const me = participants.get(cfg.myParticipantId);
   if (me) {
     participants.update(cfg.myParticipantId, {
@@ -4323,13 +4414,20 @@ async function replaceLocalWebcamCapture(nextStream, operation = 'replace') {
     session_id: cfg.sessionId,
     join_token: cfg.myJoinToken,
   });
+  if (!isCurrentWebcamOperation(token) || webcamStream !== nextStream) {
+    return Object.freeze({
+      status: webcamIntent ? 'superseded' : 'cancelled',
+      operation,
+      generation: token.generation,
+    });
+  }
   await connectMediaPeers({
     reason: `local-webcam-${operation}`,
     mediaReason: 'webcam',
     webcamOperation: operation,
   });
   if (previousStream && previousStream !== nextStream) {
-    previousStream.getTracks().forEach(track => track.stop());
+    releaseWebcamStream(previousStream);
   }
   recordVoiceLifecycleDiagnostic({
     event: 'local-webcam-capture-replaced',
@@ -4342,6 +4440,8 @@ async function replaceLocalWebcamCapture(nextStream, operation = 'replace') {
   });
   restartVoicePoll(0);
   return {
+    status: 'completed',
+    generation: token.generation,
     previousTrackId: previousTrack?.id || null,
     nextTrackId: nextTrack.id,
   };
@@ -4349,21 +4449,23 @@ async function replaceLocalWebcamCapture(nextStream, operation = 'replace') {
 
 ctxToggleWebcam.addEventListener('click', async () => {
   closeContextMenu();
-  if (webcamStream) {
+  if (webcamIntent || webcamStream) {
+    const disableToken = beginWebcamOperation(false, 'disable');
     const previousWebcamStream = webcamStream;
     recordVoiceLifecycleDiagnostic({
       event: 'local-webcam-disable-start',
       participantId: Number(cfg.myParticipantId),
-      tracks: webcamStream.getTracks().map(track => ({
+      operationGeneration: disableToken.generation,
+      tracks: previousWebcamStream?.getTracks?.().map(track => ({
         id: track.id,
         kind: track.kind,
         readyState: track.readyState,
         enabled: track.enabled,
         muted: track.muted,
-      })),
+      })) || [],
     });
     webcamStream = null;
-    previousWebcamStream.getTracks().forEach(t => t.stop());
+    releaseWebcamStream(previousWebcamStream);
     applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-off');
     const persistence = apiPost('/api/media_signal.php', {
       action: 'webcam_off',
@@ -4379,16 +4481,20 @@ ctxToggleWebcam.addEventListener('click', async () => {
     await Promise.all([persistence, negotiation]);
     return;
   }
+  let operationToken = null;
   try {
     recordVoiceLifecycleDiagnostic({
       event: 'local-webcam-enable-start',
       participantId: Number(cfg.myParticipantId),
     });
-    webcamStream = await navigator.mediaDevices.getUserMedia({
+    const acquisition = await acquireLocalWebcamCapture({
       video: { width: { ideal: 640 }, height: { ideal: 640 }, frameRate: { ideal: 30, max: 30 } },
       audio: false,
-    });
-    watchLocalWebcamStream(webcamStream);
+    }, 'enable');
+    if (!acquisition.stream) return;
+    operationToken = acquisition.token;
+    webcamStream = acquisition.stream;
+    watchLocalWebcamStream(webcamStream, operationToken);
     recordVoiceLifecycleDiagnostic({
       event: 'local-webcam-getUserMedia-success',
       participantId: Number(cfg.myParticipantId),
@@ -4422,20 +4528,34 @@ ctxToggleWebcam.addEventListener('click', async () => {
       renderParticipant(me);
     }
     await apiPost('/api/media_signal.php', { action: 'webcam_on', media: 'webcam', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
-    connectMediaPeers({
+    if (!isCurrentWebcamOperation(operationToken) || webcamStream !== acquisition.stream) return;
+    await connectMediaPeers({
       reason: 'local-webcam-enable',
       mediaReason: 'webcam',
       webcamOperation: 'enable',
     });
     restartVoicePoll(0);
   } catch (err) {
+    const failedToken = err?.webcamOperationToken || operationToken;
+    if (failedToken && failedToken.generation !== webcamOperationGeneration) {
+      recordVoiceLifecycleDiagnostic({
+        event: 'local-webcam-enable-failure-stale',
+        participantId: Number(cfg.myParticipantId),
+        operationGeneration: failedToken.generation,
+        activeOperationGeneration: webcamOperationGeneration,
+      });
+      return;
+    }
     recordVoiceLifecycleDiagnostic({
       event: 'local-webcam-enable-failed',
       participantId: Number(cfg.myParticipantId),
       message: err?.message || String(err),
     });
-    if (webcamStream) webcamStream.getTracks().forEach(t => t.stop());
+    releaseWebcamStream(webcamStream);
     webcamStream = null;
+    webcamIntent = false;
+    webcamAcquisitionState = 'failed';
+    webcamOperationGeneration += 1;
     applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-enable-failed');
     showWarning(err.message || 'Could not enable webcam.');
   }

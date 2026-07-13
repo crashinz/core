@@ -17,20 +17,38 @@ export class VoiceDeviceService {
 
     #deviceChangeListener = null;
 
+    #permissionGeneration = 0;
+
+    #sinkGeneration = 0;
+
+    #destroyed = false;
+
     configure(context = {}) {
+
+        if (this.#destroyed) return Object.freeze({ status: "destroyed" });
 
         this.#unbindDeviceChangeListener();
         this.#context = context;
         this.#bindDeviceChangeListener();
 
+        return Object.freeze({ status: "configured" });
+
     }
 
     destroy() {
 
+        if (this.#destroyed) return Object.freeze({ status: "duplicate" });
+
+        this.#destroyed = true;
+        this.#refreshGeneration += 1;
+        this.#permissionGeneration += 1;
+        this.#sinkGeneration += 1;
+
         this.#unbindDeviceChangeListener();
         this.#context = null;
         this.#selectedOutputDeviceId = "";
-        this.#refreshGeneration = 0;
+
+        return Object.freeze({ status: "completed" });
 
     }
 
@@ -42,6 +60,8 @@ export class VoiceDeviceService {
 
     captureSelectedOutputDevice() {
 
+        if (this.#destroyed) return "";
+
         this.#selectedOutputDeviceId =
             this.#context?.getOutputDeviceId?.() || "";
 
@@ -50,6 +70,8 @@ export class VoiceDeviceService {
     }
 
     selectedInputConstraints() {
+
+        if (this.#destroyed) return true;
 
         const deviceId =
             this.#context?.getInputDeviceId?.() || "";
@@ -70,6 +92,8 @@ export class VoiceDeviceService {
     }
 
     async populate(reason = "manual") {
+
+        if (this.#destroyed) return Object.freeze({ status: "destroyed" });
 
         if (!this.#context?.canPopulateDevices?.()) return;
 
@@ -133,7 +157,7 @@ export class VoiceDeviceService {
 
             });
 
-            return;
+            return Object.freeze({ status: "stale-generation" });
 
         }
 
@@ -250,9 +274,16 @@ export class VoiceDeviceService {
             !labelsAvailable || outputUnsupported ? "working" : ""
         );
 
+        return Object.freeze({ status: "completed", refreshGeneration });
+
     }
 
     async requestPermissionAndPopulate() {
+
+        if (this.#destroyed) return Object.freeze({ status: "destroyed" });
+
+        const permissionGeneration =
+            ++this.#permissionGeneration;
 
         const mediaDevices =
             this.#context?.navigator?.mediaDevices;
@@ -282,7 +313,18 @@ export class VoiceDeviceService {
 
             }
 
-            await this.populate("after-explicit-permission");
+            if (
+                this.#destroyed ||
+                permissionGeneration !== this.#permissionGeneration
+            ) {
+
+                return Object.freeze({
+                    status: this.#destroyed ? "destroyed" : "stale-generation"
+                });
+
+            }
+
+            return this.populate("after-explicit-permission");
 
         } finally {
 
@@ -294,7 +336,12 @@ export class VoiceDeviceService {
 
     async applyAudioOutput(audio) {
 
+        if (this.#destroyed) return Object.freeze({ status: "destroyed" });
+
         if (!audio || typeof audio.setSinkId !== "function") return;
+
+        const sinkGeneration =
+            ++this.#sinkGeneration;
 
         try {
 
@@ -302,9 +349,18 @@ export class VoiceDeviceService {
                 this.#selectedOutputDeviceId || ""
             );
 
+            return Object.freeze({
+                status:
+                    this.#destroyed || sinkGeneration !== this.#sinkGeneration
+                        ? "stale-generation"
+                        : "completed"
+            });
+
         } catch (error) {
 
             this.#warn(error);
+
+            return Object.freeze({ status: "failed" });
 
         }
 
@@ -323,6 +379,9 @@ export class VoiceDeviceService {
             configured:
                 Boolean(this.#context),
 
+            destroyed:
+                this.#destroyed,
+
             selectedOutputDeviceId:
                 this.#selectedOutputDeviceId ? "selected" : "default",
 
@@ -330,7 +389,13 @@ export class VoiceDeviceService {
                 this.#refreshGeneration,
 
             deviceChangeListening:
-                this.#deviceChangeListener !== null
+                this.#deviceChangeListener !== null,
+
+            permissionGeneration:
+                this.#permissionGeneration,
+
+            sinkGeneration:
+                this.#sinkGeneration
 
         });
 
