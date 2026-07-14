@@ -894,8 +894,11 @@ export class AvatarCoordinator {
      */
     reconcileRemoteLink(payload = {}) {
 
+        let authoritativeRelationship = null;
+
         if (payload.relationship) {
-            this.#relationships.upsertPersistedRelationship(payload.relationship);
+            authoritativeRelationship =
+                this.#relationships.upsertPersistedRelationship(payload.relationship);
             if (!this.#relationships.isCurrentPersistedRelationshipSnapshot(payload.relationship)) {
                 return null;
             }
@@ -961,7 +964,10 @@ export class AvatarCoordinator {
         this.#context?.renderParticipant?.(person);
 
         if (!payload.linked_to) {
-            if (previousPartnerId) {
+            if (
+                previousPartnerId &&
+                authoritativeRelationship?.status !== "active"
+            ) {
                 this.#relationships.removePersistedRelationshipForPair(
                     person.id,
                     previousPartnerId

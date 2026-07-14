@@ -77,6 +77,20 @@ if ($isVoiceNote) {
     json_out(['error' => 'Only images, PDFs, and documents are supported'], 400);
 }
 
+$channel = (string)($_POST['channel'] ?? 'room');
+if (!in_array($channel, ['room', 'community', 'link', 'dm', 'game'], true)) $channel = 'room';
+$requestedRelationshipIdentity = trim((string)($_POST['conversation_id'] ?? $_POST['relationship_id'] ?? ''));
+$targetParticipantId = (int)($_POST['target_participant_id'] ?? 0);
+if ($channel === 'link' && !avatar_relationship_chat_access(
+    $pdo,
+    $sessionId,
+    (int)$participant['id'],
+    $requestedRelationshipIdentity,
+    $targetParticipantId
+)) {
+    json_out(['error' => 'Relationship conversation unavailable'], 403);
+}
+
 $uploadDir = __DIR__ . '/../assets/uploads/' . ($isVoiceNote ? 'voice' : 'files');
 if (!is_dir($uploadDir)) {
     mkdir($uploadDir, 0775, true);
@@ -90,16 +104,17 @@ if (!move_uploaded_file($tmpName, $target)) {
 }
 
 $publicPath = '/assets/uploads/' . ($isVoiceNote ? 'voice/' : 'files/') . $filename;
-$channel = (string)($_POST['channel'] ?? 'room');
-if (!in_array($channel, ['room', 'community', 'link', 'dm', 'game'], true)) $channel = 'room';
 
-function file_reply_accessible(array $message, string $channel, int $sessionId, array $participant): bool {
+function file_reply_accessible(PDO $pdo, array $message, string $channel, int $sessionId, array $participant): bool {
     if (($message['scope'] ?? '') !== $channel) return false;
     if ($channel === 'community') return true;
     if ($channel === 'link') {
-        if ((int)($message['session_id'] ?? 0) !== $sessionId) return false;
-        $ids = array_map('intval', explode(':', (string)($message['link_key'] ?? '')));
-        return in_array((int)$participant['id'], $ids, true);
+        return avatar_relationship_chat_message_accessible(
+            $pdo,
+            $message,
+            $sessionId,
+            (int)$participant['id']
+        ) !== null;
     }
     if ($channel === 'dm') {
         $ids = explode(':', (string)($message['link_key'] ?? ''));
@@ -138,7 +153,7 @@ function file_reply_snapshot(PDO $pdo, string $channel, int $sessionId, array $p
         $stmt = $pdo->prepare('SELECT * FROM community_messages WHERE id = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1');
         $stmt->execute([$replyId]);
         $message = $stmt->fetch();
-        if ($message && !file_reply_accessible($message, $channel, $sessionId, $participant)) $message = false;
+        if ($message && !file_reply_accessible($pdo, $message, $channel, $sessionId, $participant)) $message = false;
     }
     if (!$message) json_out(['error' => 'Reply target unavailable'], 404);
     return [
@@ -153,7 +168,7 @@ function file_reply_snapshot(PDO $pdo, string $channel, int $sessionId, array $p
     ];
 }
 
-$replyTo = file_reply_snapshot($pdo, $channel, $sessionId, $participant);
+$replyTo = $channel === 'link' ? null : file_reply_snapshot($pdo, $channel, $sessionId, $participant);
 $replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
 
 function uploaded_media_message(PDO $pdo, string $channel, string $messageType, array $participant, array $authorContext, string $content, array $file, string $mimeType, string $originalName, ?array $replyTo, ?string $replyToJson, array $route = []): array {
@@ -168,6 +183,8 @@ function uploaded_media_message(PDO $pdo, string $channel, string $messageType, 
         'reply_to' => $replyTo,
         'reply_to_json' => $replyToJson,
         'link_key' => $route['link_key'] ?? null,
+        'relationship_id' => $route['relationship_id'] ?? null,
+        'relationship_version' => $route['relationship_version'] ?? null,
         'dm_key' => $route['dm_key'] ?? null,
         'target_user_id' => $route['target_user_id'] ?? null,
         'lobby_code' => $route['lobby_code'] ?? null,
@@ -179,21 +196,59 @@ if ($channel === 'community') {
 }
 
 if ($channel === 'link') {
-    $targetId = (int)($_POST['target_participant_id'] ?? 0);
-    if (!$targetId) json_out(['error' => 'Linked participant required'], 400);
-    $stmt = $pdo->prepare(
-        'SELECT id FROM participants
-         WHERE session_id = ? AND id = ?
-           AND (linked_to_participant_id = ? OR id = (SELECT linked_to_participant_id FROM participants WHERE id = ?))
-         LIMIT 1'
-    );
-    $stmt->execute([$sessionId, $targetId, (int)$participant['id'], (int)$participant['id']]);
-    if (!$stmt->fetch()) json_out(['error' => 'You are not linked to that participant'], 403);
-    $linkKey = link_key_for((int)$participant['id'], $targetId);
-    json_out(uploaded_media_message($pdo, 'link', $isVoiceNote ? 'voice_note' : 'file', $participant, $authorContext, $publicPath, $file, $mimeType, $isVoiceNote ? 'Voice Note' : $originalName, $replyTo, $replyToJson, [
-        'session_id' => $sessionId,
-        'link_key' => $linkKey,
-    ]));
+    $result = avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $participant,
+        $requestedRelationshipIdentity,
+        $targetParticipantId,
+        $isVoiceNote,
+        $authorContext,
+        $publicPath,
+        $file,
+        $mimeType,
+        $originalName
+    ): array {
+        $access = avatar_relationship_chat_access(
+            $pdo,
+            $sessionId,
+            (int)$participant['id'],
+            $requestedRelationshipIdentity,
+            $targetParticipantId,
+            true
+        );
+        if (!$access) return ['error' => 'Relationship conversation unavailable', 'http_status' => 403];
+        $replyTo = file_reply_snapshot($pdo, 'link', $sessionId, $participant);
+        $replyToJson = $replyTo
+            ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            : null;
+        return uploaded_media_message(
+            $pdo,
+            'link',
+            $isVoiceNote ? 'voice_note' : 'file',
+            $participant,
+            $authorContext,
+            $publicPath,
+            $file,
+            $mimeType,
+            $isVoiceNote ? 'Voice Note' : $originalName,
+            $replyTo,
+            $replyToJson,
+            [
+                'session_id' => $sessionId,
+                'link_key' => $access['conversation_id'],
+                'relationship_id' => $access['relationship_id'],
+                'relationship_version' => $access['relationship_version'],
+            ]
+        );
+    });
+    if (!empty($result['error'])) {
+        if (is_file($target)) @unlink($target);
+        $status = (int)($result['http_status'] ?? 403);
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
+    json_out($result);
 }
 
 if ($channel === 'dm') {

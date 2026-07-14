@@ -200,33 +200,71 @@ $communityReactions = community_reactions_for($pdo, array_map(fn(array $m): int 
 $communityMessages = array_map(fn(array $m): array => community_message_payload($m, 'community', $communityReactions), $rawCommunityMessages);
 
 $linkMessages = [];
-$linkedTo = $participant['linked_to_participant_id'] ? (int)$participant['linked_to_participant_id'] : null;
-if (!$linkedTo) {
-    $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND linked_to_participant_id = ? LIMIT 1');
-    $stmt->execute([(int)$session['id'], (int)$participant['id']]);
-    $linkedTo = (int)($stmt->fetchColumn() ?: 0);
-}
-if ($linkedTo) {
-    $linkKey = link_key_for((int)$participant['id'], $linkedTo);
+$relationshipChat = null;
+$initialLinkAccess = avatar_relationship_chat_access(
+    $pdo,
+    (int)$session['id'],
+    (int)$participant['id']
+);
+$linkConversationId = (string)($initialLinkAccess['conversation_id'] ?? '');
+$linkHistory = avatar_relationship_transaction($pdo, function() use (
+    $pdo,
+    $session,
+    $participant,
+    $linkConversationId,
+    $roomOwnerId,
+    $user
+): array {
+    $access = $linkConversationId !== ''
+        ? avatar_relationship_chat_access(
+            $pdo,
+            (int)$session['id'],
+            (int)$participant['id'],
+            $linkConversationId,
+            0,
+            true
+        )
+        : null;
+    if (!$access) return ['access' => null, 'messages' => []];
     $stmt = $pdo->prepare(
         "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json, cm.reply_to_json,
                 cm.message_type, cm.file_size, cm.mime_type, cm.original_name, cm.edited_at, cm.sent_at, cm.link_key,
                 u.role AS author_role,
                 CASE WHEN cm.user_id = ? THEN 1 ELSE 0 END AS author_is_owner
-         FROM community_messages cm
-         LEFT JOIN users u ON u.id = cm.user_id
-         WHERE cm.scope = 'link' AND cm.session_id = ? AND cm.link_key = ? AND COALESCE(cm.is_deleted, 0) = 0
-           AND sent_at > COALESCE((
-             SELECT cleared_at FROM private_message_clears
-              WHERE user_id = ? AND scope = 'link' AND session_id = ? AND link_key = ?
-              LIMIT 1
-           ), '0000-01-01 00:00:00')
-         ORDER BY cm.sent_at ASC LIMIT 120"
+           FROM community_messages cm
+           LEFT JOIN users u ON u.id = cm.user_id
+          WHERE cm.scope = 'link' AND cm.session_id = ? AND cm.link_key = ?
+            AND cm.id > ? AND COALESCE(cm.is_deleted, 0) = 0
+            AND cm.sent_at > COALESCE((
+              SELECT cleared_at FROM private_message_clears
+               WHERE user_id = ? AND scope = 'link' AND session_id = ? AND link_key = ?
+               LIMIT 1
+            ), '0000-01-01 00:00:00')
+          ORDER BY cm.sent_at ASC, cm.id ASC LIMIT 120"
     );
-    $stmt->execute([$roomOwnerId, (int)$session['id'], $linkKey, (int)$user['id'], (int)$session['id'], $linkKey]);
-    $rawLinkMessages = $stmt->fetchAll();
+    $stmt->execute([
+        $roomOwnerId,
+        (int)$session['id'],
+        $access['conversation_id'],
+        $access['visible_after_message_id'],
+        (int)$user['id'],
+        (int)$session['id'],
+        $access['conversation_id'],
+    ]);
+    return ['access' => $access, 'messages' => $stmt->fetchAll()];
+});
+if ($linkHistory['access']) {
+    $access = $linkHistory['access'];
+    $rawLinkMessages = $linkHistory['messages'];
     $linkReactions = community_reactions_for($pdo, array_map(fn(array $m): int => (int)$m['id'], $rawLinkMessages));
     $linkMessages = array_map(fn(array $m): array => community_message_payload($m, 'link', $linkReactions), $rawLinkMessages);
+    $relationshipChat = [
+        'relationshipId' => $access['relationship_id'],
+        'relationshipVersion' => $access['relationship_version'],
+        'conversationId' => $access['conversation_id'],
+        'visibleAfterMessageId' => $access['visible_after_message_id'],
+        'active' => true,
+    ];
 }
 
 $stmt = $pdo->prepare('SELECT link_key, icon_name FROM link_icons WHERE session_id = ?');
@@ -335,6 +373,7 @@ json_out([
     'messages' => $messages,
     'communityMessages' => $communityMessages,
     'linkMessages' => $linkMessages,
+    'relationshipChat' => $relationshipChat,
     'linkIcons' => $linkIcons,
     'linkIconCatalog' => link_icon_catalog($pdo),
     'dmMessages' => $dmMessages,

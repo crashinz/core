@@ -181,19 +181,22 @@ export class ChatComposerService {
 
                 }, activeChat);
 
-            const partnerId =
-                context.activeLinkPartnerId();
+            const relationship =
+                context.activeRelationshipRequest?.();
 
             const dmUserId =
                 context.activeDmUserId();
 
-            if (partnerId) {
+            if (relationship) {
 
                 payload.channel =
                     "link";
 
-                payload.target_participant_id =
-                    partnerId;
+                payload.relationship_id =
+                    relationship.relationship_id;
+
+                payload.conversation_id =
+                    relationship.conversation_id;
 
             } else if (dmUserId) {
 
@@ -215,7 +218,7 @@ export class ChatComposerService {
 
             this.#routeSentMessage(
                 message,
-                partnerId,
+                relationship,
                 dmUserId
             );
 
@@ -274,10 +277,10 @@ export class ChatComposerService {
      * Routes a sent message response through the existing presentation path.
      *
      * @param {Object} message
-     * @param {number|null} partnerId
+     * @param {Object|null} relationship
      * @param {number|null} dmUserId
      */
-    #routeSentMessage(message, partnerId, dmUserId) {
+    #routeSentMessage(message, relationship, dmUserId) {
 
         const context =
             this.#requireContext();
@@ -298,7 +301,7 @@ export class ChatComposerService {
 
             context.addMessageToChannel(
                 message,
-                `link:${partnerId}`,
+                relationship?.chatKey || context.activeRelationshipRequest?.()?.chatKey || "room",
                 false
             );
 

@@ -2232,6 +2232,32 @@ export class AvatarRelationshipService {
                     relationship.conversation_public_id ||
                     id
                 ),
+            viewerMembership:
+                relationship.viewerMembership ||
+                relationship.viewer_membership ||
+                null,
+            chatAccess:
+                Object.freeze({
+                    active:
+                        relationship.chatAccess?.active !== false &&
+                        relationship.chat_access?.active !== false,
+                    conversationId:
+                        String(
+                            relationship.chatAccess?.conversationId ||
+                            relationship.chat_access?.conversation_id ||
+                            relationship.conversationId ||
+                            relationship.conversation_public_id ||
+                            id
+                        ),
+                    visibleAfterMessageId:
+                        Math.max(0, Number(
+                            relationship.chatAccess?.visibleAfterMessageId ??
+                            relationship.chat_access?.visible_after_message_id ??
+                            relationship.viewerMembership?.visibleAfterMessageId ??
+                            relationship.viewer_membership?.visible_after_message_id ??
+                            0
+                        ))
+                }),
             legacyLinkKey,
             mode,
             capability:

@@ -270,6 +270,7 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
     }
 
     avatar_relationship_migrate_group_foundation($pdo);
+    avatar_relationship_migrate_chat_foundation($pdo);
 
     $indexes = [
         ['avatar_relationship_members', 'idx_avatar_relationship_members_active_participant', true, 'active_participant_id'],
@@ -2473,7 +2474,25 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         'options' => !empty($row['options_json']) ? (json_decode((string)$row['options_json'], true) ?: []) : [],
         ];
     }, $memberRows);
+    $viewerMembership = null;
+    if ($viewerParticipantId !== null) {
+        foreach ($memberRows as $memberRow) {
+            if ((int)$memberRow['participant_id'] !== $viewerParticipantId) continue;
+            $viewerMembership = [
+                'participantId' => $viewerParticipantId,
+                'status' => (string)$memberRow['membership_status'],
+                'permissionRole' => (string)$memberRow['permission_role'],
+                'effectiveAt' => $memberRow['membership_effective_at'] ?? null,
+                'visibleAfterMessageId' => max(0, (int)($memberRow['visible_after_message_id'] ?? 0)),
+            ];
+            break;
+        }
+    }
     $metadata = !empty($relationship['metadata_json']) ? (json_decode((string)$relationship['metadata_json'], true) ?: []) : [];
+    $conversationId = (string)($relationship['conversation_public_id'] ?: $relationship['relationship_public_id']);
+    $chatAccessActive = (string)($relationship['status'] ?? '') === 'active'
+        && (string)($relationship['divergence_status'] ?? 'synced') === 'synced'
+        && ($viewerParticipantId === null || $viewerMembership !== null);
     return [
         'id' => (string)$relationship['relationship_public_id'],
         'relationship_id' => (string)$relationship['relationship_public_id'],
@@ -2482,7 +2501,15 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         'status' => (string)($relationship['status'] ?? 'active'),
         'creatorParticipantId' => $relationship['creator_participant_id'] !== null ? (int)$relationship['creator_participant_id'] : null,
         'joinPolicy' => (string)($relationship['join_policy'] ?? 'approval-required'),
-        'conversationId' => (string)($relationship['conversation_public_id'] ?: $relationship['relationship_public_id']),
+        'conversationId' => $conversationId,
+        'viewerMembership' => $viewerMembership,
+        'chatAccess' => [
+            'active' => $chatAccessActive,
+            'conversationId' => $chatAccessActive ? $conversationId : null,
+            'visibleAfterMessageId' => $viewerMembership !== null
+                ? $viewerMembership['visibleAfterMessageId']
+                : null,
+        ],
         'legacy_link_key' => $relationship['legacy_link_key'] ?? null,
         'mode' => avatar_relationship_mode((string)$relationship['mode']),
         'capability' => (string)($relationship['capability'] ?: avatar_relationship_mode((string)$relationship['mode'])),
@@ -2557,6 +2584,254 @@ function avatar_relationship_transaction(PDO $pdo, callable $operation): array {
         if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
         throw $error;
     }
+}
+
+function avatar_relationship_chat_legacy_keys(PDO $pdo, array $relationship): array {
+    $keys = [];
+    $storedKey = trim((string)($relationship['legacy_link_key'] ?? ''));
+    if ($storedKey !== '') $keys[] = $storedKey;
+
+    $legacyParticipantIds = array_values(array_filter([
+        (int)($relationship['legacy_initiator_participant_id'] ?? 0),
+        (int)($relationship['legacy_target_participant_id'] ?? 0),
+    ], fn(int $participantId): bool => $participantId > 0));
+    if (count(array_unique($legacyParticipantIds)) === 2) {
+        $keys[] = link_key_for($legacyParticipantIds[0], $legacyParticipantIds[1]);
+    }
+
+    $historyStmt = $pdo->prepare(
+        "SELECT participant_id
+           FROM avatar_relationship_membership_history
+          WHERE relationship_id = ?
+            AND action IN ('founding-created', 'founding-migrated')
+            AND participant_id IS NOT NULL
+          ORDER BY member_order ASC, id ASC"
+    );
+    $historyStmt->execute([(int)$relationship['id']]);
+    $foundingIds = array_values(array_unique(array_map('intval', $historyStmt->fetchAll(PDO::FETCH_COLUMN))));
+    if (count($foundingIds) >= 2) {
+        $keys[] = link_key_for($foundingIds[0], $foundingIds[1]);
+    }
+
+    return array_values(array_unique(array_filter(array_map('trim', $keys))));
+}
+
+function avatar_relationship_chat_migrate_clear_key(
+    PDO $pdo,
+    int $sessionId,
+    string $legacyKey,
+    string $conversationId
+): void {
+    $stmt = $pdo->prepare(
+        "SELECT user_id, cleared_at
+           FROM private_message_clears
+          WHERE scope = 'link' AND session_id = ? AND link_key = ?"
+    );
+    $stmt->execute([$sessionId, $legacyKey]);
+    foreach ($stmt->fetchAll() as $legacyClear) {
+        $userId = (int)$legacyClear['user_id'];
+        $legacyClearedAt = (string)$legacyClear['cleared_at'];
+        $currentStmt = $pdo->prepare(
+            "SELECT id, cleared_at
+               FROM private_message_clears
+              WHERE user_id = ? AND scope = 'link' AND session_id = ? AND link_key = ?
+              LIMIT 1"
+        );
+        $currentStmt->execute([$userId, $sessionId, $conversationId]);
+        $current = $currentStmt->fetch() ?: null;
+        if ($current) {
+            if (strcmp($legacyClearedAt, (string)$current['cleared_at']) > 0) {
+                $pdo->prepare('UPDATE private_message_clears SET cleared_at = ? WHERE id = ?')
+                    ->execute([$legacyClearedAt, (int)$current['id']]);
+            }
+            continue;
+        }
+        try {
+            $pdo->prepare(
+                "INSERT INTO private_message_clears (user_id, scope, session_id, link_key, cleared_at)
+                 VALUES (?, 'link', ?, ?, ?)"
+            )->execute([$userId, $sessionId, $conversationId, $legacyClearedAt]);
+        } catch (PDOException $error) {
+            if ($error->getCode() !== '23000' && !str_contains(strtoupper($error->getMessage()), 'UNIQUE')) {
+                throw $error;
+            }
+            $pdo->prepare(
+                "UPDATE private_message_clears
+                    SET cleared_at = CASE WHEN cleared_at < ? THEN ? ELSE cleared_at END
+                  WHERE user_id = ? AND scope = 'link' AND session_id = ? AND link_key = ?"
+            )->execute([$legacyClearedAt, $legacyClearedAt, $userId, $sessionId, $conversationId]);
+        }
+    }
+    $pdo->prepare(
+        "DELETE FROM private_message_clears
+          WHERE scope = 'link' AND session_id = ? AND link_key = ?"
+    )->execute([$sessionId, $legacyKey]);
+}
+
+function avatar_relationship_chat_migrate_relationship(PDO $pdo, array $relationship): array {
+    $conversationId = trim((string)($relationship['conversation_public_id'] ?? ''));
+    if ($conversationId === '') {
+        $conversationId = trim((string)($relationship['relationship_public_id'] ?? ''));
+    }
+    if ($conversationId === '') return ['messages' => 0, 'clear_keys' => 0];
+
+    $messageCount = 0;
+    $clearKeyCount = 0;
+    foreach (avatar_relationship_chat_legacy_keys($pdo, $relationship) as $legacyKey) {
+        if ($legacyKey === $conversationId) continue;
+        $stmt = $pdo->prepare(
+            "UPDATE community_messages
+                SET link_key = ?
+              WHERE scope = 'link' AND session_id = ? AND link_key = ?"
+        );
+        $stmt->execute([$conversationId, (int)$relationship['session_id'], $legacyKey]);
+        $messageCount += $stmt->rowCount();
+        avatar_relationship_chat_migrate_clear_key(
+            $pdo,
+            (int)$relationship['session_id'],
+            $legacyKey,
+            $conversationId
+        );
+        $clearKeyCount++;
+    }
+    return ['messages' => $messageCount, 'clear_keys' => $clearKeyCount];
+}
+
+function avatar_relationship_migrate_chat_foundation(PDO $pdo): void {
+    $relationships = $pdo->query(
+        "SELECT *
+           FROM avatar_relationships
+          WHERE conversation_public_id IS NOT NULL AND conversation_public_id <> ''
+          ORDER BY id ASC"
+    )->fetchAll();
+    foreach ($relationships as $relationship) {
+        avatar_relationship_transaction($pdo, function() use ($pdo, $relationship): array {
+            $locked = avatar_relationship_locked_row(
+                $pdo,
+                (int)$relationship['session_id'],
+                (string)$relationship['relationship_public_id']
+            );
+            return $locked
+                ? avatar_relationship_chat_migrate_relationship($pdo, $locked)
+                : ['messages' => 0, 'clear_keys' => 0];
+        });
+    }
+}
+
+function avatar_relationship_chat_access(
+    PDO $pdo,
+    int $sessionId,
+    int $participantId,
+    string $conversationOrRelationshipId = '',
+    int $targetParticipantId = 0,
+    bool $lock = false
+): ?array {
+    $requestedId = trim($conversationOrRelationshipId);
+    if ($lock) {
+        if ($requestedId === '' && $targetParticipantId <= 0) return null;
+        if ($requestedId !== '') {
+            $sql = "SELECT * FROM avatar_relationships
+                     WHERE session_id = ?
+                       AND (conversation_public_id = ? OR relationship_public_id = ?)
+                     LIMIT 1";
+            $parameters = [$sessionId, $requestedId, $requestedId];
+        } else {
+            $sql = "SELECT * FROM avatar_relationships
+                     WHERE session_id = ? AND legacy_link_key = ?
+                     LIMIT 1";
+            $parameters = [$sessionId, link_key_for($participantId, $targetParticipantId)];
+        }
+        if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($parameters);
+        $relationship = $stmt->fetch() ?: null;
+        if (!$relationship
+            || (string)$relationship['status'] !== 'active'
+            || (string)($relationship['divergence_status'] ?? '') !== 'synced') {
+            return null;
+        }
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+    } else {
+        $stmt = $pdo->prepare(
+            "SELECT ar.*, arm.visible_after_message_id, arm.membership_effective_at,
+                    arm.permission_role AS viewer_permission_role
+               FROM avatar_relationship_members arm
+               JOIN avatar_relationships ar ON ar.id = arm.relationship_id
+              WHERE ar.session_id = ? AND ar.status = 'active'
+                AND ar.divergence_status = 'synced'
+                AND arm.participant_id = ? AND arm.membership_status = 'active'
+                AND arm.active_participant_id = ?
+              LIMIT 1"
+        );
+        $stmt->execute([$sessionId, $participantId, $participantId]);
+        $relationship = $stmt->fetch() ?: null;
+        if (!$relationship) return null;
+        $membersStmt = $pdo->prepare(
+            "SELECT arm.*, p.user_id, p.session_id, p.last_seen_at
+               FROM avatar_relationship_members arm
+               JOIN participants p ON p.id = arm.participant_id
+              WHERE arm.relationship_id = ? AND arm.membership_status = 'active'
+              ORDER BY arm.member_order ASC, arm.membership_effective_at ASC, arm.id ASC"
+        );
+        $membersStmt->execute([(int)$relationship['id']]);
+        $members = $membersStmt->fetchAll();
+    }
+    $conversationId = trim((string)($relationship['conversation_public_id'] ?? ''));
+    $relationshipPublicId = trim((string)($relationship['relationship_public_id'] ?? ''));
+    if ($conversationId === '' || $relationshipPublicId === '') return null;
+    if ($requestedId !== '' && $requestedId !== $conversationId && $requestedId !== $relationshipPublicId) {
+        return null;
+    }
+    $viewerMember = avatar_relationship_member_from_rows($members, $participantId);
+    if (!$viewerMember || (int)($viewerMember['active_participant_id'] ?? 0) !== $participantId) return null;
+    if ($targetParticipantId > 0 && !avatar_relationship_member_from_rows($members, $targetParticipantId)) return null;
+
+    if ($lock) {
+        $viewerParticipant = avatar_relationship_locked_participant($pdo, $sessionId, $participantId);
+    } else {
+        $participantStmt = $pdo->prepare(
+            'SELECT * FROM participants WHERE session_id = ? AND id = ? LIMIT 1'
+        );
+        $participantStmt->execute([$sessionId, $participantId]);
+        $viewerParticipant = $participantStmt->fetch() ?: null;
+    }
+    if (!$viewerParticipant || avatar_relationship_blocked_for_members($pdo, $viewerParticipant, $members)) return null;
+
+    return [
+        'relationship_db_id' => (int)$relationship['id'],
+        'relationship_id' => $relationshipPublicId,
+        'relationship_version' => max(1, (int)($relationship['version'] ?? 1)),
+        'conversation_id' => $conversationId,
+        'visible_after_message_id' => max(0, (int)($viewerMember['visible_after_message_id'] ?? 0)),
+        'membership_effective_at' => $viewerMember['membership_effective_at'] ?? null,
+        'permission_role' => (string)($viewerMember['permission_role'] ?? 'member'),
+        'legacy_link_key' => $relationship['legacy_link_key'] ?? null,
+        'members' => $members,
+    ];
+}
+
+function avatar_relationship_chat_message_accessible(
+    PDO $pdo,
+    array $message,
+    int $sessionId,
+    int $participantId,
+    bool $lock = false
+): ?array {
+    if ((string)($message['scope'] ?? '') !== 'link'
+        || (int)($message['session_id'] ?? 0) !== $sessionId
+        || (int)($message['id'] ?? 0) <= 0) {
+        return null;
+    }
+    $access = avatar_relationship_chat_access(
+        $pdo,
+        $sessionId,
+        $participantId,
+        (string)($message['link_key'] ?? ''),
+        0,
+        $lock
+    );
+    if (!$access || (int)$message['id'] <= (int)$access['visible_after_message_id']) return null;
+    return $access;
 }
 
 function avatar_relationship_locked_row(PDO $pdo, int $sessionId, string $relationshipPublicId): ?array {

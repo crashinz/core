@@ -266,16 +266,19 @@ export class ChatTypingService {
 
         };
 
-        const partnerId =
-            context.activeLinkPartnerId();
+        const relationship =
+            context.activeRelationshipRequest?.();
 
-        if (partnerId) {
+        if (relationship) {
 
             payload.channel =
                 "link";
 
-            payload.target_participant_id =
-                partnerId;
+            payload.relationship_id =
+                relationship.relationship_id;
+
+            payload.conversation_id =
+                relationship.conversation_id;
 
         }
 

@@ -472,6 +472,9 @@ function configureChatPrivateChats() {
     switchChat,
     showWarning,
     isUserBlocked,
+    participantName(participantId) {
+      return participants.get(Number(participantId))?.display_name || null;
+    },
     focusComposer() {
       document.getElementById('chat-input')?.focus();
     },
@@ -482,8 +485,7 @@ function configureChatEventRouter() {
   chatRuntime?.events?.configure({
     getConfig: () => cfg,
     getActiveChat: () => activeChatKey(),
-    activeLinkPartnerId,
-    linkPartnerIdFromKey,
+    relationshipChatKeyFromPayload,
     dmPartnerIdFromPayload,
     renderMessage,
     addMessageToChannel,
@@ -533,8 +535,7 @@ function configureChatNavigation() {
       });
     },
     isLinkChatAvailable(chatKey) {
-      const partnerId = Number(String(chatKey || '').slice(5));
-      return Boolean(partnerId && participants.has(partnerId) && linkedPartner()?.id === partnerId);
+      return Boolean(chatPrivateChats().relationshipRequest(chatKey));
     },
     isGameChatAvailable(chatKey) {
       const activeGame = gameRuntime?.lifecycle?.getActiveGame();
@@ -565,7 +566,7 @@ function configureChatTyping() {
     getConfig: () => cfg,
     getActiveChat: () => activeChatKey(),
     getParticipants: () => participants,
-    activeLinkPartnerId,
+    activeRelationshipRequest,
     isUserBlocked,
     positionAvatar,
     syncTyping(participant, active) {
@@ -581,7 +582,7 @@ function configureChatComposer() {
   chatRuntime?.composer?.configure({
     apiPost,
     getConfig: () => cfg,
-    activeLinkPartnerId,
+    activeRelationshipRequest,
     activeDmUserId,
     addMessageToChannel,
     renderMessage,
@@ -600,7 +601,7 @@ function configureChatMediaSend() {
     getConfig: () => cfg,
     getActiveChat: () => activeChatKey(),
     channelForApi,
-    activeLinkPartnerId,
+    activeRelationshipRequest,
     activeDmUserId,
     addMessageToChannel,
     renderMessage,
@@ -811,8 +812,10 @@ function configureRoomEventRouter() {
       removeParticipant(payload.target_participant_id);
     },
     onLinkTyping(payload) {
-      const partnerId = payload.participant_id;
-      if (activeChatKey() === `link:${partnerId}` || partnerId === cfg.myParticipantId) showTyping(payload.participant_id, payload.active);
+      const chatKey = chatPrivateChats().relationshipChatKeyFromPayload(payload);
+      if (chatKey && (activeChatKey() === chatKey || Number(payload.participant_id) === Number(cfg.myParticipantId))) {
+        showTyping(payload.participant_id, payload.active);
+      }
     },
     onGameTyping(payload) {
       if (gameRuntime?.lifecycle?.getActiveGame()?.lobby_code !== payload.lobby_code) return;
@@ -1651,6 +1654,10 @@ function activeLinkPartnerId() {
   return chatPrivateChats().activeLinkPartnerId(activeChatKey());
 }
 
+function activeRelationshipRequest() {
+  return chatPrivateChats().relationshipRequest(activeChatKey());
+}
+
 function activeDmUserId() {
   return chatPrivateChats().activeDmUserId(activeChatKey());
 }
@@ -1753,6 +1760,10 @@ function linkPartnerIdFromKey(key) {
   return chatPrivateChats().linkPartnerIdFromKey(key);
 }
 
+function relationshipChatKeyFromPayload(payload) {
+  return chatPrivateChats().relationshipChatKeyFromPayload(payload);
+}
+
 function dmPartnerIdFromPayload(payload) {
   return chatPrivateChats().dmPartnerIdFromPayload(payload);
 }
@@ -1767,8 +1778,7 @@ function chatLabel(chatKey = activeChatKey()) {
     const activeGame = gameRuntime?.lifecycle?.getActiveGame();
     return activeGame ? `${gameName(activeGame.game_type)} Game` : 'Game';
   }
-  const partner = participants.get(Number(chatKey.slice(5)));
-  return `Link> ${partner ? partner.display_name : 'Friend'}`;
+  return `Link> ${chatPrivateChats().relationshipLabel()}`;
 }
 
 function rememberDmUser(user) {
@@ -2275,17 +2285,21 @@ function renderLinkTabs() {
   if (!holder || !cfg) return;
   holder.innerHTML = '';
   renderGameTab(holder);
-  const partner = linkedPartner();
-  if (!partner) {
-    if (activeChatKey().startsWith('link:')) switchChat('room');
+  const relationship = avatarRuntime?.relationships?.relationshipForParticipant(cfg.myParticipantId) || null;
+  const relationshipChat = chatPrivateChats().syncRelationshipChat(
+    relationship,
+    cfg.relationshipChat?.relationshipId === relationship?.id ? cfg.relationshipChat : null
+  );
+  if (!relationshipChat) {
     renderDmTabs();
     updateTabBadges();
     return;
   }
+  const partner = { display_name: chatPrivateChats().relationshipLabel() };
   const tab = document.createElement('button');
   tab.className = 'chat-tab';
   tab.type = 'button';
-  tab.dataset.chatTab = `link:${partner.id}`;
+  tab.dataset.chatTab = relationshipChat.chatKey;
   tab.innerHTML = `<span class="link-tab-heart">🤍</span><span>Link&gt; ${esc(partner.display_name)}</span><span class="tab-badge" hidden>0</span>`;
   tab.addEventListener('click', () => switchChat(tab.dataset.chatTab));
   holder.appendChild(tab);
@@ -5380,6 +5394,10 @@ async function bootRoom() {
   restoreSessionLock();
   (cfg.blockedUserIds || []).forEach(id => blockedUserIds.add(Number(id)));
   avatarRuntime?.relationships?.seedPersistedRelationships(cfg.relationships || []);
+  chatPrivateChats().syncRelationshipChat(
+    avatarRuntime?.relationships?.relationshipForParticipant(cfg.myParticipantId) || null,
+    cfg.relationshipChat || null
+  );
   avatarRuntime?.coordinator?.seedLinkIcons(cfg.linkIcons || {});
   await Promise.all((cfg.participants || []).map(p => renderParticipantWhenReady(p, { animateJoin: true }).catch(() => {
     renderParticipant(p, { animateJoin: true });
@@ -5388,8 +5406,8 @@ async function bootRoom() {
   (cfg.messages || []).forEach(msg => addMessageToChannel(msg, 'room', false));
   (cfg.communityMessages || []).forEach(msg => addMessageToChannel(msg, 'community', false));
   (cfg.linkMessages || []).forEach(msg => {
-    const partnerId = msg.participant_id === cfg.myParticipantId ? linkedPartner()?.id : msg.participant_id;
-    if (partnerId) addMessageToChannel(msg, `link:${partnerId}`, false);
+    const chatKey = chatPrivateChats().relationshipChatKeyFromPayload(msg);
+    if (chatKey) addMessageToChannel(msg, chatKey, false);
   });
   (cfg.dmMessages || []).forEach(msg => {
     if (msg.partner_user_id) addMessageToChannel(msg, `dm:${msg.partner_user_id}`, false);

@@ -14,22 +14,36 @@ if ($channel === 'community') {
 
 if ($channel === 'link') {
     $targetId = (int)($body['target_participant_id'] ?? 0);
-    if (!$targetId) json_out(['error' => 'Linked participant required'], 400);
-    $stmt = $pdo->prepare(
-        'SELECT id FROM participants
-         WHERE session_id = ? AND id = ?
-           AND (linked_to_participant_id = ? OR id = (SELECT linked_to_participant_id FROM participants WHERE id = ?))
-         LIMIT 1'
-    );
-    $stmt->execute([$sessionId, $targetId, (int)$p['id'], (int)$p['id']]);
-    if (!$stmt->fetch()) json_out(['error' => 'You are not linked to that participant'], 403);
-    $linkKey = link_key_for((int)$p['id'], $targetId);
-    emit_community_event($pdo, 'link', $sessionId, $linkKey, 'link_typing', [
-        'participant_id' => (int)$p['id'],
-        'link_key' => $linkKey,
-        'active' => $active,
-    ]);
-    json_out(['ok' => true]);
+    $requestedIdentity = trim((string)($body['conversation_id'] ?? $body['relationship_id'] ?? ''));
+    $result = avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $p,
+        $requestedIdentity,
+        $targetId,
+        $active
+    ): array {
+        $access = avatar_relationship_chat_access(
+            $pdo,
+            $sessionId,
+            (int)$p['id'],
+            $requestedIdentity,
+            $targetId,
+            true
+        );
+        if (!$access) return ['error' => 'Relationship conversation unavailable', 'http_status' => 403];
+        emit_community_event($pdo, 'link', $sessionId, $access['conversation_id'], 'link_typing', [
+            'participant_id' => (int)$p['id'],
+            'link_key' => $access['conversation_id'],
+            'relationship_id' => $access['relationship_id'],
+            'relationship_version' => $access['relationship_version'],
+            'active' => $active,
+        ]);
+        return ['ok' => true, 'link_key' => $access['conversation_id']];
+    });
+    $status = (int)($result['http_status'] ?? 200);
+    unset($result['http_status']);
+    json_out($result, $status);
 }
 
 emit_event($pdo, $sessionId, 'typing', [

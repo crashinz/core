@@ -500,13 +500,16 @@ export class ChatMediaSendService {
         const targets =
             this.#currentTargets();
 
-        if (targets.partnerId) {
+        if (targets.relationship) {
 
             payload.channel =
                 "link";
 
-            payload.target_participant_id =
-                targets.partnerId;
+            payload.relationship_id =
+                targets.relationship.relationship_id;
+
+            payload.conversation_id =
+                targets.relationship.conversation_id;
 
         } else if (targets.dmUserId) {
 
@@ -533,8 +536,9 @@ export class ChatMediaSendService {
         const targets =
             this.#currentTargets();
 
-        if (targets.partnerId) {
-            formData.append("target_participant_id", String(targets.partnerId));
+        if (targets.relationship) {
+            formData.append("relationship_id", targets.relationship.relationship_id);
+            formData.append("conversation_id", targets.relationship.conversation_id);
         }
 
         if (targets.dmUserId) {
@@ -600,12 +604,12 @@ export class ChatMediaSendService {
 
         if (message.channel === "link") {
 
-            const partnerId =
-                targets.partnerId || this.#currentTargets().partnerId;
+            const relationship =
+                targets.relationship || this.#currentTargets().relationship;
 
             context.addMessageToChannel(
                 message,
-                partnerId ? `link:${partnerId}` : context.getActiveChat(),
+                relationship?.chatKey || context.getActiveChat(),
                 false
             );
 
@@ -668,8 +672,8 @@ export class ChatMediaSendService {
 
         return {
 
-            partnerId:
-                context.activeLinkPartnerId(),
+            relationship:
+                context.activeRelationshipRequest?.() || null,
 
             dmUserId:
                 context.activeDmUserId()

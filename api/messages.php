@@ -19,13 +19,16 @@ function dm_target_from_key(string $key, int $currentUserId): int {
     return $a === $currentUserId ? $b : $a;
 }
 
-function community_message_accessible(array $message, string $channel, int $sessionId, array $participant): bool {
+function community_message_accessible(PDO $pdo, array $message, string $channel, int $sessionId, array $participant): bool {
     if (($message['scope'] ?? '') !== $channel) return false;
     if ($channel === 'community') return true;
     if ($channel === 'link') {
-        if ((int)($message['session_id'] ?? 0) !== $sessionId) return false;
-        $ids = array_map('intval', explode(':', (string)($message['link_key'] ?? '')));
-        return in_array((int)$participant['id'], $ids, true);
+        return avatar_relationship_chat_message_accessible(
+            $pdo,
+            $message,
+            $sessionId,
+            (int)$participant['id']
+        ) !== null;
     }
     if ($channel === 'dm') {
         $ids = explode(':', (string)($message['link_key'] ?? ''));
@@ -68,7 +71,7 @@ function reply_snapshot(PDO $pdo, array $body, string $channel, int $sessionId, 
         $stmt = $pdo->prepare('SELECT * FROM community_messages WHERE id = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1');
         $stmt->execute([$replyId]);
         $message = $stmt->fetch();
-        if ($message && !community_message_accessible($message, $channel, $sessionId, $participant)) $message = false;
+        if ($message && !community_message_accessible($pdo, $message, $channel, $sessionId, $participant)) $message = false;
     }
     if (!$message) json_out(['error' => 'Reply target unavailable'], 404);
 
@@ -91,12 +94,70 @@ if ($action === 'edit') {
     $contentLength = function_exists('mb_strlen') ? mb_strlen($content, 'UTF-8') : strlen($content);
     if ($contentLength > 1000) json_out(['error' => 'Message too long'], 400);
 
+    if ($channel === 'link') {
+        $result = avatar_relationship_transaction($pdo, function() use (
+            $pdo,
+            $messageId,
+            $content,
+            $sessionId,
+            $participant
+        ): array {
+            $sql = 'SELECT * FROM community_messages WHERE id = ? LIMIT 1';
+            if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$messageId]);
+            $message = $stmt->fetch() ?: null;
+            $access = $message ? avatar_relationship_chat_message_accessible(
+                $pdo,
+                $message,
+                $sessionId,
+                (int)$participant['id'],
+                true
+            ) : null;
+            if (!$message || !$access) return ['error' => 'Message not found', 'http_status' => 404];
+            if ((int)$message['participant_id'] !== (int)$participant['id'] || !empty($message['is_deleted'])) {
+                return ['error' => 'Cannot edit this message', 'http_status' => 403];
+            }
+            if (($message['message_type'] ?? 'text') !== 'text') {
+                return ['error' => 'Cannot edit this message', 'http_status' => 403];
+            }
+            $editedAt = gmdate('Y-m-d H:i:s');
+            $original = $message['original_content'] ?? null;
+            if ($original === null || $original === '') $original = (string)$message['content'];
+            $urlPreview = url_preview_for_text($content);
+            $urlPreviewJson = $urlPreview
+                ? json_encode($urlPreview, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                : null;
+            $pdo->prepare('UPDATE community_messages SET content = ?, original_content = ?, url_preview_json = ?, edited_at = ? WHERE id = ?')
+                ->execute([$content, $original, $urlPreviewJson, $editedAt, $messageId]);
+            $payload = [
+                'id' => $messageId,
+                'message_id' => $messageId,
+                'channel' => 'link',
+                'participant_id' => (int)$participant['id'],
+                'user_id' => (int)$participant['user_id'],
+                'content' => $content,
+                'url_preview' => $urlPreview,
+                'message_type' => 'text',
+                'edited_at' => $editedAt,
+                'link_key' => $access['conversation_id'],
+                'relationship_id' => $access['relationship_id'],
+                'relationship_version' => $access['relationship_version'],
+            ];
+            emit_community_event($pdo, 'link', $sessionId, $access['conversation_id'], 'link_message_edit', $payload);
+            return ['ok' => true] + $payload;
+        });
+        $status = (int)($result['http_status'] ?? 200);
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
+
     if ($channel !== 'room') {
         if (!in_array($channel, ['community', 'link', 'dm'], true)) json_out(['error' => 'Unsupported channel'], 400);
         $stmt = $pdo->prepare('SELECT * FROM community_messages WHERE id = ? LIMIT 1');
         $stmt->execute([$messageId]);
         $message = $stmt->fetch();
-        if (!$message || !community_message_accessible($message, $channel, $sessionId, $participant)) json_out(['error' => 'Message not found'], 404);
+        if (!$message || !community_message_accessible($pdo, $message, $channel, $sessionId, $participant)) json_out(['error' => 'Message not found'], 404);
         if ((int)$message['participant_id'] !== (int)$participant['id'] || !empty($message['is_deleted'])) json_out(['error' => 'Cannot edit this message'], 403);
         if (($message['message_type'] ?? 'text') !== 'text') json_out(['error' => 'Cannot edit this message'], 403);
 
@@ -165,12 +226,56 @@ if ($action === 'edit') {
 if ($action === 'delete') {
     $messageId = (int)($body['message_id'] ?? 0);
     if (!$messageId) json_out(['error' => 'Message required'], 400);
+    if ($channel === 'link') {
+        $result = avatar_relationship_transaction($pdo, function() use (
+            $pdo,
+            $messageId,
+            $sessionId,
+            $participant
+        ): array {
+            $sql = 'SELECT * FROM community_messages WHERE id = ? LIMIT 1';
+            if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$messageId]);
+            $message = $stmt->fetch() ?: null;
+            $access = $message ? avatar_relationship_chat_message_accessible(
+                $pdo,
+                $message,
+                $sessionId,
+                (int)$participant['id'],
+                true
+            ) : null;
+            if (!$message || !$access) return ['error' => 'Message not found', 'http_status' => 404];
+            if ((int)$message['participant_id'] !== (int)$participant['id']) {
+                return ['error' => 'Cannot delete this message', 'http_status' => 403];
+            }
+            if (!empty($message['is_deleted'])) return ['ok' => true, 'message_id' => $messageId];
+            $deletedAt = gmdate('Y-m-d H:i:s');
+            $pdo->prepare('UPDATE community_messages SET is_deleted = 1, deleted_at = ?, deleted_by_user_id = ? WHERE id = ?')
+                ->execute([$deletedAt, (int)$participant['user_id'], $messageId]);
+            $payload = [
+                'message_id' => $messageId,
+                'channel' => 'link',
+                'participant_id' => (int)$participant['id'],
+                'user_id' => (int)$participant['user_id'],
+                'deleted_at' => $deletedAt,
+                'link_key' => $access['conversation_id'],
+                'relationship_id' => $access['relationship_id'],
+                'relationship_version' => $access['relationship_version'],
+            ];
+            emit_community_event($pdo, 'link', $sessionId, $access['conversation_id'], 'link_message_delete', $payload);
+            return ['ok' => true] + $payload;
+        });
+        $status = (int)($result['http_status'] ?? 200);
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
     if ($channel !== 'room') {
         if (!in_array($channel, ['community', 'link', 'dm'], true)) json_out(['error' => 'Unsupported channel'], 400);
         $stmt = $pdo->prepare('SELECT * FROM community_messages WHERE id = ? LIMIT 1');
         $stmt->execute([$messageId]);
         $message = $stmt->fetch();
-        if (!$message || !community_message_accessible($message, $channel, $sessionId, $participant)) json_out(['error' => 'Message not found'], 404);
+        if (!$message || !community_message_accessible($pdo, $message, $channel, $sessionId, $participant)) json_out(['error' => 'Message not found'], 404);
         if ((int)$message['participant_id'] !== (int)$participant['id']) json_out(['error' => 'Cannot delete this message'], 403);
         if (!empty($message['is_deleted'])) json_out(['ok' => true]);
 
@@ -251,8 +356,8 @@ $contentLength = function_exists('mb_strlen') ? mb_strlen($content, 'UTF-8') : s
 if ($messageType === 'text' && $contentLength > 1000) json_out(['error' => 'Message too long'], 400);
 $urlPreview = $messageType === 'text' ? url_preview_for_text($content) : null;
 $urlPreviewJson = $urlPreview ? json_encode($urlPreview, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
-$replyTo = reply_snapshot($pdo, $body, $channel, $sessionId, $participant);
-$replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
+$replyTo = null;
+$replyToJson = null;
 $maxPerSecond = app_setting_float($pdo, 'chat_posts_per_second', 3);
 $rateCutoff = gmdate('Y-m-d H:i:s', time() - 1);
 $roomRecent = $pdo->prepare("SELECT COUNT(*) FROM messages WHERE participant_id = ? AND sent_at >= ?");
@@ -265,16 +370,57 @@ if (((int)$roomRecent->fetchColumn() + (int)$communityRecent->fetchColumn()) >= 
 
 if ($channel === 'link') {
     $targetId = (int)($body['target_participant_id'] ?? 0);
-    if (!$targetId) json_out(['error' => 'Linked participant required'], 400);
-    $stmt = $pdo->prepare(
-        'SELECT id FROM participants
-         WHERE session_id = ? AND id = ?
-           AND (linked_to_participant_id = ? OR id = (SELECT linked_to_participant_id FROM participants WHERE id = ?))
-         LIMIT 1'
-    );
-    $stmt->execute([$sessionId, $targetId, (int)$participant['id'], (int)$participant['id']]);
-    if (!$stmt->fetch()) json_out(['error' => 'You are not linked to that participant'], 403);
-    $linkKey = link_key_for((int)$participant['id'], $targetId);
+    $requestedIdentity = trim((string)($body['conversation_id'] ?? $body['relationship_id'] ?? ''));
+    $result = avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $participant,
+        $requestedIdentity,
+        $targetId,
+        $body,
+        $messageType,
+        $content,
+        $urlPreview,
+        $urlPreviewJson,
+        $snapshot,
+        $mimeType,
+        $originalName,
+        $authorContext
+    ): array {
+        $access = avatar_relationship_chat_access(
+            $pdo,
+            $sessionId,
+            (int)$participant['id'],
+            $requestedIdentity,
+            $targetId,
+            true
+        );
+        if (!$access) return ['error' => 'Relationship conversation unavailable', 'http_status' => 403];
+        $replyTo = reply_snapshot($pdo, $body, 'link', $sessionId, $participant);
+        $replyToJson = $replyTo
+            ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            : null;
+        $message = create_message($pdo, 'link', $messageType, [
+            'session_id' => $sessionId,
+            'participant' => $participant,
+            'author_context' => $authorContext,
+            'content' => $content,
+            'url_preview' => $urlPreview,
+            'url_preview_json' => $urlPreviewJson,
+            'reply_to' => $replyTo,
+            'reply_to_json' => $replyToJson,
+            'gesture' => $messageType === 'gesture' ? $snapshot : null,
+            'mime_type' => $mimeType,
+            'original_name' => $originalName,
+            'link_key' => $access['conversation_id'],
+            'relationship_id' => $access['relationship_id'],
+            'relationship_version' => $access['relationship_version'],
+        ]);
+        return $message;
+    });
+    $status = (int)($result['http_status'] ?? 200);
+    unset($result['http_status']);
+    json_out($result, $status);
 } elseif ($channel === 'dm') {
     $targetUserId = (int)($body['target_user_id'] ?? 0);
     if (!$targetUserId || $targetUserId === (int)$participant['user_id']) json_out(['error' => 'DM recipient required'], 400);
@@ -292,6 +438,9 @@ if ($channel === 'link') {
     if ($stmt->fetch()) json_out(['error' => 'You cannot DM this user.'], 403);
     $dmKey = dm_key_for((int)$participant['user_id'], $targetUserId);
 }
+
+$replyTo = reply_snapshot($pdo, $body, $channel, $sessionId, $participant);
+$replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
 
 $msg = create_message($pdo, $channel, $messageType, [
     'session_id' => $sessionId,

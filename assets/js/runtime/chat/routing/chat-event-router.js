@@ -267,12 +267,7 @@ export class ChatEventRouter {
         }
 
         if (channel === "link") {
-            const partnerId =
-                context.linkPartnerIdFromKey(payload.link_key);
-
-            return partnerId
-                ? `link:${partnerId}`
-                : context.getActiveChat();
+            return context.relationshipChatKeyFromPayload(payload) || "room";
         }
 
         if (channel === "dm") {
@@ -436,17 +431,14 @@ export class ChatEventRouter {
         const context =
             this.#requireContext();
 
-        const partnerId =
-            context.linkPartnerIdFromKey(payload.link_key) ||
-            (
-                payload.participant_id === context.getConfig().myParticipantId
-                    ? context.activeLinkPartnerId()
-                    : payload.participant_id
-            );
+        const chatKey =
+            context.relationshipChatKeyFromPayload(payload);
+
+        if (!chatKey) return;
 
         context.addMessageToChannel(
             payload,
-            `link:${partnerId}`,
+            chatKey,
             true
         );
 

@@ -81,6 +81,8 @@ function create_message(PDO $pdo, string $channel, string $type, array $payload)
         $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => $channel] + $baseMsg;
         if ($channel === 'link') {
             $msg['link_key'] = (string)($payload['link_key'] ?? '');
+            $msg['relationship_id'] = (string)($payload['relationship_id'] ?? '');
+            $msg['relationship_version'] = max(1, (int)($payload['relationship_version'] ?? 1));
             emit_community_event($pdo, 'link', (int)($payload['session_id'] ?? 0), $msg['link_key'], 'link_message', $msg);
             return $msg;
         }

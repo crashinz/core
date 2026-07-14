@@ -75,6 +75,13 @@ export class ChatPrivateChatService {
     #closedDmUserIds = new Set();
 
     /**
+     * Current relationship conversation projection.
+     *
+     * @type {Object|null}
+     */
+    #relationshipChat = null;
+
+    /**
      * Private chat context supplied by the room composition root.
      *
      * @type {Object}
@@ -116,6 +123,8 @@ export class ChatPrivateChatService {
         this.#dmUsers.clear();
 
         this.#closedDmUserIds.clear();
+
+        this.#relationshipChat = null;
 
         this.#context = null;
 
@@ -169,7 +178,12 @@ export class ChatPrivateChatService {
 
         if (!key.startsWith("link:")) return null;
 
-        return Number(key.slice(5));
+        if (!this.#relationshipChat || key !== this.#relationshipChat.chatKey) {
+            return null;
+        }
+
+        return this.#relationshipChat.memberIds
+            .find(id => id !== Number(this.#requireContext().getConfig().myParticipantId)) || null;
 
     }
 
@@ -203,16 +217,15 @@ export class ChatPrivateChatService {
         const context =
             this.#requireContext();
 
-        const ids =
-            String(key || "")
-                .split(":")
-                .map(Number)
-                .filter(Boolean);
+        if (!this.#relationshipChat) return null;
 
-        return (
-            ids.find(id => id !== context.getConfig().myParticipantId) ||
-            this.activeLinkPartnerId(context.getActiveChat())
-        );
+        const rawKey = String(key || "");
+        if (rawKey !== this.#relationshipChat.conversationId && rawKey !== this.#relationshipChat.relationshipId) {
+            return null;
+        }
+
+        return this.#relationshipChat.memberIds
+            .find(id => id !== Number(context.getConfig().myParticipantId)) || null;
 
     }
 
@@ -276,6 +289,153 @@ export class ChatPrivateChatService {
         }
 
         return `DM> ${user ? user.display_name : "Friend"}`;
+
+    }
+
+    /**
+     * Synchronizes the one relationship conversation from the authoritative
+     * relationship snapshot.
+     *
+     * @param {Object|null} relationship
+     * @param {Object|null} accessProjection
+     *
+     * @returns {Object|null}
+     */
+    syncRelationshipChat(relationship, accessProjection = null) {
+
+        const context = this.#requireContext();
+        const participantId = Number(context.getConfig().myParticipantId);
+        const memberIds = Array.from(relationship?.memberIds || relationship?.members || [])
+            .map(member => Number(member?.participantId || member?.participant_id || member))
+            .filter(id => Number.isFinite(id) && id > 0);
+        const conversationId = String(
+            accessProjection?.conversationId ||
+            relationship?.chatAccess?.conversationId ||
+            relationship?.conversationId ||
+            ""
+        );
+        const relationshipId = String(
+            accessProjection?.relationshipId ||
+            relationship?.id ||
+            relationship?.relationship_id ||
+            ""
+        );
+        const active = Boolean(
+            relationship &&
+            relationship.status === "active" &&
+            relationship.divergenceStatus === "synced" &&
+            conversationId &&
+            relationshipId &&
+            memberIds.includes(participantId) &&
+            accessProjection?.active !== false &&
+            relationship?.chatAccess?.active !== false
+        );
+
+        const previous = this.#relationshipChat;
+        if (!active) {
+            this.#relationshipChat = null;
+            if (previous) {
+                this.#runtime.messages.clearChannel(previous.chatKey);
+                context.clearUnread(previous.chatKey);
+                if (context.getActiveChat() === previous.chatKey) context.switchChat("room");
+            }
+            return null;
+        }
+
+        const chatKey = `link:${conversationId}`;
+        this.#relationshipChat = Object.freeze({
+            relationshipId,
+            relationshipVersion: Math.max(1, Number(
+                relationship.version || accessProjection?.relationshipVersion || 1
+            )),
+            conversationId,
+            chatKey,
+            memberIds: Object.freeze(memberIds),
+            visibleAfterMessageId: Math.max(0, Number(
+                accessProjection?.visibleAfterMessageId ||
+                relationship?.chatAccess?.visibleAfterMessageId ||
+                0
+            )),
+            active: true
+        });
+
+        if (previous && previous.chatKey !== chatKey) {
+            this.#runtime.messages.clearChannel(previous.chatKey);
+            context.clearUnread(previous.chatKey);
+            if (context.getActiveChat() === previous.chatKey) context.switchChat(chatKey);
+        }
+
+        return this.#relationshipChat;
+
+    }
+
+    /**
+     * Returns the current relationship conversation projection.
+     *
+     * @returns {Object|null}
+     */
+    relationshipChat() {
+
+        return this.#relationshipChat;
+
+    }
+
+    /**
+     * Returns the active relationship request identity.
+     *
+     * @param {string} chatKey
+     *
+     * @returns {Object|null}
+     */
+    relationshipRequest(chatKey) {
+
+        const key = String(chatKey || "");
+        if (!this.#relationshipChat || key !== this.#relationshipChat.chatKey) return null;
+
+        return {
+            relationship_id: this.#relationshipChat.relationshipId,
+            conversation_id: this.#relationshipChat.conversationId,
+            chatKey: this.#relationshipChat.chatKey
+        };
+
+    }
+
+    /**
+     * Resolves an authorized relationship chat key from an event payload.
+     *
+     * @param {Object} payload
+     *
+     * @returns {string|null}
+     */
+    relationshipChatKeyFromPayload(payload = {}) {
+
+        if (!this.#relationshipChat) return null;
+
+        const conversationId = String(payload.link_key || payload.conversation_id || "");
+        const relationshipId = String(payload.relationship_id || "");
+        if (conversationId !== this.#relationshipChat.conversationId) return null;
+        if (relationshipId && relationshipId !== this.#relationshipChat.relationshipId) return null;
+
+        return this.#relationshipChat.chatKey;
+
+    }
+
+    /**
+     * Returns a compact member label for the relationship tab.
+     *
+     * @returns {string}
+     */
+    relationshipLabel() {
+
+        if (!this.#relationshipChat) return "Group";
+
+        const context = this.#requireContext();
+        const currentId = Number(context.getConfig().myParticipantId);
+        const names = this.#relationshipChat.memberIds
+            .filter(id => id !== currentId)
+            .map(id => context.participantName?.(id) || "Friend");
+        if (names.length <= 2) return names.join(", ") || "Group";
+        return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
 
     }
 
@@ -460,7 +620,10 @@ export class ChatPrivateChatService {
         }
 
         if (key.startsWith("link:")) {
-            payload.target_participant_id = Number(key.slice(5));
+            const relationship = this.relationshipRequest(key);
+            if (!relationship) return false;
+            payload.relationship_id = relationship.relationship_id;
+            payload.conversation_id = relationship.conversation_id;
         }
 
         await context.apiPost(
@@ -548,7 +711,13 @@ export class ChatPrivateChatService {
                 this.#dmUsers.size,
 
             closedDmTabs:
-                this.#closedDmUserIds.size
+                this.#closedDmUserIds.size,
+
+            relationshipChatActive:
+                Boolean(this.#relationshipChat),
+
+            relationshipConversationId:
+                this.#relationshipChat?.conversationId || null
 
         });
 

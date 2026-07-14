@@ -31,14 +31,14 @@ cleanup_stale_participants($pdo, $sessionId);
 cleanup_room_effects($pdo, $sessionId);
 $dmLeft = 'dm:' . (int)$me['user_id'] . ':%';
 $dmRight = 'dm:%:' . (int)$me['user_id'];
-$linkKeyExprA = db_concat($pdo, ['p.id', "':'", 'p.linked_to_participant_id']);
-$linkKeyExprB = db_concat($pdo, ['p.linked_to_participant_id', "':'", 'p.id']);
+$initialLinkAccess = avatar_relationship_chat_access($pdo, $sessionId, (int)$me['id']);
+$linkConversationId = (string)($initialLinkAccess['conversation_id'] ?? '');
 session_write_close();
 
 $stmt = $pdo->prepare('SELECT id, type, payload FROM events WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT 200');
 $mapRoomEvent = function(array $event) use ($pdo, $sessionId, $me): array {
     $payload = json_decode((string)$event['payload'], true) ?: [];
-    if ((string)$event['type'] === 'relationship'
+    if (in_array((string)$event['type'], ['relationship', 'link'], true)
         && isset($payload['relationship'])
         && !empty($payload['relationship_id'])
         && !empty($payload['relationship_version'])) {
@@ -63,32 +63,43 @@ $mapRoomEvent = function(array $event) use ($pdo, $sessionId, $me): array {
     ];
 };
 $communityStmt = $pdo->prepare(
-    "SELECT id, type, payload FROM community_events
-     WHERE id > ?
+    "SELECT ce.id, ce.scope, ce.link_key, ce.type, ce.payload FROM community_events ce
+     WHERE ce.id > ?
        AND (
-         scope = 'community'
+         ce.scope = 'community'
          OR (
-           scope = 'link'
-           AND session_id = ?
-           AND link_key IN (
-             SELECT CASE
-               WHEN p.id < p.linked_to_participant_id THEN {$linkKeyExprA}
-               ELSE {$linkKeyExprB}
-             END
-             FROM participants p
-             WHERE p.session_id = ?
-               AND p.linked_to_participant_id IS NOT NULL
-               AND (p.id = ? OR p.linked_to_participant_id = ?)
+           ce.scope = 'link'
+           AND ce.session_id = ?
+           AND ce.link_key IN (
+             SELECT ar.conversation_public_id
+               FROM avatar_relationship_members viewer_membership
+               JOIN avatar_relationships ar ON ar.id = viewer_membership.relationship_id
+              WHERE ar.session_id = ? AND ar.status = 'active'
+                AND ar.divergence_status = 'synced'
+                AND viewer_membership.participant_id = ?
+                AND viewer_membership.membership_status = 'active'
+                AND viewer_membership.active_participant_id = ?
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM avatar_relationship_members other_membership
+                    JOIN participants other_participant ON other_participant.id = other_membership.participant_id
+                    JOIN user_blocks ub
+                      ON (ub.blocker_user_id = ? AND ub.blocked_user_id = other_participant.user_id)
+                      OR (ub.blocked_user_id = ? AND ub.blocker_user_id = other_participant.user_id)
+                   WHERE other_membership.relationship_id = ar.id
+                     AND other_membership.membership_status = 'active'
+                     AND other_membership.participant_id <> viewer_membership.participant_id
+                )
            )
          )
          OR (
-           scope = 'dm'
-           AND (link_key LIKE ? OR link_key LIKE ?)
+           ce.scope = 'dm'
+           AND (ce.link_key LIKE ? OR ce.link_key LIKE ?)
          )
          OR (
-           scope = 'game'
-           AND session_id = ?
-           AND link_key IN (
+           ce.scope = 'game'
+           AND ce.session_id = ?
+           AND ce.link_key IN (
              SELECT gl.lobby_code
              FROM game_lobbies gl
              JOIN game_sessions gs ON gs.lobby_code = gl.lobby_code
@@ -99,7 +110,7 @@ $communityStmt = $pdo->prepare(
            )
          )
        )
-     ORDER BY id ASC LIMIT 200"
+     ORDER BY ce.id ASC LIMIT 200"
 );
 $pollAttempts = 20;
 $pollSleepMicroseconds = 100000;
@@ -109,8 +120,42 @@ for ($i = 0; $i < $pollAttempts; $i++) {
     }
     $stmt->execute([$sessionId, $last]);
     $rows = $stmt->fetchAll();
-    $communityStmt->execute([$lastCommunity, $sessionId, $sessionId, (int)$me['id'], (int)$me['id'], $dmLeft, $dmRight, $sessionId, $sessionId, (int)$me['id'], (int)$me['id']]);
-    $communityRows = $communityStmt->fetchAll();
+    $communityRows = avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $communityStmt,
+        $lastCommunity,
+        $sessionId,
+        $me,
+        $linkConversationId,
+        $dmLeft,
+        $dmRight
+    ): array {
+        $linkAccess = $linkConversationId !== ''
+            ? avatar_relationship_chat_access($pdo, $sessionId, (int)$me['id'], $linkConversationId, 0, true)
+            : null;
+        $communityStmt->execute([
+            $lastCommunity,
+            $sessionId,
+            $sessionId,
+            (int)$me['id'],
+            (int)$me['id'],
+            (int)$me['user_id'],
+            (int)$me['user_id'],
+            $dmLeft,
+            $dmRight,
+            $sessionId,
+            $sessionId,
+            (int)$me['id'],
+            (int)$me['id'],
+        ]);
+        return array_values(array_filter($communityStmt->fetchAll(), function(array $event) use ($linkAccess): bool {
+            if ((string)($event['scope'] ?? '') !== 'link') return true;
+            if (!$linkAccess || (string)($event['link_key'] ?? '') !== (string)$linkAccess['conversation_id']) return false;
+            $payload = json_decode((string)$event['payload'], true) ?: [];
+            $messageId = (int)($payload['message_id'] ?? $payload['id'] ?? 0);
+            return $messageId <= 0 || $messageId > (int)$linkAccess['visible_after_message_id'];
+        }));
+    });
     if ($rows || $communityRows) {
         json_out([
         'events' => array_map($mapRoomEvent, $rows),
