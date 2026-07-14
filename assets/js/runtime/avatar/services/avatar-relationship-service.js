@@ -19,7 +19,7 @@
  *      documented owners.
  *
  * Build:
- *      000044 Part 3
+ *      000044 Part 4
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -59,6 +59,9 @@
  * Build 000044 Part 3
  * - Added immutable ordered relationship presentation projections with
  *   presence, renderability, normal-row, and lap-host state.
+ *
+ * Build 000044 Part 4
+ * - Added the immutable viewer-specific relationship-management projection.
  ******************************************************************************/
 
 /**
@@ -73,6 +76,20 @@
 
 const RELATIONSHIP_METADATA_SCHEMA_VERSION = 1;
 const RELATIONSHIP_ID_PREFIX = "legacy-edge";
+
+function normalizeRelationshipRowOptions(options = {}) {
+
+    const rowSpacing = Number(options?.rowSpacing ?? 0);
+
+    return Object.freeze({
+        schemaVersion: 1,
+        rowSpacing:
+            Number.isInteger(rowSpacing)
+                ? Math.max(0, Math.min(64, rowSpacing))
+                : 0
+    });
+
+}
 
 const RELATIONSHIP_CAPABILITIES = Object.freeze({
 
@@ -1107,6 +1124,145 @@ export class AvatarRelationshipService {
                 Math.max(0, Number(relationship.version || 0)),
                 visibleMemberIds.join(":")
             ].join("|")
+        });
+
+    }
+
+    /**
+     * Builds one immutable viewer-specific management projection without
+     * introducing a second relationship state store.
+     *
+     * @param {Object|string|null} relationshipOrId
+     * @param {Object} options
+     * @returns {Object|null}
+     */
+    relationshipManagementProjection(relationshipOrId, options = {}) {
+
+        const relationship =
+            typeof relationshipOrId === "string"
+                ? this.relationshipById(relationshipOrId)
+                : relationshipOrId;
+        const viewerParticipantId = Number(options.viewerParticipantId || 0);
+        const participants = options.participants || this.#runtime.state;
+        const requests = Array.from(options.requests || []);
+        const participantFor = participantId =>
+            participants?.get?.(Number(participantId)) || null;
+        const viewerMember = relationship?.members?.find(member =>
+            Number(member.participantId) === viewerParticipantId
+        ) || null;
+        const viewerActive = Boolean(
+            relationship &&
+            relationship.status === "active" &&
+            viewerMember &&
+            viewerMember.status === "active"
+        );
+        const viewerPermissionRole = String(
+            viewerMember?.permissionRole ||
+            relationship?.viewerMembership?.permissionRole ||
+            "member"
+        );
+        const canManage =
+            viewerActive &&
+            ["creator", "manager"].includes(viewerPermissionRole);
+        const members = Array.from(relationship?.members || [])
+            .slice()
+            .sort((first, second) =>
+                Number(first.order) - Number(second.order) ||
+                Number(first.participantId) - Number(second.participantId)
+            )
+            .map(member => {
+                const participant = participantFor(member.participantId);
+                const relationshipRole = String(member.relationshipRole || "normal");
+                const permissionRole = String(member.permissionRole || "member");
+                const isViewer = Number(member.participantId) === viewerParticipantId;
+                return Object.freeze({
+                    participantId: Number(member.participantId),
+                    displayName: String(participant?.display_name || "Room member"),
+                    relationshipRole,
+                    permissionRole,
+                    order: Number(member.order || 0),
+                    lapHostParticipantId: Number(member.lapHostParticipantId || 0) || null,
+                    present: Boolean(participant && participant.online !== false && !participant.exiting),
+                    renderable: Boolean(participant?.avatarEl || participant?.webcam_enabled || participant?.webcam_path),
+                    isViewer,
+                    actions: Object.freeze({
+                        promote: canManage && !isViewer && permissionRole === "member",
+                        demote: canManage && !isViewer && permissionRole === "manager",
+                        remove: canManage && !isViewer && permissionRole !== "creator",
+                        reorder: canManage && relationshipRole === "normal"
+                    })
+                });
+            });
+        const normalMembers = members.filter(member => member.relationshipRole === "normal");
+        const lapMembers = members.filter(member => member.relationshipRole === "lap");
+        const visibleRequests = requests
+            .filter(request => {
+                const relationshipId = String(request?.relationshipId || request?.relationship_id || "");
+                const pending = String(request?.status || "pending") === "pending";
+                return pending && (!relationship || !relationshipId || relationshipId === relationship.id);
+            })
+            .map(request => {
+                const requesterParticipantId = Number(request.requesterParticipantId || request.requester_participant_id || 0);
+                const targetParticipantId = Number(request.targetParticipantId || request.target_participant_id || 0);
+                const type = String(request.type || request.request_type || "join-request");
+                const pending = String(request.status || "pending") === "pending";
+                const requester = participantFor(requesterParticipantId);
+                const target = participantFor(targetParticipantId);
+                const isRequester = requesterParticipantId === viewerParticipantId;
+                const isTarget = targetParticipantId === viewerParticipantId;
+                return Object.freeze({
+                    id: String(request.id || request.request_id || ""),
+                    relationshipId: String(request.relationshipId || request.relationship_id || relationship?.id || ""),
+                    relationshipVersion: Math.max(1, Number(request.relationshipVersion || request.relationship_version || relationship?.version || 1)),
+                    type,
+                    status: String(request.status || "pending"),
+                    requestedRelationshipRole: String(request.requestedRelationshipRole || request.requested_relationship_role || "normal"),
+                    requesterParticipantId,
+                    requesterName: String(requester?.display_name || "Room member"),
+                    targetParticipantId,
+                    targetName: String(target?.display_name || "Room member"),
+                    actions: Object.freeze({
+                        accept: pending && (type === "invitation" ? isTarget : canManage),
+                        reject: pending && (type === "invitation" ? isTarget : canManage),
+                        cancel: pending && (isRequester || (type === "invitation" && canManage))
+                    })
+                });
+            });
+
+        if (!relationship && !visibleRequests.length) return null;
+
+        const rowSpacing = Number(relationship?.options?.rowSpacing ?? 0);
+        return Object.freeze({
+            relationshipId: String(relationship?.id || visibleRequests[0]?.relationshipId || ""),
+            relationshipVersion: Math.max(1, Number(relationship?.version || visibleRequests[0]?.relationshipVersion || 1)),
+            relationshipStatus: String(relationship?.status || "pending"),
+            joinPolicy: String(relationship?.joinPolicy || "approval-required"),
+            conversationId: String(relationship?.conversationId || ""),
+            viewer: Object.freeze({
+                participantId: viewerParticipantId,
+                active: viewerActive,
+                relationshipRole: String(viewerMember?.relationshipRole || ""),
+                permissionRole: viewerPermissionRole
+            }),
+            members: Object.freeze(members),
+            normalMembers: Object.freeze(normalMembers),
+            lapMembers: Object.freeze(lapMembers),
+            requests: Object.freeze(visibleRequests),
+            rowOptions: Object.freeze({
+                schemaVersion: 1,
+                rowSpacing: Number.isFinite(rowSpacing) ? Math.max(0, Math.min(64, rowSpacing)) : 0
+            }),
+            actions: Object.freeze({
+                manage: viewerActive,
+                invite: canManage,
+                setJoinPolicy: canManage,
+                reorder: canManage && normalMembers.length > 1,
+                configurePosition: canManage,
+                leave: viewerActive,
+                dissolve: canManage
+            }),
+            divergenceStatus: String(relationship?.divergenceStatus || "synced"),
+            refreshRequired: String(relationship?.divergenceStatus || "synced") !== "synced"
         });
 
     }
@@ -2470,7 +2626,9 @@ export class AvatarRelationshipService {
             anchors:
                 relationship.anchors || relationship.metadata?.anchors || null,
             options:
-                relationship.options || relationship.metadata?.options || {},
+                normalizeRelationshipRowOptions(
+                    relationship.options || relationship.metadata?.options || {}
+                ),
             divergenceStatus:
                 relationship.divergence_status ||
                 relationship.divergenceStatus ||

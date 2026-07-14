@@ -2972,6 +2972,105 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .modal.open { display: grid; }
 .modal-box { width: min(520px, 100%); max-height: 78vh; overflow: auto; background: #12141d; border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.relationship-management-box {
+  width: min(720px, 100%);
+  display: grid;
+  gap: 14px;
+}
+.relationship-manage-launcher { width: 100%; margin: 0 0 10px; }
+.relationship-management-status:empty { display: none; }
+.relationship-management-status {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.relationship-management-section { display: grid; gap: 9px; }
+.relationship-management-section h3 { margin: 0; font-size: 14px; }
+.relationship-member-list,
+.relationship-request-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.relationship-member-row,
+.relationship-request-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.035);
+}
+.relationship-member-row > div:first-child,
+.relationship-request-row { min-width: 0; }
+.relationship-member-row strong,
+.relationship-member-row span,
+.relationship-request-row strong,
+.relationship-request-row span { display: block; overflow-wrap: anywhere; }
+.relationship-member-row > div:first-child span,
+.relationship-request-row span { margin-top: 2px; color: var(--text-muted); font-size: 12px; }
+.relationship-member-status { flex: 0 0 auto; display: grid; justify-items: end; gap: 4px; }
+.relationship-member-actions,
+.relationship-request-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.relationship-member-actions .btn,
+.relationship-request-actions .btn { padding: 6px 9px; }
+.relationship-role-badge,
+.relationship-presence { font-size: 11px; }
+.relationship-role-badge { font-weight: 800; }
+.relationship-presence { color: var(--text-muted); }
+.relationship-presence.present { color: var(--success); }
+.relationship-management-settings { padding-top: 4px; border-top: 1px solid var(--line); }
+.relationship-management-settings label {
+  display: grid;
+  grid-template-columns: minmax(110px, .45fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.relationship-management-settings select,
+.relationship-management-settings input { width: 100%; }
+.relationship-order-list { display: grid; gap: 6px; }
+.relationship-order-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.relationship-order-row > span { min-width: 0; overflow-wrap: anywhere; }
+.relationship-order-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; }
+.relationship-order-actions .btn { padding: 5px 8px; }
+.relationship-management-footer,
+.relationship-confirm > div { display: flex; flex-wrap: wrap; gap: 9px; }
+.relationship-confirm {
+  padding: 12px;
+  border: 1px solid rgba(255,90,110,.48);
+  border-radius: var(--radius-sm);
+  background: rgba(255,90,110,.08);
+}
+.relationship-confirm p { margin: 7px 0 12px; }
+@media (max-width: 560px) {
+  .relationship-management-box { max-height: calc(100vh - 24px); }
+  .relationship-member-row { align-items: flex-start; }
+  .relationship-member-status { justify-items: start; }
+  .relationship-member-actions,
+  .relationship-request-actions { width: 100%; justify-content: flex-start; }
+  .relationship-management-settings label { grid-template-columns: 1fr; }
+  .relationship-order-row { align-items: flex-start; flex-direction: column; }
+}
 .room-effects-box { width: min(540px, 100%); }
 .voice-device-box { width: min(430px, 100%); }
 .voice-device-grid {

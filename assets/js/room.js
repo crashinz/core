@@ -269,6 +269,7 @@ async function initializeAvatarRuntime() {
 
   participants = avatarRuntime.state;
   configureAvatarCoordinator();
+  configureAvatarRelationshipManagement();
   configureAvatarDragController();
   configureAvatarAura();
   configureChatMessageRenderer();
@@ -422,6 +423,39 @@ function configureAvatarDragController() {
     isUserBlocked,
     requestAnimationFrame(callback) {
       return requestAnimationFrame(callback);
+    },
+  });
+}
+
+function configureAvatarRelationshipManagement() {
+  avatarRuntime?.relationshipManagement?.configure({
+    document,
+    getConfig: () => cfg,
+    fetchManagementState() {
+      const query = new URLSearchParams({
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+      });
+      return runtimeRequestClient.getJson(`/api/avatar_relationships.php?${query}`, {
+        operation: 'load-relationship-management',
+        endpointCategory: 'avatar-relationship-management',
+      });
+    },
+    mutateRelationship(payload = {}) {
+      return runtimeRequestClient.postJson('/api/avatar_relationships.php', {
+        ...payload,
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+      }, {
+        operation: `relationship-management-${String(payload.action || 'mutation')}`,
+        endpointCategory: 'avatar-relationship-management',
+      });
+    },
+    showError(error) {
+      showWarning(error?.message || 'Relationship management could not be refreshed.');
+    },
+    recordDiagnostic(entry = {}) {
+      recordRuntimeDiagnostic('relationships', entry.event || 'relationship-management', entry);
     },
   });
 }
@@ -762,6 +796,7 @@ function configureRoomEventRouter() {
     },
     onRemoteRelationship(payload) {
       avatarRuntime?.coordinator?.reconcileRemoteRelationship(payload);
+      avatarRuntime?.relationshipManagement?.handleRemoteRelationship(payload);
     },
     onRemoteLinkIcon(payload) {
       avatarRuntime?.coordinator?.reconcileRemoteLinkIcon(payload);
@@ -3372,6 +3407,7 @@ function openAvatarContextMenu(x, y, participant) {
   ctxMenuParticipantId = participant.id;
   const isOwn = participant.id === cfg.myParticipantId;
   const isLinked = avatarRuntime?.relationships?.isLinked(participant) || false;
+  const relationship = avatarRuntime?.relationships?.relationshipForParticipant(participant.id) || null;
   const isBlocked = isUserBlocked(participant.user_id);
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
@@ -3384,6 +3420,7 @@ function openAvatarContextMenu(x, y, participant) {
   document.getElementById('ctx-tools-wrap').classList.remove('open');
   document.getElementById('ctx-block').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   document.getElementById('ctx-unblock').style.display = !isOwn && isBlocked ? 'block' : 'none';
+  document.getElementById('ctx-manage-relationship').style.display = relationship ? 'block' : 'none';
   document.getElementById('ctx-unlink').style.display = isLinked && !isBlocked ? 'block' : 'none';
   ctxToggleWebcam.textContent = (webcamIntent || webcamStream) ? 'Disable Webcam' : 'Enable Webcam';
   ctxMenu.style.left = `${x}px`;
@@ -3426,6 +3463,7 @@ function openTabContextMenu(x, y, chatKey) {
   closeFloatingShells(['tab', 'game']);
   tabCtxTargetChat = chatKey;
   document.getElementById('tab-close-dm').style.display = chatKey.startsWith('dm:') ? 'block' : 'none';
+  document.getElementById('tab-manage-relationship').style.display = chatKey.startsWith('link:') ? 'block' : 'none';
   document.getElementById('tab-unlink').style.display = chatKey.startsWith('link:') ? 'block' : 'none';
   tabCtxMenu.classList.add('visible');
   positionFloatingMenu(tabCtxMenu, x, y);
@@ -4217,6 +4255,15 @@ document.getElementById('tab-unlink')?.addEventListener('click', () => {
   unlinkCurrentPartner();
 });
 
+document.getElementById('tab-manage-relationship')?.addEventListener('click', () => {
+  const chatKey = tabCtxTargetChat;
+  const request = chatKey ? chatPrivateChats().relationshipRequest(chatKey) : null;
+  closeTabContextMenu();
+  if (request?.relationship_id) {
+    avatarRuntime?.relationshipManagement?.openForRelationship(request.relationship_id, 'relationship-tab');
+  }
+});
+
 document.getElementById('ctx-change-avatar').addEventListener('click', () => {
   closeContextMenu();
   avatarFileInput.click();
@@ -4240,6 +4287,14 @@ bindModalCloseButtons(['aura-close', 'aura-cancel'], closeAuraModal);
 document.getElementById('ctx-unlink').addEventListener('click', () => {
   closeContextMenu();
   unlinkCurrentPartner();
+});
+
+document.getElementById('ctx-manage-relationship')?.addEventListener('click', () => {
+  const participantId = ctxMenuParticipantId;
+  closeContextMenu();
+  if (participantId) {
+    avatarRuntime?.relationshipManagement?.openForParticipant(participantId, 'avatar-context');
+  }
 });
 
 document.getElementById('ctx-dm').addEventListener('click', () => {
@@ -5398,6 +5453,7 @@ async function bootRoom() {
   restoreSessionLock();
   (cfg.blockedUserIds || []).forEach(id => blockedUserIds.add(Number(id)));
   avatarRuntime?.relationships?.seedPersistedRelationships(cfg.relationships || []);
+  await avatarRuntime?.relationshipManagement?.refresh({ render: false });
   chatPrivateChats().syncRelationshipChat(
     avatarRuntime?.relationships?.relationshipForParticipant(cfg.myParticipantId) || null,
     cfg.relationshipChat || null

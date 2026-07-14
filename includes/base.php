@@ -1876,6 +1876,54 @@ function avatar_relationship_mode(string $mode): string {
     return in_array($mode, ['normal', 'lap'], true) ? $mode : 'normal';
 }
 
+function avatar_relationship_public_options(mixed $options = []): array {
+    if (!is_array($options)) $options = [];
+    $rowSpacing = $options['rowSpacing'] ?? 0;
+    if (!is_int($rowSpacing) && !(is_string($rowSpacing) && preg_match('/^-?\d+$/', $rowSpacing))) {
+        $rowSpacing = 0;
+    }
+    return [
+        'schemaVersion' => 1,
+        'rowSpacing' => max(0, min(64, (int)$rowSpacing)),
+    ];
+}
+
+function avatar_relationship_validate_public_options(mixed $options): array {
+    if (!is_array($options)) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFIGURATION_INVALID',
+            'Invalid relationship configuration.',
+            'malformed-relationship-options',
+            400
+        );
+    }
+    $allowed = ['schemaVersion', 'rowSpacing'];
+    foreach (array_keys($options) as $key) {
+        if (!in_array((string)$key, $allowed, true)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_INVALID',
+                'Invalid relationship configuration.',
+                'unknown-relationship-option',
+                400
+            );
+        }
+    }
+    $schemaVersion = $options['schemaVersion'] ?? 1;
+    $rowSpacing = $options['rowSpacing'] ?? null;
+    if ((int)$schemaVersion !== 1
+        || (!is_int($rowSpacing) && !(is_string($rowSpacing) && preg_match('/^\d+$/', $rowSpacing)))
+        || (int)$rowSpacing < 0
+        || (int)$rowSpacing > 64) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFIGURATION_INVALID',
+            'Invalid relationship configuration.',
+            'unsupported-relationship-options',
+            400
+        );
+    }
+    return ['ok' => true, 'options' => avatar_relationship_public_options($options)];
+}
+
 function avatar_relationship_capability(string $mode): array {
     $mode = avatar_relationship_mode($mode);
     if ($mode === 'lap') {
@@ -2517,7 +2565,11 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         'members' => $members,
         'metadata' => $metadata,
         'anchors' => !empty($relationship['anchors_json']) ? (json_decode((string)$relationship['anchors_json'], true) ?: []) : ($metadata['anchors'] ?? []),
-        'options' => !empty($relationship['options_json']) ? (json_decode((string)$relationship['options_json'], true) ?: []) : ($metadata['options'] ?? []),
+        'options' => avatar_relationship_public_options(
+            !empty($relationship['options_json'])
+                ? (json_decode((string)$relationship['options_json'], true) ?: [])
+                : ($metadata['options'] ?? [])
+        ),
         'persistence' => ['supported' => true, 'legacyDirectedEdge' => true, 'futureMetadata' => true],
         'reconciliation' => ['supported' => true, 'eventPayload' => 'link'],
         'divergence_status' => $relationship['divergence_status'] ?? 'synced',
@@ -3046,6 +3098,278 @@ function avatar_relationship_move_group(
         $eventId = (int)$pdo->lastInsertId();
 
         return ['ok' => true, 'idempotent' => false, 'event_id' => $eventId] + $eventPayload;
+    });
+}
+
+function avatar_relationship_configure(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $operationId,
+    array $normalMemberOrder,
+    mixed $options,
+    array $positions
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $actorParticipantId,
+        $relationshipPublicId,
+        $expectedVersion,
+        $operationId,
+        $normalMemberOrder,
+        $options,
+        $positions
+    ): array {
+        if ($relationshipPublicId === '' || !preg_match('/^[A-Za-z0-9:_-]{1,160}$/', $relationshipPublicId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_INVALID',
+                'A valid relationship is required.',
+                'invalid-relationship-id',
+                400
+            );
+        }
+        if (!preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $operationId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_INVALID',
+                'A valid configuration operation is required.',
+                'invalid-operation-id',
+                400
+            );
+        }
+        $optionDecision = avatar_relationship_validate_public_options($options);
+        if (empty($optionDecision['ok'])) return $optionDecision;
+        $configuration = $optionDecision['options'];
+
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship || (string)$relationship['status'] !== 'active') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_CONFLICT',
+                'That relationship is no longer active.',
+                'relationship-unavailable',
+                409
+            );
+        }
+
+        $priorStmt = $pdo->prepare(
+            "SELECT id, payload FROM events
+              WHERE session_id = ? AND type = 'relationship'
+                AND payload LIKE ? ORDER BY id DESC LIMIT 20"
+        );
+        $priorStmt->execute([$sessionId, '%"operation_id":"' . $operationId . '"%']);
+        foreach ($priorStmt->fetchAll() as $prior) {
+            $priorPayload = json_decode((string)$prior['payload'], true) ?: [];
+            if ((string)($priorPayload['operation_id'] ?? '') !== $operationId
+                || (string)($priorPayload['relationship_id'] ?? '') !== $relationshipPublicId
+                || (int)($priorPayload['actor_participant_id'] ?? 0) !== $actorParticipantId
+                || (string)($priorPayload['action'] ?? '') !== 'configuration-updated') {
+                continue;
+            }
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'event_id' => (int)$prior['id'],
+                'relationship_id' => $relationshipPublicId,
+                'relationship_version' => (int)($priorPayload['relationship_version'] ?? $expectedVersion),
+                'operation_id' => $operationId,
+                'configuration' => $priorPayload['configuration'] ?? $configuration,
+                'positions' => array_values($priorPayload['positions'] ?? []),
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $currentMemberOrders = array_map(fn(array $member): int => (int)$member['member_order'], $members);
+        $expectedMemberOrders = $members ? range(0, count($members) - 1) : [];
+        if ($currentMemberOrders !== $expectedMemberOrders) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_CONFLICT',
+                'The relationship configuration requires repair.',
+                'invalid-member-ordering',
+                409
+            );
+        }
+        $actor = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if (!avatar_relationship_permission_allows($actor)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_FORBIDDEN',
+                'You cannot configure this relationship.',
+                'relationship-configuration-permission-denied',
+                403
+            );
+        }
+
+        $normalMembers = array_values(array_filter(
+            $members,
+            fn(array $member): bool => (string)($member['relationship_role'] ?? 'normal') === 'normal'
+        ));
+        $lapMembers = array_values(array_filter(
+            $members,
+            fn(array $member): bool => (string)($member['relationship_role'] ?? 'normal') === 'lap'
+        ));
+        $expectedNormalIds = array_map(fn(array $member): int => (int)$member['participant_id'], $normalMembers);
+        sort($expectedNormalIds, SORT_NUMERIC);
+        $submittedNormalIds = array_map('intval', array_values($normalMemberOrder));
+        $sortedSubmittedNormalIds = $submittedNormalIds;
+        sort($sortedSubmittedNormalIds, SORT_NUMERIC);
+        if (!$submittedNormalIds
+            || count($submittedNormalIds) !== count(array_unique($submittedNormalIds))
+            || $sortedSubmittedNormalIds !== $expectedNormalIds) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_CONFLICT',
+                'The relationship membership changed. Refresh and try again.',
+                'normal-member-set-changed',
+                409
+            );
+        }
+
+        $storedOptions = [];
+        if (!empty($relationship['options_json'])) {
+            $storedOptions = json_decode((string)$relationship['options_json'], true);
+            if (!is_array($storedOptions) || json_last_error() !== JSON_ERROR_NONE) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_CONFIGURATION_CONFLICT',
+                    'The relationship configuration requires repair.',
+                    'malformed-stored-options',
+                    409
+                );
+            }
+        }
+
+        $presentMemberIds = [];
+        foreach ($members as $member) {
+            if (empty($member['last_seen_at'])) continue;
+            if ((string)($member['relationship_role'] ?? 'normal') === 'lap') {
+                $host = avatar_relationship_member_from_rows($members, (int)($member['lap_host_participant_id'] ?? 0));
+                if (!$host || empty($host['last_seen_at'])) continue;
+            }
+            $presentMemberIds[] = (int)$member['participant_id'];
+        }
+        sort($presentMemberIds, SORT_NUMERIC);
+        if (!$positions || count($positions) !== count($presentMemberIds) || count($positions) > 100) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_CONFLICT',
+                'The visible relationship group changed. Refresh and try again.',
+                'visible-member-set-changed',
+                409
+            );
+        }
+        $normalizedPositions = [];
+        $positionIds = [];
+        foreach ($positions as $position) {
+            if (!is_array($position)) {
+                return avatar_relationship_operation_error('RELATIONSHIP_CONFIGURATION_INVALID', 'Invalid group position.', 'malformed-position', 400);
+            }
+            $participantId = (int)($position['participant_id'] ?? 0);
+            $x = filter_var($position['x'] ?? null, FILTER_VALIDATE_FLOAT);
+            $y = filter_var($position['y'] ?? null, FILTER_VALIDATE_FLOAT);
+            if ($participantId <= 0 || $x === false || $y === false
+                || !is_finite((float)$x) || !is_finite((float)$y)
+                || isset($positionIds[$participantId])) {
+                return avatar_relationship_operation_error('RELATIONSHIP_CONFIGURATION_INVALID', 'Invalid group position.', 'malformed-position', 400);
+            }
+            $positionIds[$participantId] = true;
+            $normalizedPositions[] = [
+                'participant_id' => $participantId,
+                'position_x' => max(0, min(1, (float)$x)),
+                'position_y' => max(0, min(1, (float)$y)),
+            ];
+        }
+        $submittedPositionIds = array_keys($positionIds);
+        sort($submittedPositionIds, SORT_NUMERIC);
+        if ($submittedPositionIds !== $presentMemberIds) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_CONFLICT',
+                'The visible relationship group changed. Refresh and try again.',
+                'visible-member-set-changed',
+                409
+            );
+        }
+
+        $memberByParticipantId = [];
+        foreach ($members as $member) $memberByParticipantId[(int)$member['participant_id']] = $member;
+        $orderedMembers = [];
+        foreach ($submittedNormalIds as $participantId) $orderedMembers[] = $memberByParticipantId[$participantId];
+        usort($lapMembers, fn(array $first, array $second): int =>
+            [(int)$first['member_order'], (int)$first['id']] <=> [(int)$second['member_order'], (int)$second['id']]
+        );
+        $orderedMembers = array_merge($orderedMembers, $lapMembers);
+
+        $pdo->prepare(
+            'UPDATE avatar_relationship_members SET member_order = member_order + 1000000 WHERE relationship_id = ?'
+        )->execute([(int)$relationship['id']]);
+        $orderUpdate = $pdo->prepare(
+            'UPDATE avatar_relationship_members SET member_order = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE relationship_id = ? AND participant_id = ?'
+        );
+        foreach ($orderedMembers as $order => &$member) {
+            $orderUpdate->execute([$order, (int)$relationship['id'], (int)$member['participant_id']]);
+            if ($orderUpdate->rowCount() > 1) {
+                throw new RuntimeException('Relationship ordering updated an invalid member set.');
+            }
+            $member['member_order'] = $order;
+        }
+        unset($member);
+
+        $positionUpdate = $pdo->prepare(
+            'UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?'
+        );
+        foreach ($normalizedPositions as $position) {
+            $positionUpdate->execute([
+                $position['position_x'],
+                $position['position_y'],
+                $position['participant_id'],
+                $sessionId,
+            ]);
+            if ($positionUpdate->rowCount() > 1) {
+                throw new RuntimeException('Relationship configuration updated an invalid participant set.');
+            }
+        }
+
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        $storedOptions = array_merge($storedOptions, $configuration);
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET options_json = ?, version = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([
+            json_encode($storedOptions, JSON_UNESCAPED_SLASHES),
+            $nextVersion,
+            (int)$relationship['id'],
+        ]);
+        $relationship['version'] = $nextVersion;
+        avatar_relationship_refresh_legacy_projection_locked($pdo, $relationship, $orderedMembers);
+
+        $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+        $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            'configuration-updated',
+            $eventPayload,
+            [
+                'operation_id' => $operationId,
+                'actor_participant_id' => $actorParticipantId,
+                'configuration' => $configuration,
+                'positions' => $normalizedPositions,
+            ]
+        );
+        $eventId = (int)$pdo->lastInsertId();
+
+        return [
+            'ok' => true,
+            'idempotent' => false,
+            'event_id' => $eventId,
+            'relationship_id' => $relationshipPublicId,
+            'relationship_version' => $nextVersion,
+            'operation_id' => $operationId,
+            'configuration' => $configuration,
+            'positions' => $normalizedPositions,
+            'relationship' => $viewerPayload,
+        ];
     });
 }
 
@@ -4636,16 +4960,21 @@ function avatar_relationship_repair(PDO $pdo, array $options = []): array {
             $anchorsJson = avatar_relationship_decode_json($relationship['anchors_json'] ?? null);
             $optionsJson = avatar_relationship_decode_json($relationship['options_json'] ?? null);
             $memberParticipantIds = array_map(fn(array $member): int => (int)$member['participant_id'], $members);
+            $membersByParticipantId = [];
+            foreach ($members as $member) $membersByParticipantId[(int)$member['participant_id']] = $member;
             $memberOrders = array_map(fn(array $member): int => (int)$member['member_order'], $members);
             $memberSessions = array_values(array_unique(array_filter(array_map(fn(array $member): int => (int)($member['participant_session_id'] ?? 0), $members))));
             $missingMemberParticipant = count(array_filter($members, fn(array $member): bool => empty($member['participant_session_id']))) > 0;
-            $memberRoles = array_map(fn(array $member): string => (string)$member['member_role'], $members);
             $relationshipPublicId = (string)($relationship['relationship_public_id'] ?? '');
             $validLegacyBacked = $legacyKey !== '' && !empty($validLegacyKeys[$sid . ':' . $legacyKey]);
+            $validEdge = $validLegacyBacked ? ($validEdgesByKey[$sid . ':' . $legacyKey] ?? null) : null;
             $validStoredGroup = count($members) > 2 && !$missingMemberParticipant && (!$memberSessions || $memberSessions === [$sid]);
             $expectedPublicId = null;
-            if ($validLegacyBacked && count($memberParticipantIds) >= 2) {
-                $expectedPublicId = avatar_relationship_public_id_for((int)$memberParticipantIds[0], (int)$memberParticipantIds[1]);
+            if ($validEdge) {
+                $expectedPublicId = avatar_relationship_public_id_for(
+                    (int)$validEdge['participant_id'],
+                    (int)$validEdge['target_participant_id']
+                );
             }
 
             $recordReasons = [];
@@ -4659,16 +4988,22 @@ function avatar_relationship_repair(PDO $pdo, array $options = []): array {
             if (count($memberOrders) !== count(array_unique($memberOrders))) $recordReasons[] = 'duplicate_member_order';
             $expectedOrders = count($memberOrders) >= 2 ? range(0, count($memberOrders) - 1) : $memberOrders;
             if ($memberOrders !== $expectedOrders && count($memberOrders) >= 2) $recordReasons[] = 'invalid_member_ordering';
-            if (count($members) === 2 && $validLegacyBacked && (($memberRoles[0] ?? null) !== 'initiator' || ($memberRoles[1] ?? null) !== 'target')) $recordReasons[] = 'invalid_member_roles';
+            if (count($members) === 2 && $validEdge) {
+                $legacyInitiatorMember = $membersByParticipantId[(int)$validEdge['participant_id']] ?? null;
+                $legacyTargetMember = $membersByParticipantId[(int)$validEdge['target_participant_id']] ?? null;
+                if (($legacyInitiatorMember['member_role'] ?? null) !== 'initiator'
+                    || ($legacyTargetMember['member_role'] ?? null) !== 'target') {
+                    $recordReasons[] = 'invalid_member_roles';
+                }
+            }
             if ($memberSessions && ($memberSessions !== [$sid])) $recordReasons[] = 'member_session_mismatch';
             if ($missingMemberParticipant && count($members) > 0) $recordReasons[] = 'member_participant_missing';
             if ($relationshipPublicId === '') $recordReasons[] = 'invalid_relationship_identity_namespace';
             if (!$validLegacyBacked && !$validStoredGroup) $recordReasons[] = 'orphaned_normalized_relationship';
             if ($validLegacyBacked) {
-                $validEdge = $validEdgesByKey[$sid . ':' . $legacyKey] ?? null;
                 if ($validEdge && (
-                    (int)($memberParticipantIds[0] ?? 0) !== (int)$validEdge['participant_id']
-                    || (int)($memberParticipantIds[1] ?? 0) !== (int)$validEdge['target_participant_id']
+                    !isset($membersByParticipantId[(int)$validEdge['participant_id']])
+                    || !isset($membersByParticipantId[(int)$validEdge['target_participant_id']])
                     || (int)($relationship['legacy_initiator_participant_id'] ?? 0) !== (int)$validEdge['participant_id']
                     || (int)($relationship['legacy_target_participant_id'] ?? 0) !== (int)$validEdge['target_participant_id']
                 )) {

@@ -100,6 +100,20 @@ if ($action === 'set_join_policy') {
     ));
 }
 
+if ($action === 'configure') {
+    avatar_relationship_api_out(avatar_relationship_configure(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion,
+        trim((string)($body['operation_id'] ?? '')),
+        is_array($body['normal_member_order'] ?? null) ? $body['normal_member_order'] : [],
+        $body['options'] ?? null,
+        is_array($body['positions'] ?? null) ? $body['positions'] : []
+    ));
+}
+
 if (in_array($action, ['leave', 'remove_member', 'promote_member', 'demote_member'], true)) {
     $lifecycleAction = [
         'leave' => 'leave',

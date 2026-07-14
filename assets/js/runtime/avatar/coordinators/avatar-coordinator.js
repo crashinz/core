@@ -20,7 +20,7 @@
  *      networking, and ChatRuntime behavior with their documented owners.
  *
  * Build:
- *      000044 Part 3
+ *      000044 Part 4
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -64,6 +64,10 @@
  * Build 000044 Part 3
  * - Added authoritative group-presentation orchestration and versioned atomic
  *   relationship movement reconciliation.
+ *
+ * Build 000044 Part 4
+ * - Added order/spacing layout proposals and coherent configuration-position
+ *   reconciliation.
  ******************************************************************************/
 
 /**
@@ -1144,6 +1148,10 @@ export class AvatarCoordinator {
             return null;
         }
 
+        if (String(payload.action || "") === "configuration-updated") {
+            this.#applyRelationshipConfigurationPositions(reconciled, payload);
+        }
+
         const participantIds =
             Array.from(new Set([
                 ...(previousRelationship?.memberIds || []),
@@ -1172,6 +1180,114 @@ export class AvatarCoordinator {
         });
 
         return reconciled;
+
+    }
+
+    /**
+     * Builds one layout-owner-computed relationship configuration proposal.
+     * Participant copies keep proposal generation free of authoritative state
+     * mutation until the server accepts the complete operation.
+     *
+     * @param {Object} options
+     * @returns {Object|null}
+     */
+    relationshipConfigurationProposal({
+        relationshipId,
+        normalMemberOrder = [],
+        rowSpacing = 0
+    } = {}) {
+
+        const relationship =
+            this.#relationships.relationshipById(relationshipId);
+        const presentation =
+            this.#relationships.relationshipPresentation(relationshipId);
+        const submittedOrder =
+            Array.from(normalMemberOrder || []).map(Number);
+        const expectedOrder =
+            Array.from(presentation?.normalMembers || [])
+                .map(member => Number(member.participantId));
+        const sortedSubmitted = submittedOrder.slice().sort((a, b) => a - b);
+        const sortedExpected = expectedOrder.slice().sort((a, b) => a - b);
+        const spacing = Number(rowSpacing);
+
+        if (!relationship || relationship.status !== "active" || !presentation
+            || submittedOrder.length !== expectedOrder.length
+            || new Set(submittedOrder).size !== submittedOrder.length
+            || !sortedSubmitted.every((participantId, index) => participantId === sortedExpected[index])
+            || !Number.isInteger(spacing) || spacing < 0 || spacing > 64) {
+            return null;
+        }
+
+        const copies = new Map();
+        presentation.visibleMemberIds.forEach(participantId => {
+            const participant = this.#participant(participantId);
+            if (participant) copies.set(Number(participantId), { ...participant });
+        });
+        const normalMembers = submittedOrder
+            .map((participantId, order) => {
+                const participant = copies.get(participantId);
+                const source = this.#participant(participantId);
+                return participant && source
+                    ? {
+                        participant,
+                        dimensions: this.#renderedDimensions(source),
+                        order
+                    }
+                    : null;
+            })
+            .filter(Boolean);
+        const lapAttachments = presentation.visibleLapMembers
+            .map(member => {
+                const participant = copies.get(Number(member.participantId));
+                const source = this.#participant(member.participantId);
+                return participant && source
+                    ? {
+                        participant,
+                        hostParticipantId: Number(member.lapHostParticipantId),
+                        dimensions: this.#renderedDimensions(source),
+                        anchor: member.anchor || null
+                    }
+                    : null;
+            })
+            .filter(Boolean);
+        const currentFirstNormal = presentation.visibleNormalMembers[0];
+        const currentFirstParticipant = this.#participant(currentFirstNormal?.participantId);
+        const anchor = this.#relationshipGroupAnchors.get(relationship.id) || (
+            currentFirstParticipant
+                ? Object.freeze({
+                    x: Number(currentFirstParticipant.position_x || 0),
+                    y: Number(currentFirstParticipant.position_y || 0)
+                })
+                : null
+        );
+        const stageSize = this.#stageSize();
+        const changed = this.#layout.applyRelationshipGroupLayout({
+            normalMembers,
+            lapAttachments,
+            stageWidth: stageSize.width,
+            stageHeight: stageSize.height,
+            gap: spacing,
+            metadata: relationship.metadata,
+            anchor,
+            locked: false
+        });
+        const changedIds = new Set(changed.map(member => Number(member.id)));
+        if (changedIds.size !== copies.size
+            || !Array.from(copies.keys()).every(participantId => changedIds.has(participantId))) {
+            return null;
+        }
+
+        return Object.freeze({
+            relationshipId: relationship.id,
+            relationshipVersion: Number(relationship.version),
+            normalMemberOrder: Object.freeze(submittedOrder),
+            options: Object.freeze({ schemaVersion: 1, rowSpacing: spacing }),
+            positions: Object.freeze(Array.from(copies.values()).map(participant => Object.freeze({
+                participant_id: Number(participant.id),
+                x: Number(participant.position_x || 0),
+                y: Number(participant.position_y || 0)
+            })))
+        });
 
     }
 
@@ -2057,7 +2173,12 @@ export class AvatarCoordinator {
                 .map(participantId => this.#participant(participantId))
                 .filter(Boolean);
 
+        const usesPersistedNormalRow =
+            relationship?.source === "persisted" &&
+            presentation.normalMembers.length > 1;
+
         if (
+            !usesPersistedNormalRow &&
             presentation.members.length === 2 &&
             visibleParticipants.length === 2
         ) {
@@ -2138,7 +2259,7 @@ export class AvatarCoordinator {
                 lapAttachments,
                 stageWidth: stageSize.width,
                 stageHeight: stageSize.height,
-                gap: 0,
+                gap: Number(relationship?.options?.rowSpacing || 0),
                 metadata: relationship?.metadata || presentation.metadata,
                 anchor: groupAnchor,
                 locked: Boolean(this.#context?.isLayoutLocked?.())
@@ -2170,6 +2291,63 @@ export class AvatarCoordinator {
         this.#context?.updateStageLinkIcons?.();
 
         return changed;
+
+    }
+
+    #applyRelationshipConfigurationPositions(relationship, payload) {
+
+        const positions = Array.isArray(payload.positions) ? payload.positions : [];
+        if (!relationship || !positions.length) return false;
+        const expectedPresentIds = relationship.members
+            .filter(member => {
+                const participant = this.#participant(member.participantId);
+                if (!participant || participant.online === false || participant.exiting) return false;
+                if (String(member.relationshipRole || "normal") !== "lap") return true;
+                const host = this.#participant(member.lapHostParticipantId);
+                return Boolean(host && host.online !== false && !host.exiting);
+            })
+            .map(member => Number(member.participantId));
+        const seen = new Set();
+        const changed = [];
+        for (const position of positions) {
+            const participantId = Number(position?.participant_id || 0);
+            const x = Number(position?.position_x);
+            const y = Number(position?.position_y);
+            if (!expectedPresentIds.includes(participantId) || seen.has(participantId)
+                || !Number.isFinite(x) || !Number.isFinite(y)) {
+                this.#context?.recordRelationshipDiagnostic?.({
+                    event: "relationship-configuration-positions-rejected",
+                    relationshipId: relationship.id,
+                    relationshipVersion: Number(relationship.version)
+                });
+                return false;
+            }
+            seen.add(participantId);
+            const participant = this.#participant(participantId);
+            if (!participant) continue;
+            participant.position_x = Math.max(0, Math.min(1, x));
+            participant.position_y = Math.max(0, Math.min(1, y));
+            changed.push(participant);
+        }
+        if (seen.size !== expectedPresentIds.length) return false;
+        const firstNormalId = relationship.members.find(member =>
+            String(member.relationshipRole || "normal") === "normal"
+        )?.participantId;
+        const firstNormal = this.#participant(firstNormalId);
+        if (firstNormal) {
+            this.#relationshipGroupAnchors.set(relationship.id, Object.freeze({
+                x: Number(firstNormal.position_x || 0),
+                y: Number(firstNormal.position_y || 0)
+            }));
+        }
+        changed.forEach(member => this.#context?.positionAvatar?.(member));
+        this.#context?.recordRelationshipDiagnostic?.({
+            event: "relationship-configuration-positions-applied",
+            relationshipId: relationship.id,
+            relationshipVersion: Number(relationship.version),
+            participantCount: changed.length
+        });
+        return true;
 
     }
 

@@ -7,6 +7,7 @@ It owns all avatar-related runtime behavior while remaining isolated from applic
 The Avatar Runtime is responsible for:
 
 - avatar relationships
+- relationship management presentation and mutation lifecycle
 - member ordering
 - layout calculation
 - avatar rendering
@@ -77,9 +78,22 @@ Build 000044 Parts 1 and 2 establish the current relationship boundary:
   metadata but does not own messages, tabs, unread state, or authorization.
 - Active normal-member order is persisted for Part 3. Lap occupants remain
   relationship and chat members outside the normal ordered row.
+- `AvatarRelationshipManagementService` owns the one accessible management
+  interface, its entry points, pending mutation/confirmation state, focus
+  lifecycle, ordering controls, spacing controls, diagnostics, and cleanup.
+- `AvatarRelationshipService` supplies one immutable viewer management
+  projection. Creator/manager/member actions derive from authoritative state;
+  the server independently enforces every permission.
+- One expected-version `configure` operation persists a complete normal-member
+  permutation, public `{schemaVersion: 1, rowSpacing: 0..64}` options, and exact
+  visible-member positions under one version and event. No schema or free-form
+  positioning was added.
+- `AvatarCoordinator` proposes and reconciles configuration through
+  `AvatarLayoutService`, preserving the current left group anchor as closely as
+  stage bounds allow while retaining lap attachment and Part 3 movement.
 
-Part 2 persistence, lifecycle, contention, group chat, and reconciliation are
-certified on SQLite, MariaDB, and Chrome. Callers must not add independent
+Part 4 management, persistence, ordering, positioning, contention, and
+reconciliation are certified on SQLite, MariaDB, and Chrome. Callers must not add independent
 `linked_to` eligibility, permission, request, conversation, history-boundary,
 or snapshot-version rules.
 
@@ -111,6 +125,8 @@ avatar/
     services/
 
         avatar-relationship-service.js
+
+        avatar-relationship-management-service.js
 
         avatar-order-service.js
 
@@ -152,6 +168,7 @@ Each service owns exactly one runtime responsibility.
 Examples:
 
 - relationships
+- relationship management
 - ordering
 - layout
 
@@ -247,6 +264,16 @@ Owns:
 - relationship capabilities
 - relationship metadata contract normalization
 - legacy directed-edge metadata translation
+
+Relationship Management Service
+
+Owns:
+
+- one accessible relationship-management interface
+- immutable management projection consumption
+- entry points, pending mutation state, confirmations, and focus lifecycle
+- lifecycle, permission, ordering, and row-spacing controls
+- host mutation callback coordination and diagnostics
 
 Layout Service
 

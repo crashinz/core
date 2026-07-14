@@ -115,6 +115,12 @@ import {
 
 import {
 
+    AvatarRelationshipManagementService
+
+} from "./services/avatar-relationship-management-service.js";
+
+import {
+
     AvatarRenderer
 
 } from "./renderers/avatar-renderer.js";
@@ -186,6 +192,11 @@ export class AvatarRuntime extends CoreModule {
      * Aura workflow runtime component.
      */
     #aura = null;
+
+    /**
+     * Relationship management workflow runtime component.
+     */
+    #relationshipManagement = null;
 
     /**
      * Effects runtime component.
@@ -309,6 +320,15 @@ export class AvatarRuntime extends CoreModule {
     }
 
     /**
+     * Returns the relationship management workflow service.
+     */
+    get relationshipManagement() {
+
+        return this.#relationshipManagement;
+
+    }
+
+    /**
      * Returns the Avatar Effects Runtime.
      *
      * @returns {AvatarEffectsRuntime}
@@ -385,6 +405,9 @@ export class AvatarRuntime extends CoreModule {
             aura:
                 this.#aura?.getDiagnostics() ?? null,
 
+            relationshipManagement:
+                this.#relationshipManagement?.getDiagnostics() ?? null,
+
             effects:
                 this.#effects?.getDiagnostics() ?? null,
 
@@ -426,6 +449,8 @@ export class AvatarRuntime extends CoreModule {
 
         this.#createCoordinator();
 
+        this.#createRelationshipManagement();
+
         this.#createDrag();
 
     }
@@ -456,6 +481,8 @@ export class AvatarRuntime extends CoreModule {
     onDestroy() {
 
         this.#drag?.destroy();
+
+        this.#relationshipManagement?.destroy();
 
         this.#coordinator?.destroy();
 
@@ -588,6 +615,20 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#coordinator.initialize();
+
+    }
+
+    /**
+     * Creates the relationship management workflow service.
+     */
+    #createRelationshipManagement() {
+
+        this.#relationshipManagement =
+            new AvatarRelationshipManagementService(
+                this
+            );
+
+        this.#relationshipManagement.initialize();
 
     }
 

@@ -214,6 +214,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     </section>
     <section class="side-section">
       <div class="side-title">Chatting <span id="participant-count-label">(0)</span></div>
+      <button class="btn relationship-manage-launcher" id="relationship-manage-btn" type="button" hidden>Manage Relationship</button>
       <div class="user-list" id="user-list"></div>
     </section>
     <div class="sidebar-bottom-tools">
@@ -452,6 +453,53 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     </div>
   </div>
 </div>
+<div class="modal" id="relationship-management-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="relationship-management-title">
+  <div class="modal-box relationship-management-box" tabindex="-1">
+    <div class="modal-head">
+      <div>
+        <strong id="relationship-management-title">Relationship</strong>
+        <div class="minor" id="relationship-management-summary"></div>
+      </div>
+      <button class="window-close" id="relationship-management-close" type="button" aria-label="Close relationship management">&times;</button>
+    </div>
+    <div class="relationship-management-status" id="relationship-management-status" role="status" aria-live="polite"></div>
+    <section class="relationship-management-section" id="relationship-management-request-section" hidden>
+      <h3>Pending</h3>
+      <ul class="relationship-request-list" id="relationship-management-requests"></ul>
+    </section>
+    <section class="relationship-management-section">
+      <h3>Members</h3>
+      <ul class="relationship-member-list" id="relationship-management-members"></ul>
+    </section>
+    <section class="relationship-management-section relationship-management-settings" id="relationship-management-settings">
+      <h3>Group settings</h3>
+      <label>Joining
+        <select id="relationship-management-join-policy" disabled>
+          <option value="approval-required">Approval required</option>
+          <option value="open">Open</option>
+        </select>
+      </label>
+      <div class="relationship-order-list" id="relationship-management-order"></div>
+      <label class="relationship-spacing-control">Row spacing
+        <input id="relationship-management-spacing" type="range" min="0" max="64" step="1" value="0" disabled>
+        <output id="relationship-management-spacing-value">0 px</output>
+      </label>
+      <button class="btn" id="relationship-management-spacing-reset" type="button" disabled>Reset spacing</button>
+    </section>
+    <div class="relationship-management-footer" id="relationship-management-footer">
+      <button class="btn btn-danger" id="relationship-management-leave" type="button" disabled>Leave Relationship</button>
+      <button class="btn btn-danger" id="relationship-management-dissolve" type="button" disabled>Dissolve Relationship</button>
+    </div>
+    <div class="relationship-confirm" id="relationship-management-confirm" hidden>
+      <strong id="relationship-management-confirm-title">Confirm action</strong>
+      <p id="relationship-management-confirm-message"></p>
+      <div>
+        <button class="btn" id="relationship-management-confirm-cancel" type="button">Cancel</button>
+        <button class="btn btn-danger" id="relationship-management-confirm-accept" type="button">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="modal" id="link-choice-modal">
   <div class="modal-box link-choice-box">
     <h2>Interact</h2>
@@ -518,6 +566,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="ctx-dm" type="button">Send DM</button>
   <button id="ctx-block" class="danger" type="button">Block</button>
   <button id="ctx-unblock" type="button">Unblock</button>
+  <button id="ctx-manage-relationship" type="button">Manage Relationship</button>
   <button id="ctx-unlink" class="danger" type="button">Unlink</button>
   <div class="ctx-divider" id="ctx-tools-divider"></div>
   <div class="ctx-submenu-wrap" id="ctx-tools-wrap">
@@ -550,6 +599,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <div id="tab-ctx-menu">
   <button id="tab-clear-history" type="button">Clear History</button>
   <button id="tab-close-dm" type="button">Close DM</button>
+  <button id="tab-manage-relationship" type="button">Manage Relationship</button>
   <button id="tab-unlink" class="danger" type="button">Unlink</button>
 </div>
 <div id="room-action-menu">
