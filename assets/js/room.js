@@ -384,6 +384,18 @@ function configureAvatarCoordinator() {
         positions: list.map(p => ({ participant_id: p.id, x: p.position_x, y: p.position_y })),
       }).catch(warnRuntimeRequest);
     },
+    persistRelationshipPositions(operation) {
+      return apiPost('/api/users.php', {
+        action: 'relationship_position',
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+        relationship_id: operation.relationshipId,
+        expected_version: operation.relationshipVersion,
+        operation_id: operation.operationId,
+        positions: operation.positions,
+      });
+    },
+    warnError: warnRuntimeRequest,
     persistLinkIcon({ targetId, iconName }) {
       return apiPost('/api/users.php', {
         action: 'link_icon',
@@ -668,6 +680,9 @@ function configureRoomEventRouter() {
       })) return;
 
       positionAvatar(person);
+    },
+    onRelationshipPosition(payload, event) {
+      avatarRuntime?.coordinator?.reconcileRemoteRelationshipPosition(payload, event);
     },
     onParticipantWebcam(payload) {
       applyWebcamState(payload.participant_id, Boolean(payload.webcam_enabled || payload.webcam_path), payload.webcam_path || null, 'room-event-webcam');
@@ -2207,29 +2222,17 @@ people.forEach(p => {
 
   if (rendered.has(p.id)) return;
 
-  let partner = null;
+  const presentation = avatarRuntime?.relationships?.relationshipPresentationForParticipant(p.id) || null;
+  const presentationGroup = presentation?.visibleMemberIds
+    ?.map(participantId => participants.get(Number(participantId)))
+    .filter(Boolean) || [];
 
-  partner = avatarRuntime?.relationships?.linkedPartner(p.id) || null;
-  if (partner && rendered.has(partner.id)) partner = null;
-if (partner) {
+if (presentationGroup.length > 1 && !presentationGroup.some(member => rendered.has(member.id))) {
 
-  const group = new Set();
-
-  const add = (p) => {
-    if (!p) return;
-    group.add(p);
-  };
-
-  add(p);
-  add(partner);
-
-  const runtimeGroup = avatarRuntime?.coordinator?.linkedGroupForParticipant(p.id);
-
-  if (runtimeGroup) {
-    runtimeGroup.forEach(add);
-  }
-
-  const orderedGroup = avatarRuntime?.order?.orderLinkedGroup(group) || [...group];
+  const orderedGroup = avatarRuntime?.order?.orderLinkedGroup(
+    presentationGroup,
+    presentation.visibleMemberIds
+  ) || presentationGroup;
 
   const row = document.createElement('div');
   row.className = 'person-row linked-row';
@@ -2242,6 +2245,7 @@ if (partner) {
     </div>
   `).join('');
 
+  orderedGroup.forEach(member => rendered.add(member.id));
   userListEl.appendChild(row);
   return;
 }
@@ -5402,6 +5406,11 @@ async function bootRoom() {
   await Promise.all((cfg.participants || []).map(p => renderParticipantWhenReady(p, { animateJoin: true }).catch(() => {
     renderParticipant(p, { animateJoin: true });
   })));
+  avatarRuntime?.coordinator?.rebuildLinkGroups();
+  avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+    all: true,
+    reason: 'room-bootstrap',
+  });
   (cfg.dmUsers || []).forEach(rememberDmUser);
   (cfg.messages || []).forEach(msg => addMessageToChannel(msg, 'room', false));
   (cfg.communityMessages || []).forEach(msg => addMessageToChannel(msg, 'community', false));

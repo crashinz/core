@@ -19,7 +19,7 @@
  *      documented owners.
  *
  * Build:
- *      000038
+ *      000044 Part 3
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -55,6 +55,10 @@
  * Build 000044 Part 2A
  * - Made versioned persisted group snapshots authoritative for membership.
  * - Added stale-version rejection and relationship tombstone handling.
+ *
+ * Build 000044 Part 3
+ * - Added immutable ordered relationship presentation projections with
+ *   presence, renderability, normal-row, and lap-host state.
  ******************************************************************************/
 
 /**
@@ -91,7 +95,7 @@ const RELATIONSHIP_CAPABILITIES = Object.freeze({
                 Object.freeze({
                     orientation: "right",
                     movement: "group",
-                    drag: "breakable",
+                    drag: "group",
                     rendering: "stage-link-icon",
                     static: true,
                     animated: false
@@ -126,7 +130,7 @@ const RELATIONSHIP_CAPABILITIES = Object.freeze({
                 Object.freeze({
                     orientation: "bottom-right",
                     movement: "group",
-                    drag: "breakable",
+                    drag: "hosted",
                     rendering: "lap-pair",
                     static: true,
                     animated: false
@@ -168,7 +172,7 @@ const RELATIONSHIP_METADATA_CONTRACT = Object.freeze({
     options:
         Object.freeze({}),
     movement: "group",
-    drag: "breakable",
+    drag: "group",
     rendering: "stage-link-icon",
     persistence:
         Object.freeze({
@@ -946,6 +950,168 @@ export class AvatarRelationshipService {
     }
 
     /**
+     * Returns immutable presentation projections for active relationships.
+     *
+     * @returns {Object[]}
+     */
+    relationshipPresentations() {
+
+        return Object.freeze(
+            this.relationships()
+                .map(relationship => this.relationshipPresentation(relationship))
+                .filter(Boolean)
+        );
+
+    }
+
+    /**
+     * Returns the current relationship presentation for a participant.
+     *
+     * @param {number|string|Object} participantOrId
+     *
+     * @returns {Object|null}
+     */
+    relationshipPresentationForParticipant(participantOrId) {
+
+        const relationship =
+            this.relationshipForParticipant(participantOrId);
+
+        return relationship
+            ? this.relationshipPresentation(relationship)
+            : null;
+
+    }
+
+    /**
+     * Projects authoritative membership into current presentation state.
+     *
+     * Persisted member order remains unchanged while presence and renderability
+     * select the members that participate in the visible layout.
+     *
+     * @param {string|Object} relationshipOrId
+     *
+     * @returns {Object|null}
+     */
+    relationshipPresentation(relationshipOrId) {
+
+        const relationship =
+            this.#resolveRelationship(relationshipOrId);
+
+        if (!relationship || (relationship.status && relationship.status !== "active")) {
+            return null;
+        }
+
+        const orderedMembers =
+            this.#runtime.order?.orderRelationshipMembers(
+                relationship.members || []
+            ) || Array.from(relationship.members || []);
+
+        const legacyTargetId =
+            Number(
+                relationship.targetId ||
+                relationship.metadata?.members?.find(member => member.role === "target")?.participantId ||
+                0
+            ) || null;
+
+        const members =
+            orderedMembers.map(member => {
+
+                const participantId = Number(member.participantId);
+                const participant = this.#participant(participantId);
+                const relationshipRole =
+                    member.relationshipRole ||
+                    (
+                        relationship.mode === "lap" &&
+                        (
+                            member.role === "initiator" ||
+                            participantId === Number(relationship.initiatorId)
+                        )
+                            ? "lap"
+                            : "normal"
+                    );
+                const lapHostParticipantId =
+                    relationshipRole === "lap"
+                        ? Number(member.lapHostParticipantId || legacyTargetId || 0) || null
+                        : null;
+                const present = Boolean(
+                    participant &&
+                    participant.online !== false &&
+                    !participant.exiting
+                );
+                const renderable = Boolean(
+                    present &&
+                    (participant.avatarEl || participant.webcamVideoEl)
+                );
+
+                return Object.freeze({
+                    participantId,
+                    relationshipRole,
+                    permissionRole: member.permissionRole || null,
+                    status: String(member.status || "active"),
+                    order: Number(member.order || 0),
+                    lapHostParticipantId,
+                    anchor: member.anchor || null,
+                    options: member.options || Object.freeze({}),
+                    present,
+                    renderable
+                });
+
+            });
+
+        const activeMembers =
+            members.filter(member => member.status === "active");
+        const normalMembers =
+            activeMembers.filter(member => member.relationshipRole === "normal");
+        const lapMembers =
+            activeMembers.filter(member => member.relationshipRole === "lap");
+        const visibleNormalMembers =
+            normalMembers.filter(member => member.renderable);
+        const visibleNormalIds =
+            new Set(visibleNormalMembers.map(member => member.participantId));
+        const visibleLapMembers =
+            lapMembers.filter(member =>
+                member.renderable &&
+                visibleNormalIds.has(Number(member.lapHostParticipantId))
+            );
+        const visibleMembers = [];
+
+        visibleNormalMembers.forEach(normalMember => {
+            visibleMembers.push(normalMember);
+            visibleLapMembers
+                .filter(lapMember =>
+                    Number(lapMember.lapHostParticipantId) === normalMember.participantId
+                )
+                .forEach(lapMember => visibleMembers.push(lapMember));
+        });
+
+        const visibleMemberIds =
+            visibleMembers.map(member => member.participantId);
+
+        return Object.freeze({
+            relationshipId: String(relationship.id),
+            relationshipVersion: Math.max(0, Number(relationship.version || 0)),
+            relationshipStatus: String(relationship.status || "active"),
+            source: String(relationship.source || "persisted"),
+            mode: this.normalizeLinkMode(relationship.mode),
+            legacyLinkKey: relationship.legacyLinkKey || relationship.key || null,
+            members: Object.freeze(activeMembers),
+            normalMembers: Object.freeze(normalMembers),
+            lapMembers: Object.freeze(lapMembers),
+            visibleNormalMembers: Object.freeze(visibleNormalMembers),
+            visibleLapMembers: Object.freeze(visibleLapMembers),
+            visibleMembers: Object.freeze(visibleMembers),
+            visibleMemberIds: Object.freeze(visibleMemberIds),
+            metadata: relationship.metadata || Object.freeze({}),
+            projectionKey: [
+                String(relationship.id),
+                Math.max(0, Number(relationship.version || 0)),
+                visibleMemberIds.join(":")
+            ].join("|")
+        });
+
+    }
+
+    /**
      * Returns relationship metadata for a relationship object or id.
      *
      * @param {string|Object} relationshipOrId
@@ -1019,8 +1185,18 @@ export class AvatarRelationshipService {
      */
     isLapLinkInitiator(participant) {
 
-        return this.isLapMode(participant?.link_mode) &&
-            Boolean(participant?.linked_to);
+        const relationship =
+            this.relationshipForParticipant(participant?.id);
+        const member =
+            relationship?.members?.find(candidate =>
+                Number(candidate.participantId) === Number(participant?.id)
+            );
+
+        if (member?.relationshipRole) {
+            return member.relationshipRole === "lap";
+        }
+
+        return this.isLapMode(participant?.link_mode) && Boolean(participant?.linked_to);
 
     }
 
@@ -1035,6 +1211,16 @@ export class AvatarRelationshipService {
 
         if (!participant) {
             return false;
+        }
+
+        const relationship =
+            this.relationshipForParticipant(participant.id);
+
+        if (relationship?.members?.some(member =>
+            member.relationshipRole === "lap" &&
+            Number(member.lapHostParticipantId) === Number(participant.id)
+        )) {
+            return true;
         }
 
         for (const other of this.#participants.values()) {

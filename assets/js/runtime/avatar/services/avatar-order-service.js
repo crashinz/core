@@ -21,7 +21,7 @@
  *      implementation detail of the Avatar Runtime.
  *
  * Build:
- *      000019
+ *      000044 Part 3
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -36,6 +36,10 @@
  * - Migrated linked group ordering from room.js.
  * - Migrated avatar stage layer ordering from room.js.
  * - Migrated webcam stacking insertion decision from room.js.
+ *
+ * Build 000044 Part 3
+ * - Consumed authoritative persisted relationship-member order for group
+ *   presentation.
  ******************************************************************************/
 
 /**
@@ -177,16 +181,71 @@ export class AvatarOrderService {
      * @returns {Object[]}
      *          Ordered linked group.
      */
-    orderLinkedGroup(group) {
+    orderLinkedGroup(group, authoritativeOrder = []) {
 
         this.#orderCount += 1;
 
-        return Array.from(group || [])
+        const members =
+            Array.from(group || [])
             .filter(participant =>
                 participant &&
                 typeof participant === "object" &&
                 participant.id
             );
+
+        const order =
+            new Map(
+                Array.from(authoritativeOrder || [])
+                    .map((member, index) => [
+                        Number(
+                            typeof member === "object"
+                                ? member?.participantId ?? member?.id
+                                : member
+                        ),
+                        index
+                    ])
+                    .filter(([participantId]) => participantId > 0)
+            );
+
+        if (!order.size) {
+            return members;
+        }
+
+        return members.sort((first, second) =>
+            (order.get(Number(first.id)) ?? Number.MAX_SAFE_INTEGER) -
+            (order.get(Number(second.id)) ?? Number.MAX_SAFE_INTEGER)
+        );
+
+    }
+
+    /**
+     * Orders relationship member records by authoritative persisted order.
+     *
+     * @param {Iterable<Object>} members
+     *        Relationship member records.
+     *
+     * @returns {Object[]}
+     *          Deterministically ordered member records.
+     */
+    orderRelationshipMembers(members) {
+
+        this.#orderCount += 1;
+
+        return Array.from(members || [])
+            .filter(member =>
+                member &&
+                typeof member === "object" &&
+                Number(member.participantId) > 0
+            )
+            .sort((first, second) => {
+
+                const orderDifference =
+                    Number(first.order || 0) - Number(second.order || 0);
+
+                return orderDifference ||
+                    Number(first.participantId) - Number(second.participantId);
+
+            });
 
     }
 

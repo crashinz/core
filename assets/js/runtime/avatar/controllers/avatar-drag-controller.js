@@ -20,7 +20,7 @@
  *      AvatarLayoutService through the coordinator.
  *
  * Build:
- *      000032
+ *      000044 Part 3
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -35,6 +35,10 @@
  *
  * Build 000044 Part 1
  * - Filtered drag targets through authoritative relationship eligibility.
+ *
+ * Build 000044 Part 3
+ * - Made any active normal member the pointer owner for synchronized visible
+ *   group movement and removed implicit drag-to-unlink behavior.
  ******************************************************************************/
 
 /**
@@ -229,9 +233,6 @@ export class AvatarDragController {
             dragging:
                 false,
 
-            relationshipBroken:
-                false,
-
             relationshipBoundAtStart:
                 false,
 
@@ -241,7 +242,7 @@ export class AvatarDragController {
             offsetY:
                 0,
 
-            group:
+            operation:
                 null,
 
             handlers:
@@ -364,14 +365,15 @@ export class AvatarDragController {
         const participant =
             this.#currentParticipant();
 
+        const operation = this.#coordinator?.beginDragOperation(participant);
+        if (!operation?.allowed) {
+            return;
+        }
+
         state.dragging = true;
-        state.relationshipBroken = false;
-        state.group =
-            this.#coordinator?.linkedGroupForParticipant(participant?.id) || [
-                participant
-            ];
+        state.operation = operation;
         state.relationshipBoundAtStart = Boolean(
-            this.#runtime.relationships?.isLinked(participant)
+            operation.relationshipId
         );
         state.offsetX =
             event.clientX - element.getBoundingClientRect().left;
@@ -395,7 +397,7 @@ export class AvatarDragController {
      */
     #handlePointerMove(element, state, event) {
 
-        if (!state.dragging || !state.group) {
+        if (!state.dragging || !state.operation) {
             return;
         }
 
@@ -448,11 +450,10 @@ export class AvatarDragController {
             target
         );
 
+        const operation = state.operation;
         this.#resetDragState(state);
 
-        this.#coordinator?.persistDragEnd(
-            participant
-        );
+        this.#coordinator?.persistDragEnd(participant, operation);
 
         this.#completedDragCount += 1;
 
@@ -506,19 +507,9 @@ export class AvatarDragController {
                 )
             );
 
-        if (!state.relationshipBroken && participant.linked_to) {
-            state.relationshipBroken = true;
-            this.#coordinator?.breakRelationshipForDrag(participant);
-        }
-
         this.#coordinator?.applyDragGroupMove({
 
-            participant,
-
-            group:
-                state.group || [
-                    participant
-                ],
+            operation: state.operation,
 
             baseX:
                 rect.width
@@ -528,15 +519,7 @@ export class AvatarDragController {
             baseY:
                 rect.height
                     ? y / rect.height
-                    : 0,
-
-            spacing:
-                rect.width
-                    ? dimensions.width / rect.width
-                    : 0,
-
-            relationshipBroken:
-                state.relationshipBroken
+                    : 0
 
         });
 
@@ -727,9 +710,8 @@ export class AvatarDragController {
      */
     #resetDragState(state) {
 
-        state.relationshipBroken = false;
         state.relationshipBoundAtStart = false;
-        state.group = null;
+        state.operation = null;
 
     }
 

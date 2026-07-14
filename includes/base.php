@@ -2885,6 +2885,170 @@ function avatar_relationship_version_error(array $relationship, int $expectedVer
     ) + ['relationship_version' => $currentVersion];
 }
 
+function avatar_relationship_move_group(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $operationId,
+    array $positions
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $actorParticipantId,
+        $relationshipPublicId,
+        $expectedVersion,
+        $operationId,
+        $positions
+    ): array {
+        if ($relationshipPublicId === '' || !preg_match('/^[A-Za-z0-9:_-]{1,160}$/', $relationshipPublicId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_MOVEMENT_INVALID',
+                'A valid relationship is required.',
+                'invalid-relationship-id',
+                400
+            );
+        }
+        if (!preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $operationId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_MOVEMENT_INVALID',
+                'A valid movement operation is required.',
+                'invalid-operation-id',
+                400
+            );
+        }
+
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship || (string)$relationship['status'] !== 'active') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_MOVEMENT_CONFLICT',
+                'That relationship is no longer active.',
+                'relationship-unavailable',
+                409
+            );
+        }
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) {
+            return $versionError;
+        }
+
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actor = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if (!$actor || (string)($actor['relationship_role'] ?? '') !== 'normal' || empty($actor['last_seen_at'])) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_MOVEMENT_FORBIDDEN',
+                'This participant cannot move that relationship.',
+                'actor-not-active-normal-member',
+                403
+            );
+        }
+
+        $priorStmt = $pdo->prepare(
+            "SELECT id, payload FROM events
+              WHERE session_id = ? AND type = 'relationship_position'
+                AND payload LIKE ? ORDER BY id DESC LIMIT 10"
+        );
+        $priorStmt->execute([$sessionId, '%"operation_id":"' . $operationId . '"%']);
+        foreach ($priorStmt->fetchAll() as $prior) {
+            $priorPayload = json_decode((string)$prior['payload'], true) ?: [];
+            if ((string)($priorPayload['operation_id'] ?? '') !== $operationId
+                || (string)($priorPayload['relationship_id'] ?? '') !== $relationshipPublicId
+                || (int)($priorPayload['actor_participant_id'] ?? 0) !== $actorParticipantId) {
+                continue;
+            }
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'event_id' => (int)$prior['id'],
+                'relationship_id' => $relationshipPublicId,
+                'relationship_version' => $expectedVersion,
+                'operation_id' => $operationId,
+                'positions' => array_values($priorPayload['positions'] ?? []),
+            ];
+        }
+
+        $presentMemberIds = [];
+        foreach ($members as $member) {
+            if (empty($member['last_seen_at'])) continue;
+            if ((string)($member['relationship_role'] ?? 'normal') === 'lap') {
+                $hostId = (int)($member['lap_host_participant_id'] ?? 0);
+                $host = avatar_relationship_member_from_rows($members, $hostId);
+                if (!$host || empty($host['last_seen_at'])) continue;
+            }
+            $presentMemberIds[] = (int)$member['participant_id'];
+        }
+        sort($presentMemberIds, SORT_NUMERIC);
+
+        if (!$positions || count($positions) !== count($presentMemberIds) || count($positions) > 100) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_MOVEMENT_CONFLICT',
+                'The visible relationship group changed. Refresh and try again.',
+                'visible-member-set-changed',
+                409
+            );
+        }
+
+        $normalized = [];
+        $positionIds = [];
+        foreach ($positions as $position) {
+            if (!is_array($position)) {
+                return avatar_relationship_operation_error('RELATIONSHIP_MOVEMENT_INVALID', 'Invalid group position.', 'malformed-position', 400);
+            }
+            $participantId = (int)($position['participant_id'] ?? 0);
+            $x = filter_var($position['x'] ?? null, FILTER_VALIDATE_FLOAT);
+            $y = filter_var($position['y'] ?? null, FILTER_VALIDATE_FLOAT);
+            if ($participantId <= 0 || $x === false || $y === false || !is_finite((float)$x) || !is_finite((float)$y) || isset($positionIds[$participantId])) {
+                return avatar_relationship_operation_error('RELATIONSHIP_MOVEMENT_INVALID', 'Invalid group position.', 'malformed-position', 400);
+            }
+            $positionIds[$participantId] = true;
+            $normalized[] = [
+                'participant_id' => $participantId,
+                'position_x' => max(0, min(1, (float)$x)),
+                'position_y' => max(0, min(1, (float)$y)),
+            ];
+        }
+        $submittedIds = array_keys($positionIds);
+        sort($submittedIds, SORT_NUMERIC);
+        if ($submittedIds !== $presentMemberIds) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_MOVEMENT_CONFLICT',
+                'The visible relationship group changed. Refresh and try again.',
+                'visible-member-set-changed',
+                409
+            );
+        }
+
+        $update = $pdo->prepare(
+            'UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?'
+        );
+        foreach ($normalized as $position) {
+            $update->execute([
+                $position['position_x'],
+                $position['position_y'],
+                $position['participant_id'],
+                $sessionId,
+            ]);
+            if ($update->rowCount() > 1) {
+                throw new RuntimeException('Relationship group movement updated an invalid participant set.');
+            }
+        }
+
+        $eventPayload = [
+            'relationship_id' => $relationshipPublicId,
+            'relationship_version' => $expectedVersion,
+            'operation_id' => $operationId,
+            'actor_participant_id' => $actorParticipantId,
+            'positions' => $normalized,
+            'final' => true,
+        ];
+        emit_event($pdo, $sessionId, 'relationship_position', $eventPayload);
+        $eventId = (int)$pdo->lastInsertId();
+
+        return ['ok' => true, 'idempotent' => false, 'event_id' => $eventId] + $eventPayload;
+    });
+}
+
 function avatar_relationship_blocked_for_members(PDO $pdo, array $target, array $members): bool {
     $targetUserId = (int)($target['user_id'] ?? 0);
     $memberUserIds = array_values(array_unique(array_filter(array_map(

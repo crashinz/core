@@ -18,7 +18,7 @@
  *      AvatarRenderer.
  *
  * Build:
- *      000035
+ *      000044 Part 3
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -40,6 +40,10 @@
  * Build 000035
  * - Added metadata-driven relationship geometry strategy execution.
  * - Added sideBySide and anchorPair strategy ownership.
+ *
+ * Build 000044 Part 3
+ * - Added ordered mixed-size group layout, host-attached lap geometry, and
+ *   whole-group drag translation/clamping.
  ******************************************************************************/
 
 /**
@@ -435,6 +439,164 @@ export class AvatarLayoutService {
     }
 
     /**
+     * Applies one ordered, mixed-size relationship-group layout.
+     *
+     * @param {Object} options
+     * @param {Object[]} options.normalMembers
+     * @param {Object[]} options.lapAttachments
+     * @param {number} options.stageWidth
+     * @param {number} options.stageHeight
+     * @param {number} [options.gap=0]
+     * @param {Object} [options.metadata]
+     * @param {Object|null} [options.anchor]
+     * @param {boolean} [options.locked=false]
+     *
+     * @returns {Object[]}
+     */
+    applyRelationshipGroupLayout({
+        normalMembers = [],
+        lapAttachments = [],
+        stageWidth,
+        stageHeight,
+        gap = 0,
+        metadata = null,
+        anchor = null,
+        locked = false
+    }) {
+
+        const width = Number(stageWidth || 0);
+        const height = Number(stageHeight || 0);
+        const normalGap = Math.max(0, Number(gap || 0));
+        const normals = Array.from(normalMembers || [])
+            .filter(entry => entry?.participant && entry?.dimensions);
+
+        if (locked || !normals.length || width <= 0 || height <= 0) {
+            return [];
+        }
+
+        const anchorX = Number(
+            anchor?.x ?? normals[0].participant.position_x ?? 0
+        ) * width;
+        const anchorY = Number(
+            anchor?.y ?? normals[0].participant.position_y ?? 0
+        ) * height;
+        const normalBoxes = [];
+        let nextX = anchorX;
+
+        normals.forEach(entry => {
+
+            const memberWidth = Math.max(1, Number(entry.dimensions.width || 0));
+            const memberHeight = Math.max(1, Number(entry.dimensions.height || 0));
+
+            normalBoxes.push({
+                entry,
+                x: nextX,
+                y: anchorY,
+                width: memberWidth,
+                height: memberHeight
+            });
+
+            nextX += memberWidth + normalGap;
+
+        });
+
+        const boxesByParticipantId =
+            new Map(
+                normalBoxes.map(box => [
+                    Number(box.entry.participant.id),
+                    box
+                ])
+            );
+        const lapBoxes = [];
+
+        Array.from(lapAttachments || []).forEach(attachment => {
+
+            const participant = attachment?.participant;
+            const hostBox = boxesByParticipantId.get(
+                Number(attachment?.hostParticipantId)
+            );
+
+            if (!participant || !hostBox || !attachment?.dimensions) {
+                return;
+            }
+
+            const lapWidth = Math.max(1, Number(attachment.dimensions.width || 0));
+            const lapHeight = Math.max(1, Number(attachment.dimensions.height || 0));
+            const lapMetadata = {
+                ...(metadata || {}),
+                mode: "lap",
+                members: [
+                    {
+                        participantId: Number(participant.id),
+                        role: "initiator",
+                        anchor: attachment.anchor || null
+                    },
+                    {
+                        participantId: Number(hostBox.entry.participant.id),
+                        role: "target"
+                    }
+                ]
+            };
+            const offsets = this.#anchorPairOffsets(
+                lapMetadata,
+                {
+                    primaryWidth: hostBox.width,
+                    primaryHeight: hostBox.height,
+                    lapWidth,
+                    lapHeight
+                }
+            );
+
+            lapBoxes.push({
+                entry: attachment,
+                x: hostBox.x + offsets.x,
+                y: hostBox.y + offsets.y,
+                width: lapWidth,
+                height: lapHeight
+            });
+
+        });
+
+        const allBoxes = [...normalBoxes, ...lapBoxes];
+        const bounds = this.#relationshipBounds(allBoxes);
+        const translation = this.#clampTranslation(bounds, width, height);
+        const changed = [];
+
+        allBoxes.forEach(box => {
+
+            const participant = box.entry.participant;
+
+            if (participant._lockedPosition) {
+                return;
+            }
+
+            participant.position_x = (box.x + translation.x) / width;
+            participant.position_y = (box.y + translation.y) / height;
+            changed.push(participant);
+
+        });
+
+        this.#lastRelationshipStrategy = Object.freeze({
+            strategy: "orderedGroup",
+            mode: String(metadata?.mode || "normal"),
+            memberCount: allBoxes.length,
+            normalMemberCount: normalBoxes.length,
+            lapMemberCount: lapBoxes.length,
+            mixedSize: new Set(
+                allBoxes.map(box => `${box.width}x${box.height}`)
+            ).size > 1,
+            bounds: Object.freeze({
+                width: bounds.right - bounds.left,
+                height: bounds.bottom - bounds.top
+            })
+        });
+        this.#layoutCount += 1;
+
+        return changed;
+
+    }
+
+    /**
      * Applies drag-group layout.
      *
      * @param {Object} options
@@ -479,6 +641,77 @@ export class AvatarLayoutService {
         }
 
         return members;
+
+    }
+
+    /**
+     * Translates one captured relationship group while preserving every
+     * member's relative offset and clamping the complete mixed-size group.
+     *
+     * @param {Object} options
+     * @param {Object[]} options.members
+     * @param {number|string} options.actorParticipantId
+     * @param {number} options.desiredX
+     * @param {number} options.desiredY
+     * @param {number} options.stageWidth
+     * @param {number} options.stageHeight
+     *
+     * @returns {Object[]}
+     */
+    translateRelationshipGroup({
+        members = [],
+        actorParticipantId,
+        desiredX,
+        desiredY,
+        stageWidth,
+        stageHeight
+    }) {
+
+        const width = Number(stageWidth || 0);
+        const height = Number(stageHeight || 0);
+        const entries = Array.from(members || [])
+            .filter(entry => entry?.participant && entry?.dimensions);
+        const actor = entries.find(entry =>
+            Number(entry.participant.id) === Number(actorParticipantId)
+        );
+
+        if (!actor || !entries.length || width <= 0 || height <= 0) {
+            return [];
+        }
+
+        const deltaX = (Number(desiredX || 0) - Number(actor.originX || 0)) * width;
+        const deltaY = (Number(desiredY || 0) - Number(actor.originY || 0)) * height;
+        const boxes = entries.map(entry => ({
+            entry,
+            x: Number(entry.originX || 0) * width + deltaX,
+            y: Number(entry.originY || 0) * height + deltaY,
+            width: Math.max(1, Number(entry.dimensions.width || 0)),
+            height: Math.max(1, Number(entry.dimensions.height || 0))
+        }));
+        const bounds = this.#relationshipBounds(boxes);
+        const translation = this.#clampTranslation(bounds, width, height);
+        const changed = [];
+
+        boxes.forEach(box => {
+            const participant = box.entry.participant;
+            if (participant._lockedPosition) return;
+            participant.position_x = (box.x + translation.x) / width;
+            participant.position_y = (box.y + translation.y) / height;
+            changed.push(participant);
+        });
+
+        this.#lastRelationshipStrategy = Object.freeze({
+            strategy: "relationshipGroupTranslation",
+            memberCount: boxes.length,
+            mixedSize: new Set(boxes.map(box => `${box.width}x${box.height}`)).size > 1,
+            bounds: Object.freeze({
+                width: bounds.right - bounds.left,
+                height: bounds.bottom - bounds.top
+            })
+        });
+        this.#layoutCount += 1;
+
+        return changed;
 
     }
 

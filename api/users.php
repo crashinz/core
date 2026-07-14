@@ -46,6 +46,22 @@ if ($action === 'position_pair') {
     json_out(['ok' => true]);
 }
 
+if ($action === 'relationship_position') {
+    $result = avatar_relationship_move_group(
+        $pdo,
+        $sessionId,
+        (int)$p['id'],
+        trim((string)($body['relationship_id'] ?? '')),
+        (int)($body['expected_version'] ?? 0),
+        trim((string)($body['operation_id'] ?? '')),
+        is_array($body['positions'] ?? null) ? $body['positions'] : []
+    );
+    if (empty($result['ok'])) {
+        json_out($result, (int)($result['http_status'] ?? 409));
+    }
+    json_out($result);
+}
+
 if ($action === 'link') {
     $targetId = (int)($body['target_participant_id'] ?? 0);
     $linkMode = (string)($body['link_mode'] ?? 'normal');

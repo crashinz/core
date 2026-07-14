@@ -18,7 +18,7 @@
  *      Chat event routing remains owned by ChatRuntime.
  *
  * Build:
- *      000026
+ *      000044 Part 3
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -26,6 +26,9 @@
  * Build 000026
  * - Introduced RoomEventRouter.
  * - Transferred non-chat room/community poll event classification from room.js.
+ *
+ * Build 000044 Part 3
+ * - Added atomic relationship-position event routing to AvatarCoordinator.
  ******************************************************************************/
 
 /**
@@ -197,6 +200,10 @@ export class RoomEventRouter {
 
             case "position":
                 this.#context?.onParticipantPosition?.(payload, event);
+                return true;
+
+            case "relationship_position":
+                this.#context?.onRelationshipPosition?.(payload, event);
                 return true;
 
             case "webcam":
