@@ -400,6 +400,7 @@ export class AvatarLayoutService {
      * @param {number} options.stageHeight
      * @param {Object} options.primaryDimensions
      * @param {Object} options.lapDimensions
+     * @param {string} [options.lapSide="bottom-right"]
      * @param {boolean} [options.locked=false]
      *
      * @returns {Object[]}
@@ -411,6 +412,7 @@ export class AvatarLayoutService {
         stageHeight,
         primaryDimensions,
         lapDimensions,
+        lapSide = "bottom-right",
         locked = false
     }) {
 
@@ -423,8 +425,8 @@ export class AvatarLayoutService {
                 lapDimensions,
             targetDimensions:
                 primaryDimensions,
-            metadata:
-                this.#relationships.normalizeRelationshipMetadata(
+            metadata: {
+                ...this.#relationships.normalizeRelationshipMetadata(
                     {},
                     {
                         mode:
@@ -433,6 +435,8 @@ export class AvatarLayoutService {
                             this.#legacyMembers(initiator, target)
                     }
                 ),
+                orientation: lapSide === "bottom-left" ? "bottom-left" : "bottom-right"
+            },
             locked
         });
 
@@ -480,81 +484,84 @@ export class AvatarLayoutService {
         const anchorY = Number(
             anchor?.y ?? normals[0].participant.position_y ?? 0
         ) * height;
+        const attachmentsByHost = new Map();
+        Array.from(lapAttachments || []).forEach(attachment => {
+            const hostParticipantId = Number(attachment?.hostParticipantId || 0);
+            const lapSide = String(attachment?.lapSide || "");
+            if (!attachment?.participant || !attachment?.dimensions || !hostParticipantId
+                || !["bottom-left", "bottom-right"].includes(lapSide)) {
+                return;
+            }
+            const list = attachmentsByHost.get(hostParticipantId) || [];
+            if (list.some(item => item.lapSide === lapSide)) return;
+            list.push({ ...attachment, lapSide });
+            attachmentsByHost.set(hostParticipantId, list);
+        });
+
         const normalBoxes = [];
-        let nextX = anchorX;
+        const lapBoxes = [];
+        let previousUnitRight = null;
 
-        normals.forEach(entry => {
-
+        normals.forEach((entry, index) => {
             const memberWidth = Math.max(1, Number(entry.dimensions.width || 0));
             const memberHeight = Math.max(1, Number(entry.dimensions.height || 0));
-
-            normalBoxes.push({
+            const attachments = attachmentsByHost.get(Number(entry.participant.id)) || [];
+            const relativeLapBoxes = attachments.map(attachment => {
+                const lapWidth = Math.max(1, Number(attachment.dimensions.width || 0));
+                const lapHeight = Math.max(1, Number(attachment.dimensions.height || 0));
+                const offsets = this.#anchorPairOffsets(
+                    {
+                        ...(metadata || {}),
+                        mode: "lap",
+                        orientation: attachment.lapSide,
+                        members: [
+                            {
+                                participantId: Number(attachment.participant.id),
+                                role: "initiator",
+                                anchor: attachment.anchor || null
+                            },
+                            {
+                                participantId: Number(entry.participant.id),
+                                role: "target"
+                            }
+                        ]
+                    },
+                    {
+                        primaryWidth: memberWidth,
+                        primaryHeight: memberHeight,
+                        lapWidth,
+                        lapHeight
+                    }
+                );
+                return {
+                    entry: attachment,
+                    x: offsets.x,
+                    y: offsets.y,
+                    width: lapWidth,
+                    height: lapHeight
+                };
+            });
+            const unitBounds = this.#relationshipBounds([
+                { x: 0, y: 0, width: memberWidth, height: memberHeight },
+                ...relativeLapBoxes
+            ]);
+            const hostX = index === 0
+                ? anchorX
+                : Number(previousUnitRight) + normalGap - unitBounds.left;
+            const hostBox = {
                 entry,
-                x: nextX,
+                x: hostX,
                 y: anchorY,
                 width: memberWidth,
                 height: memberHeight
-            });
-
-            nextX += memberWidth + normalGap;
-
-        });
-
-        const boxesByParticipantId =
-            new Map(
-                normalBoxes.map(box => [
-                    Number(box.entry.participant.id),
-                    box
-                ])
-            );
-        const lapBoxes = [];
-
-        Array.from(lapAttachments || []).forEach(attachment => {
-
-            const participant = attachment?.participant;
-            const hostBox = boxesByParticipantId.get(
-                Number(attachment?.hostParticipantId)
-            );
-
-            if (!participant || !hostBox || !attachment?.dimensions) {
-                return;
-            }
-
-            const lapWidth = Math.max(1, Number(attachment.dimensions.width || 0));
-            const lapHeight = Math.max(1, Number(attachment.dimensions.height || 0));
-            const lapMetadata = {
-                ...(metadata || {}),
-                mode: "lap",
-                members: [
-                    {
-                        participantId: Number(participant.id),
-                        role: "initiator",
-                        anchor: attachment.anchor || null
-                    },
-                    {
-                        participantId: Number(hostBox.entry.participant.id),
-                        role: "target"
-                    }
-                ]
             };
-            const offsets = this.#anchorPairOffsets(
-                lapMetadata,
-                {
-                    primaryWidth: hostBox.width,
-                    primaryHeight: hostBox.height,
-                    lapWidth,
-                    lapHeight
-                }
-            );
-
-            lapBoxes.push({
-                entry: attachment,
-                x: hostBox.x + offsets.x,
-                y: hostBox.y + offsets.y,
-                width: lapWidth,
-                height: lapHeight
-            });
-
+            normalBoxes.push(hostBox);
+            relativeLapBoxes.forEach(box => lapBoxes.push({
+                ...box,
+                x: hostX + box.x,
+                y: anchorY + box.y
+            }));
+            previousUnitRight = hostX + unitBounds.right;
         });
 
         const allBoxes = [...normalBoxes, ...lapBoxes];

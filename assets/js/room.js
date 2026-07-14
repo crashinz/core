@@ -319,7 +319,17 @@ function configureAvatarCoordinator() {
     updateStageLinkIcons,
     closeLinkChoiceModal,
     openLinkChoiceModal() {
+      resetLinkChoiceModal();
       linkChoiceModal?.classList.add('open');
+    },
+    openLapSeatChoice() {
+      const actions = document.getElementById('link-choice-actions');
+      const seats = document.getElementById('link-choice-seat');
+      const prompt = document.getElementById('link-choice-prompt');
+      if (actions) actions.hidden = true;
+      if (seats) seats.hidden = false;
+      if (prompt) prompt.textContent = 'Choose which side you would like to sit on.';
+      document.getElementById('link-choice-bottom-right')?.focus();
     },
     isRelationshipBlocked(first, second) {
       const firstIsCurrent = Number(first?.id) === Number(cfg?.myParticipantId);
@@ -348,13 +358,14 @@ function configureAvatarCoordinator() {
     onCurrentParticipantUnlinked() {
       if (activeChatKey().startsWith('link:')) switchChat('room');
     },
-    persistLink({ target, linkMode, initiator }) {
+    persistLink({ target, linkMode, initiator, lapSide = null }) {
       return apiPost('/api/users.php', {
         action: 'link',
         session_id: cfg.sessionId,
         join_token: cfg.myJoinToken,
         target_participant_id: target.id,
         link_mode: linkMode,
+        lap_side: lapSide,
         initiator_x: initiator.position_x,
         initiator_y: initiator.position_y,
         target_x: target.position_x,
@@ -431,11 +442,12 @@ function configureAvatarRelationshipManagement() {
   avatarRuntime?.relationshipManagement?.configure({
     document,
     getConfig: () => cfg,
-    fetchManagementState() {
+    fetchManagementState({ relationshipId = "" } = {}) {
       const query = new URLSearchParams({
         session_id: cfg.sessionId,
         join_token: cfg.myJoinToken,
       });
+      if (relationshipId) query.set('relationship_id', relationshipId);
       return runtimeRequestClient.getJson(`/api/avatar_relationships.php?${query}`, {
         operation: 'load-relationship-management',
         endpointCategory: 'avatar-relationship-management',
@@ -1914,6 +1926,7 @@ function renderParticipant(p, options = {}) {
     webcamEnabled: merged.webcam_enabled,
     lapInitiator: isLapLinkInitiator(merged),
     lapTarget: isLapLinkTarget(merged),
+    lapSide: avatarRuntime?.relationships?.lapSideForParticipant(merged),
     flipImage: hadImage && wasWebcam !== nowWebcam,
     fallbackSize: AVATAR_STAGE_SIZE,
     visualMaxSize: 200,
@@ -2212,10 +2225,20 @@ function snapLappedPair(initiator, target, animate = true) {
 
 function closeLinkChoiceModal() {
   linkChoiceModal?.classList.remove('open');
+  resetLinkChoiceModal();
 }
 
-async function completePendingLinkChoice(mode) {
-  await avatarRuntime?.coordinator?.completePendingLinkChoice(mode);
+function resetLinkChoiceModal() {
+  const actions = document.getElementById('link-choice-actions');
+  const seats = document.getElementById('link-choice-seat');
+  const prompt = document.getElementById('link-choice-prompt');
+  if (actions) actions.hidden = false;
+  if (seats) seats.hidden = true;
+  if (prompt) prompt.textContent = 'What would you like to do?';
+}
+
+async function completePendingLinkChoice(mode, lapSide = null) {
+  await avatarRuntime?.coordinator?.completePendingLinkChoice(mode, lapSide);
 }
 
 function makeDraggable(img) {
@@ -3300,6 +3323,9 @@ document.getElementById('link-icon-close')?.addEventListener('click', closeLinkI
 document.getElementById('link-choice-link')?.addEventListener('click', () => completePendingLinkChoice('normal'));
 document.getElementById('link-choice-lap')?.addEventListener('click', () => completePendingLinkChoice('lap'));
 document.getElementById('link-choice-cancel')?.addEventListener('click', () => completePendingLinkChoice('cancel'));
+document.getElementById('link-choice-bottom-left')?.addEventListener('click', () => completePendingLinkChoice('lap', 'bottom-left'));
+document.getElementById('link-choice-bottom-right')?.addEventListener('click', () => completePendingLinkChoice('lap', 'bottom-right'));
+document.getElementById('link-choice-seat-cancel')?.addEventListener('click', () => completePendingLinkChoice('cancel'));
 document.getElementById('warning-close')?.addEventListener('click', () => {
   document.getElementById('warning-modal')?.classList.remove('open');
 });

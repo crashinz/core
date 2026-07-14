@@ -2550,12 +2550,17 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   color: rgba(255,255,255,.88);
   font-weight: 800;
 }
-.link-choice-actions {
+.link-choice-actions,
+.link-choice-seat {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-.link-choice-actions .btn {
+.link-choice-seat[hidden] {
+  display: none;
+}
+.link-choice-actions .btn,
+.link-choice-seat .btn {
   min-height: 54px;
   border: 0;
   border-radius: 10px;
@@ -2639,6 +2644,9 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .avatar.lap-avatar {
   z-index: 4;
   box-shadow: 0 0 12px rgba(0,0,0,.5), 0 6px 14px rgba(0,0,0,.42);
+}
+.avatar.lap-avatar.lap-side-right {
+  z-index: 5;
 }
 .avatar.lap-primary-avatar {
   z-index: 3;
@@ -2988,7 +2996,8 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .relationship-management-section { display: grid; gap: 9px; }
 .relationship-management-section h3 { margin: 0; font-size: 14px; }
 .relationship-member-list,
-.relationship-request-list {
+.relationship-request-list,
+.relationship-seat-list {
   display: grid;
   gap: 7px;
   margin: 0;
@@ -2996,7 +3005,8 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   list-style: none;
 }
 .relationship-member-row,
-.relationship-request-row {
+.relationship-request-row,
+.relationship-seat-row {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3026,6 +3036,17 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 }
 .relationship-member-actions .btn,
 .relationship-request-actions .btn { padding: 6px 9px; }
+.relationship-seat-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 8px;
+}
+.relationship-seat-form label { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; }
+.relationship-seat-form select { width: 100%; min-width: 0; }
+.relationship-seat-row { align-items: flex-start; }
+.relationship-seat-row > div { min-width: 0; }
+.relationship-seat-row span { display: block; color: var(--text-muted); font-size: 12px; }
 .relationship-role-badge,
 .relationship-presence { font-size: 11px; }
 .relationship-role-badge { font-weight: 800; }
@@ -3070,6 +3091,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   .relationship-request-actions { width: 100%; justify-content: flex-start; }
   .relationship-management-settings label { grid-template-columns: 1fr; }
   .relationship-order-row { align-items: flex-start; flex-direction: column; }
+  .relationship-seat-form { grid-template-columns: 1fr; }
 }
 .room-effects-box { width: min(540px, 100%); }
 .voice-device-box { width: min(430px, 100%); }

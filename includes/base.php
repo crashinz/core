@@ -188,6 +188,8 @@ function mysqlize_schema(string $schema): string {
         'join_policy' => 'VARCHAR(32)',
         'request_type' => 'VARCHAR(32)',
         'requested_relationship_role' => 'VARCHAR(32)',
+        'lap_side' => 'VARCHAR(32)',
+        'requested_lap_side' => 'VARCHAR(32)',
         'active_request_key' => 'VARCHAR(191)',
         'outcome' => 'VARCHAR(32)',
         'resolution_reason' => 'VARCHAR(512)',
@@ -229,6 +231,14 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
         'membership_effective_at' => 'TEXT DEFAULT NULL',
         'visible_after_message_id' => 'INTEGER NOT NULL DEFAULT 0',
         'lap_host_participant_id' => 'INTEGER DEFAULT NULL',
+        'lap_side' => 'TEXT DEFAULT NULL',
+    ];
+    $historyDefinitions = [
+        'lap_host_participant_id' => 'INTEGER DEFAULT NULL',
+        'lap_side' => 'TEXT DEFAULT NULL',
+    ];
+    $requestDefinitions = [
+        'requested_lap_side' => 'TEXT DEFAULT NULL',
     ];
 
     if (db_driver($pdo) === 'mysql') {
@@ -239,13 +249,15 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
         foreach ([
             'avatar_relationships' => $relationshipDefinitions,
             'avatar_relationship_members' => $memberDefinitions,
+            'avatar_relationship_membership_history' => $historyDefinitions,
+            'avatar_relationship_requests' => $requestDefinitions,
         ] as $table => $definitions) {
             $columns = $pdo->query('SHOW COLUMNS FROM ' . $table)->fetchAll();
             $columnNames = array_map(fn(array $column): string => (string)($column['Field'] ?? ''), $columns);
             foreach ($definitions as $column => $definition) {
                 if (in_array($column, $columnNames, true)) continue;
                 $mysqlDefinition = strtr($definition, $mysqlTypes);
-                if (in_array($column, ['status', 'relationship_role', 'permission_role', 'membership_status', 'join_policy'], true)) {
+                if (in_array($column, ['status', 'relationship_role', 'permission_role', 'membership_status', 'join_policy', 'lap_side', 'requested_lap_side'], true)) {
                     $mysqlDefinition = str_replace('VARCHAR(191)', 'VARCHAR(32)', $mysqlDefinition);
                 }
                 if (in_array($column, ['dissolved_at', 'membership_effective_at'], true)) {
@@ -258,6 +270,8 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
         foreach ([
             'avatar_relationships' => $relationshipDefinitions,
             'avatar_relationship_members' => $memberDefinitions,
+            'avatar_relationship_membership_history' => $historyDefinitions,
+            'avatar_relationship_requests' => $requestDefinitions,
         ] as $table => $definitions) {
             $columns = $pdo->query('PRAGMA table_info(' . $table . ')')->fetchAll();
             $columnNames = array_map(fn(array $column): string => (string)($column['name'] ?? ''), $columns);
@@ -270,10 +284,12 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
     }
 
     avatar_relationship_migrate_group_foundation($pdo);
+    avatar_relationship_migrate_lap_seats($pdo);
     avatar_relationship_migrate_chat_foundation($pdo);
 
     $indexes = [
         ['avatar_relationship_members', 'idx_avatar_relationship_members_active_participant', true, 'active_participant_id'],
+        ['avatar_relationship_members', 'idx_avatar_relationship_members_lap_seat', true, 'relationship_id, lap_host_participant_id, lap_side'],
         ['avatar_relationships', 'idx_avatar_relationships_conversation', true, 'session_id, conversation_public_id'],
         ['avatar_relationships', 'idx_avatar_relationships_status', false, 'session_id, status'],
         ['avatar_relationship_membership_history', 'idx_avatar_relationship_history_relationship', false, 'relationship_id, id'],
@@ -293,6 +309,7 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
                 $pdo->exec('CREATE ' . ($unique ? 'UNIQUE ' : '') . "INDEX IF NOT EXISTS {$name} ON {$table}({$columns})");
             }
         } catch (Throwable $error) {
+            if ($name === 'idx_avatar_relationship_members_lap_seat') throw $error;
             // Existing installs already have this index.
         }
     }
@@ -563,6 +580,7 @@ function migrate(PDO $pdo): void {
             membership_effective_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             visible_after_message_id INTEGER NOT NULL DEFAULT 0,
             lap_host_participant_id INTEGER DEFAULT NULL,
+            lap_side TEXT DEFAULT NULL,
             anchor_json TEXT DEFAULT NULL,
             options_json TEXT DEFAULT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -588,12 +606,15 @@ function migrate(PDO $pdo): void {
             membership_effective_at TEXT NOT NULL,
             membership_ended_at TEXT DEFAULT NULL,
             visible_after_message_id INTEGER NOT NULL DEFAULT 0,
+            lap_host_participant_id INTEGER DEFAULT NULL,
+            lap_side TEXT DEFAULT NULL,
             relationship_version INTEGER NOT NULL DEFAULT 1,
             reason TEXT DEFAULT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(relationship_id) REFERENCES avatar_relationships(id) ON DELETE CASCADE,
             FOREIGN KEY(participant_id) REFERENCES participants(id) ON DELETE SET NULL,
-            FOREIGN KEY(actor_participant_id) REFERENCES participants(id) ON DELETE SET NULL
+            FOREIGN KEY(actor_participant_id) REFERENCES participants(id) ON DELETE SET NULL,
+            FOREIGN KEY(lap_host_participant_id) REFERENCES participants(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS avatar_relationship_requests (
@@ -606,6 +627,7 @@ function migrate(PDO $pdo): void {
             request_type TEXT NOT NULL,
             requested_relationship_role TEXT NOT NULL DEFAULT 'normal',
             requested_lap_host_participant_id INTEGER DEFAULT NULL,
+            requested_lap_side TEXT DEFAULT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
             active_request_key TEXT DEFAULT NULL UNIQUE,
             resolution_actor_participant_id INTEGER DEFAULT NULL,
@@ -1822,11 +1844,12 @@ function avatar_relationship_migrate_group_foundation(PDO $pdo): void {
             $effectiveAt = trim((string)($member['membership_effective_at'] ?? ''))
                 ?: (string)($member['created_at'] ?? $relationship['created_at'] ?? gmdate('Y-m-d H:i:s'));
             $lapHostId = $relationshipRole === 'lap' && $legacyTargetId > 0 ? $legacyTargetId : null;
+            $lapSide = $relationshipRole === 'lap' ? 'bottom-right' : null;
 
             $pdo->prepare(
                 "UPDATE avatar_relationship_members
                     SET relationship_role = ?, permission_role = ?, membership_status = 'active',
-                        active_participant_id = ?, membership_effective_at = ?, lap_host_participant_id = ?,
+                        active_participant_id = ?, membership_effective_at = ?, lap_host_participant_id = ?, lap_side = ?,
                         updated_at = updated_at
                   WHERE id = ?"
             )->execute([
@@ -1835,6 +1858,7 @@ function avatar_relationship_migrate_group_foundation(PDO $pdo): void {
                 $participantId,
                 $effectiveAt,
                 $lapHostId,
+                $lapSide,
                 (int)$member['id'],
             ]);
 
@@ -1850,8 +1874,9 @@ function avatar_relationship_migrate_group_foundation(PDO $pdo): void {
                     'INSERT INTO avatar_relationship_membership_history
                         (relationship_id, participant_id, user_id, actor_participant_id, action, outcome,
                          relationship_role, permission_role, member_order, membership_effective_at,
-                         visible_after_message_id, relationship_version, reason)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                         visible_after_message_id, lap_host_participant_id, lap_side,
+                         relationship_version, reason)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
                 )->execute([
                     $relationshipDbId,
                     $participantId,
@@ -1864,6 +1889,8 @@ function avatar_relationship_migrate_group_foundation(PDO $pdo): void {
                     (int)$member['member_order'],
                     $effectiveAt,
                     max(0, (int)($member['visible_after_message_id'] ?? 0)),
+                    $lapHostId,
+                    $lapSide,
                     $version,
                     'legacy-pair-compatibility',
                 ]);
@@ -1872,8 +1899,122 @@ function avatar_relationship_migrate_group_foundation(PDO $pdo): void {
     }
 }
 
+function avatar_relationship_migrate_lap_seats(PDO $pdo): void {
+    $pdo->exec(
+        "UPDATE avatar_relationship_members
+            SET lap_side = NULL
+          WHERE relationship_id IN (
+                SELECT id FROM avatar_relationships WHERE status = 'conflicted'
+          )"
+    );
+    $relationships = $pdo->query(
+        "SELECT id FROM avatar_relationships WHERE status = 'active' ORDER BY id ASC"
+    )->fetchAll(PDO::FETCH_COLUMN);
+    foreach (array_map('intval', $relationships) as $relationshipDbId) {
+        $stmt = $pdo->prepare(
+            "SELECT id, participant_id, relationship_role, membership_status,
+                    lap_host_participant_id, lap_side
+               FROM avatar_relationship_members
+              WHERE relationship_id = ?
+              ORDER BY id ASC"
+        );
+        $stmt->execute([$relationshipDbId]);
+        $members = $stmt->fetchAll();
+        $activeNormals = [];
+        foreach ($members as $member) {
+            if ((string)$member['membership_status'] === 'active'
+                && (string)$member['relationship_role'] === 'normal') {
+                $activeNormals[(int)$member['participant_id']] = true;
+            }
+        }
+
+        $conflicted = false;
+        $occupied = [];
+        $updates = [];
+        foreach ($members as $member) {
+            $memberId = (int)$member['id'];
+            if ((string)$member['relationship_role'] !== 'lap') {
+                $updates[$memberId] = [null, null];
+                continue;
+            }
+            $hostId = (int)($member['lap_host_participant_id'] ?? 0);
+            $rawSide = $member['lap_side'] ?? null;
+            $side = avatar_relationship_normalize_lap_side($rawSide);
+            if ((string)$member['membership_status'] !== 'active') {
+                $updates[$memberId] = [$hostId > 0 ? $hostId : null, $side];
+                continue;
+            }
+            if ($hostId <= 0 || empty($activeNormals[$hostId])) {
+                $conflicted = true;
+                break;
+            }
+            if ($side === null && $rawSide !== null && trim((string)$rawSide) !== '') {
+                $conflicted = true;
+                break;
+            }
+            if ($side === null) {
+                $side = 'bottom-right';
+            }
+            $seatKey = $hostId . ':' . $side;
+            if (isset($occupied[$seatKey])) {
+                $conflicted = true;
+                break;
+            }
+            $occupied[$seatKey] = $memberId;
+            $updates[$memberId] = [$hostId, $side];
+        }
+
+        if ($conflicted) {
+            $pdo->prepare(
+                "UPDATE avatar_relationships
+                    SET status = 'conflicted', divergence_status = 'operator-review',
+                        updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?"
+            )->execute([$relationshipDbId]);
+            $pdo->prepare(
+                "UPDATE avatar_relationship_members
+                    SET membership_status = 'conflicted', active_participant_id = NULL,
+                        lap_side = NULL, updated_at = CURRENT_TIMESTAMP
+                  WHERE relationship_id = ?"
+            )->execute([$relationshipDbId]);
+            continue;
+        }
+
+        $update = $pdo->prepare(
+            'UPDATE avatar_relationship_members
+                SET lap_host_participant_id = ?, lap_side = ?, updated_at = updated_at
+              WHERE id = ?'
+        );
+        foreach ($updates as $memberId => [$hostId, $side]) {
+            $update->execute([$hostId, $side, $memberId]);
+        }
+    }
+
+    $pdo->exec(
+        "UPDATE avatar_relationship_requests
+            SET requested_lap_side = NULL
+          WHERE requested_relationship_role <> 'lap'"
+    );
+    $pdo->exec(
+        "UPDATE avatar_relationship_requests
+            SET requested_lap_side = 'bottom-right'
+          WHERE requested_relationship_role = 'lap'
+            AND requested_lap_side IS NULL
+            AND (request_type = 'join-request' OR status = 'accepted')"
+    );
+}
+
 function avatar_relationship_mode(string $mode): string {
     return in_array($mode, ['normal', 'lap'], true) ? $mode : 'normal';
+}
+
+function avatar_relationship_lap_sides(): array {
+    return ['bottom-left', 'bottom-right'];
+}
+
+function avatar_relationship_normalize_lap_side(mixed $side): ?string {
+    $side = is_string($side) ? trim($side) : '';
+    return in_array($side, avatar_relationship_lap_sides(), true) ? $side : null;
 }
 
 function avatar_relationship_public_options(mixed $options = []): array {
@@ -2012,8 +2153,9 @@ function avatar_relationship_clear_for_participants(PDO $pdo, int $sessionId, ar
             'INSERT INTO avatar_relationship_membership_history
                 (relationship_id, participant_id, user_id, actor_participant_id, action, outcome,
                  relationship_role, permission_role, member_order, membership_effective_at,
-                 membership_ended_at, visible_after_message_id, relationship_version, reason)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 membership_ended_at, visible_after_message_id, lap_host_participant_id, lap_side,
+                 relationship_version, reason)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         foreach ($members as $member) {
             $historyInsert->execute([
@@ -2029,6 +2171,8 @@ function avatar_relationship_clear_for_participants(PDO $pdo, int $sessionId, ar
                 (string)($member['membership_effective_at'] ?: $member['created_at']),
                 $endedAt,
                 max(0, (int)($member['visible_after_message_id'] ?? 0)),
+                $member['lap_host_participant_id'] !== null ? (int)$member['lap_host_participant_id'] : null,
+                avatar_relationship_normalize_lap_side($member['lap_side'] ?? null),
                 $nextVersion,
                 'legacy-compatibility-clear',
             ]);
@@ -2071,9 +2215,19 @@ function avatar_relationship_emit_dissolved_events(PDO $pdo, int $sessionId, int
     }
 }
 
-function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiatorId, int $targetId, string $mode, bool $clearExisting = true): ?array {
+function avatar_relationship_sync_legacy(
+    PDO $pdo,
+    int $sessionId,
+    int $initiatorId,
+    int $targetId,
+    string $mode,
+    bool $clearExisting = true,
+    ?string $lapSide = 'bottom-right'
+): ?array {
     if ($initiatorId <= 0 || $targetId <= 0 || $initiatorId === $targetId) return null;
     $mode = avatar_relationship_mode($mode);
+    $lapSide = $mode === 'lap' ? avatar_relationship_normalize_lap_side($lapSide) : null;
+    if ($mode === 'lap' && $lapSide === null) return null;
     $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND id IN (?,?)');
     $stmt->execute([$sessionId, $initiatorId, $targetId]);
     $found = array_map(fn(array $row): int => (int)$row['id'], $stmt->fetchAll());
@@ -2191,20 +2345,21 @@ function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiato
         "INSERT INTO avatar_relationship_members
             (relationship_id, participant_id, member_role, relationship_role, permission_role,
              membership_status, active_participant_id, member_order, membership_effective_at,
-             visible_after_message_id, lap_host_participant_id, anchor_json, options_json)
-         VALUES (?,?,?,?,?,'active',?,?,?,?,?,?,?)"
+             visible_after_message_id, lap_host_participant_id, lap_side, anchor_json, options_json)
+         VALUES (?,?,?,?,?,'active',?,?,?,?,?,?,?,?)"
     );
     $memberUpdate = $pdo->prepare(
         "UPDATE avatar_relationship_members
             SET member_role = ?, relationship_role = ?, permission_role = ?, membership_status = 'active',
                 active_participant_id = ?, member_order = ?,
-                lap_host_participant_id = ?, updated_at = CURRENT_TIMESTAMP
+                lap_host_participant_id = ?, lap_side = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?"
     );
     foreach ($metadata['members'] as $member) {
         $participantId = (int)$member['participantId'];
         $relationshipRole = $mode === 'lap' && $participantId === $initiatorId ? 'lap' : 'normal';
         $lapHostId = $relationshipRole === 'lap' ? $targetId : null;
+        $memberLapSide = $relationshipRole === 'lap' ? $lapSide : null;
         $memberSelect->execute([$dbRelationshipId, $participantId]);
         $existingMember = $memberSelect->fetch() ?: null;
         $permissionRole = $participantId === $relationshipCreatorId
@@ -2222,6 +2377,7 @@ function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiato
                 $participantId,
                 (int)$member['order'],
                 $lapHostId,
+                $memberLapSide,
                 (int)$existingMember['id'],
             ]);
             continue;
@@ -2238,6 +2394,7 @@ function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiato
             $effectiveAt,
             0,
             $lapHostId,
+            $memberLapSide,
             null,
             json_encode([], JSON_UNESCAPED_SLASHES),
         ]);
@@ -2247,8 +2404,8 @@ function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiato
             'INSERT INTO avatar_relationship_membership_history
                 (relationship_id, participant_id, user_id, actor_participant_id, action, outcome,
                  relationship_role, permission_role, member_order, membership_effective_at,
-                 visible_after_message_id, relationship_version, reason)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 visible_after_message_id, lap_host_participant_id, lap_side, relationship_version, reason)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             $dbRelationshipId,
             $participantId,
@@ -2261,6 +2418,8 @@ function avatar_relationship_sync_legacy(PDO $pdo, int $sessionId, int $initiato
             (int)$member['order'],
             $effectiveAt,
             0,
+            $lapHostId,
+            $memberLapSide,
             max(1, $relationshipVersion),
             'legacy-pair-compatibility',
         ]);
@@ -2371,7 +2530,8 @@ function avatar_relationship_create_pair_atomic(
     int $initiatorId,
     int $targetId,
     string $mode,
-    array $positions = []
+    array $positions = [],
+    ?string $lapSide = null
 ): array {
     $ownsTransaction = !$pdo->inTransaction();
 
@@ -2398,6 +2558,16 @@ function avatar_relationship_create_pair_atomic(
         }
 
         $mode = avatar_relationship_mode($mode);
+        $lapSide = $mode === 'lap' ? avatar_relationship_normalize_lap_side($lapSide) : null;
+        if ($mode === 'lap' && $lapSide === null) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFLICT',
+                'Choose an available lap side.',
+                'lap-side-required',
+                400
+            );
+        }
         $pdo->prepare(
             'UPDATE participants
                 SET linked_to_participant_id = ?, link_mode = ?
@@ -2410,7 +2580,8 @@ function avatar_relationship_create_pair_atomic(
             $initiatorId,
             $targetId,
             $mode,
-            false
+            false,
+            $lapSide
         );
 
         if (!$relationship) {
@@ -2487,7 +2658,7 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
     $membersStmt = $pdo->prepare(
         "SELECT arm.participant_id, arm.member_role, arm.relationship_role, arm.permission_role,
                 arm.membership_status, arm.member_order, arm.membership_effective_at,
-                arm.visible_after_message_id, arm.lap_host_participant_id,
+                arm.visible_after_message_id, arm.lap_host_participant_id, arm.lap_side,
                 arm.anchor_json, arm.options_json, p.user_id
            FROM avatar_relationship_members arm
            LEFT JOIN participants p ON p.id = arm.participant_id
@@ -2518,6 +2689,7 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         'effectiveAt' => $isViewer ? ($row['membership_effective_at'] ?? null) : null,
         'visibleAfterMessageId' => $isViewer ? max(0, (int)($row['visible_after_message_id'] ?? 0)) : null,
         'lapHostParticipantId' => $row['lap_host_participant_id'] !== null ? (int)$row['lap_host_participant_id'] : null,
+        'lapSide' => avatar_relationship_normalize_lap_side($row['lap_side'] ?? null),
         'anchor' => !empty($row['anchor_json']) ? json_decode((string)$row['anchor_json'], true) : null,
         'options' => !empty($row['options_json']) ? (json_decode((string)$row['options_json'], true) ?: []) : [],
         ];
@@ -2603,6 +2775,26 @@ function avatar_relationship_active_for_participant(PDO $pdo, int $sessionId, in
           LIMIT 1"
     );
     $stmt->execute([$sessionId, $participantId]);
+    $relationshipDbId = (int)($stmt->fetchColumn() ?: 0);
+    return $relationshipDbId > 0
+        ? avatar_relationship_payload($pdo, $relationshipDbId, $viewerParticipantId)
+        : null;
+}
+
+function avatar_relationship_for_viewer_by_public_id(
+    PDO $pdo,
+    int $sessionId,
+    string $relationshipPublicId,
+    int $viewerParticipantId
+): ?array {
+    $relationshipPublicId = trim($relationshipPublicId);
+    if ($relationshipPublicId === '') return null;
+    $stmt = $pdo->prepare(
+        "SELECT id FROM avatar_relationships
+          WHERE session_id = ? AND relationship_public_id = ? AND status = 'active'
+          LIMIT 1"
+    );
+    $stmt->execute([$sessionId, $relationshipPublicId]);
     $relationshipDbId = (int)($stmt->fetchColumn() ?: 0);
     return $relationshipDbId > 0
         ? avatar_relationship_payload($pdo, $relationshipDbId, $viewerParticipantId)
@@ -3403,6 +3595,7 @@ function avatar_relationship_request_payload(array $request): array {
         'requestedLapHostParticipantId' => $request['requested_lap_host_participant_id'] !== null
             ? (int)$request['requested_lap_host_participant_id']
             : null,
+        'requestedLapSide' => avatar_relationship_normalize_lap_side($request['requested_lap_side'] ?? null),
         'status' => (string)$request['status'],
         'resolutionActorParticipantId' => $request['resolution_actor_participant_id'] !== null
             ? (int)$request['resolution_actor_participant_id']
@@ -3448,7 +3641,14 @@ function avatar_relationship_emit_lifecycle_event(
     emit_event($pdo, $sessionId, 'relationship', $payload);
 }
 
-function avatar_relationship_validate_requested_role(array $members, string $role, ?int $lapHostParticipantId): array {
+function avatar_relationship_validate_requested_role(
+    array $members,
+    string $role,
+    ?int $lapHostParticipantId,
+    ?string $lapSide = null,
+    ?int $occupantParticipantId = null,
+    bool $allowDeferredSide = false
+): array {
     if (!in_array($role, ['normal', 'lap'], true)) {
         return avatar_relationship_operation_error(
             'RELATIONSHIP_CONFLICT',
@@ -3457,7 +3657,17 @@ function avatar_relationship_validate_requested_role(array $members, string $rol
             400
         );
     }
-    if ($role === 'normal') return ['ok' => true, 'lap_host_participant_id' => null];
+    if ($role === 'normal') {
+        if ($lapSide !== null && trim($lapSide) !== '') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFLICT',
+                'Normal relationship members do not use lap seats.',
+                'lap-side-not-applicable',
+                400
+            );
+        }
+        return ['ok' => true, 'lap_host_participant_id' => null, 'lap_side' => null];
+    }
     if (!$lapHostParticipantId) {
         return avatar_relationship_operation_error(
             'RELATIONSHIP_CONFLICT',
@@ -3467,7 +3677,7 @@ function avatar_relationship_validate_requested_role(array $members, string $rol
         );
     }
     $host = avatar_relationship_member_from_rows($members, $lapHostParticipantId);
-    if (!$host || (string)$host['relationship_role'] !== 'normal') {
+    if (!$host || (string)$host['relationship_role'] !== 'normal' || (string)$host['membership_status'] !== 'active') {
         return avatar_relationship_operation_error(
             'RELATIONSHIP_CONFLICT',
             'That lap host is not available.',
@@ -3475,7 +3685,66 @@ function avatar_relationship_validate_requested_role(array $members, string $rol
             409
         );
     }
-    return ['ok' => true, 'lap_host_participant_id' => $lapHostParticipantId];
+    if ($occupantParticipantId !== null && $lapHostParticipantId === $occupantParticipantId) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFLICT',
+            'A lap occupant cannot host themselves.',
+            'lap-host-self',
+            409
+        );
+    }
+    if (empty($host['last_seen_at'])) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFLICT',
+            'That lap host is not present.',
+            'lap-host-unavailable',
+            409
+        );
+    }
+    $normalizedSide = avatar_relationship_normalize_lap_side($lapSide);
+    if ($normalizedSide === null && $lapSide !== null && trim($lapSide) !== '') {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFLICT',
+            'That lap side is not available.',
+            'invalid-lap-side',
+            400
+        );
+    }
+    if ($normalizedSide === null && !$allowDeferredSide) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_CONFLICT',
+            'Choose an available lap side.',
+            'lap-side-required',
+            400
+        );
+    }
+    $occupiedSides = [];
+    foreach ($members as $member) {
+        if ((string)$member['relationship_role'] !== 'lap'
+            || (int)($member['lap_host_participant_id'] ?? 0) !== $lapHostParticipantId
+            || ($occupantParticipantId !== null && (int)$member['participant_id'] === $occupantParticipantId)) {
+            continue;
+        }
+        $occupiedSide = avatar_relationship_normalize_lap_side($member['lap_side'] ?? null);
+        if ($occupiedSide !== null) $occupiedSides[$occupiedSide] = true;
+    }
+    if ($normalizedSide !== null && isset($occupiedSides[$normalizedSide])) {
+        return avatar_relationship_operation_error(
+            'RELATIONSHIP_LAP_SEAT_OCCUPIED',
+            'That lap side is already occupied.',
+            'lap-seat-occupied',
+            409
+        );
+    }
+    return [
+        'ok' => true,
+        'lap_host_participant_id' => $lapHostParticipantId,
+        'lap_side' => $normalizedSide,
+        'available_lap_sides' => array_values(array_filter(
+            avatar_relationship_lap_sides(),
+            fn(string $side): bool => !isset($occupiedSides[$side])
+        )),
+    ];
 }
 
 function avatar_relationship_target_membership(PDO $pdo, int $participantId): ?array {
@@ -3492,6 +3761,125 @@ function avatar_relationship_target_membership(PDO $pdo, int $participantId): ?a
     return $stmt->fetch() ?: null;
 }
 
+function avatar_relationship_lap_seat_eligibility(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    int $occupantParticipantId,
+    int $hostParticipantId,
+    ?string $lapSide = null
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $actorParticipantId,
+        $relationshipPublicId,
+        $expectedVersion,
+        $occupantParticipantId,
+        $hostParticipantId,
+        $lapSide
+    ): array {
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship || (string)$relationship['status'] !== 'active'
+            || (string)($relationship['divergence_status'] ?? 'synced') !== 'synced') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SEAT_CONFLICT',
+                'That lap seat is not available.',
+                'relationship-unavailable',
+                409
+            );
+        }
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actorMember = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if ($actorParticipantId !== $occupantParticipantId && !avatar_relationship_permission_allows($actorMember)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_PERMISSION_DENIED',
+                'You cannot inspect that lap seat.',
+                'lap-seat-permission-denied',
+                403
+            );
+        }
+        $occupant = avatar_relationship_locked_participant($pdo, $sessionId, $occupantParticipantId);
+        if (!$occupant || empty($occupant['last_seen_at'])) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SEAT_CONFLICT',
+                'That lap seat is not available.',
+                'occupant-unavailable',
+                409
+            );
+        }
+        $occupantMember = avatar_relationship_member_from_rows($members, $occupantParticipantId);
+        if ($occupantMember && (string)$occupantMember['relationship_role'] !== 'lap') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SEAT_CONFLICT',
+                'That lap seat is not available.',
+                'occupant-role-unavailable',
+                409
+            );
+        }
+        if (!$occupantMember && avatar_relationship_target_membership($pdo, $occupantParticipantId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_MEMBER_ELSEWHERE',
+                'That participant belongs to another relationship.',
+                'relationship-member-elsewhere',
+                409
+            );
+        }
+        if (avatar_relationship_blocked_for_members($pdo, $occupant, $members)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_PERMISSION_DENIED',
+                'That lap seat is not available.',
+                'blocked',
+                403
+            );
+        }
+
+        $availability = avatar_relationship_validate_requested_role(
+            $members,
+            'lap',
+            $hostParticipantId,
+            null,
+            $occupantParticipantId,
+            true
+        );
+        if (empty($availability['ok'])) return $availability;
+        $normalizedSide = avatar_relationship_normalize_lap_side($lapSide);
+        if ($normalizedSide === null && $lapSide !== null && trim($lapSide) !== '') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFLICT',
+                'That lap side is not available.',
+                'invalid-lap-side',
+                400
+            );
+        }
+        $allowed = $normalizedSide === null
+            || in_array($normalizedSide, $availability['available_lap_sides'], true);
+        $reason = $allowed ? 'eligible' : 'lap-seat-occupied';
+        $fingerprintState = [
+            'relationship_id' => $relationshipPublicId,
+            'relationship_version' => (int)$relationship['version'],
+            'occupant_participant_id' => $occupantParticipantId,
+            'host_participant_id' => $hostParticipantId,
+            'lap_side' => $normalizedSide,
+            'available_lap_sides' => $availability['available_lap_sides'],
+        ];
+        return [
+            'ok' => true,
+            'allowed' => $allowed,
+            'reason' => $reason,
+            'relationship_id' => $relationshipPublicId,
+            'relationship_version' => (int)$relationship['version'],
+            'host_participant_id' => $hostParticipantId,
+            'lap_side' => $normalizedSide,
+            'available_lap_sides' => $availability['available_lap_sides'],
+            'state_fingerprint' => hash('sha256', json_encode($fingerprintState, JSON_UNESCAPED_SLASHES)),
+        ];
+    });
+}
+
 function avatar_relationship_add_member_locked(
     PDO $pdo,
     array $relationship,
@@ -3500,6 +3888,7 @@ function avatar_relationship_add_member_locked(
     int $actorParticipantId,
     string $relationshipRole,
     ?int $lapHostParticipantId,
+    ?string $lapSide,
     string $reason
 ): array {
     $relationshipDbId = (int)$relationship['id'];
@@ -3526,7 +3915,13 @@ function avatar_relationship_add_member_locked(
             403
         );
     }
-    $roleDecision = avatar_relationship_validate_requested_role($members, $relationshipRole, $lapHostParticipantId);
+    $roleDecision = avatar_relationship_validate_requested_role(
+        $members,
+        $relationshipRole,
+        $lapHostParticipantId,
+        $lapSide,
+        $targetParticipantId
+    );
     if (empty($roleDecision['ok'])) return $roleDecision;
 
     $nextOrder = $members
@@ -3539,8 +3934,8 @@ function avatar_relationship_add_member_locked(
             "INSERT INTO avatar_relationship_members
                 (relationship_id, participant_id, member_role, relationship_role, permission_role,
                  membership_status, active_participant_id, member_order, membership_effective_at,
-                 visible_after_message_id, lap_host_participant_id, options_json)
-             VALUES (?,?, 'member', ?, 'member', 'active', ?, ?, ?, ?, ?, ?)"
+                 visible_after_message_id, lap_host_participant_id, lap_side, options_json)
+             VALUES (?,?, 'member', ?, 'member', 'active', ?, ?, ?, ?, ?, ?, ?)"
         )->execute([
             $relationshipDbId,
             $targetParticipantId,
@@ -3550,10 +3945,19 @@ function avatar_relationship_add_member_locked(
             $effectiveAt,
             $visibleAfterMessageId,
             $roleDecision['lap_host_participant_id'],
+            $roleDecision['lap_side'],
             json_encode([], JSON_UNESCAPED_SLASHES),
         ]);
     } catch (PDOException $error) {
         if ($error->getCode() !== '23000' && !str_contains(strtoupper($error->getMessage()), 'UNIQUE')) throw $error;
+        if ($relationshipRole === 'lap' && !avatar_relationship_target_membership($pdo, $targetParticipantId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SEAT_OCCUPIED',
+                'That lap side is already occupied.',
+                'lap-seat-occupied',
+                409
+            );
+        }
         return avatar_relationship_operation_error(
             'RELATIONSHIP_MEMBER_ELSEWHERE',
             'That participant belongs to another relationship.',
@@ -3570,8 +3974,8 @@ function avatar_relationship_add_member_locked(
         'INSERT INTO avatar_relationship_membership_history
             (relationship_id, participant_id, user_id, actor_participant_id, action, outcome,
              relationship_role, permission_role, member_order, membership_effective_at,
-             visible_after_message_id, relationship_version, reason)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             visible_after_message_id, lap_host_participant_id, lap_side, relationship_version, reason)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     )->execute([
         $relationshipDbId,
         $targetParticipantId,
@@ -3584,6 +3988,8 @@ function avatar_relationship_add_member_locked(
         $nextOrder,
         $effectiveAt,
         $visibleAfterMessageId,
+        $roleDecision['lap_host_participant_id'],
+        $roleDecision['lap_side'],
         $nextVersion,
         $reason,
     ]);
@@ -3604,11 +4010,13 @@ function avatar_relationship_create_request(
     string $requestType,
     int $targetParticipantId,
     string $requestedRelationshipRole = 'normal',
-    ?int $lapHostParticipantId = null
+    ?int $lapHostParticipantId = null,
+    ?string $requestedLapSide = null
 ): array {
     return avatar_relationship_transaction($pdo, function() use (
         $pdo, $sessionId, $actorParticipantId, $relationshipPublicId, $expectedVersion,
-        $requestType, $targetParticipantId, $requestedRelationshipRole, $lapHostParticipantId
+        $requestType, $targetParticipantId, $requestedRelationshipRole, $lapHostParticipantId,
+        $requestedLapSide
     ): array {
         $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
         if (!$relationship) return avatar_relationship_operation_error('RELATIONSHIP_NOT_FOUND', 'Relationship not found.', 'relationship-not-found', 404);
@@ -3639,8 +4047,24 @@ function avatar_relationship_create_request(
         if (avatar_relationship_blocked_for_members($pdo, $target, $members)) {
             return avatar_relationship_operation_error('RELATIONSHIP_PERMISSION_DENIED', 'That participant cannot join this relationship.', 'blocked', 403);
         }
-        $roleDecision = avatar_relationship_validate_requested_role($members, $requestedRelationshipRole, $lapHostParticipantId);
+        $roleDecision = avatar_relationship_validate_requested_role(
+            $members,
+            $requestedRelationshipRole,
+            $lapHostParticipantId,
+            $requestedLapSide,
+            $targetParticipantId,
+            $requestType === 'invitation'
+        );
         if (empty($roleDecision['ok'])) return $roleDecision;
+        if ($requestType === 'invitation' && $requestedRelationshipRole === 'lap'
+            && $roleDecision['lap_side'] !== null) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFLICT',
+                'The invited participant chooses their lap side when accepting.',
+                'invitation-lap-side-deferred',
+                400
+            );
+        }
 
         $activeRequestKey = (int)$relationship['id'] . ':' . $targetParticipantId;
         $existingStmt = $pdo->prepare(
@@ -3656,6 +4080,7 @@ function avatar_relationship_create_request(
                 && (int)$existing['requester_participant_id'] === $actorParticipantId
                 && (string)$existing['requested_relationship_role'] === $requestedRelationshipRole
                 && (int)($existing['requested_lap_host_participant_id'] ?? 0) === (int)($roleDecision['lap_host_participant_id'] ?? 0)
+                && (string)($existing['requested_lap_side'] ?? '') === (string)($roleDecision['lap_side'] ?? '')
                 && (int)$existing['relationship_version'] === $expectedVersion;
             if (!$same) return avatar_relationship_operation_error('RELATIONSHIP_CONFLICT', 'A membership request is already pending.', 'relationship-request-conflict', 409);
             return ['ok' => true, 'idempotent' => true, 'request' => avatar_relationship_request_payload($existing)];
@@ -3666,8 +4091,8 @@ function avatar_relationship_create_request(
             'INSERT INTO avatar_relationship_requests
                 (request_public_id, relationship_id, relationship_version, requester_participant_id,
                  target_participant_id, request_type, requested_relationship_role,
-                 requested_lap_host_participant_id, status, active_request_key)
-             VALUES (?,?,?,?,?,?,?,?,\'pending\',?)'
+                 requested_lap_host_participant_id, requested_lap_side, status, active_request_key)
+             VALUES (?,?,?,?,?,?,?,?,?,\'pending\',?)'
         )->execute([
             $requestPublicId,
             (int)$relationship['id'],
@@ -3677,6 +4102,7 @@ function avatar_relationship_create_request(
             $requestType,
             $requestedRelationshipRole,
             $roleDecision['lap_host_participant_id'],
+            $roleDecision['lap_side'],
             $activeRequestKey,
         ]);
 
@@ -3701,6 +4127,7 @@ function avatar_relationship_create_request(
                 $actorParticipantId,
                 $requestedRelationshipRole,
                 $roleDecision['lap_host_participant_id'],
+                $roleDecision['lap_side'],
                 'open-join-policy'
             );
             if (empty($add['ok'])) return $add;
@@ -3746,10 +4173,12 @@ function avatar_relationship_resolve_request(
     int $actorParticipantId,
     string $requestPublicId,
     int $expectedVersion,
-    string $resolution
+    string $resolution,
+    ?string $acceptedLapSide = null
 ): array {
     return avatar_relationship_transaction($pdo, function() use (
-        $pdo, $sessionId, $actorParticipantId, $requestPublicId, $expectedVersion, $resolution
+        $pdo, $sessionId, $actorParticipantId, $requestPublicId, $expectedVersion, $resolution,
+        $acceptedLapSide
     ): array {
         $request = avatar_relationship_locked_request($pdo, $requestPublicId);
         if (!$request || (int)$request['session_id'] !== $sessionId) {
@@ -3807,14 +4236,20 @@ function avatar_relationship_resolve_request(
         if ($resolution === 'accept') {
             $target = avatar_relationship_locked_participant($pdo, $sessionId, (int)$request['target_participant_id']);
             if (!$target || empty($target['last_seen_at'])) return avatar_relationship_operation_error('RELATIONSHIP_CONFLICT', 'That participant is unavailable.', 'target-unavailable', 409);
+            $requestRole = (string)$request['requested_relationship_role'];
+            $resolvedLapSide = $request['requested_lap_side'] ?? null;
+            if ($type === 'invitation' && $requestRole === 'lap') {
+                $resolvedLapSide = $acceptedLapSide;
+            }
             $add = avatar_relationship_add_member_locked(
                 $pdo,
                 $relationship,
                 $members,
                 $target,
                 $actorParticipantId,
-                (string)$request['requested_relationship_role'],
+                $requestRole,
                 $request['requested_lap_host_participant_id'] !== null ? (int)$request['requested_lap_host_participant_id'] : null,
+                $resolvedLapSide !== null ? (string)$resolvedLapSide : null,
                 $type === 'invitation' ? 'invitation-accepted' : 'join-request-approved'
             );
             if (empty($add['ok'])) return $add;
@@ -3914,6 +4349,156 @@ function avatar_relationship_set_join_policy(
     });
 }
 
+function avatar_relationship_set_lap_side(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $operationId,
+    string $lapSide
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $actorParticipantId,
+        $relationshipPublicId,
+        $expectedVersion,
+        $operationId,
+        $lapSide
+    ): array {
+        if (!preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $operationId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SIDE_INVALID',
+                'A valid lap-side operation is required.',
+                'invalid-operation-id',
+                400
+            );
+        }
+        $normalizedSide = avatar_relationship_normalize_lap_side($lapSide);
+        if ($normalizedSide === null) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SIDE_INVALID',
+                'Choose an available lap side.',
+                'invalid-lap-side',
+                400
+            );
+        }
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship || (string)$relationship['status'] !== 'active'
+            || (string)($relationship['divergence_status'] ?? 'synced') !== 'synced') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SIDE_CONFLICT',
+                'That relationship is no longer available.',
+                'relationship-unavailable',
+                409
+            );
+        }
+
+        $priorStmt = $pdo->prepare(
+            "SELECT id, payload FROM events
+              WHERE session_id = ? AND type = 'relationship'
+                AND payload LIKE ? ORDER BY id DESC LIMIT 20"
+        );
+        $priorStmt->execute([$sessionId, '%"operation_id":"' . $operationId . '"%']);
+        foreach ($priorStmt->fetchAll() as $prior) {
+            $payload = json_decode((string)$prior['payload'], true) ?: [];
+            if ((string)($payload['operation_id'] ?? '') !== $operationId
+                || (string)($payload['relationship_id'] ?? '') !== $relationshipPublicId
+                || (int)($payload['actor_participant_id'] ?? 0) !== $actorParticipantId
+                || (string)($payload['action'] ?? '') !== 'lap-side-changed') {
+                continue;
+            }
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'event_id' => (int)$prior['id'],
+                'operation_id' => $operationId,
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actor = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if (!$actor || (string)$actor['relationship_role'] !== 'lap') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_PERMISSION_DENIED',
+                'Only the lap occupant can change this seat.',
+                'lap-side-occupant-required',
+                403
+            );
+        }
+        $currentSide = avatar_relationship_normalize_lap_side($actor['lap_side'] ?? null);
+        if ($currentSide === null || $currentSide === $normalizedSide) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_SIDE_CONFLICT',
+                'Choose the other available lap side.',
+                'lap-side-unchanged',
+                409
+            );
+        }
+        $hostId = (int)($actor['lap_host_participant_id'] ?? 0);
+        $decision = avatar_relationship_validate_requested_role(
+            $members,
+            'lap',
+            $hostId,
+            $normalizedSide,
+            $actorParticipantId
+        );
+        if (empty($decision['ok'])) return $decision;
+
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        $update = $pdo->prepare(
+            'UPDATE avatar_relationship_members
+                SET lap_side = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE relationship_id = ? AND participant_id = ?
+                AND membership_status = \'active\''
+        );
+        $update->execute([$normalizedSide, (int)$relationship['id'], $actorParticipantId]);
+        if ($update->rowCount() !== 1) {
+            throw new RuntimeException('Lap-side mutation updated an invalid member set.');
+        }
+        $actor['lap_side'] = $normalizedSide;
+        $pdo->prepare(
+            'UPDATE avatar_relationships SET version = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+        )->execute([$nextVersion, (int)$relationship['id']]);
+        avatar_relationship_insert_history(
+            $pdo,
+            (int)$relationship['id'],
+            $actor,
+            $actorParticipantId,
+            'lap-side-changed',
+            $nextVersion,
+            'occupant-side-switch'
+        );
+        $relationship['version'] = $nextVersion;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        avatar_relationship_refresh_legacy_projection_locked($pdo, $relationship, $members);
+        $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+        $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            'lap-side-changed',
+            $eventPayload,
+            [
+                'operation_id' => $operationId,
+                'actor_participant_id' => $actorParticipantId,
+                'lap_host_participant_id' => $hostId,
+                'lap_side' => $normalizedSide,
+            ]
+        );
+        return [
+            'ok' => true,
+            'idempotent' => false,
+            'event_id' => (int)$pdo->lastInsertId(),
+            'operation_id' => $operationId,
+            'relationship' => $viewerPayload,
+        ];
+    });
+}
+
 function avatar_relationship_insert_history(
     PDO $pdo,
     int $relationshipDbId,
@@ -3928,8 +4513,9 @@ function avatar_relationship_insert_history(
         'INSERT INTO avatar_relationship_membership_history
             (relationship_id, participant_id, user_id, actor_participant_id, action, outcome,
              relationship_role, permission_role, member_order, membership_effective_at,
-             membership_ended_at, visible_after_message_id, relationship_version, reason)
-         VALUES (?,?,?,?,?,\'applied\',?,?,?,?,?,?,?,?)'
+             membership_ended_at, visible_after_message_id, lap_host_participant_id, lap_side,
+             relationship_version, reason)
+         VALUES (?,?,?,?,?,\'applied\',?,?,?,?,?,?,?,?,?,?)'
     )->execute([
         $relationshipDbId,
         (int)$member['participant_id'],
@@ -3942,6 +4528,8 @@ function avatar_relationship_insert_history(
         (string)($member['membership_effective_at'] ?? $member['created_at'] ?? gmdate('Y-m-d H:i:s')),
         $membershipEndedAt,
         max(0, (int)($member['visible_after_message_id'] ?? 0)),
+        isset($member['lap_host_participant_id']) ? (int)$member['lap_host_participant_id'] : null,
+        avatar_relationship_normalize_lap_side($member['lap_side'] ?? null),
         $relationshipVersion,
         $reason,
     ]);
@@ -4044,10 +4632,17 @@ function avatar_relationship_refresh_legacy_projection_locked(
         $target = $normalMembers[0];
         $pdo->prepare(
             'UPDATE avatar_relationship_members
-                SET lap_host_participant_id = ?, member_role = CASE WHEN participant_id = ? THEN \'initiator\' ELSE \'target\' END,
+                SET lap_host_participant_id = CASE WHEN participant_id = ? THEN ? ELSE NULL END,
+                    lap_side = CASE WHEN participant_id = ? THEN COALESCE(lap_side, \'bottom-right\') ELSE NULL END,
+                    member_role = CASE WHEN participant_id = ? THEN \'initiator\' ELSE \'target\' END,
                     updated_at = CURRENT_TIMESTAMP
               WHERE relationship_id = ?'
-        )->execute([(int)$target['participant_id'], (int)$initiator['participant_id'], $relationshipDbId]);
+        )->execute([
+            (int)$initiator['participant_id'],
+            (int)$target['participant_id'],
+            (int)$initiator['participant_id'],
+            $relationshipDbId,
+        ]);
     } else {
         $creatorId = (int)($relationship['creator_participant_id'] ?? 0);
         $initiator = $memberById[$creatorId] ?? $orderedMembers[0];
@@ -4056,7 +4651,7 @@ function avatar_relationship_refresh_legacy_projection_locked(
             : $orderedMembers[0];
         $pdo->prepare(
             "UPDATE avatar_relationship_members
-                SET lap_host_participant_id = NULL,
+                SET lap_host_participant_id = NULL, lap_side = NULL,
                     member_role = CASE WHEN participant_id = ? THEN 'initiator' ELSE 'target' END,
                     updated_at = CURRENT_TIMESTAMP
               WHERE relationship_id = ?"
@@ -4988,6 +5583,31 @@ function avatar_relationship_repair(PDO $pdo, array $options = []): array {
             if (count($memberOrders) !== count(array_unique($memberOrders))) $recordReasons[] = 'duplicate_member_order';
             $expectedOrders = count($memberOrders) >= 2 ? range(0, count($memberOrders) - 1) : $memberOrders;
             if ($memberOrders !== $expectedOrders && count($memberOrders) >= 2) $recordReasons[] = 'invalid_member_ordering';
+            $normalMemberIds = [];
+            foreach ($members as $member) {
+                if ((string)($member['membership_status'] ?? 'active') === 'active'
+                    && (string)($member['relationship_role'] ?? '') === 'normal') {
+                    $normalMemberIds[(int)$member['participant_id']] = true;
+                }
+            }
+            $lapSeatKeys = [];
+            foreach ($members as $member) {
+                $role = (string)($member['relationship_role'] ?? '');
+                $hostId = (int)($member['lap_host_participant_id'] ?? 0);
+                $rawSide = $member['lap_side'] ?? null;
+                $side = avatar_relationship_normalize_lap_side($rawSide);
+                if ($role === 'normal') {
+                    if ($hostId > 0 || $rawSide !== null) $recordReasons[] = 'invalid_normal_lap_seat_state';
+                    continue;
+                }
+                if ($role !== 'lap' || $hostId <= 0 || empty($normalMemberIds[$hostId]) || $side === null) {
+                    $recordReasons[] = 'invalid_lap_seat_state';
+                    continue;
+                }
+                $seatKey = $hostId . ':' . $side;
+                if (isset($lapSeatKeys[$seatKey])) $recordReasons[] = 'duplicate_lap_seat';
+                $lapSeatKeys[$seatKey] = true;
+            }
             if (count($members) === 2 && $validEdge) {
                 $legacyInitiatorMember = $membersByParticipantId[(int)$validEdge['participant_id']] ?? null;
                 $legacyTargetMember = $membersByParticipantId[(int)$validEdge['target_participant_id']] ?? null;

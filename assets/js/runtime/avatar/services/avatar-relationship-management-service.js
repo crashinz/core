@@ -2,7 +2,7 @@
  * Chat Runtime Framework for ChatSpace
  * ---------------------------------------------------------------------------
  * Owner: Avatar Runtime
- * Build: 000044 Part 4
+ * Build: 000044 Part 5
  * Purpose: Own the relationship-management interface and mutation lifecycle.
  ******************************************************************************/
 
@@ -76,6 +76,11 @@ export class AvatarRelationshipManagementService {
         const confirmAccept = this.#element("relationship-management-confirm-accept");
         const spacing = this.#element("relationship-management-spacing");
         const spacingReset = this.#element("relationship-management-spacing-reset");
+        const joinRole = this.#element("relationship-management-join-role");
+        const joinHost = this.#element("relationship-management-join-host");
+        const inviteRole = this.#element("relationship-management-invite-role");
+        const requestJoin = this.#element("relationship-management-request-join");
+        const invite = this.#element("relationship-management-invite");
         close?.addEventListener("click", () => this.close(), { signal });
         launcher?.addEventListener("click", () => this.openCurrent(), { signal });
         modal?.addEventListener("click", event => {
@@ -128,6 +133,11 @@ export class AvatarRelationshipManagementService {
                 0
             );
         }, { signal });
+        joinRole?.addEventListener("change", () => this.#syncSeatFormControls(), { signal });
+        joinHost?.addEventListener("change", () => this.#syncSeatFormControls(), { signal });
+        inviteRole?.addEventListener("change", () => this.#syncSeatFormControls(), { signal });
+        requestJoin?.addEventListener("click", () => this.#submitJoinRequest(), { signal });
+        invite?.addEventListener("click", () => this.#submitInvitation(), { signal });
         this.#syncLauncher();
     }
 
@@ -140,7 +150,9 @@ export class AvatarRelationshipManagementService {
     async refresh({ render = true } = {}) {
         if (this.#refreshPromise) return this.#refreshPromise;
         this.#refreshPromise = (async () => {
-            const response = await this.#context?.fetchManagementState?.();
+            const response = await this.#context?.fetchManagementState?.({
+                relationshipId: this.#relationshipId
+            });
             if (response?.relationship) {
                 this.#runtime.relationships.upsertPersistedRelationship(response.relationship);
                 this.#relationshipId = String(response.relationship.id || response.relationship.relationship_id || this.#relationshipId);
@@ -236,7 +248,7 @@ export class AvatarRelationshipManagementService {
     getDiagnostics() {
         return Object.freeze({
             owner: "AvatarRuntime",
-            build: "000044 Part 4",
+            build: "000044 Part 5",
             configured: Boolean(this.#context),
             open: this.isOpen(),
             relationshipId: this.#relationshipId || null,
@@ -272,7 +284,8 @@ export class AvatarRelationshipManagementService {
             this.close();
             return;
         }
-        if (projection.relationshipStatus === "active" && !projection.viewer.active && !projection.requests.length) {
+        if (projection.relationshipStatus === "active" && !projection.viewer.active
+            && !projection.requests.length && !projection.actions.requestJoin) {
             this.close();
             return;
         }
@@ -282,6 +295,10 @@ export class AvatarRelationshipManagementService {
         const members = this.#element("relationship-management-members");
         const requests = this.#element("relationship-management-requests");
         const requestSection = this.#element("relationship-management-request-section");
+        const joinSection = this.#element("relationship-management-join-section");
+        const inviteSection = this.#element("relationship-management-invite-section");
+        const seatSection = this.#element("relationship-management-seat-section");
+        const seats = this.#element("relationship-management-seats");
         const settings = this.#element("relationship-management-settings");
         const footer = this.#element("relationship-management-footer");
         const joinPolicy = this.#element("relationship-management-join-policy");
@@ -292,16 +309,30 @@ export class AvatarRelationshipManagementService {
         const spacingValue = this.#element("relationship-management-spacing-value");
         const spacingReset = this.#element("relationship-management-spacing-reset");
         if (summary) {
+            const pendingInvitation = projection.requests.some(request =>
+                request.type === "invitation" && request.actions.accept
+            );
+            const pendingJoinRequest = projection.requests.some(request =>
+                request.type === "join-request" && request.actions.cancel
+            );
             summary.textContent = projection.viewer.active
                 ? `${projection.members.length} members · ${this.#policyLabel(projection.joinPolicy)}`
-                : "Pending relationship invitation";
+                : pendingInvitation
+                    ? "Pending relationship invitation"
+                    : pendingJoinRequest
+                        ? "Membership request pending"
+                        : "Request relationship membership";
         }
         members?.replaceChildren(...projection.members.map(member => this.#memberRow(member, projection)));
-        requests?.replaceChildren(...projection.requests.map(request => this.#requestRow(request)));
+        requests?.replaceChildren(...projection.requests.map(request => this.#requestRow(request, projection)));
+        seats?.replaceChildren(...projection.lapSeats.map(seat => this.#seatRow(seat)));
         order?.replaceChildren(...projection.normalMembers.map((member, index) =>
             this.#orderRow(member, index, projection)
         ));
         if (requestSection) requestSection.hidden = projection.requests.length === 0;
+        if (joinSection) joinSection.hidden = !projection.actions.requestJoin;
+        if (inviteSection) inviteSection.hidden = !projection.actions.invite;
+        if (seatSection) seatSection.hidden = projection.lapSeats.length === 0;
         if (settings) settings.hidden = !projection.viewer.active;
         if (footer) footer.hidden = !projection.viewer.active;
         if (joinPolicy) {
@@ -321,6 +352,7 @@ export class AvatarRelationshipManagementService {
                 || projection.rowOptions.rowSpacing === 0;
         }
         if (this.#isPending()) this.#setStatus("Saving relationship changes...");
+        this.#renderSeatForms(projection);
         this.#syncLauncher(projection);
     }
 
@@ -333,7 +365,9 @@ export class AvatarRelationshipManagementService {
         const name = document.createElement("strong");
         name.textContent = member.isViewer ? `${member.displayName} (You)` : member.displayName;
         const detail = document.createElement("span");
-        const role = member.relationshipRole === "lap" ? "Lap occupant" : `Normal · position ${projection.normalMembers.findIndex(item => item.participantId === member.participantId) + 1}`;
+        const role = member.relationshipRole === "lap"
+            ? `Lap occupant · ${this.#sideLabel(member.lapSide)}`
+            : `Normal · position ${projection.normalMembers.findIndex(item => item.participantId === member.participantId) + 1}`;
         const host = member.lapHostParticipantId
             ? projection.members.find(item => item.participantId === member.lapHostParticipantId)?.displayName
             : "";
@@ -359,12 +393,21 @@ export class AvatarRelationshipManagementService {
         if (member.actions.remove) {
             actions.append(this.#actionButton("Remove", "remove_member", member.participantId, true));
         }
+        if (member.actions.switchLapSide) {
+            const seat = projection.lapSeats.find(item => item.hostParticipantId === member.lapHostParticipantId);
+            const nextSide = member.lapSide === "bottom-left" ? "bottom-right" : "bottom-left";
+            if (seat?.availableSides?.includes(nextSide)) {
+                const button = this.#actionButton(`Switch to ${this.#sideLabel(nextSide)}`, "set_lap_side", member.participantId);
+                button.dataset.lapSide = nextSide;
+                actions.append(button);
+            }
+        }
         row.append(identity, status);
         if (actions.childElementCount) row.append(actions);
         return row;
     }
 
-    #requestRow(request) {
+    #requestRow(request, projection) {
         const document = this.#context.document;
         const row = document.createElement("li");
         row.className = "relationship-request-row";
@@ -373,16 +416,44 @@ export class AvatarRelationshipManagementService {
             ? `${request.requesterName} invited ${request.targetName}`
             : `${request.requesterName} requested to join`;
         const detail = document.createElement("span");
-        detail.textContent = `${request.requestedRelationshipRole === "lap" ? "Lap" : "Normal"} · ${request.status}`;
+        const host = request.requestedLapHostParticipantId
+            ? projection.members.find(member => member.participantId === request.requestedLapHostParticipantId)?.displayName
+            : "";
+        const side = request.requestedLapSide ? ` · ${this.#sideLabel(request.requestedLapSide)}` : "";
+        detail.textContent = `${request.requestedRelationshipRole === "lap" ? "Lap" : "Normal"}${host ? ` · host ${host}` : ""}${side} · ${request.status}`;
         const identity = document.createElement("div");
         identity.append(label, detail);
         const actions = document.createElement("div");
         actions.className = "relationship-request-actions";
-        if (request.actions.accept) actions.append(this.#requestActionButton("Accept", "accept_request", request));
+        if (request.actions.accept && request.type === "invitation" && request.requestedRelationshipRole === "lap") {
+            const seat = projection.lapSeats.find(item => item.hostParticipantId === request.requestedLapHostParticipantId);
+            seat?.availableSides?.forEach(lapSide => {
+                actions.append(this.#requestActionButton(`Accept ${this.#sideLabel(lapSide)}`, "accept_request", request, lapSide));
+            });
+        } else if (request.actions.accept) {
+            actions.append(this.#requestActionButton("Accept", "accept_request", request));
+        }
         if (request.actions.reject) actions.append(this.#requestActionButton("Reject", "reject_request", request));
         if (request.actions.cancel) actions.append(this.#requestActionButton("Cancel", "cancel_request", request));
         row.append(identity);
         if (actions.childElementCount) row.append(actions);
+        return row;
+    }
+
+    #seatRow(seat) {
+        const row = this.#context.document.createElement("li");
+        row.className = "relationship-seat-row";
+        const content = this.#context.document.createElement("div");
+        const host = this.#context.document.createElement("strong");
+        host.textContent = seat.hostName;
+        content.append(host);
+        ["bottom-left", "bottom-right"].forEach(side => {
+            const line = this.#context.document.createElement("span");
+            const occupant = seat.occupants[side];
+            line.textContent = `${this.#sideLabel(side)}: ${occupant?.displayName || "Open"}`;
+            content.append(line);
+        });
+        row.append(content);
         return row;
     }
 
@@ -422,11 +493,12 @@ export class AvatarRelationshipManagementService {
         return button;
     }
 
-    #requestActionButton(label, action, request) {
+    #requestActionButton(label, action, request, lapSide = null) {
         const button = this.#actionButton(label, action, 0, action === "reject_request");
         button.dataset.requestId = request.id;
         button.dataset.relationshipId = request.relationshipId;
         button.dataset.relationshipVersion = String(request.relationshipVersion);
+        if (lapSide) button.dataset.lapSide = lapSide;
         return button;
     }
 
@@ -435,6 +507,7 @@ export class AvatarRelationshipManagementService {
         const action = String(button.dataset.relationshipAction || "");
         const targetParticipantId = Number(button.dataset.targetParticipantId || 0);
         const requestId = String(button.dataset.requestId || "");
+        const lapSide = String(button.dataset.lapSide || "");
         const payload = { action };
         if (targetParticipantId > 0) payload.target_participant_id = targetParticipantId;
         if (requestId) {
@@ -442,6 +515,8 @@ export class AvatarRelationshipManagementService {
             payload.relationship_id = String(button.dataset.relationshipId || "");
             payload.expected_version = Number(button.dataset.relationshipVersion || 0);
         }
+        if (lapSide) payload.lap_side = lapSide;
+        if (action === "set_lap_side") payload.operation_id = this.#operationId("lap-side");
         if (action.startsWith("order-")) {
             this.#reorder(targetParticipantId, action);
             return;
@@ -459,6 +534,111 @@ export class AvatarRelationshipManagementService {
             return;
         }
         this.#mutate(payload);
+    }
+
+    #renderSeatForms(projection) {
+        const hostOptions = projection.lapSeats
+            .filter(seat => seat.availableSides.length > 0)
+            .map(seat => ({
+                value: String(seat.hostParticipantId),
+                label: seat.hostName
+            }));
+        const candidateOptions = projection.inviteCandidates.map(candidate => ({
+            value: String(candidate.participantId),
+            label: candidate.displayName
+        }));
+        this.#populateSelect(this.#element("relationship-management-join-host"), hostOptions);
+        this.#populateSelect(this.#element("relationship-management-invite-host"), hostOptions);
+        this.#populateSelect(this.#element("relationship-management-invite-target"), candidateOptions, "No eligible participants");
+        this.#syncSeatFormControls();
+    }
+
+    #syncSeatFormControls() {
+        const projection = this.#projection;
+        if (!projection) return;
+        const pending = this.#isPending();
+        const joinRole = String(this.#element("relationship-management-join-role")?.value || "normal");
+        const joinHost = this.#element("relationship-management-join-host");
+        const joinSide = this.#element("relationship-management-join-side");
+        const selectedHostId = Number(joinHost?.value || 0);
+        const selectedSeat = projection.lapSeats.find(seat => seat.hostParticipantId === selectedHostId);
+        const availableSides = selectedSeat?.availableSides || [];
+        this.#populateSelect(
+            joinSide,
+            availableSides.map(side => ({ value: side, label: this.#sideLabel(side) })),
+            "No available side"
+        );
+        if (joinHost) joinHost.disabled = pending || joinRole !== "lap" || projection.lapSeats.length === 0;
+        if (joinSide) joinSide.disabled = pending || joinRole !== "lap" || availableSides.length === 0;
+        const requestButton = this.#element("relationship-management-request-join");
+        if (requestButton) {
+            requestButton.disabled = pending || !projection.actions.requestJoin
+                || (joinRole === "lap" && (!selectedHostId || availableSides.length === 0));
+        }
+
+        const inviteRole = String(this.#element("relationship-management-invite-role")?.value || "normal");
+        const inviteHost = this.#element("relationship-management-invite-host");
+        const inviteTarget = this.#element("relationship-management-invite-target");
+        if (inviteHost) inviteHost.disabled = pending || inviteRole !== "lap" || projection.lapSeats.length === 0;
+        const inviteButton = this.#element("relationship-management-invite");
+        if (inviteButton) {
+            inviteButton.disabled = pending || !projection.actions.invite || !Number(inviteTarget?.value || 0)
+                || (inviteRole === "lap" && !Number(inviteHost?.value || 0));
+        }
+    }
+
+    #submitJoinRequest() {
+        if (this.#isPending() || !this.#projection?.actions.requestJoin) return;
+        const role = String(this.#element("relationship-management-join-role")?.value || "normal");
+        const payload = {
+            action: "request_join",
+            relationship_role: role
+        };
+        if (role === "lap") {
+            payload.lap_host_participant_id = Number(this.#element("relationship-management-join-host")?.value || 0);
+            payload.lap_side = String(this.#element("relationship-management-join-side")?.value || "");
+            if (!payload.lap_host_participant_id || !payload.lap_side) return;
+        }
+        this.#mutate(payload);
+    }
+
+    #submitInvitation() {
+        if (this.#isPending() || !this.#projection?.actions.invite) return;
+        const role = String(this.#element("relationship-management-invite-role")?.value || "normal");
+        const payload = {
+            action: "invite",
+            target_participant_id: Number(this.#element("relationship-management-invite-target")?.value || 0),
+            relationship_role: role
+        };
+        if (!payload.target_participant_id) return;
+        if (role === "lap") {
+            payload.lap_host_participant_id = Number(this.#element("relationship-management-invite-host")?.value || 0);
+            if (!payload.lap_host_participant_id) return;
+        }
+        this.#mutate(payload);
+    }
+
+    #populateSelect(select, options, emptyLabel = "No options") {
+        if (!select) return;
+        const current = String(select.value || "");
+        const nodes = options.map(option => {
+            const node = this.#context.document.createElement("option");
+            node.value = option.value;
+            node.textContent = option.label;
+            return node;
+        });
+        if (!nodes.length) {
+            const empty = this.#context.document.createElement("option");
+            empty.value = "";
+            empty.textContent = emptyLabel;
+            nodes.push(empty);
+        }
+        select.replaceChildren(...nodes);
+        if (options.some(option => option.value === current)) select.value = current;
+    }
+
+    #sideLabel(side) {
+        return side === "bottom-left" ? "Left side" : "Right side";
     }
 
     #reorder(participantId, action) {
@@ -500,11 +680,11 @@ export class AvatarRelationshipManagementService {
         return true;
     }
 
-    #operationId() {
+    #operationId(prefix = "config") {
         const uuid = globalThis.crypto?.randomUUID?.();
         return uuid
-            ? `config-${uuid}`
-            : `config-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            ? `${prefix}-${uuid}`
+            : `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     }
 
     #confirm({ title, message, action, payload }) {
@@ -563,7 +743,7 @@ export class AvatarRelationshipManagementService {
             await this.refresh({ render: false });
             this.#pendingMutation = null;
             const refreshed = this.#buildProjection();
-            if (!refreshed || !refreshed.viewer.active) {
+            if (!refreshed || (!refreshed.viewer.active && !refreshed.requests.length && !refreshed.actions.requestJoin)) {
                 this.close();
             } else {
                 this.#render();
@@ -606,6 +786,8 @@ export class AvatarRelationshipManagementService {
     #eventAction(action) {
         return ({
             set_join_policy: "join-policy-changed",
+            request_join: "request-created",
+            invite: "invitation-created",
             accept_request: "request-accepted",
             reject_request: "request-rejected",
             cancel_request: "request-cancelled",
@@ -614,7 +796,8 @@ export class AvatarRelationshipManagementService {
             remove_member: "member-removed",
             leave: "member-left",
             dissolve: "relationship-dissolved",
-            configure: "configuration-updated"
+            configure: "configuration-updated",
+            set_lap_side: "lap-side-changed"
         })[action] || "relationship-updated";
     }
 

@@ -20,7 +20,7 @@
  *      networking, and ChatRuntime behavior with their documented owners.
  *
  * Build:
- *      000044 Part 4
+ *      000044 Part 5
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -88,6 +88,7 @@ const DEFAULT_AVATAR_SIZE = 150;
 const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
 const DEFAULT_LINK_GAP = 0;
 const LINK_CHOICE_SUPPRESS_MS = 400;
+const LAP_SIDES = Object.freeze(["bottom-left", "bottom-right"]);
 
 //--------------------------------------------------
 // Avatar Coordinator
@@ -686,10 +687,11 @@ export class AvatarCoordinator {
      * Completes the pending link choice.
      *
      * @param {string} mode
+     * @param {string|null} lapSide
      *
      * @returns {Promise<boolean>}
      */
-    async completePendingLinkChoice(mode) {
+    async completePendingLinkChoice(mode, lapSide = null) {
 
         const pending =
             this.#pendingLinkChoice;
@@ -710,6 +712,25 @@ export class AvatarCoordinator {
                 return false;
             }
             await this.#context?.persistPosition?.(initiator);
+            return true;
+        }
+
+        const selectedLapSide =
+            LAP_SIDES.includes(String(lapSide || ""))
+                ? String(lapSide)
+                : null;
+
+        if (mode === "lap" && !selectedLapSide) {
+            this.#context?.openLapSeatChoice?.({
+                availableSides: LAP_SIDES,
+                defaultSide: "bottom-right"
+            });
+            this.#recordEligibilityDiagnostic({
+                reason: "lap-seat-choice",
+                initiatorParticipantId: pending.initiatorId,
+                targetParticipantId: pending.targetId,
+                allowed: true
+            }, "pending-choice-seat-phase");
             return true;
         }
 
@@ -737,7 +758,8 @@ export class AvatarCoordinator {
 
                 initiator,
                 target,
-                linkMode
+                linkMode,
+                lapSide: linkMode === "lap" ? selectedLapSide : null
 
             });
 
@@ -1244,6 +1266,7 @@ export class AvatarCoordinator {
                     ? {
                         participant,
                         hostParticipantId: Number(member.lapHostParticipantId),
+                        lapSide: member.lapSide,
                         dimensions: this.#renderedDimensions(source),
                         anchor: member.anchor || null
                     }
@@ -2234,6 +2257,7 @@ export class AvatarCoordinator {
                         ? {
                             participant,
                             hostParticipantId: member.lapHostParticipantId,
+                            lapSide: member.lapSide,
                             dimensions: this.#renderedDimensions(participant),
                             anchor: member.anchor || null
                         }

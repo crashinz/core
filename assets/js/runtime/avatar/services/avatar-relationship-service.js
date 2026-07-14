@@ -19,7 +19,7 @@
  *      documented owners.
  *
  * Build:
- *      000044 Part 4
+ *      000044 Part 5
  *
  * ---------------------------------------------------------------------------
  * Build History
@@ -76,6 +76,12 @@
 
 const RELATIONSHIP_METADATA_SCHEMA_VERSION = 1;
 const RELATIONSHIP_ID_PREFIX = "legacy-edge";
+const LAP_SIDES = Object.freeze(["bottom-left", "bottom-right"]);
+
+function normalizeLapSide(side) {
+    const normalized = typeof side === "string" ? side.trim() : "";
+    return LAP_SIDES.includes(normalized) ? normalized : null;
+}
 
 function normalizeRelationshipRowOptions(options = {}) {
 
@@ -1050,6 +1056,12 @@ export class AvatarRelationshipService {
                     relationshipRole === "lap"
                         ? Number(member.lapHostParticipantId || legacyTargetId || 0) || null
                         : null;
+                const lapSide =
+                    relationshipRole === "lap"
+                        ? normalizeLapSide(member.lapSide) || (
+                            relationship.source === "legacy" ? "bottom-right" : null
+                        )
+                        : null;
                 const present = Boolean(
                     participant &&
                     participant.online !== false &&
@@ -1067,6 +1079,7 @@ export class AvatarRelationshipService {
                     status: String(member.status || "active"),
                     order: Number(member.order || 0),
                     lapHostParticipantId,
+                    lapSide,
                     anchor: member.anchor || null,
                     options: member.options || Object.freeze({}),
                     present,
@@ -1175,6 +1188,7 @@ export class AvatarRelationshipService {
                 const relationshipRole = String(member.relationshipRole || "normal");
                 const permissionRole = String(member.permissionRole || "member");
                 const isViewer = Number(member.participantId) === viewerParticipantId;
+                const lapSide = normalizeLapSide(member.lapSide);
                 return Object.freeze({
                     participantId: Number(member.participantId),
                     displayName: String(participant?.display_name || "Room member"),
@@ -1182,6 +1196,7 @@ export class AvatarRelationshipService {
                     permissionRole,
                     order: Number(member.order || 0),
                     lapHostParticipantId: Number(member.lapHostParticipantId || 0) || null,
+                    lapSide,
                     present: Boolean(participant && participant.online !== false && !participant.exiting),
                     renderable: Boolean(participant?.avatarEl || participant?.webcam_enabled || participant?.webcam_path),
                     isViewer,
@@ -1189,12 +1204,42 @@ export class AvatarRelationshipService {
                         promote: canManage && !isViewer && permissionRole === "member",
                         demote: canManage && !isViewer && permissionRole === "manager",
                         remove: canManage && !isViewer && permissionRole !== "creator",
-                        reorder: canManage && relationshipRole === "normal"
+                        reorder: canManage && relationshipRole === "normal",
+                        switchLapSide: isViewer && viewerActive && relationshipRole === "lap"
                     })
                 });
             });
         const normalMembers = members.filter(member => member.relationshipRole === "normal");
         const lapMembers = members.filter(member => member.relationshipRole === "lap");
+        const lapSeats = normalMembers.map(host => {
+            const occupants = Object.fromEntries(LAP_SIDES.map(side => [
+                side,
+                lapMembers.find(member =>
+                    member.lapHostParticipantId === host.participantId && member.lapSide === side
+                ) || null
+            ]));
+            return Object.freeze({
+                hostParticipantId: host.participantId,
+                hostName: host.displayName,
+                occupants: Object.freeze(occupants),
+                availableSides: Object.freeze(LAP_SIDES.filter(side => !occupants[side]))
+            });
+        });
+        const memberIds = new Set(members.map(member => member.participantId));
+        const inviteCandidates = Array.from(participants?.values?.() || [])
+            .filter(participant => {
+                const participantId = Number(participant?.id || 0);
+                return participantId > 0
+                    && participantId !== viewerParticipantId
+                    && !memberIds.has(participantId)
+                    && participant.online !== false
+                    && !participant.exiting
+                    && !this.relationshipForParticipant(participantId);
+            })
+            .map(participant => Object.freeze({
+                participantId: Number(participant.id),
+                displayName: String(participant.display_name || "Room member")
+            }));
         const visibleRequests = requests
             .filter(request => {
                 const relationshipId = String(request?.relationshipId || request?.relationship_id || "");
@@ -1217,6 +1262,8 @@ export class AvatarRelationshipService {
                     type,
                     status: String(request.status || "pending"),
                     requestedRelationshipRole: String(request.requestedRelationshipRole || request.requested_relationship_role || "normal"),
+                    requestedLapHostParticipantId: Number(request.requestedLapHostParticipantId || request.requested_lap_host_participant_id || 0) || null,
+                    requestedLapSide: normalizeLapSide(request.requestedLapSide || request.requested_lap_side),
                     requesterParticipantId,
                     requesterName: String(requester?.display_name || "Room member"),
                     targetParticipantId,
@@ -1247,6 +1294,8 @@ export class AvatarRelationshipService {
             members: Object.freeze(members),
             normalMembers: Object.freeze(normalMembers),
             lapMembers: Object.freeze(lapMembers),
+            lapSeats: Object.freeze(lapSeats),
+            inviteCandidates: Object.freeze(inviteCandidates),
             requests: Object.freeze(visibleRequests),
             rowOptions: Object.freeze({
                 schemaVersion: 1,
@@ -1255,6 +1304,7 @@ export class AvatarRelationshipService {
             actions: Object.freeze({
                 manage: viewerActive,
                 invite: canManage,
+                requestJoin: Boolean(relationship && relationship.status === "active" && !viewerActive && !this.relationshipForParticipant(viewerParticipantId)),
                 setJoinPolicy: canManage,
                 reorder: canManage && normalMembers.length > 1,
                 configurePosition: canManage,
@@ -1354,6 +1404,28 @@ export class AvatarRelationshipService {
 
         return this.isLapMode(participant?.link_mode) && Boolean(participant?.linked_to);
 
+    }
+
+    /**
+     * Returns the authoritative finite lap side for one active occupant.
+     * Legacy directed edges retain the certified bottom-right orientation.
+     *
+     * @param {Object|number|string} participant
+     * @returns {string|null}
+     */
+    lapSideForParticipant(participant) {
+        const participantId = Number(participant?.id || participant || 0);
+        const relationship = this.relationshipForParticipant(participantId);
+        const member = relationship?.members?.find(candidate =>
+            Number(candidate.participantId) === participantId
+        );
+        if (member?.relationshipRole === "lap") {
+            return normalizeLapSide(member.lapSide);
+        }
+        const state = typeof participant === "object" ? participant : this.#participant(participantId);
+        return this.isLapMode(state?.link_mode) && state?.linked_to
+            ? "bottom-right"
+            : null;
     }
 
     /**
@@ -2534,6 +2606,11 @@ export class AvatarRelationshipService {
                             member?.lap_host_participant_id ||
                             0
                         ) || null,
+                    lapSide:
+                        normalizeLapSide(
+                            member?.lapSide ||
+                            member?.lap_side
+                        ),
                     anchor:
                         member?.anchor || null,
                     options:
@@ -2548,6 +2625,27 @@ export class AvatarRelationshipService {
 
         if (uniqueMemberIds.size !== members.length) {
             return null;
+        }
+
+        const normalMemberIds = new Set(
+            members
+                .filter(member => member.relationshipRole === "normal")
+                .map(member => member.participantId)
+        );
+        const occupiedLapSeats = new Set();
+        for (const member of members) {
+            if (member.relationshipRole === "normal") {
+                if (member.lapHostParticipantId !== null || member.lapSide !== null) return null;
+                continue;
+            }
+            if (member.relationshipRole !== "lap"
+                || !normalMemberIds.has(member.lapHostParticipantId)
+                || !member.lapSide) {
+                return null;
+            }
+            const seatKey = `${member.lapHostParticipantId}:${member.lapSide}`;
+            if (occupiedLapSeats.has(seatKey)) return null;
+            occupiedLapSeats.add(seatKey);
         }
 
         return Object.freeze({

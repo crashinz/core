@@ -29,6 +29,23 @@ Those responsibilities remain outside the runtime.
 
 # Relationship Persistence Boundary
 
+Build 000044 Part 5 completes dual-side lap ownership within the existing
+relationship boundary:
+
+- finite persisted side values are `bottom-left` and `bottom-right`;
+- each normal host has at most one active occupant per side;
+- direct occupants and join-request actors choose a side, while invitation
+  targets choose during acceptance;
+- pending operations do not reserve seats;
+- occupant switching is atomic, versioned, and idempotent;
+- valid legacy single-lap state migrates to `bottom-right`;
+- `AvatarLayoutService` owns mirrored mixed-size host units and complete-group
+  clamping, while `AvatarRenderer` owns side classes and stacking;
+- host departure removes both occupants, and one occupant departure preserves
+  the other;
+- stable relationship chat, history boundaries, normal order, row spacing,
+  explicit unlink, direct messages, and media ownership remain unchanged.
+
 Build 000044 Parts 1 and 2 establish the current relationship boundary:
 
 - `AvatarRelationshipService.relationshipEligibility()` is the authoritative,

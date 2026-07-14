@@ -325,6 +325,13 @@ export class AvatarRenderer {
         image.classList.toggle("webcam", Boolean(options.webcam));
         image.classList.toggle("lap-avatar", Boolean(options.lapInitiator));
         image.classList.toggle("lap-primary-avatar", Boolean(options.lapTarget));
+        image.classList.toggle("lap-side-left", options.lapSide === "bottom-left");
+        image.classList.toggle("lap-side-right", options.lapSide === "bottom-right");
+        if (options.lapInitiator && ["bottom-left", "bottom-right"].includes(options.lapSide)) {
+            image.dataset.lapSide = options.lapSide;
+        } else {
+            delete image.dataset.lapSide;
+        }
         label.textContent = options.displayName || "";
 
         if (participant.webcamVideoEl && options.webcamEnabled) {

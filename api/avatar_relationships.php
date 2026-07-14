@@ -13,15 +13,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $sessionId = resolve_session_id($pdo, $_GET['session_id'] ?? '');
     $participant = auth_participant($pdo, $sessionId, (string)($_GET['join_token'] ?? ''));
     $participantId = (int)$participant['id'];
-    avatar_relationship_api_out([
-        'ok' => true,
-        'relationship' => avatar_relationship_active_for_participant(
+    $requests = avatar_relationship_requests_for_actor($pdo, $sessionId, $participantId);
+    $requestedRelationshipId = trim((string)($_GET['relationship_id'] ?? ''));
+    $relationship = $requestedRelationshipId !== ''
+        ? avatar_relationship_for_viewer_by_public_id(
+            $pdo,
+            $sessionId,
+            $requestedRelationshipId,
+            $participantId
+        )
+        : avatar_relationship_active_for_participant(
             $pdo,
             $sessionId,
             $participantId,
             $participantId
-        ),
-        'requests' => avatar_relationship_requests_for_actor($pdo, $sessionId, $participantId),
+        );
+    if (!$relationship && $requests) {
+        $relationship = avatar_relationship_for_viewer_by_public_id(
+            $pdo,
+            $sessionId,
+            (string)($requests[0]['relationshipId'] ?? ''),
+            $participantId
+        );
+    }
+    avatar_relationship_api_out([
+        'ok' => true,
+        'relationship' => $relationship,
+        'requests' => $requests,
     ]);
 }
 
@@ -55,7 +73,8 @@ if ($action === 'request_join') {
         'join-request',
         $participantId,
         (string)($body['relationship_role'] ?? 'normal'),
-        isset($body['lap_host_participant_id']) ? (int)$body['lap_host_participant_id'] : null
+        isset($body['lap_host_participant_id']) ? (int)$body['lap_host_participant_id'] : null,
+        isset($body['lap_side']) ? (string)$body['lap_side'] : null
     ));
 }
 
@@ -69,7 +88,8 @@ if ($action === 'invite') {
         'invitation',
         (int)($body['target_participant_id'] ?? 0),
         (string)($body['relationship_role'] ?? 'normal'),
-        isset($body['lap_host_participant_id']) ? (int)$body['lap_host_participant_id'] : null
+        isset($body['lap_host_participant_id']) ? (int)$body['lap_host_participant_id'] : null,
+        isset($body['lap_side']) ? (string)$body['lap_side'] : null
     ));
 }
 
@@ -85,7 +105,8 @@ if (in_array($action, ['accept_request', 'reject_request', 'cancel_request'], tr
         $participantId,
         trim((string)($body['request_id'] ?? '')),
         $expectedVersion,
-        $resolution
+        $resolution,
+        isset($body['lap_side']) ? (string)$body['lap_side'] : null
     ));
 }
 
@@ -100,6 +121,19 @@ if ($action === 'set_join_policy') {
     ));
 }
 
+if ($action === 'lap_seat_eligibility') {
+    avatar_relationship_api_out(avatar_relationship_lap_seat_eligibility(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion,
+        (int)($body['occupant_participant_id'] ?? $participantId),
+        (int)($body['lap_host_participant_id'] ?? 0),
+        isset($body['lap_side']) ? (string)$body['lap_side'] : null
+    ));
+}
+
 if ($action === 'configure') {
     avatar_relationship_api_out(avatar_relationship_configure(
         $pdo,
@@ -111,6 +145,18 @@ if ($action === 'configure') {
         is_array($body['normal_member_order'] ?? null) ? $body['normal_member_order'] : [],
         $body['options'] ?? null,
         is_array($body['positions'] ?? null) ? $body['positions'] : []
+    ));
+}
+
+if ($action === 'set_lap_side') {
+    avatar_relationship_api_out(avatar_relationship_set_lap_side(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion,
+        trim((string)($body['operation_id'] ?? '')),
+        (string)($body['lap_side'] ?? '')
     ));
 }
 

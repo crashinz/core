@@ -467,6 +467,49 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       <h3>Pending</h3>
       <ul class="relationship-request-list" id="relationship-management-requests"></ul>
     </section>
+    <section class="relationship-management-section" id="relationship-management-join-section" hidden>
+      <h3>Request to join</h3>
+      <div class="relationship-seat-form">
+        <label>Membership
+          <select id="relationship-management-join-role">
+            <option value="normal">Normal member</option>
+            <option value="lap">Lap occupant</option>
+          </select>
+        </label>
+        <label>Host
+          <select id="relationship-management-join-host"></select>
+        </label>
+        <label>Side
+          <select id="relationship-management-join-side">
+            <option value="bottom-left">Left side</option>
+            <option value="bottom-right">Right side</option>
+          </select>
+        </label>
+        <button class="btn" id="relationship-management-request-join" type="button">Request</button>
+      </div>
+    </section>
+    <section class="relationship-management-section" id="relationship-management-invite-section" hidden>
+      <h3>Invite member</h3>
+      <div class="relationship-seat-form">
+        <label>Participant
+          <select id="relationship-management-invite-target"></select>
+        </label>
+        <label>Membership
+          <select id="relationship-management-invite-role">
+            <option value="normal">Normal member</option>
+            <option value="lap">Lap occupant</option>
+          </select>
+        </label>
+        <label>Host
+          <select id="relationship-management-invite-host"></select>
+        </label>
+        <button class="btn" id="relationship-management-invite" type="button">Invite</button>
+      </div>
+    </section>
+    <section class="relationship-management-section" id="relationship-management-seat-section">
+      <h3>Lap seats</h3>
+      <ul class="relationship-seat-list" id="relationship-management-seats"></ul>
+    </section>
     <section class="relationship-management-section">
       <h3>Members</h3>
       <ul class="relationship-member-list" id="relationship-management-members"></ul>
@@ -503,11 +546,16 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <div class="modal" id="link-choice-modal">
   <div class="modal-box link-choice-box">
     <h2>Interact</h2>
-    <p>What would you like to do?</p>
-    <div class="link-choice-actions">
+    <p id="link-choice-prompt">What would you like to do?</p>
+    <div class="link-choice-actions" id="link-choice-actions">
       <button class="btn link-choice-link" id="link-choice-link" type="button">🔗 Link Avatars</button>
       <button class="btn link-choice-lap" id="link-choice-lap" type="button">🧸 Sit in Lap</button>
       <button class="btn link-choice-cancel" id="link-choice-cancel" type="button">Cancel</button>
+    </div>
+    <div class="link-choice-seat" id="link-choice-seat" hidden>
+      <button class="btn" id="link-choice-bottom-left" type="button">Left side</button>
+      <button class="btn" id="link-choice-bottom-right" type="button">Right side</button>
+      <button class="btn link-choice-cancel" id="link-choice-seat-cancel" type="button">Cancel</button>
     </div>
   </div>
 </div>

@@ -72,7 +72,8 @@ if ($action === 'link') {
         (int)$p['id'],
         $targetId,
         $linkMode,
-        $body
+        $body,
+        isset($body['lap_side']) ? (string)$body['lap_side'] : null
     );
 
     if (empty($result['ok'])) {
