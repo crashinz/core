@@ -28,8 +28,7 @@ Those responsibilities remain outside the runtime.
 
 # Relationship Persistence Boundary
 
-Build 000044 Parts 1, 2A, and completed Part 2B establish the current
-relationship boundary:
+Build 000044 Parts 1 and 2 establish the current relationship boundary:
 
 - `AvatarRelationshipService.relationshipEligibility()` is the authoritative,
   side-effect-free client policy.
@@ -47,6 +46,10 @@ relationship boundary:
 - Persisted group identity is stable across refresh, order, and role changes.
   Valid multi-member membership is represented without creating additional
   legacy pair edges.
+- Active membership, membership history, permission roles, request lifecycle,
+  expected-version mutations, creator succession, deterministic member order,
+  lap-host attachment, dissolution, and relationship chat boundaries are
+  authoritative server state owned through `includes/base.php`.
 - The server independently enforces current creation constraints in an atomic
   transaction and never replaces an existing relationship implicitly.
 - The dedicated relationship lifecycle API owns persistent requests,
@@ -69,10 +72,16 @@ relationship boundary:
   authenticated snapshots; non-members receive redacted roles. Dissolution
   invalidation uses prior and incoming membership before installing a terminal
   tombstone.
+- `conversation_public_id` is the sole stable relationship conversation
+  identity. AvatarRelationshipService exposes viewer membership/chat-access
+  metadata but does not own messages, tabs, unread state, or authorization.
+- Active normal-member order is persisted for Part 3. Lap occupants remain
+  relationship and chat members outside the normal ordered row.
 
-Part 2B contention and reconciliation are certified on SQLite, MariaDB, and
-Chrome. Part 2C will add stable relationship group chat. Callers must not add independent `linked_to` eligibility,
-permission, request, or snapshot-version rules.
+Part 2 persistence, lifecycle, contention, group chat, and reconciliation are
+certified on SQLite, MariaDB, and Chrome. Callers must not add independent
+`linked_to` eligibility, permission, request, conversation, history-boundary,
+or snapshot-version rules.
 
 ---
 
@@ -324,36 +333,27 @@ Future runtime expansion SHALL occur through the Avatar Runtime rather than bypa
 
 # Current Status
 
-Build:
+Build 000044 Part 2 is Engineering Complete.
 
-000039
+`avatar_relationships` and active membership are authoritative. Legacy
+`linked_to` / `link_mode` fields are compatibility projections only and are
+never a multi-member authority. Ambiguous legacy graphs fail closed for
+operator review.
 
-Status:
+AvatarRelationshipService owns immutable persisted payload normalization,
+viewer relationship/chat-access state, current membership queries, and stale
+or terminal reconciliation. AvatarCoordinator reconciles versioned relationship
+and compatibility events without allowing a lossy pair projection to replace a
+current group.
 
-Relationship Persistence Repair Complete
+The PHP/API layer owns database migration, transactions, requests,
+permissions, lifecycle, history, repair, group-chat authorization, and exact
+membership boundaries. ChatRuntime owns the stable relationship channel and
+tab. `room.js` remains host composition and presentation wiring.
 
-Build 000038 added persisted relationship payload ingestion for the first-class
-runtime relationship identity model. Build 000039 added deterministic
-database-side backfill, repair, divergence diagnostics, and administrative
-recovery for the additive persisted relationship tables. Build 000040
-operationally certified the relationship persistence and repair system on
-SQLite and on MariaDB through the repository's MySQL-compatible PDO path.
-
-The current legacy `linked_to` / `link_mode` participant-edge model remains
-valid and remains the compatibility write authority while API payloads can now
-carry relationship identity, metadata, members, roles, ordering, anchors,
-options, persistence flags, and reconciliation flags.
-
-AvatarRelationshipService owns persisted payload normalization and ingestion.
-AvatarCoordinator reconciles persisted payloads from remote link events.
-
-The PHP/API layer owns database persistence, repair execution, administrative
-transport, and dry-run diagnostics. `room.js` remains host composition and only
-seeds the runtime from room configuration.
-
-The runtime infrastructure has been established.
-
-Behavior migration will occur incrementally in future builds.
+Build 000044 Part 3 may consume stable relationship identity and deterministic
+normal-member order for multi-member presentation and movement. It must not
+redesign Part 2 persistence, permissions, lifecycle, or chat.
 
 ---
 
