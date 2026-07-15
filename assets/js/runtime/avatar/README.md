@@ -8,6 +8,7 @@ The Avatar Runtime is responsible for:
 
 - avatar relationships
 - relationship management presentation and mutation lifecycle
+- finite static relationship formations and transition lifecycle
 - member ordering
 - layout calculation
 - avatar rendering
@@ -28,6 +29,25 @@ Those responsibilities remain outside the runtime.
 ---
 
 # Relationship Persistence Boundary
+
+Build 000044 Part 6 adds finite formation and transition configuration without
+changing the relationship persistence boundary:
+
+- public options are
+  `{schemaVersion: 2, rowSpacing, formation, transition}`;
+- schema version 1 migrates deterministically to `horizontal-row` and `snap`;
+- formations are `horizontal-row`, `bottom-center-trio`, and `grid` only;
+- transitions are `snap`, `glide`, and `fade-reposition` only;
+- `AvatarFormationService` owns registry, applicability, fallback, validation,
+  and diagnostics, while stateless strategies only propose geometry;
+- `AvatarLayoutService` owns host-unit/lap geometry, anchor preservation, stage
+  clamping, and position mutation;
+- `AvatarTransitionService` owns active animation state, exact-final
+  cancellation, stale/duplicate suppression, diagnostics, and teardown;
+- `AvatarRenderer` supplies visual targets and `AvatarCoordinator` sequences
+  configuration, drag, movement, refresh, and reconciliation boundaries;
+- the existing expected-version configure transaction atomically persists
+  order, options, and exact positions under one version and event.
 
 Build 000044 Part 5 completes dual-side lap ownership within the existing
 relationship boundary:
@@ -102,9 +122,9 @@ Build 000044 Parts 1 and 2 establish the current relationship boundary:
   projection. Creator/manager/member actions derive from authoritative state;
   the server independently enforces every permission.
 - One expected-version `configure` operation persists a complete normal-member
-  permutation, public `{schemaVersion: 1, rowSpacing: 0..64}` options, and exact
-  visible-member positions under one version and event. No schema or free-form
-  positioning was added.
+  permutation, allowlisted public options, and exact visible-member positions
+  under one version and event. No database schema or free-form positioning was
+  added.
 - `AvatarCoordinator` proposes and reconciles configuration through
   `AvatarLayoutService`, preserving the current left group anchor as closely as
   stage bounds allow while retaining lap attachment and Part 3 movement.

@@ -109,9 +109,21 @@ import {
 
 import {
 
+    AvatarFormationService
+
+} from "./services/avatar-formation-service.js";
+
+import {
+
     AvatarAuraService
 
 } from "./services/avatar-aura-service.js";
+
+import {
+
+    AvatarTransitionService
+
+} from "./services/avatar-transition-service.js";
 
 import {
 
@@ -184,9 +196,19 @@ export class AvatarRuntime extends CoreModule {
     #layout = null;
 
     /**
+     * Formation strategy runtime component.
+     */
+    #formations = null;
+
+    /**
      * Renderer runtime component.
      */
     #renderer = null;
+
+    /**
+     * Relationship configuration transition runtime component.
+     */
+    #transitions = null;
 
     /**
      * Aura workflow runtime component.
@@ -296,6 +318,15 @@ export class AvatarRuntime extends CoreModule {
     }
 
     /**
+     * Returns the Avatar Formation Service.
+     */
+    get formations() {
+
+        return this.#formations;
+
+    }
+
+    /**
      * Returns the Avatar Renderer.
      *
      * @returns {AvatarRenderer}
@@ -304,6 +335,15 @@ export class AvatarRuntime extends CoreModule {
     get renderer() {
 
         return this.#renderer;
+
+    }
+
+    /**
+     * Returns the relationship configuration transition service.
+     */
+    get transitions() {
+
+        return this.#transitions;
 
     }
 
@@ -399,8 +439,14 @@ export class AvatarRuntime extends CoreModule {
             layout:
                 this.#layout?.getDiagnostics() ?? null,
 
+            formations:
+                this.#formations?.getDiagnostics() ?? null,
+
             renderer:
                 this.#renderer?.getDiagnostics() ?? null,
+
+            transitions:
+                this.#transitions?.getDiagnostics() ?? null,
 
             aura:
                 this.#aura?.getDiagnostics() ?? null,
@@ -439,9 +485,13 @@ export class AvatarRuntime extends CoreModule {
 
         this.#createOrder();
 
+        this.#createFormations();
+
         this.#createLayout();
 
         this.#createRenderer();
+
+        this.#createTransitions();
 
         this.#createAura();
 
@@ -490,9 +540,13 @@ export class AvatarRuntime extends CoreModule {
 
         this.#aura?.destroy();
 
+        this.#transitions?.destroy();
+
         this.#renderer?.destroy();
 
         this.#layout?.destroy();
+
+        this.#formations?.destroy();
 
         this.#order?.destroy();
 
@@ -573,6 +627,34 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#renderer.initialize();
+
+    }
+
+    /**
+     * Creates the relationship configuration transition component.
+     */
+    #createTransitions() {
+
+        this.#transitions =
+            new AvatarTransitionService(
+                this
+            );
+
+        this.#transitions.initialize();
+
+    }
+
+    /**
+     * Creates the Formation runtime component.
+     */
+    #createFormations() {
+
+        this.#formations =
+            new AvatarFormationService(
+                this
+            );
+
+        this.#formations.initialize();
 
     }
 

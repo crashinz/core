@@ -2,7 +2,7 @@
  * Chat Runtime Framework for ChatSpace
  * ---------------------------------------------------------------------------
  * Owner: Avatar Runtime
- * Build: 000044 Part 5
+ * Build: 000044 Part 6
  * Purpose: Own the relationship-management interface and mutation lifecycle.
  ******************************************************************************/
 
@@ -76,6 +76,8 @@ export class AvatarRelationshipManagementService {
         const confirmAccept = this.#element("relationship-management-confirm-accept");
         const spacing = this.#element("relationship-management-spacing");
         const spacingReset = this.#element("relationship-management-spacing-reset");
+        const formation = this.#element("relationship-management-formation");
+        const transition = this.#element("relationship-management-transition");
         const joinRole = this.#element("relationship-management-join-role");
         const joinHost = this.#element("relationship-management-join-host");
         const inviteRole = this.#element("relationship-management-invite-role");
@@ -131,6 +133,21 @@ export class AvatarRelationshipManagementService {
             this.#configureCurrent(
                 this.#projection?.normalMembers?.map(member => member.participantId) || [],
                 0
+            );
+        }, { signal });
+        formation?.addEventListener("change", event => {
+            this.#configureCurrent(
+                this.#projection?.normalMembers?.map(member => member.participantId) || [],
+                this.#projection?.rowOptions?.rowSpacing || 0,
+                String(event.target.value || "horizontal-row")
+            );
+        }, { signal });
+        transition?.addEventListener("change", event => {
+            this.#configureCurrent(
+                this.#projection?.normalMembers?.map(member => member.participantId) || [],
+                this.#projection?.rowOptions?.rowSpacing || 0,
+                this.#projection?.rowOptions?.formation || "horizontal-row",
+                String(event.target.value || "snap")
             );
         }, { signal });
         joinRole?.addEventListener("change", () => this.#syncSeatFormControls(), { signal });
@@ -248,7 +265,7 @@ export class AvatarRelationshipManagementService {
     getDiagnostics() {
         return Object.freeze({
             owner: "AvatarRuntime",
-            build: "000044 Part 5",
+            build: "000044 Part 6",
             configured: Boolean(this.#context),
             open: this.isOpen(),
             relationshipId: this.#relationshipId || null,
@@ -308,6 +325,9 @@ export class AvatarRelationshipManagementService {
         const spacing = this.#element("relationship-management-spacing");
         const spacingValue = this.#element("relationship-management-spacing-value");
         const spacingReset = this.#element("relationship-management-spacing-reset");
+        const formation = this.#element("relationship-management-formation");
+        const formationStatus = this.#element("relationship-management-formation-status");
+        const transition = this.#element("relationship-management-transition");
         if (summary) {
             const pendingInvitation = projection.requests.some(request =>
                 request.type === "invitation" && request.actions.accept
@@ -350,6 +370,24 @@ export class AvatarRelationshipManagementService {
             spacingReset.disabled = this.#isPending()
                 || !projection.actions.configurePosition
                 || projection.rowOptions.rowSpacing === 0;
+        }
+        if (formation) {
+            formation.value = projection.rowOptions.formation;
+            Array.from(formation.options).forEach(option => {
+                const definition = projection.rowOptions.formationOptions
+                    .find(item => item.id === option.value);
+                option.disabled = !definition?.available;
+            });
+            formation.disabled = this.#isPending() || !projection.actions.configurePosition;
+        }
+        if (formationStatus) {
+            formationStatus.textContent = projection.rowOptions.formationFallbackReason
+                ? `Currently using ${this.#formationLabel(projection.rowOptions.effectiveFormation)}`
+                : `Currently using ${this.#formationLabel(projection.rowOptions.formation)}`;
+        }
+        if (transition) {
+            transition.value = projection.rowOptions.transition;
+            transition.disabled = this.#isPending() || !projection.actions.configurePosition;
         }
         if (this.#isPending()) this.#setStatus("Saving relationship changes...");
         this.#renderSeatForms(projection);
@@ -659,12 +697,19 @@ export class AvatarRelationshipManagementService {
         this.#configureCurrent(next, this.#projection.rowOptions.rowSpacing);
     }
 
-    #configureCurrent(normalMemberOrder, rowSpacing) {
+    #configureCurrent(
+        normalMemberOrder,
+        rowSpacing,
+        formation = this.#projection?.rowOptions?.formation || "horizontal-row",
+        transition = this.#projection?.rowOptions?.transition || "snap"
+    ) {
         if (this.#isPending() || !this.#projection?.actions.configurePosition) return false;
         const proposal = this.#runtime.coordinator?.relationshipConfigurationProposal({
             relationshipId: this.#projection.relationshipId,
             normalMemberOrder,
-            rowSpacing
+            rowSpacing,
+            formation,
+            transition
         });
         if (!proposal) {
             this.#setStatus("The current relationship layout could not be configured.");
@@ -678,6 +723,14 @@ export class AvatarRelationshipManagementService {
             positions: proposal.positions
         });
         return true;
+    }
+
+    #formationLabel(formation) {
+        return formation === "bottom-center-trio"
+            ? "Bottom-Center Trio"
+            : formation === "grid"
+                ? "Grid"
+                : "Horizontal Row";
     }
 
     #operationId(prefix = "config") {

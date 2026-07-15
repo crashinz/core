@@ -523,6 +523,21 @@ if (session_status() === PHP_SESSION_ACTIVE) {
         </select>
       </label>
       <div class="relationship-order-list" id="relationship-management-order"></div>
+      <label>Formation
+        <select id="relationship-management-formation" disabled>
+          <option value="horizontal-row">Horizontal Row</option>
+          <option value="bottom-center-trio">Bottom-Center Trio</option>
+          <option value="grid">Grid</option>
+        </select>
+      </label>
+      <div class="minor" id="relationship-management-formation-status"></div>
+      <label>Transition
+        <select id="relationship-management-transition" disabled>
+          <option value="snap">Snap</option>
+          <option value="glide">Glide</option>
+          <option value="fade-reposition">Fade and Reposition</option>
+        </select>
+      </label>
       <label class="relationship-spacing-control">Row spacing
         <input id="relationship-management-spacing" type="range" min="0" max="64" step="1" value="0" disabled>
         <output id="relationship-management-spacing-value">0 px</output>

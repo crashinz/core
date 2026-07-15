@@ -475,6 +475,41 @@ export class AvatarRenderer {
     }
 
     /**
+     * Returns renderer-owned visual targets for a relationship transition.
+     *
+     * The transition owner receives element references from the renderer and
+     * never rediscovers avatar presentation through global DOM selectors.
+     */
+    relationshipTransitionTargets(participants = []) {
+
+        const roles = Object.freeze([
+            ["avatar", "avatarEl"],
+            ["aura", "auraEl"],
+            ["webcam", "webcamVideoEl"],
+            ["label", "labelEl"],
+            ["typing", "typingEl"],
+            ["speech", "speechEl"]
+        ]);
+        const targets = [];
+
+        Array.from(participants).forEach(participant => {
+            roles.forEach(([role, property]) => {
+                const element = participant?.[property];
+                if (!element || element.isConnected === false) return;
+                targets.push(Object.freeze({
+                    participantId: Number(participant.id),
+                    participant,
+                    role,
+                    element
+                }));
+            });
+        });
+
+        return Object.freeze(targets);
+
+    }
+
+    /**
      * Removes participant presentation from the stage.
      *
      * @param {Object} participant
@@ -1366,7 +1401,7 @@ export class AvatarRenderer {
                 "AvatarRenderer",
 
             build:
-                "000032",
+                "000044 Part 6",
 
             renderCount:
                 this.#renderCount,

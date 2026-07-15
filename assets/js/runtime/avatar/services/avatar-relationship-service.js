@@ -86,13 +86,23 @@ function normalizeLapSide(side) {
 function normalizeRelationshipRowOptions(options = {}) {
 
     const rowSpacing = Number(options?.rowSpacing ?? 0);
+    const formation = ["horizontal-row", "bottom-center-trio", "grid"]
+        .includes(String(options?.formation || ""))
+        ? String(options.formation)
+        : "horizontal-row";
+    const transition = ["snap", "glide", "fade-reposition"]
+        .includes(String(options?.transition || ""))
+        ? String(options.transition)
+        : "snap";
 
     return Object.freeze({
-        schemaVersion: 1,
+        schemaVersion: 2,
         rowSpacing:
             Number.isInteger(rowSpacing)
                 ? Math.max(0, Math.min(64, rowSpacing))
-                : 0
+                : 0,
+        formation,
+        transition
     });
 
 }
@@ -1116,6 +1126,11 @@ export class AvatarRelationshipService {
 
         const visibleMemberIds =
             visibleMembers.map(member => member.participantId);
+        const selectedOptions = normalizeRelationshipRowOptions(relationship.options);
+        const formationResolution = this.#runtime.formations.resolve(
+            selectedOptions.formation,
+            { normalMemberCount: visibleNormalMembers.length }
+        );
 
         return Object.freeze({
             relationshipId: String(relationship.id),
@@ -1131,6 +1146,10 @@ export class AvatarRelationshipService {
             visibleLapMembers: Object.freeze(visibleLapMembers),
             visibleMembers: Object.freeze(visibleMembers),
             visibleMemberIds: Object.freeze(visibleMemberIds),
+            options: selectedOptions,
+            selectedFormation: formationResolution.selected,
+            effectiveFormation: formationResolution.effective,
+            formationFallbackReason: formationResolution.fallbackReason,
             metadata: relationship.metadata || Object.freeze({}),
             projectionKey: [
                 String(relationship.id),
@@ -1278,7 +1297,21 @@ export class AvatarRelationshipService {
 
         if (!relationship && !visibleRequests.length) return null;
 
-        const rowSpacing = Number(relationship?.options?.rowSpacing ?? 0);
+        const rowOptions = normalizeRelationshipRowOptions(relationship?.options);
+        const visibleNormalCount = normalMembers.filter(member => member.renderable).length;
+        const formationResolution = this.#runtime.formations.resolve(
+            rowOptions.formation,
+            { normalMemberCount: visibleNormalCount }
+        );
+        const formationOptions = Object.freeze([
+            Object.freeze({ id: "horizontal-row", label: "Horizontal Row", available: true }),
+            Object.freeze({
+                id: "bottom-center-trio",
+                label: "Bottom-Center Trio",
+                available: normalMembers.length === 3
+            }),
+            Object.freeze({ id: "grid", label: "Grid", available: normalMembers.length >= 2 })
+        ]);
         return Object.freeze({
             relationshipId: String(relationship?.id || visibleRequests[0]?.relationshipId || ""),
             relationshipVersion: Math.max(1, Number(relationship?.version || visibleRequests[0]?.relationshipVersion || 1)),
@@ -1298,8 +1331,13 @@ export class AvatarRelationshipService {
             inviteCandidates: Object.freeze(inviteCandidates),
             requests: Object.freeze(visibleRequests),
             rowOptions: Object.freeze({
-                schemaVersion: 1,
-                rowSpacing: Number.isFinite(rowSpacing) ? Math.max(0, Math.min(64, rowSpacing)) : 0
+                schemaVersion: 2,
+                rowSpacing: rowOptions.rowSpacing,
+                formation: rowOptions.formation,
+                transition: rowOptions.transition,
+                effectiveFormation: formationResolution.effective,
+                formationFallbackReason: formationResolution.fallbackReason,
+                formationOptions
             }),
             actions: Object.freeze({
                 manage: viewerActive,

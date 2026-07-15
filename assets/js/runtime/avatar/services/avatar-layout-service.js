@@ -465,6 +465,7 @@ export class AvatarLayoutService {
         gap = 0,
         metadata = null,
         anchor = null,
+        formation = "horizontal-row",
         locked = false
     }) {
 
@@ -498,11 +499,7 @@ export class AvatarLayoutService {
             attachmentsByHost.set(hostParticipantId, list);
         });
 
-        const normalBoxes = [];
-        const lapBoxes = [];
-        let previousUnitRight = null;
-
-        normals.forEach((entry, index) => {
+        const hostUnits = normals.map(entry => {
             const memberWidth = Math.max(1, Number(entry.dimensions.width || 0));
             const memberHeight = Math.max(1, Number(entry.dimensions.height || 0));
             const attachments = attachmentsByHost.get(Number(entry.participant.id)) || [];
@@ -545,23 +542,47 @@ export class AvatarLayoutService {
                 { x: 0, y: 0, width: memberWidth, height: memberHeight },
                 ...relativeLapBoxes
             ]);
-            const hostX = index === 0
-                ? anchorX
-                : Number(previousUnitRight) + normalGap - unitBounds.left;
-            const hostBox = {
+            return {
                 entry,
-                x: hostX,
-                y: anchorY,
                 width: memberWidth,
-                height: memberHeight
+                height: memberHeight,
+                relativeLapBoxes,
+                bounds: unitBounds
+            };
+        });
+
+        const formationResult = this.#formations.layout({
+            selectedFormation: formation,
+            units: hostUnits.map(unit => ({
+                participantId: Number(unit.entry.participant.id),
+                width: unit.width,
+                height: unit.height,
+                bounds: unit.bounds
+            })),
+            anchor: { x: anchorX, y: anchorY },
+            rowSpacing: normalGap
+        });
+        const placementByParticipantId = new Map(
+            formationResult.placements.map(placement => [placement.participantId, placement])
+        );
+        const normalBoxes = [];
+        const lapBoxes = [];
+
+        hostUnits.forEach(unit => {
+            const placement = placementByParticipantId.get(Number(unit.entry.participant.id));
+            const hostBox = {
+                entry: unit.entry,
+                x: placement.x,
+                y: placement.y,
+                width: unit.width,
+                height: unit.height
             };
             normalBoxes.push(hostBox);
-            relativeLapBoxes.forEach(box => lapBoxes.push({
+            unit.relativeLapBoxes.forEach(box => lapBoxes.push({
                 ...box,
-                x: hostX + box.x,
-                y: anchorY + box.y
+                x: placement.x + box.x,
+                y: placement.y + box.y
             }));
-            previousUnitRight = hostX + unitBounds.right;
         });
 
         const allBoxes = [...normalBoxes, ...lapBoxes];
@@ -584,7 +605,10 @@ export class AvatarLayoutService {
         });
 
         this.#lastRelationshipStrategy = Object.freeze({
-            strategy: "orderedGroup",
+            strategy: formationResult.effective,
+            selectedFormation: formationResult.selected,
+            effectiveFormation: formationResult.effective,
+            fallbackReason: formationResult.fallbackReason,
             mode: String(metadata?.mode || "normal"),
             memberCount: allBoxes.length,
             normalMemberCount: normalBoxes.length,
@@ -794,6 +818,15 @@ export class AvatarLayoutService {
     get #relationships() {
 
         return this.#runtime.relationships;
+
+    }
+
+    /**
+     * Returns the formation strategy owner.
+     */
+    get #formations() {
+
+        return this.#runtime.formations;
 
     }
 

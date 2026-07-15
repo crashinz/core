@@ -286,6 +286,7 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
     avatar_relationship_migrate_group_foundation($pdo);
     avatar_relationship_migrate_lap_seats($pdo);
     avatar_relationship_migrate_chat_foundation($pdo);
+    avatar_relationship_migrate_options_v2($pdo);
 
     $indexes = [
         ['avatar_relationship_members', 'idx_avatar_relationship_members_active_participant', true, 'active_participant_id'],
@@ -2024,9 +2025,23 @@ function avatar_relationship_public_options(mixed $options = []): array {
         $rowSpacing = 0;
     }
     return [
-        'schemaVersion' => 1,
+        'schemaVersion' => 2,
         'rowSpacing' => max(0, min(64, (int)$rowSpacing)),
+        'formation' => in_array(($options['formation'] ?? ''), avatar_relationship_formation_ids(), true)
+            ? (string)$options['formation']
+            : 'horizontal-row',
+        'transition' => in_array(($options['transition'] ?? ''), avatar_relationship_transition_ids(), true)
+            ? (string)$options['transition']
+            : 'snap',
     ];
+}
+
+function avatar_relationship_formation_ids(): array {
+    return ['horizontal-row', 'bottom-center-trio', 'grid'];
+}
+
+function avatar_relationship_transition_ids(): array {
+    return ['snap', 'glide', 'fade-reposition'];
 }
 
 function avatar_relationship_validate_public_options(mixed $options): array {
@@ -2038,7 +2053,11 @@ function avatar_relationship_validate_public_options(mixed $options): array {
             400
         );
     }
-    $allowed = ['schemaVersion', 'rowSpacing'];
+    $schemaVersion = $options['schemaVersion'] ?? null;
+    $legacy = (int)$schemaVersion === 1;
+    $allowed = $legacy
+        ? ['schemaVersion', 'rowSpacing']
+        : ['schemaVersion', 'rowSpacing', 'formation', 'transition'];
     foreach (array_keys($options) as $key) {
         if (!in_array((string)$key, $allowed, true)) {
             return avatar_relationship_operation_error(
@@ -2049,12 +2068,17 @@ function avatar_relationship_validate_public_options(mixed $options): array {
             );
         }
     }
-    $schemaVersion = $options['schemaVersion'] ?? 1;
     $rowSpacing = $options['rowSpacing'] ?? null;
-    if ((int)$schemaVersion !== 1
+    if (!in_array((int)$schemaVersion, [1, 2], true)
         || (!is_int($rowSpacing) && !(is_string($rowSpacing) && preg_match('/^\d+$/', $rowSpacing)))
         || (int)$rowSpacing < 0
-        || (int)$rowSpacing > 64) {
+        || (int)$rowSpacing > 64
+        || (!$legacy && (
+            !array_key_exists('formation', $options)
+            || !in_array($options['formation'], avatar_relationship_formation_ids(), true)
+            || !array_key_exists('transition', $options)
+            || !in_array($options['transition'], avatar_relationship_transition_ids(), true)
+        ))) {
         return avatar_relationship_operation_error(
             'RELATIONSHIP_CONFIGURATION_INVALID',
             'Invalid relationship configuration.',
@@ -2062,7 +2086,58 @@ function avatar_relationship_validate_public_options(mixed $options): array {
             400
         );
     }
-    return ['ok' => true, 'options' => avatar_relationship_public_options($options)];
+    return [
+        'ok' => true,
+        'legacy' => $legacy,
+        'options' => avatar_relationship_public_options($options),
+    ];
+}
+
+function avatar_relationship_migrate_options_v2(PDO $pdo): void {
+    $rows = $pdo->query(
+        'SELECT id, status, options_json FROM avatar_relationships ORDER BY id ASC'
+    )->fetchAll();
+    $update = $pdo->prepare(
+        'UPDATE avatar_relationships SET options_json = ?, updated_at = updated_at WHERE id = ?'
+    );
+    $conflict = $pdo->prepare(
+        "UPDATE avatar_relationships
+            SET status = 'conflicted', divergence_status = 'operator-review',
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'active'"
+    );
+
+    foreach ($rows as $row) {
+        $raw = trim((string)($row['options_json'] ?? ''));
+        $options = $raw === '' ? [] : json_decode($raw, true);
+        if (!is_array($options) || ($raw !== '' && json_last_error() !== JSON_ERROR_NONE)) {
+            $conflict->execute([(int)$row['id']]);
+            continue;
+        }
+
+        $schemaVersion = (int)($options['schemaVersion'] ?? 1);
+        $rowSpacing = $options['rowSpacing'] ?? 0;
+        $validSpacing = is_int($rowSpacing)
+            || (is_string($rowSpacing) && preg_match('/^\d+$/', $rowSpacing));
+        $validV2 = $schemaVersion !== 2 || (
+            in_array(($options['formation'] ?? ''), avatar_relationship_formation_ids(), true)
+            && in_array(($options['transition'] ?? ''), avatar_relationship_transition_ids(), true)
+        );
+        if (!in_array($schemaVersion, [1, 2], true)
+            || !$validSpacing
+            || (int)$rowSpacing < 0
+            || (int)$rowSpacing > 64
+            || !$validV2) {
+            $conflict->execute([(int)$row['id']]);
+            continue;
+        }
+
+        $normalized = array_merge($options, avatar_relationship_public_options($options));
+        $encoded = json_encode($normalized, JSON_UNESCAPED_SLASHES);
+        if ($encoded !== $raw) {
+            $update->execute([$encoded, (int)$row['id']]);
+        }
+    }
 }
 
 function avatar_relationship_capability(string $mode): array {
@@ -2107,7 +2182,7 @@ function avatar_relationship_metadata(int $initiatorId, int $targetId, string $m
         'orientation' => $capability['orientation'],
         'order' => [$initiatorId, $targetId],
         'anchors' => ['relationship' => null, 'members' => [], 'mode' => []],
-        'options' => [],
+        'options' => avatar_relationship_public_options(),
         'movement' => 'group',
         'drag' => 'breakable',
         'rendering' => $capability['rendering'],
@@ -3427,6 +3502,24 @@ function avatar_relationship_configure(
                     'The relationship configuration requires repair.',
                     'malformed-stored-options',
                     409
+                );
+            }
+        }
+        if (!empty($optionDecision['legacy'])) {
+            $storedPublicOptions = avatar_relationship_public_options($storedOptions);
+            $configuration['formation'] = $storedPublicOptions['formation'];
+            $configuration['transition'] = $storedPublicOptions['transition'];
+        }
+        $storedPublicOptions = avatar_relationship_public_options($storedOptions);
+        if ($configuration['formation'] !== $storedPublicOptions['formation']) {
+            $normalCount = count($normalMembers);
+            if (($configuration['formation'] === 'bottom-center-trio' && $normalCount !== 3)
+                || ($configuration['formation'] === 'grid' && $normalCount < 2)) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_CONFIGURATION_INVALID',
+                    'That formation is unavailable for the current relationship.',
+                    'formation-inapplicable',
+                    400
                 );
             }
         }

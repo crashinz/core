@@ -1156,6 +1156,15 @@ export class AvatarCoordinator {
             relationshipId
                 ? this.#relationships.relationshipById(relationshipId)
                 : null;
+        if (
+            previousRelationship &&
+            relationshipVersion > Number(previousRelationship.version || 0)
+        ) {
+            this.#runtime.transitions?.finish(relationshipId, {
+                relationshipVersion,
+                reason: "newer-relationship-version"
+            });
+        }
         const reconciled =
             this.#relationships.upsertPersistedRelationship(relationship);
 
@@ -1170,9 +1179,10 @@ export class AvatarCoordinator {
             return null;
         }
 
-        if (String(payload.action || "") === "configuration-updated") {
-            this.#applyRelationshipConfigurationPositions(reconciled, payload);
-        }
+        const configurationTransitionAccepted =
+            String(payload.action || "") === "configuration-updated"
+                ? this.#transitionRelationshipConfiguration(reconciled, payload)
+                : false;
 
         const participantIds =
             Array.from(new Set([
@@ -1188,7 +1198,9 @@ export class AvatarCoordinator {
             participantIds
         );
 
-        this.#syncRelationshipPresentation();
+        this.#syncRelationshipPresentation({
+            scheduleRefresh: !configurationTransitionAccepted
+        });
         this.#lifecycleOperationCount += 1;
 
         this.#context?.recordRelationshipDiagnostic?.({
@@ -1216,7 +1228,9 @@ export class AvatarCoordinator {
     relationshipConfigurationProposal({
         relationshipId,
         normalMemberOrder = [],
-        rowSpacing = 0
+        rowSpacing = 0,
+        formation = "horizontal-row",
+        transition = "snap"
     } = {}) {
 
         const relationship =
@@ -1231,12 +1245,21 @@ export class AvatarCoordinator {
         const sortedSubmitted = submittedOrder.slice().sort((a, b) => a - b);
         const sortedExpected = expectedOrder.slice().sort((a, b) => a - b);
         const spacing = Number(rowSpacing);
+        const selectedFormation = ["horizontal-row", "bottom-center-trio", "grid"]
+            .includes(String(formation))
+            ? String(formation)
+            : null;
+        const selectedTransition = ["snap", "glide", "fade-reposition"]
+            .includes(String(transition))
+            ? String(transition)
+            : null;
 
         if (!relationship || relationship.status !== "active" || !presentation
             || submittedOrder.length !== expectedOrder.length
             || new Set(submittedOrder).size !== submittedOrder.length
             || !sortedSubmitted.every((participantId, index) => participantId === sortedExpected[index])
-            || !Number.isInteger(spacing) || spacing < 0 || spacing > 64) {
+            || !Number.isInteger(spacing) || spacing < 0 || spacing > 64
+            || !selectedFormation || !selectedTransition) {
             return null;
         }
 
@@ -1292,6 +1315,7 @@ export class AvatarCoordinator {
             gap: spacing,
             metadata: relationship.metadata,
             anchor,
+            formation: selectedFormation,
             locked: false
         });
         const changedIds = new Set(changed.map(member => Number(member.id)));
@@ -1304,7 +1328,12 @@ export class AvatarCoordinator {
             relationshipId: relationship.id,
             relationshipVersion: Number(relationship.version),
             normalMemberOrder: Object.freeze(submittedOrder),
-            options: Object.freeze({ schemaVersion: 1, rowSpacing: spacing }),
+            options: Object.freeze({
+                schemaVersion: 2,
+                rowSpacing: spacing,
+                formation: selectedFormation,
+                transition: selectedTransition
+            }),
             positions: Object.freeze(Array.from(copies.values()).map(participant => Object.freeze({
                 participant_id: Number(participant.id),
                 x: Number(participant.position_x || 0),
@@ -1490,6 +1519,13 @@ export class AvatarCoordinator {
 
         const presentation =
             this.#relationships.relationshipPresentationForParticipant(participant.id);
+
+        if (presentation) {
+            this.#runtime.transitions?.finish(presentation.relationshipId, {
+                relationshipVersion: presentation.relationshipVersion,
+                reason: "local-drag-start"
+            });
+        }
 
         if (!presentation) {
             return Object.freeze({
@@ -1784,7 +1820,7 @@ export class AvatarCoordinator {
             })
             .map(member => Number(member.participantId));
         const seen = new Set();
-        const changed = [];
+        const updates = [];
         for (const position of positions) {
             const participantId = Number(position?.participant_id || 0);
             const x = Number(position?.position_x);
@@ -1797,9 +1833,7 @@ export class AvatarCoordinator {
             seen.add(participantId);
             const participant = this.#participant(participantId);
             if (!participant) continue;
-            participant.position_x = Math.max(0, Math.min(1, x));
-            participant.position_y = Math.max(0, Math.min(1, y));
-            changed.push(participant);
+            updates.push({ participant, x, y });
         }
 
         if (seen.size !== expectedPresentIds.length
@@ -1807,6 +1841,16 @@ export class AvatarCoordinator {
             this.#relationshipMovementDiagnostics.rejected += 1;
             return false;
         }
+
+        this.#runtime.transitions?.finish(relationshipId, {
+            relationshipVersion: Number(payload.relationship_version),
+            reason: "remote-group-movement"
+        });
+        const changed = updates.map(update => {
+            update.participant.position_x = Math.max(0, Math.min(1, update.x));
+            update.participant.position_y = Math.max(0, Math.min(1, update.y));
+            return update.participant;
+        });
 
         const firstNormalId = presentation.members.find(member =>
             String(member.relationshipRole || member.role || "normal") === "normal"
@@ -2178,6 +2222,13 @@ export class AvatarCoordinator {
      */
     #refreshRelationshipPresentation(presentation, options = {}) {
 
+        if (presentation?.relationshipId && !options.preserveTransition) {
+            this.#runtime.transitions?.finish(presentation.relationshipId, {
+                relationshipVersion: presentation.relationshipVersion,
+                reason: options.reason || "relationship-refresh"
+            });
+        }
+
         if (!presentation?.visibleMembers?.length) {
             return [];
         }
@@ -2286,6 +2337,7 @@ export class AvatarCoordinator {
                 gap: Number(relationship?.options?.rowSpacing || 0),
                 metadata: relationship?.metadata || presentation.metadata,
                 anchor: groupAnchor,
+                formation: relationship?.options?.formation || "horizontal-row",
                 locked: Boolean(this.#context?.isLayoutLocked?.())
             });
 
@@ -2372,6 +2424,51 @@ export class AvatarCoordinator {
             participantCount: changed.length
         });
         return true;
+
+    }
+
+    #transitionRelationshipConfiguration(relationship, payload) {
+
+        const positions = Array.isArray(payload.positions) ? payload.positions : [];
+        if (!relationship || !positions.length) return false;
+
+        const participants = relationship.members
+            .map(member => this.#participant(member.participantId))
+            .filter(participant => participant && participant.online !== false && !participant.exiting);
+        const positionsChanged = positions.some(position => {
+            const participant = this.#participant(position?.participant_id);
+            if (!participant) return false;
+            return Math.abs(Number(participant.position_x || 0) - Number(position.position_x)) > 0.000001
+                || Math.abs(Number(participant.position_y || 0) - Number(position.position_y)) > 0.000001;
+        });
+        const applyFinal = () => {
+            if (!this.#applyRelationshipConfigurationPositions(relationship, payload)) return;
+            const presentation =
+                this.#relationships.relationshipPresentation(relationship.id);
+            if (presentation) {
+                this.#refreshRelationshipPresentation(presentation, {
+                    animate: false,
+                    persist: false,
+                    preserveTransition: true,
+                    reason: "relationship-configuration-transition-final"
+                });
+            }
+        };
+        const transitionService = this.#runtime.transitions;
+
+        if (!transitionService) {
+            applyFinal();
+            return true;
+        }
+
+        return Boolean(transitionService.transition({
+            relationshipId: relationship.id,
+            relationshipVersion: Number(relationship.version),
+            transition: relationship.options?.transition || "snap",
+            participants,
+            positionsChanged,
+            applyFinal
+        })?.accepted);
 
     }
 
@@ -2642,16 +2739,18 @@ export class AvatarCoordinator {
     /**
      * Synchronizes relationship presentation through host callbacks.
      */
-    #syncRelationshipPresentation() {
+    #syncRelationshipPresentation(options = {}) {
 
         this.rebuildLinkGroups();
         this.#context?.refreshLinkClasses?.();
         this.#context?.renderPeople?.();
         this.#context?.renderLinkTabs?.();
-        this.scheduleRelationshipRefresh({
-            all: true,
-            reason: "relationship-presentation-sync"
-        });
+        if (options.scheduleRefresh !== false) {
+            this.scheduleRelationshipRefresh({
+                all: true,
+                reason: "relationship-presentation-sync"
+            });
+        }
 
     }
 
