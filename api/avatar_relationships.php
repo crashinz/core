@@ -148,6 +148,19 @@ if ($action === 'configure') {
     ));
 }
 
+if ($action === 'set_dance_playback') {
+    avatar_relationship_api_out(avatar_relationship_set_dance_playback(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion,
+        trim((string)($body['operation_id'] ?? '')),
+        (string)($body['playback_state'] ?? ''),
+        isset($body['dance_id']) ? (string)$body['dance_id'] : null
+    ));
+}
+
 if ($action === 'set_lap_side') {
     avatar_relationship_api_out(avatar_relationship_set_lap_side(
         $pdo,

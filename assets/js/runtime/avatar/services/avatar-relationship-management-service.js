@@ -78,6 +78,9 @@ export class AvatarRelationshipManagementService {
         const spacingReset = this.#element("relationship-management-spacing-reset");
         const formation = this.#element("relationship-management-formation");
         const transition = this.#element("relationship-management-transition");
+        const dance = this.#element("relationship-management-dance");
+        const danceStart = this.#element("relationship-management-dance-start");
+        const danceStop = this.#element("relationship-management-dance-stop");
         const joinRole = this.#element("relationship-management-join-role");
         const joinHost = this.#element("relationship-management-join-host");
         const inviteRole = this.#element("relationship-management-invite-role");
@@ -149,6 +152,12 @@ export class AvatarRelationshipManagementService {
                 this.#projection?.rowOptions?.formation || "horizontal-row",
                 String(event.target.value || "snap")
             );
+        }, { signal });
+        danceStart?.addEventListener("click", () => {
+            this.#setDancePlayback("playing", String(dance?.value || "synchronized-sway"));
+        }, { signal });
+        danceStop?.addEventListener("click", () => {
+            this.#setDancePlayback("stopped");
         }, { signal });
         joinRole?.addEventListener("change", () => this.#syncSeatFormControls(), { signal });
         joinHost?.addEventListener("change", () => this.#syncSeatFormControls(), { signal });
@@ -265,7 +274,7 @@ export class AvatarRelationshipManagementService {
     getDiagnostics() {
         return Object.freeze({
             owner: "AvatarRuntime",
-            build: "000044 Part 6",
+            build: "000044 Part 9",
             configured: Boolean(this.#context),
             open: this.isOpen(),
             relationshipId: this.#relationshipId || null,
@@ -328,6 +337,10 @@ export class AvatarRelationshipManagementService {
         const formation = this.#element("relationship-management-formation");
         const formationStatus = this.#element("relationship-management-formation-status");
         const transition = this.#element("relationship-management-transition");
+        const dance = this.#element("relationship-management-dance");
+        const danceStart = this.#element("relationship-management-dance-start");
+        const danceStop = this.#element("relationship-management-dance-stop");
+        const danceStatus = this.#element("relationship-management-dance-status");
         if (summary) {
             const pendingInvitation = projection.requests.some(request =>
                 request.type === "invitation" && request.actions.accept
@@ -388,6 +401,36 @@ export class AvatarRelationshipManagementService {
         if (transition) {
             transition.value = projection.rowOptions.transition;
             transition.disabled = this.#isPending() || !projection.actions.configurePosition;
+        }
+        const dancePlayback = projection.dancePlayback || { state: "stopped" };
+        const selectedDanceId = dancePlayback.state === "playing"
+            ? dancePlayback.danceId
+            : String(dance?.value || projection.danceOptions[0]?.id || "synchronized-sway");
+        if (dance) {
+            dance.replaceChildren(...projection.danceOptions.map(definition => {
+                const option = this.#context.document.createElement("option");
+                option.value = definition.id;
+                option.textContent = definition.label;
+                option.disabled = !definition.available;
+                return option;
+            }));
+            dance.value = selectedDanceId;
+            dance.disabled = this.#isPending() || !projection.actions.controlDance
+                || !projection.danceOptions.some(option => option.available);
+        }
+        if (danceStart) {
+            danceStart.disabled = this.#isPending() || !projection.actions.controlDance
+                || !projection.danceOptions.some(option => option.id === String(dance?.value || "") && option.available);
+        }
+        if (danceStop) {
+            danceStop.disabled = this.#isPending() || !projection.actions.controlDance
+                || dancePlayback.state !== "playing";
+        }
+        if (danceStatus) {
+            const label = projection.danceOptions.find(option => option.id === dancePlayback.danceId)?.label;
+            danceStatus.textContent = dancePlayback.state === "playing" && label
+                ? `Playing ${label}`
+                : "Stopped";
         }
         if (this.#isPending()) this.#setStatus("Saving relationship changes...");
         this.#renderSeatForms(projection);
@@ -735,6 +778,17 @@ export class AvatarRelationshipManagementService {
                     : "Horizontal Row";
     }
 
+    #setDancePlayback(playbackState, danceId = null) {
+        if (this.#isPending() || !this.#projection?.actions.controlDance) return false;
+        this.#mutate({
+            action: "set_dance_playback",
+            operation_id: this.#operationId("dance"),
+            playback_state: playbackState,
+            dance_id: playbackState === "playing" ? danceId : null
+        });
+        return true;
+    }
+
     #operationId(prefix = "config") {
         const uuid = globalThis.crypto?.randomUUID?.();
         return uuid
@@ -774,6 +828,17 @@ export class AvatarRelationshipManagementService {
         const relationshipId = String(payload.relationship_id || projection?.relationshipId || "");
         const expectedVersion = Number(payload.expected_version || projection?.relationshipVersion || 0);
         if (!action || !relationshipId || expectedVersion < 1) return false;
+        const suspendsDance = [
+            "configure",
+            "accept_request",
+            "remove_member",
+            "leave",
+            "dissolve",
+            "set_lap_side"
+        ].includes(action);
+        if (suspendsDance) {
+            this.#runtime.dances?.suspend(relationshipId, `local-${action}`);
+        }
         this.#pendingMutation = action;
         this.#render();
         try {
@@ -813,6 +878,12 @@ export class AvatarRelationshipManagementService {
             return true;
         } catch (error) {
             this.#pendingMutation = null;
+            if (suspendsDance) {
+                this.#runtime.dances?.reconcile(
+                    this.#runtime.relationships?.relationshipById?.(relationshipId),
+                    { reason: `${action}-rejected` }
+                );
+            }
             const status = Number(error?.details?.status || 0);
             if (status === 409) {
                 try {
@@ -852,6 +923,7 @@ export class AvatarRelationshipManagementService {
             leave: "member-left",
             dissolve: "relationship-dissolved",
             configure: "configuration-updated",
+            set_dance_playback: "dance-playback-updated",
             set_lap_side: "lap-side-changed"
         })[action] || "relationship-updated";
     }

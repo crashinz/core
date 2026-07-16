@@ -9,6 +9,7 @@ The Avatar Runtime is responsible for:
 - avatar relationships
 - relationship management presentation and mutation lifecycle
 - finite static relationship formations and transition lifecycle
+- finite synchronized relationship dance playback
 - member ordering
 - layout calculation
 - avatar rendering
@@ -26,6 +27,30 @@ The Avatar Runtime does not own:
 - application routing
 
 Those responsibilities remain outside the runtime.
+
+---
+
+# Synchronized Dance Playback
+
+Build 000044 Part 9 adds a finite first-party catalog containing only
+Synchronized Sway and Synchronized Bounce. `AvatarDanceService` owns the
+registry, authoritative-epoch phase, one scheduler per relationship,
+generation replacement, suspension, cleanup, and bounded diagnostics.
+
+Static dance modules return temporary offsets only. `AvatarLayoutService`
+clamps those offsets against the complete actual rendered group, including
+dual-side lap occupants. `AvatarRenderer` applies offsets to every owned visual
+target and restores exact prior presentation on stop or cancellation.
+`AvatarCoordinator` sequences refresh, resize, drag, movement, configuration,
+membership, remote reconciliation, and teardown boundaries.
+
+The existing relationship server owner retains permission, expected version,
+idempotency, persistence, and event authority. No per-frame positions are
+persisted, and dance playback never owns media capture or WebRTC negotiation.
+
+Part 9 exact-final Chrome passed 78 automated checks with zero defects;
+canonical SHA-256 is
+`65277DE5108A5C15965E919F4FF2B2AB95A7BC02D95EBC796955163EC3EF5816`.
 
 ---
 

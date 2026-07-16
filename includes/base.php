@@ -2162,6 +2162,118 @@ function avatar_relationship_transition_ids(): array {
     return ['snap', 'glide', 'fade-reposition'];
 }
 
+function avatar_relationship_dance_ids(): array {
+    return ['synchronized-sway', 'synchronized-bounce'];
+}
+
+function avatar_relationship_dance_playback(mixed $playback): array {
+    if (!is_array($playback)) $playback = [];
+    $state = (string)($playback['state'] ?? 'stopped');
+    $danceId = (string)($playback['danceId'] ?? '');
+    $generation = trim((string)($playback['generation'] ?? ''));
+    $startedAtMs = (int)($playback['startedAtMs'] ?? 0);
+    $initiatorParticipantId = (int)($playback['initiatorParticipantId'] ?? 0);
+    $validPlaying = $state === 'playing'
+        && in_array($danceId, avatar_relationship_dance_ids(), true)
+        && preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $generation)
+        && $startedAtMs > 0
+        && $initiatorParticipantId > 0;
+
+    return [
+        'schemaVersion' => 1,
+        'danceId' => $validPlaying ? $danceId : null,
+        'state' => $validPlaying ? 'playing' : 'stopped',
+        'startedAtMs' => $validPlaying ? $startedAtMs : null,
+        'generation' => $validPlaying ? $generation : ($generation !== '' ? $generation : null),
+        'initiatorParticipantId' => $validPlaying ? $initiatorParticipantId : null,
+    ];
+}
+
+function avatar_relationship_dance_playback_from_row(array $relationship): array {
+    $options = [];
+    if (!empty($relationship['options_json'])) {
+        $options = json_decode((string)$relationship['options_json'], true);
+        if (!is_array($options) || json_last_error() !== JSON_ERROR_NONE) $options = [];
+    }
+    return avatar_relationship_dance_playback($options['dancePlayback'] ?? null);
+}
+
+function avatar_relationship_cancel_dance_playback_options(
+    array &$storedOptions,
+    string $generation
+): ?array {
+    $current = avatar_relationship_dance_playback($storedOptions['dancePlayback'] ?? null);
+    if ($current['state'] !== 'playing') return null;
+    $stopped = avatar_relationship_dance_playback([
+        'state' => 'stopped',
+        'generation' => $generation,
+    ]);
+    $storedOptions['dancePlayback'] = $stopped;
+    return $stopped;
+}
+
+function avatar_relationship_cancel_active_dances(
+    PDO $pdo,
+    ?int $userId,
+    string $reason
+): int {
+    $parameters = [];
+    $sql = "SELECT DISTINCT ar.id, ar.session_id, ar.relationship_public_id
+              FROM avatar_relationships ar";
+    if ($userId !== null) {
+        $sql .= " JOIN avatar_relationship_members arm
+                    ON arm.relationship_id = ar.id AND arm.membership_status = 'active'
+                  JOIN participants p ON p.id = arm.participant_id";
+    }
+    $sql .= " WHERE ar.status = 'active'";
+    if ($userId !== null) {
+        $sql .= ' AND p.user_id = ?';
+        $parameters[] = $userId;
+    }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($parameters);
+    $cancelled = 0;
+    foreach ($stmt->fetchAll() as $candidate) {
+        $relationship = avatar_relationship_locked_row(
+            $pdo,
+            (int)$candidate['session_id'],
+            (string)$candidate['relationship_public_id']
+        );
+        if (!$relationship) continue;
+        $storedOptions = !empty($relationship['options_json'])
+            ? (json_decode((string)$relationship['options_json'], true) ?: [])
+            : [];
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        $generation = 'safety-geometry-' . (int)$relationship['id'] . '-' . $nextVersion;
+        $playback = avatar_relationship_cancel_dance_playback_options($storedOptions, $generation);
+        if (!$playback) continue;
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET options_json = ?, version = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([
+            json_encode($storedOptions, JSON_UNESCAPED_SLASHES),
+            $nextVersion,
+            (int)$relationship['id'],
+        ]);
+        $eventRelationship = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            (int)$relationship['session_id'],
+            'dance-playback-updated',
+            $eventRelationship,
+            [
+                'operation_id' => $generation,
+                'actor_participant_id' => 0,
+                'dancePlayback' => $playback,
+                'resolution_reason' => $reason,
+            ]
+        );
+        $cancelled++;
+    }
+    return $cancelled;
+}
+
 function avatar_relationship_validate_public_options(mixed $options): array {
     if (!is_array($options)) {
         return avatar_relationship_operation_error(
@@ -2902,6 +3014,9 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         }
     }
     $metadata = !empty($relationship['metadata_json']) ? (json_decode((string)$relationship['metadata_json'], true) ?: []) : [];
+    $storedRelationshipOptions = !empty($relationship['options_json'])
+        ? (json_decode((string)$relationship['options_json'], true) ?: [])
+        : ($metadata['options'] ?? []);
     $conversationId = (string)($relationship['conversation_public_id'] ?: $relationship['relationship_public_id']);
     $chatAccessActive = (string)($relationship['status'] ?? '') === 'active'
         && (string)($relationship['divergence_status'] ?? 'synced') === 'synced'
@@ -2931,9 +3046,10 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         'metadata' => $metadata,
         'anchors' => !empty($relationship['anchors_json']) ? (json_decode((string)$relationship['anchors_json'], true) ?: []) : ($metadata['anchors'] ?? []),
         'options' => avatar_relationship_public_options(
-            !empty($relationship['options_json'])
-                ? (json_decode((string)$relationship['options_json'], true) ?: [])
-                : ($metadata['options'] ?? [])
+            $storedRelationshipOptions
+        ),
+        'dancePlayback' => avatar_relationship_dance_playback(
+            $storedRelationshipOptions['dancePlayback'] ?? null
         ),
         'persistence' => ['supported' => true, 'legacyDirectedEdge' => true, 'futureMetadata' => true],
         'reconciliation' => ['supported' => true, 'eventPayload' => 'link'],
@@ -3456,6 +3572,31 @@ function avatar_relationship_move_group(
             );
         }
 
+        $storedOptions = [];
+        if (!empty($relationship['options_json'])) {
+            $storedOptions = json_decode((string)$relationship['options_json'], true);
+            if (!is_array($storedOptions) || json_last_error() !== JSON_ERROR_NONE) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_MOVEMENT_CONFLICT',
+                    'The relationship configuration requires repair.',
+                    'malformed-stored-options',
+                    409
+                );
+            }
+        }
+        $dancePlayback = avatar_relationship_cancel_dance_playback_options(
+            $storedOptions,
+            $operationId
+        );
+        if ($dancePlayback) {
+            $pdo->prepare(
+                'UPDATE avatar_relationships SET options_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+            )->execute([
+                json_encode($storedOptions, JSON_UNESCAPED_SLASHES),
+                (int)$relationship['id'],
+            ]);
+        }
+
         $update = $pdo->prepare(
             'UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?'
         );
@@ -3479,6 +3620,7 @@ function avatar_relationship_move_group(
             'positions' => $normalized,
             'final' => true,
         ];
+        if ($dancePlayback) $eventPayload['dancePlayback'] = $dancePlayback;
         emit_event($pdo, $sessionId, 'relationship_position', $eventPayload);
         $eventId = (int)$pdo->lastInsertId();
 
@@ -3731,6 +3873,7 @@ function avatar_relationship_configure(
         }
 
         $nextVersion = max(1, (int)$relationship['version']) + 1;
+        avatar_relationship_cancel_dance_playback_options($storedOptions, $operationId);
         $storedOptions = array_merge($storedOptions, $configuration);
         $pdo->prepare(
             'UPDATE avatar_relationships
@@ -3769,6 +3912,171 @@ function avatar_relationship_configure(
             'operation_id' => $operationId,
             'configuration' => $configuration,
             'positions' => $normalizedPositions,
+            'relationship' => $viewerPayload,
+        ];
+    });
+}
+
+function avatar_relationship_set_dance_playback(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $operationId,
+    string $playbackState,
+    ?string $danceId = null
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $actorParticipantId,
+        $relationshipPublicId,
+        $expectedVersion,
+        $operationId,
+        $playbackState,
+        $danceId
+    ): array {
+        if ($relationshipPublicId === '' || !preg_match('/^[A-Za-z0-9:_-]{1,160}$/', $relationshipPublicId)
+            || !preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $operationId)
+            || !in_array($playbackState, ['playing', 'stopped'], true)
+            || ($playbackState === 'playing' && !in_array($danceId, avatar_relationship_dance_ids(), true))) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_DANCE_INVALID',
+                'Invalid relationship dance operation.',
+                'invalid-dance-operation',
+                400
+            );
+        }
+
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship || (string)$relationship['status'] !== 'active') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_DANCE_CONFLICT',
+                'That relationship is no longer active.',
+                'relationship-unavailable',
+                409
+            );
+        }
+
+        $priorStmt = $pdo->prepare(
+            "SELECT id, payload FROM events
+              WHERE session_id = ? AND type = 'relationship' AND payload LIKE ?
+              ORDER BY id DESC LIMIT 20"
+        );
+        $priorStmt->execute([$sessionId, '%"operation_id":"' . $operationId . '"%']);
+        foreach ($priorStmt->fetchAll() as $prior) {
+            $priorPayload = json_decode((string)$prior['payload'], true) ?: [];
+            if ((string)($priorPayload['operation_id'] ?? '') !== $operationId
+                || (string)($priorPayload['relationship_id'] ?? '') !== $relationshipPublicId
+                || (int)($priorPayload['actor_participant_id'] ?? 0) !== $actorParticipantId
+                || (string)($priorPayload['action'] ?? '') !== 'dance-playback-updated') {
+                continue;
+            }
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'event_id' => (int)$prior['id'],
+                'relationship_id' => $relationshipPublicId,
+                'relationship_version' => (int)($priorPayload['relationship_version'] ?? $expectedVersion),
+                'operation_id' => $operationId,
+                'dancePlayback' => avatar_relationship_dance_playback($priorPayload['dancePlayback'] ?? null),
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actor = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if (!avatar_relationship_permission_allows($actor)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_DANCE_FORBIDDEN',
+                'You cannot control this relationship dance.',
+                'relationship-dance-permission-denied',
+                403
+            );
+        }
+
+        if ($playbackState === 'playing') {
+            $activeMembers = array_values(array_filter(
+                $members,
+                fn(array $member): bool => (string)($member['membership_status'] ?? 'active') === 'active'
+            ));
+            $visibleNormalHosts = array_values(array_filter(
+                $activeMembers,
+                fn(array $member): bool => (string)($member['relationship_role'] ?? 'normal') === 'normal'
+                    && !empty($member['last_seen_at'])
+            ));
+            if (count($activeMembers) < 2 || !$visibleNormalHosts) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_DANCE_UNAVAILABLE',
+                    'That dance is unavailable for the current relationship.',
+                    'dance-inapplicable',
+                    409
+                );
+            }
+        }
+
+        $storedOptions = [];
+        if (!empty($relationship['options_json'])) {
+            $storedOptions = json_decode((string)$relationship['options_json'], true);
+            if (!is_array($storedOptions) || json_last_error() !== JSON_ERROR_NONE) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_DANCE_CONFLICT',
+                    'The relationship configuration requires repair.',
+                    'malformed-stored-options',
+                    409
+                );
+            }
+        }
+        $playback = $playbackState === 'playing'
+            ? avatar_relationship_dance_playback([
+                'state' => 'playing',
+                'danceId' => $danceId,
+                'startedAtMs' => (int)floor(microtime(true) * 1000),
+                'generation' => $operationId,
+                'initiatorParticipantId' => $actorParticipantId,
+            ])
+            : avatar_relationship_dance_playback([
+                'state' => 'stopped',
+                'generation' => $operationId,
+            ]);
+        $storedOptions['dancePlayback'] = $playback;
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET options_json = ?, version = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([
+            json_encode($storedOptions, JSON_UNESCAPED_SLASHES),
+            $nextVersion,
+            (int)$relationship['id'],
+        ]);
+        $relationship['version'] = $nextVersion;
+
+        $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+        $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            'dance-playback-updated',
+            $eventPayload,
+            [
+                'operation_id' => $operationId,
+                'actor_participant_id' => $actorParticipantId,
+                'dancePlayback' => $playback,
+            ]
+        );
+        $eventId = (int)$pdo->lastInsertId();
+
+        return [
+            'ok' => true,
+            'idempotent' => false,
+            'event_id' => $eventId,
+            'relationship_id' => $relationshipPublicId,
+            'relationship_version' => $nextVersion,
+            'operation_id' => $operationId,
+            'dancePlayback' => $playback,
             'relationship' => $viewerPayload,
         ];
     });
@@ -3840,6 +4148,41 @@ function avatar_relationship_emit_lifecycle_event(
     array $relationship,
     array $extra = []
 ): void {
+    $safetyCancellationActions = [
+        'configuration-updated',
+        'member-added',
+        'lap-side-changed',
+        'member-left',
+        'member-removed',
+        'relationship-dissolved',
+    ];
+    if (in_array($action, $safetyCancellationActions, true)
+        && avatar_relationship_dance_playback($relationship['dancePlayback'] ?? null)['state'] === 'playing') {
+        $relationshipPublicId = (string)($relationship['id'] ?? $relationship['relationship_id'] ?? '');
+        $stmt = $pdo->prepare(
+            'SELECT id, options_json FROM avatar_relationships
+              WHERE session_id = ? AND relationship_public_id = ? LIMIT 1'
+        );
+        $stmt->execute([$sessionId, $relationshipPublicId]);
+        $row = $stmt->fetch() ?: null;
+        if ($row) {
+            $storedOptions = !empty($row['options_json'])
+                ? (json_decode((string)$row['options_json'], true) ?: [])
+                : [];
+            $generation = 'safety-' . $action . '-' . max(1, (int)($relationship['version'] ?? 1));
+            $stopped = avatar_relationship_cancel_dance_playback_options($storedOptions, $generation);
+            if ($stopped) {
+                $pdo->prepare(
+                    'UPDATE avatar_relationships SET options_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+                )->execute([
+                    json_encode($storedOptions, JSON_UNESCAPED_SLASHES),
+                    (int)$row['id'],
+                ]);
+                $relationship['dancePlayback'] = $stopped;
+                $extra['dancePlayback'] = $stopped;
+            }
+        }
+    }
     $payload = [
         'action' => $action,
         'relationship_id' => (string)($relationship['id'] ?? $relationship['relationship_id'] ?? ''),

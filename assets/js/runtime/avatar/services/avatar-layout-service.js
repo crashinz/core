@@ -747,6 +747,47 @@ export class AvatarLayoutService {
     }
 
     /**
+     * Clamps one shared dance offset against the complete visible group.
+     */
+    constrainRelationshipDanceOffset({
+        participants = [],
+        requestedOffset = null,
+        stageWidth,
+        stageHeight
+    } = {}) {
+
+        const width = Number(stageWidth || 0);
+        const height = Number(stageHeight || 0);
+        const boxes = Array.from(participants || []).map(participant => {
+            const frame = this.#runtime.renderer?.renderedAvatarFrame?.(participant);
+            if (frame) return frame;
+            const dimensions = this.#runtime.renderer?.renderedAvatarDimensions(participant);
+            return dimensions ? {
+                x: Number(participant.position_x || 0) * width,
+                y: Number(participant.position_y || 0) * height,
+                width: Math.max(1, Number(dimensions.width || 0)),
+                height: Math.max(1, Number(dimensions.height || 0))
+            } : null;
+        }).filter(Boolean);
+
+        if (!boxes.length || width <= 0 || height <= 0) {
+            return Object.freeze({ x: 0, y: 0 });
+        }
+
+        const bounds = this.#relationshipBounds(boxes);
+        const requestedX = Number(requestedOffset?.x || 0);
+        const requestedY = Number(requestedOffset?.y || 0);
+        const x = Math.max(-bounds.left, Math.min(width - bounds.right, requestedX));
+        const y = Math.max(-bounds.top, Math.min(height - bounds.bottom, requestedY));
+
+        return Object.freeze({
+            x: Number.isFinite(x) && x !== 0 ? x : 0,
+            y: Number.isFinite(y) && y !== 0 ? y : 0
+        });
+
+    }
+
+    /**
      * Applies authoritative participant coordinates.
      *
      * @param {Object} participant

@@ -133,6 +133,12 @@ import {
 
 import {
 
+    AvatarDanceService
+
+} from "./services/avatar-dance-service.js";
+
+import {
+
     AvatarRelationshipManagementService
 
 } from "./services/avatar-relationship-management-service.js";
@@ -217,6 +223,11 @@ export class AvatarRuntime extends CoreModule {
      * Relationship configuration transition runtime component.
      */
     #transitions = null;
+
+    /**
+     * Synchronized relationship dance runtime component.
+     */
+    #dances = null;
 
     /**
      * Aura workflow runtime component.
@@ -362,6 +373,15 @@ export class AvatarRuntime extends CoreModule {
     }
 
     /**
+     * Returns the synchronized relationship dance service.
+     */
+    get dances() {
+
+        return this.#dances;
+
+    }
+
+    /**
      * Returns the Avatar Aura Service.
      *
      * @returns {AvatarAuraService}
@@ -465,6 +485,9 @@ export class AvatarRuntime extends CoreModule {
             transitions:
                 this.#transitions?.getDiagnostics() ?? null,
 
+            dances:
+                this.#dances?.getDiagnostics() ?? null,
+
             aura:
                 this.#aura?.getDiagnostics() ?? null,
 
@@ -512,6 +535,8 @@ export class AvatarRuntime extends CoreModule {
 
         this.#createTransitions();
 
+        this.#createDances();
+
         this.#createAura();
 
         this.#createEffects();
@@ -558,6 +583,8 @@ export class AvatarRuntime extends CoreModule {
         this.#effects?.destroy();
 
         this.#aura?.destroy();
+
+        this.#dances?.destroy();
 
         this.#transitions?.destroy();
 
@@ -673,6 +700,20 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#transitions.initialize();
+
+    }
+
+    /**
+     * Creates the synchronized relationship dance component.
+     */
+    #createDances() {
+
+        this.#dances =
+            new AvatarDanceService(
+                this
+            );
+
+        this.#dances.initialize();
 
     }
 

@@ -3099,6 +3099,13 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 }
 .relationship-management-settings select,
 .relationship-management-settings input { width: 100%; }
+.relationship-dance-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.relationship-dance-controls .minor { min-width: 120px; }
 .relationship-order-list { display: grid; gap: 6px; }
 .relationship-order-row {
   display: flex;

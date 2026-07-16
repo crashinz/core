@@ -55,6 +55,9 @@
  *
  * Build 000044 Part 7
  * - Added finite image-only avatar orientation presentation.
+ *
+ * Build 000044 Part 9
+ * - Added exact relationship-dance offset presentation and cleanup.
  ******************************************************************************/
 
 /**
@@ -124,6 +127,8 @@ export class AvatarRenderer {
 
     #webcamPlaybackStates = new WeakMap();
 
+    #relationshipDanceTargets = new Map();
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -167,6 +172,8 @@ export class AvatarRenderer {
      * Releases resources owned by the renderer.
      */
     destroy() {
+
+        this.clearAllRelationshipDanceOffsets();
 
         this.clearStageLinkIcons({
             removeImmediately:
@@ -569,6 +576,99 @@ export class AvatarRenderer {
         });
 
         return Object.freeze(targets);
+
+    }
+
+    /**
+     * Returns the current resting avatar frame without temporary dance offset.
+     */
+    renderedAvatarFrame(participant) {
+
+        const element = participant?.avatarEl;
+        const dimensions = this.renderedAvatarDimensions(participant);
+        const x = Number.parseFloat(element?.style?.left || "");
+        const y = Number.parseFloat(element?.style?.top || "");
+        const appliedWidth = Number.parseFloat(element?.style?.width || "");
+        const appliedHeight = Number.parseFloat(element?.style?.height || "");
+        if (!dimensions || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return Object.freeze({
+            x,
+            y,
+            width: Number.isFinite(appliedWidth) && appliedWidth > 0
+                ? appliedWidth
+                : dimensions.width,
+            height: Number.isFinite(appliedHeight) && appliedHeight > 0
+                ? appliedHeight
+                : dimensions.height
+        });
+
+    }
+
+    /**
+     * Applies one shared temporary dance offset to complete renderer targets.
+     */
+    applyRelationshipDanceOffset({
+        relationshipId,
+        generation,
+        participants = [],
+        offset = null
+    } = {}) {
+
+        const id = String(relationshipId || "");
+        const token = String(generation || "");
+        if (!id || !token) return false;
+        let operation = this.#relationshipDanceTargets.get(id);
+        if (operation?.generation !== token) {
+            this.clearRelationshipDanceOffset(id);
+            operation = { generation: token, targets: new Map() };
+            this.#relationshipDanceTargets.set(id, operation);
+        }
+
+        const currentTargets = new Set();
+        this.relationshipTransitionTargets(participants).forEach(target => {
+            const element = target.element;
+            currentTargets.add(element);
+            if (!operation.targets.has(element)) {
+                operation.targets.set(element, element.style.translate || "");
+            }
+            element.style.translate = `${Number(offset?.x || 0)}px ${Number(offset?.y || 0)}px`;
+            element.dataset.relationshipDanceGeneration = token;
+        });
+        operation.targets.forEach((previous, element) => {
+            if (currentTargets.has(element)) return;
+            element.style.translate = previous;
+            delete element.dataset.relationshipDanceGeneration;
+            operation.targets.delete(element);
+        });
+        this.#renderCount += 1;
+        return true;
+
+    }
+
+    /**
+     * Restores exact pre-dance presentation for one relationship.
+     */
+    clearRelationshipDanceOffset(relationshipId) {
+
+        const id = String(relationshipId || "");
+        const operation = this.#relationshipDanceTargets.get(id);
+        if (!operation) return false;
+        operation.targets.forEach((previous, element) => {
+            element.style.translate = previous;
+            delete element.dataset.relationshipDanceGeneration;
+        });
+        operation.targets.clear();
+        this.#relationshipDanceTargets.delete(id);
+        this.#renderCount += 1;
+        return true;
+
+    }
+
+    clearAllRelationshipDanceOffsets() {
+
+        Array.from(this.#relationshipDanceTargets.keys()).forEach(relationshipId => {
+            this.clearRelationshipDanceOffset(relationshipId);
+        });
 
     }
 

@@ -283,6 +283,7 @@ export class AvatarCoordinator {
      */
     destroy() {
 
+        this.#runtime.dances?.stopAll("coordinator-destroy");
         this.cancelPendingLinkChoice("runtime-destroy");
         this.#linkChoiceSuppressionTimers.forEach(timer => clearTimeout(timer));
         this.#linkChoiceSuppressionTimers.clear();
@@ -328,6 +329,7 @@ export class AvatarCoordinator {
     configure(context = {}) {
 
         this.#context = context;
+        this.#runtime.dances?.configure(context);
 
     }
 
@@ -1183,6 +1185,10 @@ export class AvatarCoordinator {
                 ? this.#transitionRelationshipConfiguration(reconciled, payload)
                 : false;
 
+        this.#runtime.dances?.reconcile(reconciled, {
+            reason: String(payload.action || "relationship-event")
+        });
+
         const participantIds =
             Array.from(new Set([
                 ...(previousRelationship?.memberIds || []),
@@ -1413,6 +1419,11 @@ export class AvatarCoordinator {
             }
         );
 
+        const relationship = this.#relationships.relationshipById(presentation.relationshipId);
+        this.#runtime.dances?.reconcile(relationship, {
+            reason: options.reason || "participant-refresh"
+        });
+
         return true;
 
     }
@@ -1439,6 +1450,10 @@ export class AvatarCoordinator {
                         }
                     )
                 );
+                const relationship = this.#relationships.relationshipById(presentation.relationshipId);
+                this.#runtime.dances?.reconcile(relationship, {
+                    reason: options.reason || "all-refresh"
+                });
             });
 
         return changed;
@@ -1525,6 +1540,10 @@ export class AvatarCoordinator {
             this.#relationships.relationshipPresentationForParticipant(participant.id);
 
         if (presentation) {
+            this.#runtime.dances?.suspend(
+                presentation.relationshipId,
+                "local-drag-start"
+            );
             this.#runtime.transitions?.finish(presentation.relationshipId, {
                 relationshipVersion: presentation.relationshipVersion,
                 reason: "local-drag-start"
@@ -1757,6 +1776,18 @@ export class AvatarCoordinator {
                 positions
             });
             if (!result?.ok) throw new Error("Relationship movement was not accepted.");
+            if (result.dancePlayback) {
+                const current = this.#relationships.relationshipById(operation.relationshipId);
+                if (current) {
+                    this.#relationships.upsertPersistedRelationship({
+                        ...current,
+                        dancePlayback: result.dancePlayback
+                    });
+                }
+                this.#runtime.dances?.stop(operation.relationshipId, {
+                    reason: "local-group-movement"
+                });
+            }
             this.#relationshipMovementEventIds.set(
                 operation.relationshipId,
                 Math.max(
@@ -1848,6 +1879,18 @@ export class AvatarCoordinator {
 
         this.#runtime.transitions?.finish(relationshipId, {
             relationshipVersion: Number(payload.relationship_version),
+            reason: "remote-group-movement"
+        });
+        if (payload.dancePlayback) {
+            const current = this.#relationships.relationshipById(relationshipId);
+            if (current) {
+                this.#relationships.upsertPersistedRelationship({
+                    ...current,
+                    dancePlayback: payload.dancePlayback
+                });
+            }
+        }
+        this.#runtime.dances?.stop(relationshipId, {
             reason: "remote-group-movement"
         });
         const changed = updates.map(update => {

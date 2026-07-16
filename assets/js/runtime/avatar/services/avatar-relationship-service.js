@@ -107,6 +107,32 @@ function normalizeRelationshipRowOptions(options = {}) {
 
 }
 
+function normalizeDancePlayback(playback = {}) {
+    const danceId = ["synchronized-sway", "synchronized-bounce"]
+        .includes(String(playback?.danceId || playback?.dance_id || ""))
+        ? String(playback?.danceId || playback?.dance_id)
+        : null;
+    const generation = String(playback?.generation || "");
+    const startedAtMs = Number(playback?.startedAtMs || playback?.started_at_ms || 0);
+    const initiatorParticipantId = Number(
+        playback?.initiatorParticipantId || playback?.initiator_participant_id || 0
+    );
+    const playing = String(playback?.state || "stopped") === "playing"
+        && danceId
+        && generation
+        && Number.isFinite(startedAtMs)
+        && startedAtMs > 0
+        && initiatorParticipantId > 0;
+    return Object.freeze({
+        schemaVersion: 1,
+        danceId: playing ? danceId : null,
+        state: playing ? "playing" : "stopped",
+        startedAtMs: playing ? startedAtMs : null,
+        generation: generation || null,
+        initiatorParticipantId: playing ? initiatorParticipantId : null
+    });
+}
+
 const RELATIONSHIP_CAPABILITIES = Object.freeze({
 
     normal:
@@ -1147,6 +1173,7 @@ export class AvatarRelationshipService {
             visibleMembers: Object.freeze(visibleMembers),
             visibleMemberIds: Object.freeze(visibleMemberIds),
             options: selectedOptions,
+            dancePlayback: relationship.dancePlayback,
             selectedFormation: formationResolution.selected,
             effectiveFormation: formationResolution.effective,
             formationFallbackReason: formationResolution.fallbackReason,
@@ -1317,6 +1344,15 @@ export class AvatarRelationshipService {
             }),
             Object.freeze({ id: "grid", label: "Grid", available: normalMembers.length >= 2 })
         ]);
+        const dancePlayback = normalizeDancePlayback(relationship?.dancePlayback);
+        const danceOptions = Object.freeze(
+            Array.from(this.#runtime.dances?.approvedDances || []).map(dance => Object.freeze({
+                id: dance.id,
+                label: dance.label,
+                durationMs: dance.durationMs,
+                available: Boolean(relationship && members.length >= 2 && normalMembers.some(member => member.renderable))
+            }))
+        );
         return Object.freeze({
             relationshipId: String(relationship?.id || visibleRequests[0]?.relationshipId || ""),
             relationshipVersion: Math.max(1, Number(relationship?.version || visibleRequests[0]?.relationshipVersion || 1)),
@@ -1344,6 +1380,8 @@ export class AvatarRelationshipService {
                 formationFallbackReason: formationResolution.fallbackReason,
                 formationOptions
             }),
+            dancePlayback,
+            danceOptions,
             actions: Object.freeze({
                 manage: viewerActive,
                 invite: canManage,
@@ -1351,6 +1389,7 @@ export class AvatarRelationshipService {
                 setJoinPolicy: canManage,
                 reorder: canManage && normalMembers.length > 1,
                 configurePosition: canManage,
+                controlDance: canManage,
                 leave: viewerActive,
                 dissolve: canManage
             }),
@@ -2769,6 +2808,10 @@ export class AvatarRelationshipService {
             options:
                 normalizeRelationshipRowOptions(
                     relationship.options || relationship.metadata?.options || {}
+                ),
+            dancePlayback:
+                normalizeDancePlayback(
+                    relationship.dancePlayback || relationship.dance_playback || {}
                 ),
             divergenceStatus:
                 relationship.divergence_status ||

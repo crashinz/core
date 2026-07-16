@@ -119,6 +119,13 @@ function avatar_size_policy_update(PDO $pdo, array $input, bool $reset = false):
             }
         }
         $revision = (int)$before['revision'] + ($changed ? 1 : 0);
+        if ($changed && (int)$before['avatarDisplayMaxPx'] !== (int)$candidate['avatarDisplayMaxPx']) {
+            avatar_relationship_cancel_active_dances(
+                $pdo,
+                null,
+                'installation-avatar-display-cap-change'
+            );
+        }
         set_app_setting($pdo, 'avatar_size_policy_revision', (string)$revision);
         $policy = avatar_size_policy($pdo);
         if ($changed) avatar_size_policy_emit($pdo, $policy);
@@ -265,6 +272,8 @@ function avatar_size_preferences_update(
         }
         $nextVersion = $currentVersion + ($changed ? 1 : 0);
         if ($changed) {
+            $avatarDisplayChanged = (isset($user['avatar_display_size_px']) ? (int)$user['avatar_display_size_px'] : null)
+                !== $next['avatar_display_size_px'];
             $pdo->prepare(
                 'UPDATE users SET avatar_display_size_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
             )->execute([
@@ -283,6 +292,13 @@ function avatar_size_preferences_update(
                 $nextVersion,
                 $userId,
             ]);
+            if ($avatarDisplayChanged) {
+                avatar_relationship_cancel_active_dances(
+                    $pdo,
+                    $userId,
+                    'participant-avatar-display-size-change'
+                );
+            }
         }
         $next['avatar_size_version'] = $nextVersion;
         if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();

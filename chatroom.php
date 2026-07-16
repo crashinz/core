@@ -540,6 +540,17 @@ if (session_status() === PHP_SESSION_ACTIVE) {
           <option value="fade-reposition">Fade and Reposition</option>
         </select>
       </label>
+      <label>Dance
+        <select id="relationship-management-dance" disabled>
+          <option value="synchronized-sway">Synchronized Sway</option>
+          <option value="synchronized-bounce">Synchronized Bounce</option>
+        </select>
+      </label>
+      <div class="relationship-dance-controls">
+        <button class="btn" id="relationship-management-dance-start" type="button" disabled>Start</button>
+        <button class="btn" id="relationship-management-dance-stop" type="button" disabled>Stop</button>
+        <span class="minor" id="relationship-management-dance-status" role="status" aria-live="polite">Stopped</span>
+      </div>
       <label class="relationship-spacing-control">Row spacing
         <input id="relationship-management-spacing" type="range" min="0" max="64" step="1" value="0" disabled>
         <output id="relationship-management-spacing-value">0 px</output>
