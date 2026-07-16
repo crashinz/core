@@ -52,6 +52,9 @@
  * Build 000036
  * - Added rendered-size change notification for relationship refresh
  *   orchestration.
+ *
+ * Build 000044 Part 7
+ * - Added finite image-only avatar orientation presentation.
  ******************************************************************************/
 
 /**
@@ -70,6 +73,12 @@
 
 const DEFAULT_AVATAR_FALLBACK_SIZE = 150;
 const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
+const AVATAR_ORIENTATION_SCALE = Object.freeze({
+    original: "",
+    "flip-horizontal": "-1 1",
+    "flip-vertical": "1 -1",
+    "flip-both": "-1 -1"
+});
 
 //--------------------------------------------------
 // Avatar Renderer
@@ -98,6 +107,8 @@ export class AvatarRenderer {
      * Number of presentation operations performed.
      */
     #renderCount = 0;
+
+    #orientationSyncCount = 0;
 
     /**
      * Stage link icon elements keyed by relationship key.
@@ -140,6 +151,7 @@ export class AvatarRenderer {
     initialize() {
 
         this.#renderCount = 0;
+        this.#orientationSyncCount = 0;
 
     }
 
@@ -163,6 +175,7 @@ export class AvatarRenderer {
         });
 
         this.#renderCount = 0;
+        this.#orientationSyncCount = 0;
 
     }
 
@@ -219,6 +232,40 @@ export class AvatarRenderer {
     }
 
     /**
+     * Applies one finite orientation to avatar image pixels only.
+     * CSS individual scale composes with transition translate and source-change
+     * transform animation without changing layout dimensions.
+     *
+     * @param {HTMLImageElement} image
+     * @param {string} orientation
+     * @returns {string}
+     */
+    setAvatarImageOrientation(image, orientation = "original") {
+
+        if (!image) return "original";
+
+        const normalized = Object.prototype.hasOwnProperty.call(
+            AVATAR_ORIENTATION_SCALE,
+            orientation
+        )
+            ? orientation
+            : "original";
+
+        if (image.dataset.avatarOrientation !== normalized) {
+            this.#orientationSyncCount += 1;
+        }
+        image.dataset.avatarOrientation = normalized;
+        if (AVATAR_ORIENTATION_SCALE[normalized]) {
+            image.style.scale = AVATAR_ORIENTATION_SCALE[normalized];
+        } else {
+            image.style.removeProperty("scale");
+        }
+
+        return normalized;
+
+    }
+
+    /**
      * Synchronizes a participant's avatar stage layers.
      *
      * @param {Object} participant
@@ -255,6 +302,7 @@ export class AvatarRenderer {
 
             label = documentRef.createElement("div");
             label.className = "avatar-name";
+            label.dataset.participantId = participant.id;
 
             const layers =
                 this.#runtime.order?.stageLayerOrder({
@@ -299,6 +347,10 @@ export class AvatarRenderer {
                 window:
                     options.window
             }
+        );
+        participant.avatar_orientation = this.setAvatarImageOrientation(
+            image,
+            options.orientation
         );
 
         this.#notifyRenderedSizeAfterImageLoad(
@@ -1401,10 +1453,13 @@ export class AvatarRenderer {
                 "AvatarRenderer",
 
             build:
-                "000044 Part 6",
+                "000044 Part 7",
 
             renderCount:
                 this.#renderCount,
+
+            orientationSyncCount:
+                this.#orientationSyncCount,
 
             stageLinkIconCount:
                 this.#stageLinkIcons.size

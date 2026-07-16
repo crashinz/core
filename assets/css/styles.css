@@ -4402,7 +4402,8 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   margin: 6px 4px;
   background: var(--border);
 }
-#ctx-tools {
+#ctx-tools,
+#ctx-orientation {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4424,6 +4425,10 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .ctx-submenu-wrap.open .ctx-submenu,
 .ctx-submenu-wrap:hover .ctx-submenu {
   display: block;
+}
+.ctx-submenu [aria-checked="true"] {
+  background: rgba(39,211,195,.18);
+  color: #dffffb;
 }
 #room-menu a {
   display: flex;

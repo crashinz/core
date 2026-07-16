@@ -4,6 +4,35 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'POST required']
 $pdo = db();
 $sessionId = resolve_session_id($pdo, $_POST['session_id'] ?? '');
 $p = auth_participant($pdo, $sessionId, $_POST['join_token'] ?? '');
+$action = trim((string)($_POST['action'] ?? 'upload'));
+
+if ($action === 'set_orientation') {
+    $result = avatar_orientation_update(
+        $pdo,
+        (int)$p['user_id'],
+        $_POST['expected_orientation'] ?? null,
+        $_POST['avatar_orientation'] ?? null
+    );
+    if (empty($result['ok'])) {
+        $status = (int)($result['http_status'] ?? 400);
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
+    $orientation = avatar_orientation_normalize($result['avatar_orientation'] ?? null);
+    emit_event($pdo, $sessionId, 'avatar', [
+        'participant_id' => (int)$p['id'],
+        'avatar_path' => (string)$result['avatar_path'],
+        'avatar_url' => resolve_avatar((string)$result['avatar_path']),
+        'avatar_orientation' => $orientation,
+        'webcam_path' => $p['webcam_path'] ?? null,
+        'webcam_enabled' => !empty($p['webcam_enabled']),
+    ]);
+    json_out([
+        'ok' => true,
+        'idempotent' => !empty($result['idempotent']),
+        'avatar_orientation' => $orientation,
+    ]);
+}
 
 if (empty($_FILES['avatar']['tmp_name']) || !is_uploaded_file($_FILES['avatar']['tmp_name'])) {
     json_out(['error' => 'Avatar image required'], 400);
@@ -30,8 +59,14 @@ emit_event($pdo, $sessionId, 'avatar', [
     'participant_id' => (int)$p['id'],
     'avatar_path' => $public,
     'avatar_url' => $public,
+    'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
     'webcam_path' => null,
     'webcam_enabled' => false,
 ]);
 
-json_out(['ok' => true, 'avatar_path' => $public, 'avatar_url' => $public]);
+json_out([
+    'ok' => true,
+    'avatar_path' => $public,
+    'avatar_url' => $public,
+    'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
+]);

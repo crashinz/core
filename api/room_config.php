@@ -99,6 +99,7 @@ $participants = array_map(function(array $p) use ($roomOwnerId): array {
         'is_owner' => (int)$p['user_id'] === $roomOwnerId,
         'avatar_path' => $p['avatar_path'],
         'avatar_url' => $p['webcam_path'] ?: resolve_avatar($p['avatar_path']),
+        'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
         'aura_effect' => $p['aura_effect'] ?? null,
         'position_x' => (float)$p['position_x'],
         'position_y' => (float)$p['position_y'],

@@ -30,13 +30,15 @@ Those responsibilities remain outside the runtime.
 
 # Relationship Persistence Boundary
 
-Build 000044 Part 6 adds finite formation and transition configuration without
+Build 000044 Part 6, including the owner-approved Part 6E extension, adds finite
+formation and transition configuration without
 changing the relationship persistence boundary:
 
 - public options are
   `{schemaVersion: 2, rowSpacing, formation, transition}`;
 - schema version 1 migrates deterministically to `horizontal-row` and `snap`;
-- formations are `horizontal-row`, `bottom-center-trio`, and `grid` only;
+- formations are `horizontal-row`, `bottom-center-trio`, `top-center-trio`, and
+  `grid` only;
 - transitions are `snap`, `glide`, and `fade-reposition` only;
 - `AvatarFormationService` owns registry, applicability, fallback, validation,
   and diagnostics, while stateless strategies only propose geometry;
@@ -48,6 +50,30 @@ changing the relationship persistence boundary:
   configuration, drag, movement, refresh, and reconciliation boundaries;
 - the existing expected-version configure transaction atomically persists
   order, options, and exact positions under one version and event.
+- temporary non-renderability preserves selected formation identity, while a
+  permanent authoritative normal-membership change that invalidates a trio is
+  versioned and normalized to `horizontal-row`; lap-only changes do not
+  invalidate trios.
+
+Build 000044 Part 7 adds finite server-authoritative avatar image orientation.
+`AvatarRenderer` applies orientation to image pixels only. Orientation must not
+alter authoritative rendered dimensions, containers, labels, icons, frames,
+webcam presentation, transition targets, geometry, drag bounds, or persisted
+relationship positions.
+
+`users.avatar_orientation` is the durable authority and active participant
+rows are room projections. The finite values are `original`,
+`flip-horizontal`, `flip-vertical`, and `flip-both`. The existing avatar API
+uses expected-current conflict protection, while participant join, room config,
+and avatar events synchronize initial and remote state. Uploading a replacement
+avatar preserves orientation. CSS individual `scale` leaves source animation
+`transform` and relationship transition `translate`/opacity independent.
+
+Build 000044 Part 6E and Part 7 are Engineering Complete. Exact-final
+integrated Edge/Chrome certification passed 142 automated checks with zero
+defects; production fingerprint is
+`B2C821539F8618CC7C667E4A7CF9B63E2A0CEE0AC4A249FD381F0B0ADA89B6D7`.
+Human visual review remains owner-pending.
 
 Build 000044 Part 5 completes dual-side lap ownership within the existing
 relationship boundary:

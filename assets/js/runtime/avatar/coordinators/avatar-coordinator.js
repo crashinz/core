@@ -1245,7 +1245,12 @@ export class AvatarCoordinator {
         const sortedSubmitted = submittedOrder.slice().sort((a, b) => a - b);
         const sortedExpected = expectedOrder.slice().sort((a, b) => a - b);
         const spacing = Number(rowSpacing);
-        const selectedFormation = ["horizontal-row", "bottom-center-trio", "grid"]
+        const selectedFormation = [
+            "horizontal-row",
+            "bottom-center-trio",
+            "top-center-trio",
+            "grid"
+        ]
             .includes(String(formation))
             ? String(formation)
             : null;

@@ -728,9 +728,11 @@ export class AvatarRelationshipManagementService {
     #formationLabel(formation) {
         return formation === "bottom-center-trio"
             ? "Bottom-Center Trio"
-            : formation === "grid"
-                ? "Grid"
-                : "Horizontal Row";
+            : formation === "top-center-trio"
+                ? "Top-Center Trio"
+                : formation === "grid"
+                    ? "Grid"
+                    : "Horizontal Row";
     }
 
     #operationId(prefix = "config") {

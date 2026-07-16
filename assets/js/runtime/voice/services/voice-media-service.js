@@ -5995,9 +5995,23 @@ export class VoiceMediaService {
 
                         });
 
+                    const activePeer =
+                        this.#peers.get(from) || null;
+
+                    const scheduledDeferredRequest =
+                        outcome === SIGNAL_OUTCOME.DEFERRED &&
+                        Boolean(activePeer?.__voicePendingNegotiation);
+
+                    const effectiveOutcome =
+                        scheduledDeferredRequest ?
+                            SIGNAL_OUTCOME.CONSUMED :
+                            outcome;
+
                     this.#recordNegotiationDiagnostic({
 
                         event:
+                            scheduledDeferredRequest ?
+                                "renegotiation-request-scheduled" :
                             outcome === SIGNAL_OUTCOME.DEFERRED ?
                                 "renegotiation-request-deferred" :
                                 "renegotiation-request-completed",
@@ -6007,10 +6021,14 @@ export class VoiceMediaService {
                         signalId:
                             Number(signal.id) || null,
 
-                        outcome,
+                        outcome:
+                            effectiveOutcome,
 
-                        ...(this.#peers.get(from) ?
-                            this.#peerSnapshot(this.#peers.get(from)) :
+                        operationOutcome:
+                            outcome,
+
+                        ...(activePeer ?
+                            this.#peerSnapshot(activePeer) :
                             {
 
                                 remoteParticipantId:
@@ -6020,7 +6038,7 @@ export class VoiceMediaService {
 
                     });
 
-                    return outcome;
+                    return effectiveOutcome;
 
                 } catch (error) {
 

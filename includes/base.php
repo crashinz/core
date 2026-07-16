@@ -153,6 +153,7 @@ function mysqlize_schema(string $schema): string {
         'role' => 'VARCHAR(32)',
         'avatar_path' => 'VARCHAR(512)',
         'avatar_url' => 'VARCHAR(512)',
+        'avatar_orientation' => 'VARCHAR(32)',
         'background_path' => 'VARCHAR(512)',
         'background_mime' => 'VARCHAR(128)',
         'background_thumb_path' => 'VARCHAR(512)',
@@ -327,6 +328,7 @@ function migrate(PDO $pdo): void {
             display_name TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
             avatar_path TEXT DEFAULT 'preset:Default',
+            avatar_orientation TEXT NOT NULL DEFAULT 'original',
             aura_effect TEXT DEFAULT NULL,
             current_room_id INTEGER DEFAULT NULL,
             last_seen_at TEXT DEFAULT NULL,
@@ -372,6 +374,7 @@ function migrate(PDO $pdo): void {
             user_id INTEGER NOT NULL,
             display_name TEXT NOT NULL,
             avatar_path TEXT DEFAULT 'preset:Default',
+            avatar_orientation TEXT NOT NULL DEFAULT 'original',
             aura_effect TEXT DEFAULT NULL,
             join_token TEXT NOT NULL UNIQUE,
             position_x REAL NOT NULL DEFAULT 0.15,
@@ -847,6 +850,9 @@ function migrate(PDO $pdo): void {
         if (!in_array('aura_effect', $mysqlUserColNames, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN aura_effect VARCHAR(128) DEFAULT NULL');
         }
+        if (!in_array('avatar_orientation', $mysqlUserColNames, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN avatar_orientation VARCHAR(32) NOT NULL DEFAULT 'original'");
+        }
         $mysqlParticipantCols = $pdo->query('SHOW COLUMNS FROM participants')->fetchAll();
         $mysqlParticipantColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $mysqlParticipantCols);
         if (!in_array('webcam_enabled', $mysqlParticipantColNames, true)) {
@@ -855,8 +861,14 @@ function migrate(PDO $pdo): void {
         if (!in_array('aura_effect', $mysqlParticipantColNames, true)) {
             $pdo->exec('ALTER TABLE participants ADD COLUMN aura_effect VARCHAR(128) DEFAULT NULL');
         }
+        if (!in_array('avatar_orientation', $mysqlParticipantColNames, true)) {
+            $pdo->exec("ALTER TABLE participants ADD COLUMN avatar_orientation VARCHAR(32) NOT NULL DEFAULT 'original'");
+        }
         if (!in_array('link_mode', $mysqlParticipantColNames, true)) {
             $pdo->exec("ALTER TABLE participants ADD COLUMN link_mode VARCHAR(24) NOT NULL DEFAULT 'normal'");
+        }
+        foreach (['users', 'participants'] as $orientationTable) {
+            $pdo->exec("UPDATE {$orientationTable} SET avatar_orientation = 'original' WHERE avatar_orientation IS NULL OR avatar_orientation NOT IN ('original', 'flip-horizontal', 'flip-vertical', 'flip-both')");
         }
         $mysqlVoiceCols = $pdo->query('SHOW COLUMNS FROM voice_sessions')->fetchAll();
         $mysqlVoiceColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $mysqlVoiceCols);
@@ -922,6 +934,9 @@ function migrate(PDO $pdo): void {
     if (!in_array('aura_effect', $userColNames, true)) {
         $pdo->exec('ALTER TABLE users ADD COLUMN aura_effect TEXT DEFAULT NULL');
     }
+    if (!in_array('avatar_orientation', $userColNames, true)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN avatar_orientation TEXT NOT NULL DEFAULT 'original'");
+    }
     $settingsCols = $pdo->query('PRAGMA table_info(app_settings)')->fetchAll();
     $settingsColNames = array_map(fn(array $col): string => (string)$col['name'], $settingsCols);
     if (in_array('key', $settingsColNames, true) && !in_array('setting_key', $settingsColNames, true)) {
@@ -973,11 +988,17 @@ function migrate(PDO $pdo): void {
     if (!in_array('aura_effect', $participantColNames, true)) {
         $pdo->exec('ALTER TABLE participants ADD COLUMN aura_effect TEXT DEFAULT NULL');
     }
+    if (!in_array('avatar_orientation', $participantColNames, true)) {
+        $pdo->exec("ALTER TABLE participants ADD COLUMN avatar_orientation TEXT NOT NULL DEFAULT 'original'");
+    }
     if (!$hasLinkedTo) {
         $pdo->exec('ALTER TABLE participants ADD COLUMN linked_to_participant_id INTEGER DEFAULT NULL');
     }
     if (!in_array('link_mode', $participantColNames, true)) {
         $pdo->exec("ALTER TABLE participants ADD COLUMN link_mode TEXT NOT NULL DEFAULT 'normal'");
+    }
+    foreach (['users', 'participants'] as $orientationTable) {
+        $pdo->exec("UPDATE {$orientationTable} SET avatar_orientation = 'original' WHERE avatar_orientation IS NULL OR avatar_orientation NOT IN ('original', 'flip-horizontal', 'flip-vertical', 'flip-both')");
     }
     $voiceCols = $pdo->query('PRAGMA table_info(voice_sessions)')->fetchAll();
     $voiceColNames = array_map(fn(array $col): string => (string)$col['name'], $voiceCols);
@@ -2037,7 +2058,54 @@ function avatar_relationship_public_options(mixed $options = []): array {
 }
 
 function avatar_relationship_formation_ids(): array {
-    return ['horizontal-row', 'bottom-center-trio', 'grid'];
+    return ['horizontal-row', 'bottom-center-trio', 'top-center-trio', 'grid'];
+}
+
+function avatar_relationship_trio_formation_ids(): array {
+    return ['bottom-center-trio', 'top-center-trio'];
+}
+
+function avatar_relationship_normalize_permanently_invalid_formation_locked(
+    PDO $pdo,
+    array &$relationship,
+    array $members
+): ?array {
+    $storedOptions = [];
+    if (!empty($relationship['options_json'])) {
+        $storedOptions = json_decode((string)$relationship['options_json'], true);
+        if (!is_array($storedOptions) || json_last_error() !== JSON_ERROR_NONE) {
+            throw new RuntimeException('Relationship options require repair before membership mutation.');
+        }
+    }
+    $publicOptions = avatar_relationship_public_options($storedOptions);
+    $normalMemberCount = count(array_filter(
+        $members,
+        fn(array $member): bool => (string)($member['membership_status'] ?? 'active') === 'active'
+            && (string)($member['relationship_role'] ?? 'normal') === 'normal'
+    ));
+    if (!in_array($publicOptions['formation'], avatar_relationship_trio_formation_ids(), true)
+        || $normalMemberCount === 3) {
+        return null;
+    }
+
+    $previousFormation = $publicOptions['formation'];
+    $publicOptions['formation'] = 'horizontal-row';
+    $storedOptions = array_merge($storedOptions, $publicOptions);
+    $encoded = json_encode($storedOptions, JSON_UNESCAPED_SLASHES);
+    if ($encoded === false) {
+        throw new RuntimeException('Relationship options could not be normalized.');
+    }
+    $pdo->prepare(
+        'UPDATE avatar_relationships SET options_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    )->execute([$encoded, (int)$relationship['id']]);
+    $relationship['options_json'] = $encoded;
+
+    return [
+        'from' => $previousFormation,
+        'to' => 'horizontal-row',
+        'reason' => 'permanent-normal-membership-change',
+        'normal_member_count' => $normalMemberCount,
+    ];
 }
 
 function avatar_relationship_transition_ids(): array {
@@ -3511,17 +3579,15 @@ function avatar_relationship_configure(
             $configuration['transition'] = $storedPublicOptions['transition'];
         }
         $storedPublicOptions = avatar_relationship_public_options($storedOptions);
-        if ($configuration['formation'] !== $storedPublicOptions['formation']) {
-            $normalCount = count($normalMembers);
-            if (($configuration['formation'] === 'bottom-center-trio' && $normalCount !== 3)
-                || ($configuration['formation'] === 'grid' && $normalCount < 2)) {
-                return avatar_relationship_operation_error(
-                    'RELATIONSHIP_CONFIGURATION_INVALID',
-                    'That formation is unavailable for the current relationship.',
-                    'formation-inapplicable',
-                    400
-                );
-            }
+        $normalCount = count($normalMembers);
+        if ((in_array($configuration['formation'], avatar_relationship_trio_formation_ids(), true) && $normalCount !== 3)
+            || ($configuration['formation'] === 'grid' && $normalCount < 2)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFIGURATION_INVALID',
+                'That formation is unavailable for the current relationship.',
+                'formation-inapplicable',
+                400
+            );
         }
 
         $presentMemberIds = [];
@@ -4059,6 +4125,14 @@ function avatar_relationship_add_member_locked(
         );
     }
 
+    $formationNormalization = null;
+    if ($relationshipRole === 'normal') {
+        $formationNormalization = avatar_relationship_normalize_permanently_invalid_formation_locked(
+            $pdo,
+            $relationship,
+            avatar_relationship_locked_members($pdo, $relationshipDbId)
+        );
+    }
     $nextVersion = max(1, (int)$relationship['version']) + 1;
     $pdo->prepare(
         'UPDATE avatar_relationships SET version = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
@@ -4089,6 +4163,7 @@ function avatar_relationship_add_member_locked(
     return [
         'ok' => true,
         'relationship_version' => $nextVersion,
+        'configuration_normalized' => $formationNormalization,
         'relationship' => avatar_relationship_payload($pdo, $relationshipDbId, $actorParticipantId),
         'event_relationship' => avatar_relationship_public_event_snapshot($pdo, $relationshipDbId),
     ];
@@ -4246,7 +4321,10 @@ function avatar_relationship_create_request(
                 $sessionId,
                 'member-added',
                 $add['event_relationship'],
-                ['request_outcome' => 'accepted']
+                array_filter([
+                    'request_outcome' => 'accepted',
+                    'configuration_normalized' => $add['configuration_normalized'] ?? null,
+                ], fn(mixed $value): bool => $value !== null)
             );
             $accepted = avatar_relationship_locked_request($pdo, $requestPublicId);
             return [
@@ -4372,7 +4450,10 @@ function avatar_relationship_resolve_request(
                 $sessionId,
                 'member-added',
                 $add['event_relationship'],
-                ['request_outcome' => 'accepted']
+                array_filter([
+                    'request_outcome' => 'accepted',
+                    'configuration_normalized' => $add['configuration_normalized'] ?? null,
+                ], fn(mixed $value): bool => $value !== null)
             );
             $resolved = avatar_relationship_locked_request($pdo, $requestPublicId);
             return [
@@ -5253,6 +5334,13 @@ function avatar_relationship_mutate_member(
             "DELETE FROM avatar_relationship_members
               WHERE relationship_id = ? AND participant_id IN ($departingPlaceholders)"
         )->execute(array_merge([(int)$relationship['id']], $departingIds));
+        $formationNormalization = (string)$targetMember['relationship_role'] === 'normal'
+            ? avatar_relationship_normalize_permanently_invalid_formation_locked(
+                $pdo,
+                $relationship,
+                $remainingMembers
+            )
+            : null;
         $pdo->prepare(
             'UPDATE avatar_relationships
                 SET version = ?, creator_participant_id = ?, updated_at = CURRENT_TIMESTAMP
@@ -5277,6 +5365,7 @@ function avatar_relationship_mutate_member(
                 'target_participant_id' => $targetParticipantId,
                 'prior_relationship_role' => (string)$targetMember['relationship_role'],
                 'resolution_reason' => $targetHistoryReason,
+                'configuration_normalized' => $formationNormalization,
             ]
         );
         foreach ($hostedLapMembers as $hostedLapMember) {
@@ -6045,6 +6134,84 @@ function resolve_avatar(?string $path): string {
     return $path;
 }
 
+function avatar_orientation_values(): array {
+    return ['original', 'flip-horizontal', 'flip-vertical', 'flip-both'];
+}
+
+function avatar_orientation_normalize(mixed $orientation): string {
+    $orientation = is_string($orientation) ? trim($orientation) : '';
+    return in_array($orientation, avatar_orientation_values(), true)
+        ? $orientation
+        : 'original';
+}
+
+function avatar_orientation_update(
+    PDO $pdo,
+    int $userId,
+    mixed $expectedOrientation,
+    mixed $requestedOrientation
+): array {
+    if (!is_string($expectedOrientation)
+        || !in_array(trim($expectedOrientation), avatar_orientation_values(), true)
+        || !is_string($requestedOrientation)
+        || !in_array(trim($requestedOrientation), avatar_orientation_values(), true)) {
+        return [
+            'ok' => false,
+            'code' => 'AVATAR_ORIENTATION_INVALID',
+            'error' => 'That avatar orientation is not available.',
+            'http_status' => 400,
+        ];
+    }
+    $expectedOrientation = trim($expectedOrientation);
+    $requestedOrientation = trim($requestedOrientation);
+    $ownsTransaction = !$pdo->inTransaction();
+    try {
+        if ($ownsTransaction) {
+            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
+            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        }
+        $sql = 'SELECT avatar_path, avatar_orientation FROM users WHERE id = ? LIMIT 1';
+        if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch();
+        if (!$user) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return [
+                'ok' => false,
+                'code' => 'AVATAR_ORIENTATION_USER_NOT_FOUND',
+                'error' => 'Avatar settings are unavailable.',
+                'http_status' => 404,
+            ];
+        }
+        $currentOrientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
+        if ($currentOrientation !== $expectedOrientation) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return [
+                'ok' => false,
+                'code' => 'AVATAR_ORIENTATION_STALE',
+                'error' => 'Avatar orientation changed. Refresh and try again.',
+                'current_orientation' => $currentOrientation,
+                'http_status' => 409,
+            ];
+        }
+        $pdo->prepare('UPDATE users SET avatar_orientation = ? WHERE id = ?')
+            ->execute([$requestedOrientation, $userId]);
+        $pdo->prepare('UPDATE participants SET avatar_orientation = ? WHERE user_id = ?')
+            ->execute([$requestedOrientation, $userId]);
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        return [
+            'ok' => true,
+            'idempotent' => $currentOrientation === $requestedOrientation,
+            'avatar_orientation' => $requestedOrientation,
+            'avatar_path' => (string)($user['avatar_path'] ?? 'preset:Default'),
+        ];
+    } catch (Throwable $error) {
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+}
+
 function aura_catalog(): array {
     $dir = __DIR__ . '/../assets/auras';
     if (!is_dir($dir)) return [];
@@ -6104,6 +6271,12 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     $matches = $stmt->fetchAll();
     if ($matches) {
         $participant = $matches[0];
+        $userOrientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
+        if (avatar_orientation_normalize($participant['avatar_orientation'] ?? null) !== $userOrientation) {
+            $pdo->prepare('UPDATE participants SET avatar_orientation = ? WHERE id = ?')
+                ->execute([$userOrientation, (int)$participant['id']]);
+            $participant['avatar_orientation'] = $userOrientation;
+        }
         if (count($matches) > 1) {
             $extraIds = array_map(fn($row) => (int)$row['id'], array_slice($matches, 1));
             $placeholders = implode(',', array_fill(0, count($extraIds), '?'));
@@ -6123,10 +6296,11 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     $token = bin2hex(random_bytes(24));
     $x = random_int(12, 68) / 100;
     $y = random_int(18, 58) / 100;
+    $orientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
     $pdo->prepare(
-        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, aura_effect, join_token, position_x, position_y, last_seen_at)
-         VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
-    )->execute([$sessionId, (int)$user['id'], $user['display_name'], $user['avatar_path'] ?: 'preset:Default', $user['aura_effect'] ?? null, $token, $x, $y]);
+        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_orientation, aura_effect, join_token, position_x, position_y, last_seen_at)
+         VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
+    )->execute([$sessionId, (int)$user['id'], $user['display_name'], $user['avatar_path'] ?: 'preset:Default', $orientation, $user['aura_effect'] ?? null, $token, $x, $y]);
     $stmt->execute([$sessionId, (int)$user['id']]);
     return $stmt->fetch();
 }

@@ -136,6 +136,15 @@ const auraPreviewLayer = document.querySelector('#aura-modal .aura-preview-layer
 const avatarFileInput = document.getElementById('avatar-file-input');
 const ctxToggleWebcam = document.getElementById('ctx-toggle-webcam');
 const ctxAuras = document.getElementById('ctx-auras');
+const ctxOrientationWrap = document.getElementById('ctx-orientation-wrap');
+const ctxOrientation = document.getElementById('ctx-orientation');
+const ctxOrientationSubmenu = document.getElementById('ctx-orientation-submenu');
+const AVATAR_ORIENTATION_LABELS = Object.freeze({
+  original: 'Original',
+  'flip-horizontal': 'Flip Horizontally',
+  'flip-vertical': 'Flip Vertically',
+  'flip-both': 'Flip Horizontally and Vertically',
+});
 const sessionLockEl = document.getElementById('session-lock');
 const sessionLockForm = document.getElementById('session-lock-form');
 const sessionLockPassword = document.getElementById('session-lock-password');
@@ -144,6 +153,7 @@ let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastLatencyMs = null;
 let ctxMenuParticipantId = null;
+let avatarOrientationPending = false;
 let hostModalTargetParticipantId = null;
 let msgActionTargetId = null;
 let msgActionTargetChat = null;
@@ -733,9 +743,18 @@ function configureRoomEventRouter() {
     onParticipantWebcam(payload) {
       applyWebcamState(payload.participant_id, Boolean(payload.webcam_enabled || payload.webcam_path), payload.webcam_path || null, 'room-event-webcam');
     },
-    onParticipantAvatar(payload) {
+    onParticipantAvatar(payload, event = {}) {
       const person = participants.get(payload.participant_id);
       if (!person) return;
+      const eventId = Number(event.id || event.event_id || 0);
+      if (eventId > 0 && eventId <= Number(person.avatar_event_id || 0)) {
+        recordRuntimeDiagnostic('avatarOrientation', 'avatar-event-stale', {
+          participantId: Number(person.id),
+          eventId,
+          lastEventId: Number(person.avatar_event_id || 0),
+        });
+        return;
+      }
       const localCaptureActive = Number(payload.participant_id) === Number(cfg.myParticipantId)
         && Boolean(webcamStream?.getVideoTracks?.().some(track => track.readyState === 'live'));
       const nextWebcamEnabled = Boolean(payload.webcam_enabled || payload.webcam_path || localCaptureActive);
@@ -755,15 +774,29 @@ function configureRoomEventRouter() {
         localCaptureAuthoritative: localCaptureActive,
       });
 
+      const nextAvatarPath = payload.avatar_path ?? person.avatar_path;
+      const nextAvatarUrl = payload.avatar_url ?? person.avatar_url;
+      const avatarSourceChanged = nextAvatarPath !== person.avatar_path
+        || nextAvatarUrl !== person.avatar_url;
+
       participants.update(payload.participant_id, {
-        avatar_path: payload.avatar_path,
-        avatar_url: payload.avatar_url,
-        avatar_version: Date.now(),
+        avatar_path: nextAvatarPath,
+        avatar_url: nextAvatarUrl,
+        avatar_orientation: payload.avatar_orientation === undefined
+          ? normalizeAvatarOrientation(person.avatar_orientation)
+          : normalizeAvatarOrientation(payload.avatar_orientation),
+        avatar_event_id: eventId || Number(person.avatar_event_id || 0),
+        avatar_version: avatarSourceChanged ? Date.now() : person.avatar_version,
         webcam_path: payload.webcam_path || null,
         webcam_enabled: nextWebcamEnabled,
       });
       if (!nextWebcamEnabled) detachParticipantVideo(person.id, true, 'participant-avatar-event');
       renderParticipant(person);
+      recordRuntimeDiagnostic('avatarOrientation', 'avatar-event-reconciled', {
+        participantId: Number(person.id),
+        eventId: eventId || null,
+        orientation: normalizeAvatarOrientation(person.avatar_orientation),
+      });
     },
     onParticipantAura(payload) {
       participants.forEach(person => {
@@ -1921,6 +1954,7 @@ function renderParticipant(p, options = {}) {
     makeDraggable,
     addContextListeners: addAvatarContextListeners,
     avatarSource: avatarUrl(merged),
+    orientation: normalizeAvatarOrientation(merged.avatar_orientation),
     displayName: displayNameFor(merged),
     webcam: nowWebcam,
     webcamEnabled: merged.webcam_enabled,
@@ -3426,6 +3460,85 @@ async function refreshPresence() {
   }
 }
 
+function normalizeAvatarOrientation(value) {
+  const orientation = String(value || 'original');
+  return Object.prototype.hasOwnProperty.call(AVATAR_ORIENTATION_LABELS, orientation)
+    ? orientation
+    : 'original';
+}
+
+function syncAvatarOrientationControls(participant) {
+  const orientation = normalizeAvatarOrientation(participant?.avatar_orientation);
+  if (ctxOrientation) {
+    ctxOrientation.textContent = `Orientation: ${AVATAR_ORIENTATION_LABELS[orientation]} >`;
+    ctxOrientation.disabled = avatarOrientationPending;
+    ctxOrientation.setAttribute('aria-expanded', ctxOrientationWrap?.classList.contains('open') ? 'true' : 'false');
+  }
+  ctxOrientationSubmenu?.querySelectorAll('[data-avatar-orientation]').forEach(button => {
+    const value = normalizeAvatarOrientation(button.dataset.avatarOrientation);
+    const selected = value === orientation;
+    button.textContent = `${button.dataset.label || AVATAR_ORIENTATION_LABELS[value]}${selected ? ' (Current)' : ''}`;
+    button.setAttribute('aria-checked', selected ? 'true' : 'false');
+    button.disabled = avatarOrientationPending;
+  });
+}
+
+async function setAvatarOrientation(requestedOrientation) {
+  if (avatarOrientationPending) return;
+  const me = participants.get(cfg.myParticipantId);
+  if (!me) return;
+  const expectedOrientation = normalizeAvatarOrientation(me.avatar_orientation);
+  const nextOrientation = normalizeAvatarOrientation(requestedOrientation);
+  if (nextOrientation !== requestedOrientation) {
+    showWarning('That avatar orientation is not available.');
+    return;
+  }
+  if (nextOrientation === expectedOrientation) {
+    closeContextMenu();
+    return;
+  }
+
+  avatarOrientationPending = true;
+  participants.update(me.id, { avatar_orientation: nextOrientation });
+  renderParticipant(me);
+  syncAvatarOrientationControls(me);
+  const formData = new FormData();
+  formData.append('action', 'set_orientation');
+  formData.append('session_id', cfg.sessionId);
+  formData.append('join_token', cfg.myJoinToken);
+  formData.append('expected_orientation', expectedOrientation);
+  formData.append('avatar_orientation', nextOrientation);
+  try {
+    const response = await runtimeRequestClient.postForm('/api/avatar.php', formData, {
+      operation: 'set-avatar-orientation',
+      endpointCategory: 'avatar',
+    });
+    const acceptedOrientation = normalizeAvatarOrientation(response.avatar_orientation);
+    participants.update(me.id, { avatar_orientation: acceptedOrientation });
+    renderParticipant(me);
+    recordRuntimeDiagnostic('avatarOrientation', 'avatar-orientation-updated', {
+      participantId: Number(me.id),
+      previousOrientation: expectedOrientation,
+      orientation: acceptedOrientation,
+      idempotent: Boolean(response.idempotent),
+    });
+    closeContextMenu();
+  } catch (error) {
+    participants.update(me.id, { avatar_orientation: expectedOrientation });
+    renderParticipant(me);
+    recordRuntimeDiagnostic('avatarOrientation', 'avatar-orientation-update-failed', {
+      participantId: Number(me.id),
+      attemptedOrientation: nextOrientation,
+      code: error?.code || null,
+      status: error?.details?.status || null,
+    });
+    showWarning(error?.message || 'Could not update avatar orientation.');
+  } finally {
+    avatarOrientationPending = false;
+    syncAvatarOrientationControls(participants.get(cfg.myParticipantId));
+  }
+}
+
 function openAvatarContextMenu(x, y, participant) {
   closeTextContextMenu();
   closeRoomMenu();
@@ -3437,6 +3550,7 @@ function openAvatarContextMenu(x, y, participant) {
   const isBlocked = isUserBlocked(participant.user_id);
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
+  if (ctxOrientationWrap) ctxOrientationWrap.style.display = isOwn ? 'block' : 'none';
   if (ctxAuras) ctxAuras.style.display = isOwn ? 'block' : 'none';
   ctxToggleWebcam.style.display = isOwn ? 'block' : 'none';
   document.getElementById('ctx-dm').style.display = !isOwn && !isBlocked ? 'block' : 'none';
@@ -3444,11 +3558,13 @@ function openAvatarContextMenu(x, y, participant) {
   document.getElementById('ctx-tools-divider').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-community-eject').style.display = showHostTools && Boolean(cfg.canCommunityEject) ? 'block' : 'none';
   document.getElementById('ctx-tools-wrap').classList.remove('open');
+  ctxOrientationWrap?.classList.remove('open');
   document.getElementById('ctx-block').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   document.getElementById('ctx-unblock').style.display = !isOwn && isBlocked ? 'block' : 'none';
   document.getElementById('ctx-manage-relationship').style.display = relationship ? 'block' : 'none';
   document.getElementById('ctx-unlink').style.display = isLinked && !isBlocked ? 'block' : 'none';
   ctxToggleWebcam.textContent = (webcamIntent || webcamStream) ? 'Disable Webcam' : 'Enable Webcam';
+  syncAvatarOrientationControls(participant);
   ctxMenu.style.left = `${x}px`;
   ctxMenu.style.top = `${y}px`;
   ctxMenu.classList.add('visible');
@@ -3457,6 +3573,8 @@ function openAvatarContextMenu(x, y, participant) {
 function closeContextMenu() {
   ctxMenu.classList.remove('visible');
   document.getElementById('ctx-tools-wrap')?.classList.remove('open');
+  ctxOrientationWrap?.classList.remove('open');
+  ctxOrientation?.setAttribute('aria-expanded', 'false');
   ctxMenuParticipantId = null;
 }
 
@@ -4295,6 +4413,25 @@ document.getElementById('ctx-change-avatar').addEventListener('click', () => {
   avatarFileInput.click();
 });
 
+ctxOrientation?.addEventListener('click', event => {
+  event.stopPropagation();
+  const opening = !ctxOrientationWrap?.classList.contains('open');
+  document.getElementById('ctx-tools-wrap')?.classList.remove('open');
+  ctxOrientationWrap?.classList.toggle('open', opening);
+  ctxOrientation.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  if (opening) {
+    const selected = ctxOrientationSubmenu?.querySelector('[aria-checked="true"]');
+    (selected || ctxOrientationSubmenu?.querySelector('button'))?.focus();
+  }
+});
+
+ctxOrientationSubmenu?.addEventListener('click', event => {
+  const button = event.target.closest('[data-avatar-orientation]');
+  if (!button) return;
+  setAvatarOrientation(String(button.dataset.avatarOrientation || ''))
+    .catch(error => showWarning(error?.message || 'Could not update avatar orientation.'));
+});
+
 ctxAuras?.addEventListener('click', () => {
   openAuraModal();
 });
@@ -4331,6 +4468,8 @@ document.getElementById('ctx-dm').addEventListener('click', () => {
 
 document.getElementById('ctx-tools')?.addEventListener('click', e => {
   e.stopPropagation();
+  ctxOrientationWrap?.classList.remove('open');
+  ctxOrientation?.setAttribute('aria-expanded', 'false');
   document.getElementById('ctx-tools-wrap')?.classList.toggle('open');
 });
 
@@ -4407,6 +4546,7 @@ avatarFileInput.addEventListener('change', async () => {
     participants.update(cfg.myParticipantId, {
       avatar_path: data.avatar_path,
       avatar_url: data.avatar_url,
+      avatar_orientation: normalizeAvatarOrientation(data.avatar_orientation ?? updated?.avatar_orientation),
       avatar_version: Date.now(),
       webcam_path: null,
     });

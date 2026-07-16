@@ -86,7 +86,7 @@ function normalizeLapSide(side) {
 function normalizeRelationshipRowOptions(options = {}) {
 
     const rowSpacing = Number(options?.rowSpacing ?? 0);
-    const formation = ["horizontal-row", "bottom-center-trio", "grid"]
+    const formation = ["horizontal-row", "bottom-center-trio", "top-center-trio", "grid"]
         .includes(String(options?.formation || ""))
         ? String(options.formation)
         : "horizontal-row";
@@ -1308,6 +1308,11 @@ export class AvatarRelationshipService {
             Object.freeze({
                 id: "bottom-center-trio",
                 label: "Bottom-Center Trio",
+                available: normalMembers.length === 3
+            }),
+            Object.freeze({
+                id: "top-center-trio",
+                label: "Top-Center Trio",
                 available: normalMembers.length === 3
             }),
             Object.freeze({ id: "grid", label: "Grid", available: normalMembers.length >= 2 })

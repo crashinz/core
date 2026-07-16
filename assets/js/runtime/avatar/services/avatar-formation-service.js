@@ -1,11 +1,13 @@
 import { HorizontalRowFormation } from "../formations/horizontal-row-formation.js";
 import { BottomCenterTrioFormation } from "../formations/bottom-center-trio-formation.js";
+import { TopCenterTrioFormation } from "../formations/top-center-trio-formation.js";
 import { GridFormation } from "../formations/grid-formation.js";
 
 const DEFAULT_FORMATION = "horizontal-row";
 const APPROVED_FORMATIONS = Object.freeze([
     DEFAULT_FORMATION,
     "bottom-center-trio",
+    "top-center-trio",
     "grid"
 ]);
 
@@ -31,6 +33,7 @@ export class AvatarFormationService {
 
         this.#register(HorizontalRowFormation);
         this.#register(BottomCenterTrioFormation);
+        this.#register(TopCenterTrioFormation);
         this.#register(GridFormation);
 
     }

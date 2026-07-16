@@ -45,6 +45,7 @@ emit_event($pdo, (int)$session['id'], 'participant_join', [
     'is_owner' => (int)$room['owner_id'] === (int)$user['id'],
     'avatar_path' => $participant['avatar_path'],
     'avatar_url' => resolve_avatar($participant['avatar_path']),
+    'avatar_orientation' => avatar_orientation_normalize($participant['avatar_orientation'] ?? null),
     'aura_effect' => $participant['aura_effect'] ?? null,
     'position_x' => (float)$participant['position_x'],
     'position_y' => (float)$participant['position_y'],
@@ -527,6 +528,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
         <select id="relationship-management-formation" disabled>
           <option value="horizontal-row">Horizontal Row</option>
           <option value="bottom-center-trio">Bottom-Center Trio</option>
+          <option value="top-center-trio">Top-Center Trio</option>
           <option value="grid">Grid</option>
         </select>
       </label>
@@ -624,6 +626,15 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 </div>
 <div id="ctx-menu">
   <button id="ctx-change-avatar" type="button">Change Avatar</button>
+  <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
+    <button id="ctx-orientation" type="button" aria-haspopup="menu" aria-expanded="false">Orientation <span>&gt;</span></button>
+    <div class="ctx-submenu" id="ctx-orientation-submenu" role="menu" aria-label="Avatar orientation">
+      <button type="button" role="menuitemradio" data-avatar-orientation="original" data-label="Original">Original</button>
+      <button type="button" role="menuitemradio" data-avatar-orientation="flip-horizontal" data-label="Flip Horizontally">Flip Horizontally</button>
+      <button type="button" role="menuitemradio" data-avatar-orientation="flip-vertical" data-label="Flip Vertically">Flip Vertically</button>
+      <button type="button" role="menuitemradio" data-avatar-orientation="flip-both" data-label="Flip Horizontally and Vertically">Flip Horizontally and Vertically</button>
+    </div>
+  </div>
   <button id="ctx-auras" type="button">Auras</button>
   <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
   <button id="ctx-dm" type="button">Send DM</button>
