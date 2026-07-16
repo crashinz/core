@@ -121,6 +121,12 @@ import {
 
 import {
 
+    AvatarDisplayPolicyService
+
+} from "./services/avatar-display-policy-service.js";
+
+import {
+
     AvatarTransitionService
 
 } from "./services/avatar-transition-service.js";
@@ -179,6 +185,8 @@ export class AvatarRuntime extends CoreModule {
      * State runtime component.
      */
     #state = null;
+
+    #displayPolicy = null;
 
     /**
      * Relationship runtime component.
@@ -278,6 +286,12 @@ export class AvatarRuntime extends CoreModule {
     get state() {
 
         return this.#state;
+
+    }
+
+    get displayPolicy() {
+
+        return this.#displayPolicy;
 
     }
 
@@ -430,6 +444,9 @@ export class AvatarRuntime extends CoreModule {
             state:
                 this.#state?.getDiagnostics() ?? null,
 
+            displayPolicy:
+                this.#displayPolicy?.getDiagnostics() ?? null,
+
             relationships:
                 this.#relationships?.getDiagnostics() ?? null,
 
@@ -480,6 +497,8 @@ export class AvatarRuntime extends CoreModule {
     onInitialize() {
 
         this.#createState();
+
+        this.#createDisplayPolicy();
 
         this.#createRelationships();
 
@@ -551,6 +570,8 @@ export class AvatarRuntime extends CoreModule {
         this.#order?.destroy();
 
         this.#relationships?.destroy();
+
+        this.#displayPolicy?.destroy();
 
         this.#state?.destroy();
 
@@ -627,6 +648,17 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#renderer.initialize();
+
+    }
+
+    #createDisplayPolicy() {
+
+        this.#displayPolicy =
+            new AvatarDisplayPolicyService(
+                this
+            );
+
+        this.#displayPolicy.initialize();
 
     }
 

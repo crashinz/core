@@ -14,6 +14,8 @@ if (is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
 }
 
+require_once __DIR__ . '/avatar_size_policy.php';
+
 function app_base_path(): string {
     static $base = null;
     if ($base !== null) return $base;
@@ -329,6 +331,10 @@ function migrate(PDO $pdo): void {
             role TEXT NOT NULL DEFAULT 'user',
             avatar_path TEXT DEFAULT 'preset:Default',
             avatar_orientation TEXT NOT NULL DEFAULT 'original',
+            avatar_display_size_px INTEGER DEFAULT NULL,
+            webcam_display_width_px INTEGER DEFAULT NULL,
+            webcam_display_height_px INTEGER DEFAULT NULL,
+            avatar_size_version INTEGER NOT NULL DEFAULT 1,
             aura_effect TEXT DEFAULT NULL,
             current_room_id INTEGER DEFAULT NULL,
             last_seen_at TEXT DEFAULT NULL,
@@ -375,6 +381,10 @@ function migrate(PDO $pdo): void {
             display_name TEXT NOT NULL,
             avatar_path TEXT DEFAULT 'preset:Default',
             avatar_orientation TEXT NOT NULL DEFAULT 'original',
+            avatar_display_size_px INTEGER DEFAULT NULL,
+            webcam_display_width_px INTEGER DEFAULT NULL,
+            webcam_display_height_px INTEGER DEFAULT NULL,
+            avatar_size_version INTEGER NOT NULL DEFAULT 1,
             aura_effect TEXT DEFAULT NULL,
             join_token TEXT NOT NULL UNIQUE,
             position_x REAL NOT NULL DEFAULT 0.15,
@@ -853,6 +863,16 @@ function migrate(PDO $pdo): void {
         if (!in_array('avatar_orientation', $mysqlUserColNames, true)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN avatar_orientation VARCHAR(32) NOT NULL DEFAULT 'original'");
         }
+        foreach ([
+            'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
+            'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
+            'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
+            'avatar_size_version' => 'INTEGER NOT NULL DEFAULT 1',
+        ] as $column => $definition) {
+            if (!in_array($column, $mysqlUserColNames, true)) {
+                $pdo->exec("ALTER TABLE users ADD COLUMN {$column} {$definition}");
+            }
+        }
         $mysqlParticipantCols = $pdo->query('SHOW COLUMNS FROM participants')->fetchAll();
         $mysqlParticipantColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $mysqlParticipantCols);
         if (!in_array('webcam_enabled', $mysqlParticipantColNames, true)) {
@@ -863,6 +883,16 @@ function migrate(PDO $pdo): void {
         }
         if (!in_array('avatar_orientation', $mysqlParticipantColNames, true)) {
             $pdo->exec("ALTER TABLE participants ADD COLUMN avatar_orientation VARCHAR(32) NOT NULL DEFAULT 'original'");
+        }
+        foreach ([
+            'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
+            'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
+            'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
+            'avatar_size_version' => 'INTEGER NOT NULL DEFAULT 1',
+        ] as $column => $definition) {
+            if (!in_array($column, $mysqlParticipantColNames, true)) {
+                $pdo->exec("ALTER TABLE participants ADD COLUMN {$column} {$definition}");
+            }
         }
         if (!in_array('link_mode', $mysqlParticipantColNames, true)) {
             $pdo->exec("ALTER TABLE participants ADD COLUMN link_mode VARCHAR(24) NOT NULL DEFAULT 'normal'");
@@ -937,6 +967,16 @@ function migrate(PDO $pdo): void {
     if (!in_array('avatar_orientation', $userColNames, true)) {
         $pdo->exec("ALTER TABLE users ADD COLUMN avatar_orientation TEXT NOT NULL DEFAULT 'original'");
     }
+    foreach ([
+        'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
+        'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
+        'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
+        'avatar_size_version' => 'INTEGER NOT NULL DEFAULT 1',
+    ] as $column => $definition) {
+        if (!in_array($column, $userColNames, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN {$column} {$definition}");
+        }
+    }
     $settingsCols = $pdo->query('PRAGMA table_info(app_settings)')->fetchAll();
     $settingsColNames = array_map(fn(array $col): string => (string)$col['name'], $settingsCols);
     if (in_array('key', $settingsColNames, true) && !in_array('setting_key', $settingsColNames, true)) {
@@ -990,6 +1030,16 @@ function migrate(PDO $pdo): void {
     }
     if (!in_array('avatar_orientation', $participantColNames, true)) {
         $pdo->exec("ALTER TABLE participants ADD COLUMN avatar_orientation TEXT NOT NULL DEFAULT 'original'");
+    }
+    foreach ([
+        'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
+        'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
+        'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
+        'avatar_size_version' => 'INTEGER NOT NULL DEFAULT 1',
+    ] as $column => $definition) {
+        if (!in_array($column, $participantColNames, true)) {
+            $pdo->exec("ALTER TABLE participants ADD COLUMN {$column} {$definition}");
+        }
     }
     if (!$hasLinkedTo) {
         $pdo->exec('ALTER TABLE participants ADD COLUMN linked_to_participant_id INTEGER DEFAULT NULL');
@@ -1197,7 +1247,7 @@ function upsert_link_icon_catalog(PDO $pdo, string $iconName, string $label, str
 }
 
 function seed_app_settings(PDO $pdo): void {
-    $defaults = [
+    $defaults = array_merge([
         'chat_posts_per_second' => '3',
         'room_chat_history_limit' => '100',
         'avatar_movements_per_second' => '12',
@@ -1219,7 +1269,7 @@ function seed_app_settings(PDO $pdo): void {
         'age_gate_min_age' => '13',
         'community_name' => '',
         'community_logo_path' => '',
-    ];
+    ], avatar_size_policy_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -6272,10 +6322,25 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     if ($matches) {
         $participant = $matches[0];
         $userOrientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
-        if (avatar_orientation_normalize($participant['avatar_orientation'] ?? null) !== $userOrientation) {
-            $pdo->prepare('UPDATE participants SET avatar_orientation = ? WHERE id = ?')
-                ->execute([$userOrientation, (int)$participant['id']]);
+        $userSize = avatar_size_preferences_from_row($user);
+        $participantSize = avatar_size_preferences_from_row($participant);
+        if (avatar_orientation_normalize($participant['avatar_orientation'] ?? null) !== $userOrientation
+            || $participantSize !== $userSize) {
+            $pdo->prepare(
+                'UPDATE participants SET avatar_orientation = ?, avatar_display_size_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
+            )->execute([
+                $userOrientation,
+                $userSize['avatarDisplayPreferencePx'],
+                $userSize['webcamDisplayWidthPreferencePx'],
+                $userSize['webcamDisplayHeightPreferencePx'],
+                $userSize['displayPreferenceVersion'],
+                (int)$participant['id'],
+            ]);
             $participant['avatar_orientation'] = $userOrientation;
+            $participant['avatar_display_size_px'] = $userSize['avatarDisplayPreferencePx'];
+            $participant['webcam_display_width_px'] = $userSize['webcamDisplayWidthPreferencePx'];
+            $participant['webcam_display_height_px'] = $userSize['webcamDisplayHeightPreferencePx'];
+            $participant['avatar_size_version'] = $userSize['displayPreferenceVersion'];
         }
         if (count($matches) > 1) {
             $extraIds = array_map(fn($row) => (int)$row['id'], array_slice($matches, 1));
@@ -6297,10 +6362,25 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     $x = random_int(12, 68) / 100;
     $y = random_int(18, 58) / 100;
     $orientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
+    $size = avatar_size_preferences_from_row($user);
     $pdo->prepare(
-        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_orientation, aura_effect, join_token, position_x, position_y, last_seen_at)
-         VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
-    )->execute([$sessionId, (int)$user['id'], $user['display_name'], $user['avatar_path'] ?: 'preset:Default', $orientation, $user['aura_effect'] ?? null, $token, $x, $y]);
+        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_orientation, avatar_display_size_px, webcam_display_width_px, webcam_display_height_px, avatar_size_version, aura_effect, join_token, position_x, position_y, last_seen_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
+    )->execute([
+        $sessionId,
+        (int)$user['id'],
+        $user['display_name'],
+        $user['avatar_path'] ?: 'preset:Default',
+        $orientation,
+        $size['avatarDisplayPreferencePx'],
+        $size['webcamDisplayWidthPreferencePx'],
+        $size['webcamDisplayHeightPreferencePx'],
+        $size['displayPreferenceVersion'],
+        $user['aura_effect'] ?? null,
+        $token,
+        $x,
+        $y,
+    ]);
     $stmt->execute([$sessionId, (int)$user['id']]);
     return $stmt->fetch();
 }

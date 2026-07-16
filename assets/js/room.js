@@ -139,6 +139,20 @@ const ctxAuras = document.getElementById('ctx-auras');
 const ctxOrientationWrap = document.getElementById('ctx-orientation-wrap');
 const ctxOrientation = document.getElementById('ctx-orientation');
 const ctxOrientationSubmenu = document.getElementById('ctx-orientation-submenu');
+const avatarSizeModal = document.getElementById('avatar-size-modal');
+const avatarSizeForm = document.getElementById('avatar-size-form');
+const avatarSizeTitle = document.getElementById('avatar-size-title');
+const avatarSizeCap = document.getElementById('avatar-size-cap');
+const avatarSizeAvatarFields = document.getElementById('avatar-size-avatar-fields');
+const avatarSizeWebcamFields = document.getElementById('avatar-size-webcam-fields');
+const avatarSizeEdge = document.getElementById('avatar-size-edge');
+const avatarSizeWebcamPreset = document.getElementById('avatar-size-webcam-preset');
+const avatarSizeWebcamWidth = document.getElementById('avatar-size-webcam-width');
+const avatarSizeWebcamHeight = document.getElementById('avatar-size-webcam-height');
+const avatarSizeAspectLock = document.getElementById('avatar-size-aspect-lock');
+const avatarSizeMatchWrap = document.getElementById('avatar-size-match-wrap');
+const avatarSizeMatchParticipant = document.getElementById('avatar-size-match-participant');
+const avatarSizeStatus = document.getElementById('avatar-size-status');
 const AVATAR_ORIENTATION_LABELS = Object.freeze({
   original: 'Original',
   'flip-horizontal': 'Flip Horizontally',
@@ -154,6 +168,13 @@ let textMenuMode = 'copy';
 let lastLatencyMs = null;
 let ctxMenuParticipantId = null;
 let avatarOrientationPending = false;
+let avatarSizePending = false;
+let avatarSizeModalMode = 'avatar';
+let avatarSizeResetRequested = false;
+let avatarSizeStartWebcam = false;
+let avatarSizeStartConfirmed = false;
+let avatarSizeAspectRatio = 1;
+let avatarSizeInputSync = false;
 let hostModalTargetParticipantId = null;
 let msgActionTargetId = null;
 let msgActionTargetChat = null;
@@ -778,6 +799,28 @@ function configureRoomEventRouter() {
       const nextAvatarUrl = payload.avatar_url ?? person.avatar_url;
       const avatarSourceChanged = nextAvatarPath !== person.avatar_path
         || nextAvatarUrl !== person.avatar_url;
+      const previousDimensions = avatarRenderedDimensions(person);
+      const currentSizeVersion = Number(person.avatar_size_version || 1);
+      const incomingSizeVersion = Number(payload.avatar_size_version || currentSizeVersion);
+      const staleSizeProjection = incomingSizeVersion < currentSizeVersion;
+      const nextSizeProjection = staleSizeProjection ? {} : {
+        avatar_display_size_px: payload.avatar_display_size_px === undefined
+          ? person.avatar_display_size_px
+          : payload.avatar_display_size_px,
+        webcam_display_width_px: payload.webcam_display_width_px === undefined
+          ? person.webcam_display_width_px
+          : payload.webcam_display_width_px,
+        webcam_display_height_px: payload.webcam_display_height_px === undefined
+          ? person.webcam_display_height_px
+          : payload.webcam_display_height_px,
+        avatar_size_version: incomingSizeVersion,
+      };
+      const sizeProjectionChanged = !staleSizeProjection && (
+        Number(nextSizeProjection.avatar_size_version || 1) !== currentSizeVersion
+        || nextSizeProjection.avatar_display_size_px !== person.avatar_display_size_px
+        || nextSizeProjection.webcam_display_width_px !== person.webcam_display_width_px
+        || nextSizeProjection.webcam_display_height_px !== person.webcam_display_height_px
+      );
 
       participants.update(payload.participant_id, {
         avatar_path: nextAvatarPath,
@@ -789,13 +832,42 @@ function configureRoomEventRouter() {
         avatar_version: avatarSourceChanged ? Date.now() : person.avatar_version,
         webcam_path: payload.webcam_path || null,
         webcam_enabled: nextWebcamEnabled,
+        ...nextSizeProjection,
       });
       if (!nextWebcamEnabled) detachParticipantVideo(person.id, true, 'participant-avatar-event');
       renderParticipant(person);
+      if (sizeProjectionChanged) {
+        const nextDimensions = avatarRenderedDimensions(person);
+        avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+          participant: person,
+          reason: 'avatar-display-size-change',
+        });
+        recordRuntimeDiagnostic('avatarDisplayPolicy', 'participant-display-size-reconciled', {
+          participantId: Number(person.id),
+          displayPreferenceVersion: Number(person.avatar_size_version || 1),
+          previousDimensions,
+          nextDimensions,
+        });
+      }
       recordRuntimeDiagnostic('avatarOrientation', 'avatar-event-reconciled', {
         participantId: Number(person.id),
         eventId: eventId || null,
         orientation: normalizeAvatarOrientation(person.avatar_orientation),
+      });
+    },
+    onAvatarSizePolicy(payload, event = {}) {
+      const changed = avatarRuntime?.displayPolicy?.configure(payload) || false;
+      if (!changed) return;
+      cfg.avatarSizePolicy = avatarRuntime.displayPolicy.policy();
+      window.ChatSpaceAvatar?.configure?.(cfg.avatarSizePolicy);
+      participants.forEach(renderParticipant);
+      avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+        all: true,
+        reason: 'installation-avatar-size-policy-change',
+      });
+      recordRuntimeDiagnostic('avatarDisplayPolicy', 'installation-policy-reconciled', {
+        eventId: Number(event.id || 0) || null,
+        revision: Number(cfg.avatarSizePolicy.revision || 1),
       });
     },
     onParticipantAura(payload) {
@@ -1787,7 +1859,6 @@ function avatarStageSize(person) {
 function avatarRenderedDimensions(person) {
   return avatarRuntime?.renderer?.renderedAvatarDimensions(person, {
     fallbackSize: AVATAR_STAGE_SIZE,
-    visualMaxSize: 200,
     lapInitiator: isLapLinkInitiator(person),
   }) || {
     width: AVATAR_STAGE_SIZE,
@@ -1963,7 +2034,6 @@ function renderParticipant(p, options = {}) {
     lapSide: avatarRuntime?.relationships?.lapSideForParticipant(merged),
     flipImage: hadImage && wasWebcam !== nowWebcam,
     fallbackSize: AVATAR_STAGE_SIZE,
-    visualMaxSize: 200,
     onRenderedSizeChange(participant, detail = {}) {
       avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
         participant,
@@ -3539,6 +3609,176 @@ async function setAvatarOrientation(requestedOrientation) {
   }
 }
 
+function participantSizeFields(preferences = {}) {
+  return {
+    avatar_display_size_px: preferences.avatarDisplayPreferencePx ?? null,
+    webcam_display_width_px: preferences.webcamDisplayWidthPreferencePx ?? null,
+    webcam_display_height_px: preferences.webcamDisplayHeightPreferencePx ?? null,
+    avatar_size_version: Number(preferences.displayPreferenceVersion || 1),
+  };
+}
+
+function applyLocalDisplayPreferences(preferences, reason = 'local-display-size-save') {
+  const me = participants.get(cfg.myParticipantId);
+  if (!me || !preferences) return false;
+  const currentVersion = Number(me.avatar_size_version || 1);
+  const next = participantSizeFields(preferences);
+  if (next.avatar_size_version < currentVersion) return false;
+  const changed = next.avatar_size_version !== currentVersion
+    || next.avatar_display_size_px !== me.avatar_display_size_px
+    || next.webcam_display_width_px !== me.webcam_display_width_px
+    || next.webcam_display_height_px !== me.webcam_display_height_px;
+  if (!changed) return false;
+  const previousDimensions = avatarRenderedDimensions(me);
+  participants.update(me.id, next);
+  renderParticipant(me);
+  const nextDimensions = avatarRenderedDimensions(me);
+  avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+    participant: me,
+    reason,
+  });
+  recordRuntimeDiagnostic('avatarDisplayPolicy', 'local-display-size-applied', {
+    participantId: Number(me.id),
+    displayPreferenceVersion: next.avatar_size_version,
+    previousDimensions,
+    nextDimensions,
+  });
+  return true;
+}
+
+function setAvatarSizeStatus(message = '', state = '') {
+  if (!avatarSizeStatus) return;
+  avatarSizeStatus.textContent = message;
+  avatarSizeStatus.dataset.state = state;
+}
+
+function closeAvatarSizeModal() {
+  avatarSizeModal?.classList.remove('open');
+  avatarSizeModal?.setAttribute('aria-hidden', 'true');
+  avatarSizeStartWebcam = false;
+  avatarSizeResetRequested = false;
+  setAvatarSizeStatus();
+}
+
+function setWebcamPresetFromInputs() {
+  if (!avatarSizeWebcamPreset) return;
+  const width = Number(avatarSizeWebcamWidth?.value || 0);
+  const height = Number(avatarSizeWebcamHeight?.value || 0);
+  const exact = ['100x100', '150x150', '200x200'].find(value => {
+    const [presetWidth, presetHeight] = value.split('x').map(Number);
+    return width === presetWidth && height === presetHeight;
+  });
+  avatarSizeWebcamPreset.value = avatarSizeResetRequested ? 'default' : (exact || 'custom');
+}
+
+function openAvatarSizeModal(mode, options = {}) {
+  const me = participants.get(cfg.myParticipantId);
+  if (!me || !avatarSizeModal) return;
+  const policy = avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {};
+  avatarSizeModalMode = mode === 'webcam' ? 'webcam' : 'avatar';
+  avatarSizeStartWebcam = Boolean(options.startWebcam);
+  avatarSizeResetRequested = avatarSizeModalMode === 'avatar'
+    ? me.avatar_display_size_px == null
+    : me.webcam_display_width_px == null && me.webcam_display_height_px == null;
+  avatarSizeAvatarFields.hidden = avatarSizeModalMode !== 'avatar';
+  avatarSizeWebcamFields.hidden = avatarSizeModalMode !== 'webcam';
+  avatarSizeTitle.textContent = avatarSizeModalMode === 'avatar'
+    ? 'Avatar Display Size'
+    : (avatarSizeStartWebcam ? 'Webcam Display Size Before Starting' : 'Webcam Display Size');
+
+  if (avatarSizeModalMode === 'avatar') {
+    const cap = Number(policy.avatarDisplayMaxPx || 200);
+    avatarSizeCap.textContent = `Community maximum: ${cap}px`;
+    avatarSizeEdge.max = String(cap);
+    avatarSizeEdge.value = String(avatarRuntime.displayPolicy.effectiveAvatarMaxEdge(me));
+  } else {
+    const maxWidth = Number(policy.webcamDisplayMaxWidthPx || 200);
+    const maxHeight = Number(policy.webcamDisplayMaxHeightPx || 200);
+    const box = avatarRuntime.displayPolicy.effectiveWebcamBox(me);
+    avatarSizeCap.textContent = `Community maximum: ${maxWidth} x ${maxHeight}px`;
+    avatarSizeWebcamWidth.max = String(maxWidth);
+    avatarSizeWebcamHeight.max = String(maxHeight);
+    avatarSizeWebcamWidth.value = String(box.width);
+    avatarSizeWebcamHeight.value = String(box.height);
+    avatarSizeAspectRatio = box.width / Math.max(box.height, 1);
+    avatarSizeAspectLock.checked = true;
+    setWebcamPresetFromInputs();
+
+    const relationship = avatarRuntime?.relationships?.relationshipForParticipant(me.id) || null;
+    const candidates = avatarRuntime?.displayPolicy?.webcamSizeMatchCandidates(
+      relationship,
+      participants.values(),
+      me.id
+    ) || [];
+    avatarSizeMatchParticipant.innerHTML = '';
+    candidates.forEach(candidate => {
+      const option = document.createElement('option');
+      option.value = String(candidate.participantId);
+      option.textContent = `${candidate.displayName} (${candidate.width} x ${candidate.height})`;
+      option.dataset.width = String(candidate.width);
+      option.dataset.height = String(candidate.height);
+      avatarSizeMatchParticipant.appendChild(option);
+    });
+    avatarSizeMatchWrap.hidden = candidates.length === 0;
+  }
+
+  closeContextMenu();
+  setAvatarSizeStatus();
+  avatarSizeModal.classList.add('open');
+  avatarSizeModal.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => (
+    avatarSizeModalMode === 'avatar' ? avatarSizeEdge : avatarSizeWebcamPreset
+  )?.focus());
+}
+
+async function saveAvatarSizePreferences() {
+  if (avatarSizePending) return;
+  const me = participants.get(cfg.myParticipantId);
+  if (!me) return;
+  avatarSizePending = true;
+  const saveButton = document.getElementById('avatar-size-save');
+  saveButton.disabled = true;
+  setAvatarSizeStatus('Saving...', 'working');
+  const formData = new FormData();
+  formData.append('action', 'set_display_preferences');
+  formData.append('session_id', cfg.sessionId);
+  formData.append('join_token', cfg.myJoinToken);
+  formData.append('expected_size_version', String(me.avatar_size_version || 1));
+  if (avatarSizeModalMode === 'avatar') {
+    formData.append('avatar_display_size_px', avatarSizeResetRequested ? '' : avatarSizeEdge.value);
+  } else {
+    formData.append('webcam_display_width_px', avatarSizeResetRequested ? '' : avatarSizeWebcamWidth.value);
+    formData.append('webcam_display_height_px', avatarSizeResetRequested ? '' : avatarSizeWebcamHeight.value);
+  }
+  try {
+    const response = await runtimeRequestClient.postForm('/api/avatar.php', formData, {
+      operation: 'set-avatar-display-preferences',
+      endpointCategory: 'avatar',
+    });
+    avatarRuntime?.displayPolicy?.configure(response.avatarSizePolicy || {});
+    cfg.avatarSizePolicy = avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy;
+    window.ChatSpaceAvatar?.configure?.(cfg.avatarSizePolicy || {});
+    applyLocalDisplayPreferences(response.preferences, 'local-display-size-save');
+    const startWebcam = avatarSizeStartWebcam;
+    closeAvatarSizeModal();
+    if (startWebcam) {
+      avatarSizeStartConfirmed = true;
+      ctxToggleWebcam.click();
+    }
+  } catch (error) {
+    setAvatarSizeStatus(error?.message || 'Display size could not be saved.', 'error');
+    recordRuntimeDiagnostic('avatarDisplayPolicy', 'display-size-save-failed', {
+      participantId: Number(me.id),
+      mode: avatarSizeModalMode,
+      code: error?.code || null,
+      status: error?.details?.status || null,
+    });
+  } finally {
+    avatarSizePending = false;
+    saveButton.disabled = false;
+  }
+}
+
 function openAvatarContextMenu(x, y, participant) {
   closeTextContextMenu();
   closeRoomMenu();
@@ -3550,9 +3790,11 @@ function openAvatarContextMenu(x, y, participant) {
   const isBlocked = isUserBlocked(participant.user_id);
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
+  document.getElementById('ctx-avatar-size').style.display = isOwn ? 'block' : 'none';
   if (ctxOrientationWrap) ctxOrientationWrap.style.display = isOwn ? 'block' : 'none';
   if (ctxAuras) ctxAuras.style.display = isOwn ? 'block' : 'none';
   ctxToggleWebcam.style.display = isOwn ? 'block' : 'none';
+  document.getElementById('ctx-webcam-size').style.display = isOwn && Boolean(webcamIntent || webcamStream) ? 'block' : 'none';
   document.getElementById('ctx-dm').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   document.getElementById('ctx-tools-wrap').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-tools-divider').style.display = showHostTools ? 'block' : 'none';
@@ -4413,6 +4655,95 @@ document.getElementById('ctx-change-avatar').addEventListener('click', () => {
   avatarFileInput.click();
 });
 
+document.getElementById('ctx-avatar-size')?.addEventListener('click', () => {
+  openAvatarSizeModal('avatar');
+});
+
+document.getElementById('ctx-webcam-size')?.addEventListener('click', () => {
+  openAvatarSizeModal('webcam');
+});
+
+avatarSizeForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  saveAvatarSizePreferences();
+});
+
+bindModalCloseButtons(['avatar-size-close', 'avatar-size-cancel'], closeAvatarSizeModal);
+
+document.getElementById('avatar-size-reset')?.addEventListener('click', () => {
+  const policy = avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {};
+  avatarSizeResetRequested = true;
+  if (avatarSizeModalMode === 'avatar') {
+    avatarSizeEdge.value = String(policy.avatarDisplayMaxPx || 200);
+  } else {
+    avatarSizeWebcamWidth.value = String(policy.webcamDisplayMaxWidthPx || 200);
+    avatarSizeWebcamHeight.value = String(policy.webcamDisplayMaxHeightPx || 200);
+    avatarSizeAspectRatio = Number(avatarSizeWebcamWidth.value) / Math.max(Number(avatarSizeWebcamHeight.value), 1);
+    setWebcamPresetFromInputs();
+  }
+  setAvatarSizeStatus('Community default selected.', 'ok');
+});
+
+avatarSizeEdge?.addEventListener('input', () => {
+  avatarSizeResetRequested = false;
+});
+
+avatarSizeWebcamPreset?.addEventListener('change', () => {
+  const policy = avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {};
+  const value = avatarSizeWebcamPreset.value;
+  if (value === 'custom') return;
+  avatarSizeInputSync = true;
+  if (value === 'default') {
+    avatarSizeResetRequested = true;
+    avatarSizeWebcamWidth.value = String(policy.webcamDisplayMaxWidthPx || 200);
+    avatarSizeWebcamHeight.value = String(policy.webcamDisplayMaxHeightPx || 200);
+  } else {
+    const [width, height] = value.split('x').map(Number);
+    avatarSizeResetRequested = false;
+    avatarSizeWebcamWidth.value = String(Math.min(width, Number(policy.webcamDisplayMaxWidthPx || 200)));
+    avatarSizeWebcamHeight.value = String(Math.min(height, Number(policy.webcamDisplayMaxHeightPx || 200)));
+  }
+  avatarSizeAspectRatio = Number(avatarSizeWebcamWidth.value) / Math.max(Number(avatarSizeWebcamHeight.value), 1);
+  avatarSizeInputSync = false;
+});
+
+avatarSizeWebcamWidth?.addEventListener('input', () => {
+  if (avatarSizeInputSync) return;
+  avatarSizeResetRequested = false;
+  if (avatarSizeAspectLock.checked) {
+    avatarSizeInputSync = true;
+    const maxHeight = Number(avatarSizeWebcamHeight.max || 200);
+    avatarSizeWebcamHeight.value = String(Math.min(maxHeight, Math.max(42, Math.round(Number(avatarSizeWebcamWidth.value || 42) / avatarSizeAspectRatio))));
+    avatarSizeInputSync = false;
+  }
+  setWebcamPresetFromInputs();
+});
+
+avatarSizeWebcamHeight?.addEventListener('input', () => {
+  if (avatarSizeInputSync) return;
+  avatarSizeResetRequested = false;
+  if (avatarSizeAspectLock.checked) {
+    avatarSizeInputSync = true;
+    const maxWidth = Number(avatarSizeWebcamWidth.max || 200);
+    avatarSizeWebcamWidth.value = String(Math.min(maxWidth, Math.max(42, Math.round(Number(avatarSizeWebcamHeight.value || 42) * avatarSizeAspectRatio))));
+    avatarSizeInputSync = false;
+  }
+  setWebcamPresetFromInputs();
+});
+
+document.getElementById('avatar-size-match')?.addEventListener('click', () => {
+  const selected = avatarSizeMatchParticipant?.selectedOptions?.[0];
+  if (!selected) return;
+  avatarSizeInputSync = true;
+  avatarSizeResetRequested = false;
+  avatarSizeWebcamWidth.value = selected.dataset.width;
+  avatarSizeWebcamHeight.value = selected.dataset.height;
+  avatarSizeAspectRatio = Number(selected.dataset.width) / Math.max(Number(selected.dataset.height), 1);
+  avatarSizeInputSync = false;
+  setWebcamPresetFromInputs();
+  setAvatarSizeStatus('Linked member size copied once.', 'ok');
+});
+
 ctxOrientation?.addEventListener('click', event => {
   event.stopPropagation();
   const opening = !ctxOrientationWrap?.classList.contains('open');
@@ -4520,6 +4851,14 @@ avatarFileInput.addEventListener('change', async () => {
   if (!file) return;
   let preparedFile = file;
   let previewUrl = '';
+  const me = participants.get(cfg.myParticipantId);
+  const previousAvatarState = me ? {
+    avatar_path: me.avatar_path,
+    avatar_url: me.avatar_url,
+    avatar_version: me.avatar_version,
+    webcam_path: me.webcam_path,
+    webcam_enabled: me.webcam_enabled,
+  } : null;
   const fd = new FormData();
   fd.append('session_id', cfg.sessionId);
   fd.append('join_token', cfg.myJoinToken);
@@ -4527,7 +4866,6 @@ avatarFileInput.addEventListener('change', async () => {
   try {
     if (window.ChatSpaceAvatar) preparedFile = await window.ChatSpaceAvatar.prepareAvatarFile(file);
     previewUrl = URL.createObjectURL(preparedFile);
-    const me = participants.get(cfg.myParticipantId);
     if (me) {
       participants.update(cfg.myParticipantId, {
         webcam_path: null,
@@ -4552,6 +4890,14 @@ avatarFileInput.addEventListener('change', async () => {
     });
     renderParticipant(updated);
   } catch (err) {
+    if (me && previousAvatarState) {
+      participants.update(cfg.myParticipantId, previousAvatarState);
+      renderParticipant(me);
+      avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+        participant: me,
+        reason: 'avatar-upload-rejected',
+      });
+    }
     alert(err.message);
   } finally {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -4755,6 +5101,11 @@ ctxToggleWebcam.addEventListener('click', async () => {
     await Promise.all([persistence, negotiation]);
     return;
   }
+  if (!avatarSizeStartConfirmed) {
+    openAvatarSizeModal('webcam', { startWebcam: true });
+    return;
+  }
+  avatarSizeStartConfirmed = false;
   let operationToken = null;
   try {
     recordVoiceLifecycleDiagnostic({
@@ -5609,6 +5960,8 @@ async function bootRoom() {
     operation: 'bootstrap-room',
     endpointCategory: 'room-config',
   });
+  avatarRuntime?.displayPolicy?.configure(cfg.avatarSizePolicy || {});
+  window.ChatSpaceAvatar?.configure?.(avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {});
   cfg.innerTranquillityPlayer = innerTranquillityPlayerCapability();
   importedRoomRuntime?.layout?.render(cfg.importLayout);
   importedRoomRuntime?.music?.renderPlayer(cfg.musicPlaylist);

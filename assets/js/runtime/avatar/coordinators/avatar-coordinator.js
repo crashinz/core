@@ -85,7 +85,6 @@
 //--------------------------------------------------
 
 const DEFAULT_AVATAR_SIZE = 150;
-const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
 const DEFAULT_LINK_GAP = 0;
 const LINK_CHOICE_SUPPRESS_MS = 400;
 const LAP_SIDES = Object.freeze(["bottom-left", "bottom-right"]);
@@ -2727,8 +2726,6 @@ export class AvatarCoordinator {
             {
                 fallbackSize:
                     this.#baseAvatarSize(),
-                visualMaxSize:
-                    DEFAULT_AVATAR_VISUAL_MAX_SIZE,
                 lapInitiator:
                     this.#relationships.isLapLinkInitiator(participant)
             }

@@ -90,8 +90,8 @@ $lastEventId = (int)$stmt->fetchColumn();
 $stmt = $pdo->prepare('SELECT p.*, u.role FROM participants p JOIN users u ON u.id = p.user_id WHERE p.session_id = ? AND p.last_seen_at >= ? ORDER BY p.joined_at ASC');
 $stmt->execute([(int)$session['id'], stale_cutoff($pdo)]);
 $roomOwnerId = (int)$room['owner_id'];
-$participants = array_map(function(array $p) use ($roomOwnerId): array {
-    return [
+$participants = array_map(function(array $p) use ($roomOwnerId, $pdo): array {
+    return array_merge([
         'id' => (int)$p['id'],
         'user_id' => (int)$p['user_id'],
         'display_name' => $p['display_name'],
@@ -108,7 +108,7 @@ $participants = array_map(function(array $p) use ($roomOwnerId): array {
         'linked_to' => $p['linked_to_participant_id'] ? (int)$p['linked_to_participant_id'] : null,
         'link_mode' => in_array(($p['link_mode'] ?? 'normal'), ['normal', 'lap'], true) ? $p['link_mode'] : 'normal',
         'online' => $p['last_seen_at'] && strtotime($p['last_seen_at']) >= time() - 35,
-    ];
+    ], avatar_size_participant_event_fields($pdo, $p));
 }, $stmt->fetchAll());
 
 $stmt = $pdo->prepare(
@@ -381,6 +381,7 @@ json_out([
     'dmUsers' => $dmUsers,
     'lastCommunityEventId' => $lastCommunityEventId,
     'avatarPresets' => avatar_presets(),
+    'avatarSizePolicy' => avatar_size_policy($pdo),
     'backgroundPath' => $room['background_path'],
     'backgroundMime' => $room['background_mime'],
     'backgroundTile' => !empty($room['import_url']) && !empty($room['background_path']) && !str_starts_with((string)$room['background_mime'], 'video/'),

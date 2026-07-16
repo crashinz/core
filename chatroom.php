@@ -37,7 +37,7 @@ $pdo->prepare('UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP, webcam_
 $participant['webcam_path'] = null;
 $participant['webcam_enabled'] = 0;
 
-emit_event($pdo, (int)$session['id'], 'participant_join', [
+emit_event($pdo, (int)$session['id'], 'participant_join', array_merge([
     'id' => (int)$participant['id'],
     'user_id' => (int)$user['id'],
     'display_name' => $participant['display_name'],
@@ -54,7 +54,7 @@ emit_event($pdo, (int)$session['id'], 'participant_join', [
     'linked_to' => $participant['linked_to_participant_id'] ? (int)$participant['linked_to_participant_id'] : null,
     'link_mode' => in_array(($participant['link_mode'] ?? 'normal'), ['normal', 'lap'], true) ? $participant['link_mode'] : 'normal',
     'joined_at' => gmdate('Y-m-d H:i:s'),
-]);
+], avatar_size_participant_event_fields($pdo, $participant)));
 $lastEventId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ' . (int)$session['id'])->fetchColumn();
 $linkIconCatalog = link_icon_catalog($pdo);
 $csrfToken = csrf_token();
@@ -624,8 +624,57 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     </div>
   </div>
 </div>
+<div class="modal" id="avatar-size-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="avatar-size-title">
+  <form class="modal-box avatar-size-box" id="avatar-size-form">
+    <div class="modal-head">
+      <div>
+        <h2 id="avatar-size-title">Avatar Display Size</h2>
+        <div class="minor" id="avatar-size-cap"></div>
+      </div>
+      <button class="icon-btn" id="avatar-size-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <section id="avatar-size-avatar-fields">
+      <label>Preferred maximum edge (px)
+        <input id="avatar-size-edge" name="avatar_display_size_px" type="number" min="42" step="1" inputmode="numeric">
+      </label>
+    </section>
+    <section id="avatar-size-webcam-fields" hidden>
+      <label>Size preset
+        <select id="avatar-size-webcam-preset">
+          <option value="default">Community default</option>
+          <option value="100x100">100 x 100</option>
+          <option value="150x150">150 x 150</option>
+          <option value="200x200">200 x 200</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      <div class="avatar-size-dimensions">
+        <label>Width (px)
+          <input id="avatar-size-webcam-width" name="webcam_display_width_px" type="number" min="42" step="1" inputmode="numeric">
+        </label>
+        <label>Height (px)
+          <input id="avatar-size-webcam-height" name="webcam_display_height_px" type="number" min="42" step="1" inputmode="numeric">
+        </label>
+      </div>
+      <label class="avatar-size-lock"><input id="avatar-size-aspect-lock" type="checkbox" checked> Lock aspect ratio</label>
+      <div id="avatar-size-match-wrap" hidden>
+        <label>Match a linked member once
+          <select id="avatar-size-match-participant"></select>
+        </label>
+        <button class="btn" id="avatar-size-match" type="button">Use selected size</button>
+      </div>
+    </section>
+    <div class="admin-row-status" id="avatar-size-status" aria-live="polite"></div>
+    <div class="delete-message-actions">
+      <button class="btn" id="avatar-size-reset" type="button">Use community default</button>
+      <button class="btn" id="avatar-size-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="avatar-size-save" type="submit">Save</button>
+    </div>
+  </form>
+</div>
 <div id="ctx-menu">
   <button id="ctx-change-avatar" type="button">Change Avatar</button>
+  <button id="ctx-avatar-size" type="button">Avatar Size</button>
   <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
     <button id="ctx-orientation" type="button" aria-haspopup="menu" aria-expanded="false">Orientation <span>&gt;</span></button>
     <div class="ctx-submenu" id="ctx-orientation-submenu" role="menu" aria-label="Avatar orientation">
@@ -637,6 +686,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   </div>
   <button id="ctx-auras" type="button">Auras</button>
   <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
+  <button id="ctx-webcam-size" type="button">Webcam Size</button>
   <button id="ctx-dm" type="button">Send DM</button>
   <button id="ctx-block" class="danger" type="button">Block</button>
   <button id="ctx-unblock" type="button">Unblock</button>

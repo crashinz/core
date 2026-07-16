@@ -72,7 +72,6 @@
 //--------------------------------------------------
 
 const DEFAULT_AVATAR_FALLBACK_SIZE = 150;
-const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
 const AVATAR_ORIENTATION_SCALE = Object.freeze({
     original: "",
     "flip-horizontal": "-1 1",
@@ -411,14 +410,28 @@ export class AvatarRenderer {
         const fallbackSize =
             Number(options.fallbackSize || DEFAULT_AVATAR_FALLBACK_SIZE);
 
-        const visualMaxSize =
-            Number(options.visualMaxSize || DEFAULT_AVATAR_VISUAL_MAX_SIZE);
-
-        const lapMaxSize =
-            Number(options.lapMaxSize || Math.round(fallbackSize * 0.5));
-
         const image =
             participant?.avatarEl || null;
+
+        const constraints =
+            this.#runtime.displayPolicy?.renderedConstraints(
+                participant,
+                {
+                    baseSize: fallbackSize,
+                    lapInitiator: Boolean(options.lapInitiator),
+                    webcam: Boolean(participant?.webcam_enabled && participant?.webcamVideoEl)
+                }
+            ) || {
+                kind: "avatar",
+                maxEdge: Number(options.visualMaxSize || 200)
+            };
+
+        if (constraints.kind === "webcam") {
+            return Object.freeze({
+                width: constraints.width,
+                height: constraints.height
+            });
+        }
 
         const naturalWidth =
             Number(image?.naturalWidth) ||
@@ -431,9 +444,7 @@ export class AvatarRenderer {
             fallbackSize;
 
         const maxSide =
-            options.lapInitiator
-                ? lapMaxSize
-                : visualMaxSize;
+            Number(constraints.maxEdge || fallbackSize);
 
         const scale =
             Math.min(

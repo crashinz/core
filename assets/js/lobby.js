@@ -1093,6 +1093,11 @@ adminSettings?.addEventListener('submit', async e => {
       room_chat_history_limit: form.elements.room_chat_history_limit.value,
       avatar_movements_per_second: form.elements.avatar_movements_per_second.value,
       avatar_max_size_mb: form.elements.avatar_max_size_mb.value,
+      avatar_upload_max_width_px: form.elements.avatar_upload_max_width_px.value,
+      avatar_upload_max_height_px: form.elements.avatar_upload_max_height_px.value,
+      avatar_display_max_px: form.elements.avatar_display_max_px.value,
+      webcam_display_max_width_px: form.elements.webcam_display_max_width_px.value,
+      webcam_display_max_height_px: form.elements.webcam_display_max_height_px.value,
       gesture_upload_limit: form.elements.gesture_upload_limit.value,
       room_image_max_size_mb: form.elements.room_image_max_size_mb.value,
       room_video_max_size_mb: form.elements.room_video_max_size_mb.value,
@@ -1115,6 +1120,23 @@ adminSettings?.addEventListener('submit', async e => {
     setAdminFormStatus(form, err.message || 'Settings failed to save.', 'error');
   } finally {
     submit.disabled = false;
+  }
+});
+
+document.getElementById('admin-reset-avatar-size-policy')?.addEventListener('click', async () => {
+  if (!adminSettings) return;
+  const button = document.getElementById('admin-reset-avatar-size-policy');
+  button.disabled = true;
+  setAdminFormStatus(adminSettings, 'Resetting avatar and webcam sizes...', 'working');
+  try {
+    await adminSystemRequest({ action: 'reset_avatar_size_policy' });
+    await loadAdminSettings();
+    await loadAdminLogs();
+    setAdminFormStatus(adminSettings, 'Avatar and webcam size defaults restored.', 'ok');
+  } catch (err) {
+    setAdminFormStatus(adminSettings, err.message || 'Size defaults could not be reset.', 'error');
+  } finally {
+    button.disabled = false;
   }
 });
 

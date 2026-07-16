@@ -374,11 +374,17 @@ $rooms = $roomsStmt->fetchAll();
                 <section class="admin-settings-group">
                   <h3>Media Limits</h3>
                   <div class="admin-settings-fields">
-                    <label>Avatar max size MB <input name="avatar_max_size_mb" type="number" min="0.5" max="50" step="0.5"></label>
+                    <label>Avatar upload max MB <input name="avatar_max_size_mb" type="number" min="0.5" max="50" step="0.5"></label>
+                    <label>Avatar upload max width px <input name="avatar_upload_max_width_px" type="number" min="42" max="4096" step="1"></label>
+                    <label>Avatar upload max height px <input name="avatar_upload_max_height_px" type="number" min="42" max="4096" step="1"></label>
+                    <label>Avatar display max edge px <input name="avatar_display_max_px" type="number" min="42" max="1000" step="1"></label>
+                    <label>Webcam display max width px <input name="webcam_display_max_width_px" type="number" min="42" max="2048" step="1"></label>
+                    <label>Webcam display max height px <input name="webcam_display_max_height_px" type="number" min="42" max="2048" step="1"></label>
                     <label>Gestures per account <input name="gesture_upload_limit" type="number" min="0" max="1000" step="1"></label>
                     <label>Room image max size MB <input name="room_image_max_size_mb" type="number" min="1" max="100" step="1"></label>
                     <label>Room video max size MB <input name="room_video_max_size_mb" type="number" min="5" max="1000" step="5"></label>
                   </div>
+                  <button class="btn" id="admin-reset-avatar-size-policy" type="button">Reset avatar and webcam size defaults</button>
                 </section>
                 <section class="admin-settings-group admin-settings-group-wide">
                   <h3>Account Protection</h3>

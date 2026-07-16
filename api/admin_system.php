@@ -15,7 +15,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $action = (string)($_GET['action'] ?? 'overview');
 
     if ($action === 'settings') {
-        json_out(['settings' => admin_settings($pdo)]);
+        json_out([
+            'settings' => admin_settings($pdo),
+            'avatarSizePolicy' => avatar_size_policy($pdo),
+        ]);
     }
 
     if ($action === 'logs') {
@@ -116,6 +119,12 @@ $body = input_json();
 $action = (string)($body['action'] ?? '');
 
 if ($action === 'save_settings') {
+    $policyValidation = avatar_size_policy_validate_settings($body);
+    if (empty($policyValidation['ok'])) {
+        $status = (int)($policyValidation['http_status'] ?? 400);
+        unset($policyValidation['http_status']);
+        json_out($policyValidation, $status);
+    }
     $allowed = [
         'chat_posts_per_second' => [0.2, 30],
         'room_chat_history_limit' => [1, 1000],
@@ -147,8 +156,40 @@ if ($action === 'save_settings') {
     set_app_setting($pdo, 'gif_klipy_api_key', $klipyKey);
     set_app_setting($pdo, 'gif_default_provider', $provider);
     set_app_setting($pdo, 'age_gate_enabled', !empty($body['age_gate_enabled']) ? '1' : '0');
+    $sizePolicyResult = avatar_size_policy_update($pdo, $body);
+    if (empty($sizePolicyResult['ok'])) {
+        $status = (int)($sizePolicyResult['http_status'] ?? 400);
+        unset($sizePolicyResult['http_status']);
+        json_out($sizePolicyResult, $status);
+    }
     log_tool($pdo, (int)$me['id'], 'admin_settings_update', null, null, 'Updated community settings');
-    json_out(['ok' => true, 'settings' => admin_settings($pdo)]);
+    json_out([
+        'ok' => true,
+        'settings' => admin_settings($pdo),
+        'avatarSizePolicy' => $sizePolicyResult['policy'],
+    ]);
+}
+
+if ($action === 'reset_avatar_size_policy') {
+    $result = avatar_size_policy_update($pdo, [], true);
+    if (empty($result['ok'])) {
+        $status = (int)($result['http_status'] ?? 400);
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
+    log_tool(
+        $pdo,
+        (int)$me['id'],
+        'admin_avatar_size_policy_reset',
+        null,
+        null,
+        'Reset avatar and webcam size policy defaults'
+    );
+    json_out([
+        'ok' => true,
+        'settings' => admin_settings($pdo),
+        'avatarSizePolicy' => $result['policy'],
+    ]);
 }
 
 if ($action === 'remove_block') {

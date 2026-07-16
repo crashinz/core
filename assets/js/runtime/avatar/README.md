@@ -14,6 +14,7 @@ The Avatar Runtime is responsible for:
 - avatar rendering
 - avatar interaction
 - aura workflow
+- avatar/webcam display policy projection
 
 The Avatar Runtime does not own:
 
@@ -25,6 +26,34 @@ The Avatar Runtime does not own:
 - application routing
 
 Those responsibilities remain outside the runtime.
+
+---
+
+# Avatar And Webcam Display Sizing
+
+Build 000044 Part 8 adds `AvatarDisplayPolicyService` as the runtime owner of
+installation policy projection, effective per-participant display constraints,
+one-time eligible normal-member webcam size matching, and diagnostics.
+
+The permanent boundary is:
+
+- server policy: upload width/height, avatar display cap, webcam display caps;
+- user state: nullable avatar edge and webcam width/height preferences plus
+  expected version;
+- `AvatarRenderer`: actual natural/no-upscale avatar geometry and rectangular
+  webcam presentation geometry;
+- `AvatarLayoutService`: relationship, formation, lap, anchor, and stage bounds;
+- `AvatarDragController`: rendered-size drag bounds;
+- host shell: accessible settings/context UI and API adaptation;
+- VoiceRuntime/host capture: tracks, peers, transceivers, SDP, ICE, and signals.
+
+Defaults are a 200px avatar display cap, a 200x200 webcam display cap, and a
+separate source-proven 250x250 upload envelope. Lap occupants are excluded from
+one-time webcam matching. Size changes never advance avatar source version.
+
+Part 8 exact-final Chrome passed 75 automated checks with zero defects;
+canonical SHA-256 is
+`B27CFB65BAA806A95A3496A127C13F64AF90DAB4470AD21BBB55AEDE0019B4AB`.
 
 ---
 

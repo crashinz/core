@@ -57,7 +57,6 @@
 
 const DEFAULT_LINK_TARGET_DISTANCE = 120;
 const DEFAULT_AVATAR_FALLBACK_SIZE = 150;
-const DEFAULT_AVATAR_VISUAL_MAX_SIZE = 200;
 
 //--------------------------------------------------
 // Avatar Drag Controller
@@ -564,8 +563,6 @@ export class AvatarDragController {
             {
                 fallbackSize:
                     Number(this.#context?.baseAvatarSize?.() || DEFAULT_AVATAR_FALLBACK_SIZE),
-                visualMaxSize:
-                    DEFAULT_AVATAR_VISUAL_MAX_SIZE,
                 lapInitiator:
                     this.#runtime.relationships?.isLapLinkInitiator(participant) || false
             }

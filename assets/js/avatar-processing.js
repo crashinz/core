@@ -1,8 +1,9 @@
 'use strict';
 
 (function initAvatarProcessing() {
-  const MAX_AVATAR_SIZE = 250;
   const MIN_AVATAR_SIZE = 42;
+  let maxWidth = 250;
+  let maxHeight = 250;
 
   function isGif(file) {
     return file?.type === 'image/gif' || /\.gif$/i.test(file?.name || '');
@@ -25,7 +26,7 @@
   }
 
   function scaledSize(width, height) {
-    const scale = Math.min(1, MAX_AVATAR_SIZE / Math.max(width, height));
+    const scale = Math.min(1, maxWidth / width, maxHeight / height);
     return {
       width: Math.max(1, Math.round(width * scale)),
       height: Math.max(1, Math.round(height * scale)),
@@ -58,7 +59,7 @@
 
     if (isGif(file)) {
       if (size.width !== width || size.height !== height) {
-        throw new Error('Animated GIF avatars must be 250x250 or smaller so the animation stays intact.');
+        throw new Error(`Animated GIF avatars must be ${maxWidth}x${maxHeight} or smaller so the animation stays intact.`);
       }
       return file;
     }
@@ -83,8 +84,23 @@
   }
 
   window.ChatSpaceAvatar = {
-    maxSize: MAX_AVATAR_SIZE,
+    get maxSize() {
+      return Math.min(maxWidth, maxHeight);
+    },
+    get maxWidth() {
+      return maxWidth;
+    },
+    get maxHeight() {
+      return maxHeight;
+    },
     minSize: MIN_AVATAR_SIZE,
+    configure(policy = {}) {
+      const width = Number.parseInt(policy.avatarUploadMaxWidthPx, 10);
+      const height = Number.parseInt(policy.avatarUploadMaxHeightPx, 10);
+      if (Number.isFinite(width) && width >= MIN_AVATAR_SIZE) maxWidth = width;
+      if (Number.isFinite(height) && height >= MIN_AVATAR_SIZE) maxHeight = height;
+      return Object.freeze({ maxWidth, maxHeight });
+    },
     prepareAvatarFile,
     replaceInputFile,
   };
