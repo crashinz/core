@@ -177,21 +177,29 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 
         <audio id="vp-music-audio" controls preload="none"></audio>
 
-<button
-    class="btn btn-primary vp-music-launch"
-    id="vp-music-launch"
-    type="button"
-    hidden>
-    Launch YouTube Pop-Up
-</button>
-
-<button
-    class="btn btn-primary vp-music-launch"
-    id="vp-music-embed"
-    type="button"
-    hidden>
-    Launch YouTube Embed
-</button>
+        <div class="vp-music-youtube-controls" id="vp-music-youtube-controls" hidden>
+          <div class="vp-music-youtube-title">YouTube</div>
+          <div class="vp-music-youtube-actions">
+            <button
+              class="btn btn-primary vp-music-launch"
+              id="vp-music-launch"
+              type="button"
+              title="Open YouTube in the pop-out player"
+              aria-controls="vp-music-modal"
+              aria-expanded="false">
+              Pop out
+            </button>
+            <button
+              class="btn btn-primary vp-music-launch"
+              id="vp-music-embed"
+              type="button"
+              title="Play YouTube in the room panel"
+              aria-controls="vp-music-youtube"
+              aria-expanded="false">
+              Play here
+            </button>
+          </div>
+        </div>
 
 <div id="vp-music-youtube" hidden></div>
 

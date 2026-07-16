@@ -35,7 +35,8 @@ ImportedRoomRuntime does not own:
 
 - `ImportedRoomLayoutRenderer` owns imported room layout presentation.
 - `ImportedRoomMusicService` owns imported room music-player behavior,
-  modal lifecycle, inline embed presentation, and diagnostics.
+  modal lifecycle, compact right-side YouTube controls, inline embed
+  presentation, accessible expanded state, one-player cleanup, and diagnostics.
 - `ImportedRoomWebsiteCompatibilityService` owns page-level imported website
   compatibility routing and page-level player HTML.
 - `InnerTranquillityCompatibility` owns inner-tranquillity.net MediaElement

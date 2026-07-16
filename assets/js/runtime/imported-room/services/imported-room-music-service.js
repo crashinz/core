@@ -194,6 +194,20 @@ export class ImportedRoomMusicService {
 
             }
 
+            if (this.#embedElement()) {
+
+                this.#embedElement().hidden = true;
+
+            }
+
+            if (this.#youtubeControlsElement()) {
+
+                this.#youtubeControlsElement().hidden = true;
+
+            }
+
+            this.#hideInlineEmbed();
+
             return;
 
         }
@@ -220,7 +234,6 @@ export class ImportedRoomMusicService {
                     if (this.#modalElement()?.classList.contains("open")) {
 
                         this.closeModal();
-                        launch.textContent = "Launch YouTube Pop-Up";
                         return;
 
                     }
@@ -228,8 +241,6 @@ export class ImportedRoomMusicService {
                     this.openModal(
                         this.#activeTrack
                     );
-
-                    launch.textContent = "Close YouTube Pop-Up";
 
                 };
 
@@ -277,6 +288,16 @@ export class ImportedRoomMusicService {
         const isLaunchTrack =
             track.type === "youtube" || Boolean(track.embed_url);
 
+        const youtubeControls =
+            this.#youtubeControlsElement();
+
+        if (youtubeControls) {
+
+            youtubeControls.hidden =
+                !isLaunchTrack;
+
+        }
+
         audio.hidden =
             isLaunchTrack;
 
@@ -288,8 +309,7 @@ export class ImportedRoomMusicService {
             launch.hidden =
                 !isLaunchTrack;
 
-            launch.textContent =
-                "Launch YouTube Pop-Up";
+            this.#syncLaunchControl(false);
 
         }
 
@@ -301,8 +321,7 @@ export class ImportedRoomMusicService {
             embed.hidden =
                 !isLaunchTrack;
 
-            embed.textContent =
-                "Launch YouTube Embed";
+            this.#syncEmbedControl(false);
 
         }
 
@@ -409,6 +428,8 @@ export class ImportedRoomMusicService {
             "open"
         );
 
+        this.#syncLaunchControl(true);
+
         this.#modalOpen =
             true;
 
@@ -438,15 +459,7 @@ export class ImportedRoomMusicService {
 
         }
 
-        const launch =
-            this.#launchElement();
-
-        if (launch) {
-
-            launch.textContent =
-                "Launch YouTube Pop-Up";
-
-        }
+        this.#syncLaunchControl(false);
 
         this.#modalOpen =
             false;
@@ -640,6 +653,12 @@ export class ImportedRoomMusicService {
     #audioElement() {
 
         return this.#context?.getMusicAudioElement?.() || null;
+
+    }
+
+    #youtubeControlsElement() {
+
+        return this.#context?.getMusicYoutubeControlsElement?.() || null;
 
     }
 
@@ -893,10 +912,14 @@ export class ImportedRoomMusicService {
         const youtube =
             this.#youtubeElement();
 
-        if (!youtube) return;
+        if (youtube) {
 
-        youtube.hidden = true;
-        youtube.innerHTML = "";
+            youtube.hidden = true;
+            youtube.innerHTML = "";
+
+        }
+
+        this.#syncEmbedControl(false);
 
     }
 
@@ -911,20 +934,12 @@ export class ImportedRoomMusicService {
         const youtube =
             this.#youtubeElement();
 
-        const embed =
-            this.#embedElement();
-
         if (!youtube.hidden) {
 
             youtube.hidden = true;
             youtube.innerHTML = "";
 
-            if (embed) {
-
-                embed.textContent =
-                    "Launch YouTube Embed";
-
-            }
+            this.#syncEmbedControl(false);
 
             return;
 
@@ -933,16 +948,46 @@ export class ImportedRoomMusicService {
         youtube.hidden = false;
         youtube.innerHTML =
             `<iframe src="${this.#esc(this.#activeTrack.embed_url)}"
+                title="${this.#esc(this.#activeTrack.label || "YouTube player")}"
                 allow="autoplay; encrypted-media"
                 allowfullscreen>
              </iframe>`;
 
-        if (embed) {
+        this.#syncEmbedControl(true);
 
-            embed.textContent =
-                "Hide YouTube Embed";
+    }
 
-        }
+    #syncLaunchControl(expanded) {
+
+        const launch =
+            this.#launchElement();
+
+        if (!launch) return;
+
+        launch.textContent =
+            expanded ? "Close pop out" : "Pop out";
+
+        launch.setAttribute(
+            "aria-expanded",
+            expanded ? "true" : "false"
+        );
+
+    }
+
+    #syncEmbedControl(expanded) {
+
+        const embed =
+            this.#embedElement();
+
+        if (!embed) return;
+
+        embed.textContent =
+            expanded ? "Hide player" : "Play here";
+
+        embed.setAttribute(
+            "aria-expanded",
+            expanded ? "true" : "false"
+        );
 
     }
 

@@ -70,6 +70,7 @@ const vpRoomLayout = document.getElementById('vp-room-layout');
 const vpMusicPlayer = document.getElementById('vp-music-player');
 const vpMusicSelect = document.getElementById('vp-music-select');
 const vpMusicAudio = document.getElementById('vp-music-audio');
+const vpMusicYoutubeControls = document.getElementById('vp-music-youtube-controls');
 const vpMusicLaunch = document.getElementById('vp-music-launch');
 const vpMusicEmbed = document.getElementById('vp-music-embed');
 const vpMusicModal = document.getElementById('vp-music-modal');
@@ -1198,6 +1199,9 @@ function configureImportedRoomRuntime() {
     },
     getMusicAudioElement() {
       return vpMusicAudio;
+    },
+    getMusicYoutubeControlsElement() {
+      return vpMusicYoutubeControls;
     },
     getMusicLaunchElement() {
       return vpMusicLaunch;
