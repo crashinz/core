@@ -3673,6 +3673,31 @@ export class VoiceMediaService {
 
                 if (!this.#isActivePeer(pc)) return;
 
+                if (event.candidate?.candidate === "") {
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "ice-gathering-complete",
+
+                        remoteParticipantId:
+                            id,
+
+                        peerInstanceId:
+                            pc.__voicePeerInstanceId,
+
+                        generation:
+                            pc.__voiceGeneration,
+
+                        remotePeerInstanceId:
+                            pc.__voiceRemotePeerInstanceId || null
+
+                    });
+
+                    return;
+
+                }
+
                 if (event.candidate) {
 
                     this.#recordNegotiationDiagnostic({

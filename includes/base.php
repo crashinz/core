@@ -5208,6 +5208,7 @@ function avatar_relationship_refresh_legacy_projection_locked(
             (int)$initiator['participant_id'],
             (int)$target['participant_id'],
             (int)$initiator['participant_id'],
+            (int)$initiator['participant_id'],
             $relationshipDbId,
         ]);
     } else {

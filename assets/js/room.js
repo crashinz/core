@@ -56,10 +56,15 @@ let runtimeDiagnostics = null;
 let runtimeVerificationControls = null;
 let runtimeRequestClient = null;
 const runtimeRequestAbortController = new AbortController();
-window.addEventListener('pagehide', () => {
-  runtimeRequestAbortController.abort('page-hide');
-  avatarRuntime?.coordinator?.cancelPendingLinkChoice('page-hide');
-}, { once: true });
+function stopRoomForDocumentExit(reason) {
+  roomExitInProgress = true;
+  chatRuntime?.poll?.stop();
+  if (chatRuntimeCore?.state === 'started') chatRuntimeCore.stop();
+  runtimeRequestAbortController.abort(reason);
+  avatarRuntime?.coordinator?.cancelPendingLinkChoice(reason);
+}
+window.addEventListener('pagehide', () => stopRoomForDocumentExit('page-hide'), { once: true });
+window.addEventListener('beforeunload', () => stopRoomForDocumentExit('before-unload'), { once: true });
 let frameQueued = false;
 let pendingLayout = false;
 let layoutLocked = false;
