@@ -46,7 +46,7 @@ if ($action === 'update') {
     if (!in_array($role, $roles, true)) json_out(['error' => 'Invalid role'], 400);
     $pdo->prepare('UPDATE users SET role = ? WHERE id = ?')->execute([$role, $userId]);
     if ($password !== '') {
-        $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $userId]);
+        $pdo->prepare('UPDATE users SET password_hash = ?, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $userId]);
     }
     log_tool($pdo, (int)$me['id'], 'admin_update_user', $userId, null, 'Role: ' . $role . ($password !== '' ? '; password reset' : ''));
 

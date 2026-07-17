@@ -55,12 +55,14 @@ let runtimeDiagnosticsInstallation = null;
 let runtimeDiagnostics = null;
 let runtimeVerificationControls = null;
 let runtimeRequestClient = null;
+let runtimeIssueCaptureService = null;
 const runtimeRequestAbortController = new AbortController();
 function stopRoomForDocumentExit(reason) {
   roomExitInProgress = true;
   chatRuntime?.poll?.stop();
   if (chatRuntimeCore?.state === 'started') chatRuntimeCore.stop();
   runtimeRequestAbortController.abort(reason);
+  runtimeIssueCaptureService?.destroy();
   avatarRuntime?.coordinator?.cancelPendingLinkChoice(reason);
 }
 window.addEventListener('pagehide', () => stopRoomForDocumentExit('page-hide'), { once: true });
@@ -169,6 +171,12 @@ const sessionLockEl = document.getElementById('session-lock');
 const sessionLockForm = document.getElementById('session-lock-form');
 const sessionLockPassword = document.getElementById('session-lock-password');
 const sessionLockError = document.getElementById('session-lock-error');
+const reportProblemModal = document.getElementById('report-problem-modal');
+const reportProblemForm = document.getElementById('report-problem-form');
+const reportProblemSummary = document.getElementById('report-problem-summary');
+const reportProblemScreenshot = document.getElementById('report-problem-screenshot');
+const reportProblemStatus = document.getElementById('report-problem-status');
+const chatOptionsModal = document.getElementById('chat-options-modal');
 let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastLatencyMs = null;
@@ -230,7 +238,7 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
@@ -242,6 +250,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
     import(appUrl('/assets/js/core/runtime-diagnostics.js')),
     import(appUrl('/assets/js/core/runtime-request-client.js')),
+    import(appUrl('/assets/js/core/runtime-issue-capture-service.js')),
   ]);
 
   if (!runtimeDiagnosticsInstallation) {
@@ -268,6 +277,15 @@ async function initializeAvatarRuntime() {
     });
   }
 
+  if (!runtimeIssueCaptureService) {
+    runtimeIssueCaptureService = new RuntimeIssueCaptureService({
+      endpoint: appUrl('/api/runtime_issues.php'),
+      csrfToken: CSRF_TOKEN,
+      diagnostics: runtimeDiagnostics,
+      buildId: '000045',
+    }).start();
+  }
+
   runtimeRequestClient = new RuntimeRequestClient({
     resolveUrl: appUrl,
     csrfToken: CSRF_TOKEN,
@@ -278,6 +296,7 @@ async function initializeAvatarRuntime() {
         message: error.message,
         ...error.details,
       });
+      runtimeIssueCaptureService?.captureRequestFailure(error).catch(() => {});
     },
   });
 
@@ -544,6 +563,7 @@ function configureChatMessageRenderer() {
     isHttpUrl,
     formatBytes,
     fullTimestamp,
+    parseServerDate,
     messageAvatarUrl,
     participantRoleClass,
     participantRoleLabel,
@@ -885,6 +905,14 @@ function configureRoomEventRouter() {
     },
     onUserRoleUpdate(payload) {
       applyUserRoleUpdate(payload);
+    },
+    onRoleColorsUpdate(payload) {
+      document.body.dataset.roleColorsMode = payload?.mode || 'enabled';
+      for (const [role, colors] of Object.entries(payload?.palette || {})) {
+        if (!['admin', 'developer', 'guide', 'owner', 'user'].includes(role)) continue;
+        if (/^#[0-9a-f]{6}$/i.test(colors?.background || '')) document.body.style.setProperty(`--role-${role}-bg`, colors.background);
+        if (/^#[0-9a-f]{6}$/i.test(colors?.text || '')) document.body.style.setProperty(`--role-${role}-text`, colors.text);
+      }
     },
     onTyping(payload) {
       showTyping(payload.participant_id, payload.active);
@@ -2754,7 +2782,7 @@ function fullTimestamp(value) {
 
 function updateVisibleTimestamps() {
   document.querySelectorAll('[data-ts]').forEach(el => {
-    el.textContent = `${el.dataset.prefix || ''}${fullTimestamp(el.dataset.ts)}`;
+    el.textContent = `${el.dataset.prefix || ''}${chatMessageRenderer().formatTimestamp(el.dataset.ts)}`;
   });
 }
 
@@ -3490,6 +3518,12 @@ document.getElementById('rooms-link')?.addEventListener('click', async e => {
   const href = e.currentTarget.dataset.href || e.currentTarget.href || appUrl('/lobby.php');
   await leaveRoomWithLocalExit(href);
 });
+for (const id of ['admin-link', 'account-link']) {
+  document.getElementById(id)?.addEventListener('click', async e => {
+    e.preventDefault();
+    await leaveRoomWithLocalExit(e.currentTarget.dataset.href);
+  });
+}
 document.getElementById('logout-link')?.addEventListener('click', async e => {
   e.preventDefault();
   await leaveRoomWithLocalExit(null, () => {
@@ -3956,6 +3990,38 @@ document.getElementById('room-menu-btn').addEventListener('click', e => {
   else openRoomMenu();
 });
 
+function syncChatOptions() {
+  const mode = chatMessageRenderer().displayMode;
+  document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
+    input.checked = input.value === mode;
+  });
+}
+
+function openChatOptions() {
+  closeRoomMenu();
+  syncChatOptions();
+  chatOptionsModal?.classList.add('open');
+  chatOptionsModal?.setAttribute('aria-hidden', 'false');
+  chatOptionsModal?.querySelector('input:checked')?.focus();
+}
+
+function closeChatOptions() {
+  chatOptionsModal?.classList.remove('open');
+  chatOptionsModal?.setAttribute('aria-hidden', 'true');
+}
+
+document.getElementById('chat-options-btn')?.addEventListener('click', openChatOptions);
+document.getElementById('chat-options-close')?.addEventListener('click', closeChatOptions);
+chatOptionsModal?.addEventListener('click', event => {
+  if (event.target === chatOptionsModal) closeChatOptions();
+});
+document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
+  input.addEventListener('change', event => {
+    if (!event.currentTarget.checked) return;
+    chatMessageRenderer().setDisplayMode(event.currentTarget.value);
+  });
+});
+
 document.getElementById('room-action-btn')?.addEventListener('click', e => {
   e.stopPropagation();
   if (roomActionMenu?.classList.contains('visible')) closeRoomActionMenu();
@@ -3963,6 +4029,44 @@ document.getElementById('room-action-btn')?.addEventListener('click', e => {
 });
 
 document.getElementById('lock-session-btn')?.addEventListener('click', lockSession);
+
+async function openReportProblem() {
+  closeRoomMenu();
+  reportProblemStatus.textContent = '';
+  reportProblemScreenshot.checked = false;
+  reportProblemScreenshot.closest('.diagnostic-screenshot-option').hidden = true;
+  try {
+    const config = await runtimeRequestClient.getJson('/api/runtime_issues.php?action=config', { operation: 'diagnostic-screenshot-config' });
+    reportProblemScreenshot.closest('.diagnostic-screenshot-option').hidden = !config?.screenshots?.enabled;
+  } catch {
+    // Reporting remains available without optional screenshot evidence.
+  }
+  reportProblemModal.classList.add('open');
+  reportProblemModal.setAttribute('aria-hidden', 'false');
+  reportProblemSummary.focus();
+}
+
+function closeReportProblem() {
+  reportProblemModal?.classList.remove('open');
+  reportProblemModal?.setAttribute('aria-hidden', 'true');
+}
+
+document.getElementById('report-problem-btn')?.addEventListener('click', openReportProblem);
+document.getElementById('report-problem-close')?.addEventListener('click', closeReportProblem);
+reportProblemModal?.addEventListener('click', event => {
+  if (event.target === reportProblemModal) closeReportProblem();
+});
+reportProblemForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  reportProblemStatus.textContent = 'Submitting…';
+  try {
+    await runtimeIssueCaptureService.report({ summary: reportProblemSummary.value, includeScreenshot: reportProblemScreenshot.checked });
+    reportProblemStatus.textContent = 'Report submitted.';
+    reportProblemForm.reset();
+  } catch (error) {
+    reportProblemStatus.textContent = error?.message || 'Report could not be submitted.';
+  }
+});
 
 sessionLockForm?.addEventListener('submit', e => {
   e.preventDefault();
@@ -4416,6 +4520,7 @@ document.addEventListener('keydown', e => {
     document.getElementById('host-warn-modal')?.classList.remove('open');
     document.getElementById('host-kick-modal')?.classList.remove('open');
     document.getElementById('warning-modal')?.classList.remove('open');
+    closeReportProblem();
     closeDeleteMessageModal();
     cancelVoiceNote();
   }

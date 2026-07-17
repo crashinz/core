@@ -4053,6 +4053,11 @@ export class VoiceMediaService {
                         }
                     );
 
+                    this.#reattachRemoteAudioFromPeer(
+                        from,
+                        "local-answer-complete"
+                    );
+
                     if (this.#isActivePeer(pc)) {
 
                         pc.__voiceLifecycleState =
@@ -4189,6 +4194,11 @@ export class VoiceMediaService {
 
                     pc.__voicePendingLocalOffer =
                         null;
+
+                    this.#reattachRemoteAudioFromPeer(
+                        from,
+                        "remote-answer-complete"
+                    );
 
                     this.#scheduleTransportRtpProbe(
                         pc,
@@ -5006,6 +5016,94 @@ export class VoiceMediaService {
         });
 
         this.#pendingRemoteAudioTracks.clear();
+
+    }
+
+    #reattachRemoteAudioFromPeer(participantId, reason) {
+
+        if (!this.#lifecycle.isJoined()) return;
+
+        const id =
+            Number(participantId);
+
+        const pc =
+            this.#peers.get(id) || null;
+
+        const transceiver =
+            pc?.__voiceTransceivers?.audio || null;
+
+        const track =
+            transceiver?.receiver?.track || null;
+
+        if (
+            !this.#isActivePeer(pc) ||
+            !transceiver ||
+            !track ||
+            track.readyState === "ended"
+        ) {
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "remote-audio-reattach-deferred",
+
+                reason,
+
+                remoteParticipantId:
+                    id,
+
+                peerInstanceId:
+                    pc?.__voicePeerInstanceId || null,
+
+                generation:
+                    pc?.__voiceGeneration || null,
+
+                receiverTrackId:
+                    track?.id || null,
+
+                receiverTrackState:
+                    track?.readyState || null
+
+            });
+
+            return;
+
+        }
+
+        this.#recordAudioPathDiagnostic({
+
+            event:
+                "remote-audio-reattach-preserved-peer",
+
+            reason,
+
+            remoteParticipantId:
+                id,
+
+            peerInstanceId:
+                pc.__voicePeerInstanceId || null,
+
+            generation:
+                pc.__voiceGeneration || null,
+
+            receiverTrackId:
+                track.id || null,
+
+            receiverTrackState:
+                track.readyState,
+
+            receiverTrackMuted:
+                Boolean(track.muted)
+
+        });
+
+        this.#attachRemoteAudioTrack(
+            id,
+            track,
+            [],
+            pc,
+            transceiver
+        );
 
     }
 

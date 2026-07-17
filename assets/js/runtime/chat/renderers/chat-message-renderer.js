@@ -32,6 +32,10 @@
  * - Transferred message DOM rendering from room.js.
  * - Transferred message scroll presentation state from room.js.
  * - Transferred reply preview, reaction, and media/body presentation markup.
+ *
+ * Build 000045 Checkpoint 45C2
+ * - Added the authoritative Detailed/Compact message display preference.
+ * - Added shared compact presentation for every ChatRuntime channel.
  ******************************************************************************/
 
 /**
@@ -43,6 +47,51 @@
 //
 // No imports required.
 //
+
+export const CHAT_DISPLAY_STORAGE_KEY = "chatspace.chatDisplayMode";
+
+export function normalizeChatDisplayMode(value) {
+
+    return value === "compact" ? "compact" : "detailed";
+
+}
+
+export function formatChatMessageTimestamp(dateValue, nowValue = new Date()) {
+
+    const date = dateValue instanceof Date
+        ? dateValue
+        : new Date(dateValue);
+
+    const now = nowValue instanceof Date
+        ? nowValue
+        : new Date(nowValue);
+
+    if (Number.isNaN(date.getTime()) || Number.isNaN(now.getTime())) {
+        return "";
+    }
+
+    const time = date.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit"
+    });
+
+    if (
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate()
+    ) {
+        return time;
+    }
+
+    const day = date.toLocaleDateString([], {
+        month: "2-digit",
+        day: "2-digit",
+        year: "2-digit"
+    });
+
+    return `${day} ${time}`;
+
+}
 
 //--------------------------------------------------
 // Chat Message Renderer
@@ -77,6 +126,13 @@ export class ChatMessageRenderer {
      * @type {boolean}
      */
     #messagesPinnedToBottom = true;
+
+    /**
+     * Personal message presentation mode.
+     *
+     * @type {"detailed"|"compact"}
+     */
+    #displayMode = "detailed";
 
     //--------------------------------------------------
     // Constructor
@@ -114,6 +170,8 @@ export class ChatMessageRenderer {
 
         this.#messagesPinnedToBottom = true;
 
+        this.#displayMode = "detailed";
+
     }
 
     //--------------------------------------------------
@@ -131,6 +189,17 @@ export class ChatMessageRenderer {
 
     }
 
+    /**
+     * Returns the active personal message presentation mode.
+     *
+     * @returns {"detailed"|"compact"}
+     */
+    get displayMode() {
+
+        return this.#displayMode;
+
+    }
+
     //--------------------------------------------------
     // Public Configuration
     //--------------------------------------------------
@@ -143,6 +212,63 @@ export class ChatMessageRenderer {
     configure(context = {}) {
 
         this.#context = context;
+
+        const storage = context.window?.localStorage;
+
+        let stored = null;
+
+        try {
+            stored = storage?.getItem(CHAT_DISPLAY_STORAGE_KEY) ?? null;
+        } catch {
+            stored = null;
+        }
+
+        this.#displayMode = normalizeChatDisplayMode(stored);
+
+        if (stored !== null && stored !== this.#displayMode) {
+            try {
+                storage?.setItem(CHAT_DISPLAY_STORAGE_KEY, this.#displayMode);
+            } catch {
+                // The normalized in-memory preference remains available.
+            }
+        }
+
+        this.#syncDisplayMode();
+
+    }
+
+    /**
+     * Applies and persists a personal message presentation mode.
+     *
+     * @param {string} value
+     * @param {Object} options
+     *
+     * @returns {"detailed"|"compact"}
+     */
+    setDisplayMode(value, { persist = true, render = true } = {}) {
+
+        const mode = normalizeChatDisplayMode(value);
+
+        this.#displayMode = mode;
+
+        if (persist) {
+            try {
+                this.#context?.window?.localStorage?.setItem(
+                    CHAT_DISPLAY_STORAGE_KEY,
+                    mode
+                );
+            } catch {
+                // Personal presentation still updates for the current page.
+            }
+        }
+
+        this.#syncDisplayMode();
+
+        if (render && this.#context) {
+            this.renderActiveChat(this.#context.getActiveChat?.() || "room");
+        }
+
+        return mode;
 
     }
 
@@ -228,7 +354,8 @@ export class ChatMessageRenderer {
         row.className =
             "message" +
             (message.participant_id === cfg.myParticipantId ? " me" : "") +
-            (message.is_deleted ? " deleted" : "");
+            (message.is_deleted ? " deleted" : "") +
+            (this.#displayMode === "compact" ? " compact" : " detailed");
 
         row.dataset.messageId =
             message.id;
@@ -250,12 +377,12 @@ export class ChatMessageRenderer {
 
         const flagTime =
             timeValue
-                ? `<span class="msg-name-time" data-ts="${context.esc(timeValue)}" data-prefix="${context.esc(timePrefix)}">${context.esc(timePrefix)}${context.esc(context.fullTimestamp(timeValue))}</span>`
+                ? `<span class="msg-name-time" data-ts="${context.esc(timeValue)}" data-prefix="${context.esc(timePrefix)}">${context.esc(timePrefix)}${context.esc(this.formatTimestamp(timeValue))}</span>`
                 : "";
 
         const deletedMeta =
             message.is_deleted && message.deleted_at
-                ? `<div class="msg-audit deleted-audit">Deleted at ${context.esc(context.fullTimestamp(message.deleted_at))}</div>`
+                ? `<div class="msg-audit deleted-audit">Deleted at ${context.esc(this.formatTimestamp(message.deleted_at))}</div>`
                 : "";
 
         const original =
@@ -273,8 +400,51 @@ export class ChatMessageRenderer {
                 ? ""
                 : '<button class="msg-options" type="button" aria-label="Message options">&#8942;</button>';
 
-        row.innerHTML =
-            `<div class="bubble"><div class="msg-head"><div class="msg-name ${context.participantRoleClass(author)}" title="${context.esc(context.participantRoleLabel(author))}"><img src="${context.esc(context.messageAvatarUrl(message, participant))}" alt=""><span class="msg-name-copy"><span class="msg-name-text">${context.esc(participant ? context.displayNameFor(participant) : message.display_name)}</span>${flagTime}</span></div>${optionsButton}</div>${this.replyPreviewHtml(message)}<div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${this.renderReactions(message)}</div></div>`;
+        const displayName =
+            context.esc(participant ? context.displayNameFor(participant) : message.display_name);
+
+        const roleClass =
+            context.participantRoleClass(author);
+
+        const roleLabel =
+            context.esc(context.participantRoleLabel(author));
+
+        if (this.#displayMode === "compact") {
+
+            const isText =
+                (message.message_type || "text") === "text";
+
+            const inlineBody = isText
+                ? this.linkifiedTextHtml(message.content)
+                : "";
+
+            const compactText =
+                message.is_deleted && cfg.canModerateMessages
+                    ? `<span class="msg-deleted-body">${inlineBody}</span>`
+                    : inlineBody;
+
+            const continuationBody = isText
+                ? this.urlPreviewHtml(message.url_preview)
+                : body;
+
+            const continuation =
+                `${this.replyPreviewHtml(message)}` +
+                (continuationBody
+                    ? `<div class="msg-compact-body">${continuationBody}</div>`
+                    : "") +
+                deletedMeta +
+                original +
+                `<div class="msg-meta-line">${this.renderReactions(message)}</div>`;
+
+            row.innerHTML =
+                `<div class="bubble"><div class="msg-compact-line">${flagTime}<span class="msg-compact-name ${roleClass}" title="${roleLabel}">${displayName}</span><span class="msg-compact-separator" aria-hidden="true">:</span><span class="msg-compact-text">${compactText}</span>${optionsButton}</div><div class="msg-compact-continuation">${continuation}</div></div>`;
+
+        } else {
+
+            row.innerHTML =
+                `<div class="bubble"><div class="msg-head"><div class="msg-name ${roleClass}" title="${roleLabel}"><img src="${context.esc(context.messageAvatarUrl(message, participant))}" alt=""><span class="msg-name-copy"><span class="msg-name-text">${displayName}</span>${flagTime}</span></div>${optionsButton}</div>${this.replyPreviewHtml(message)}<div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${this.renderReactions(message)}</div></div>`;
+
+        }
 
         row.querySelector(".msg-options")?.addEventListener("click", event => {
 
@@ -479,6 +649,26 @@ export class ChatMessageRenderer {
             return `<button class="reaction-chip${own ? " own" : ""}" type="button" data-msg-reaction="${context.esc(emoji)}"><span class="reaction-emoji">${context.esc(emoji)}</span><span class="reaction-avatars">${avatars}</span></button>`;
 
         }).join("")}</div>`;
+
+    }
+
+    /**
+     * Formats a message timestamp using the room's server-date parser.
+     *
+     * @param {string} value
+     * @param {Date} now
+     *
+     * @returns {string}
+     */
+    formatTimestamp(value, now = new Date()) {
+
+        const context = this.#requireContext();
+
+        const parsed = typeof context.parseServerDate === "function"
+            ? context.parseServerDate(value)
+            : value;
+
+        return formatChatMessageTimestamp(parsed, now);
 
     }
 
@@ -809,7 +999,13 @@ export class ChatMessageRenderer {
                 Boolean(this.#context),
 
             messagesPinnedToBottom:
-                this.#messagesPinnedToBottom
+                this.#messagesPinnedToBottom,
+
+            displayMode:
+                this.#displayMode,
+
+            displayStorageKey:
+                CHAT_DISPLAY_STORAGE_KEY
 
         });
 
@@ -842,6 +1038,19 @@ export class ChatMessageRenderer {
     #messagesElement() {
 
         return this.#context?.messagesElement || null;
+
+    }
+
+    /**
+     * Projects the personal presentation mode onto the shared viewport.
+     */
+    #syncDisplayMode() {
+
+        const messagesElement = this.#messagesElement();
+
+        if (messagesElement) {
+            messagesElement.dataset.chatDisplayMode = this.#displayMode;
+        }
 
     }
 

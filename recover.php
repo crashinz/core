@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (password_verify($newPassword, (string)$user['password_hash'])) {
                 $error = 'New password must be different from the current password.';
             } else {
-                $stmt = $pdo->prepare('UPDATE users SET password_hash = ?, recovery_code_hash = NULL, recovery_code_suffix = NULL WHERE id = ?');
+                $stmt = $pdo->prepare('UPDATE users SET password_hash = ?, recovery_code_hash = NULL, recovery_code_suffix = NULL, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?');
                 $stmt->execute([password_hash($newPassword, PASSWORD_DEFAULT), (int)$user['id']]);
                 auth_rate_clear_identifier($pdo, 'recovery', $login);
                 $success = 'Password reset. Your old recovery code has been invalidated.';

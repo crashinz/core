@@ -85,7 +85,7 @@ if ($action === 'reset_password') {
         json_out(['error' => 'New password must be different from the current password.'], 400);
     }
 
-    $stmt = $pdo->prepare('UPDATE users SET password_hash = ?, recovery_code_hash = NULL, recovery_code_suffix = NULL WHERE id = ?');
+    $stmt = $pdo->prepare('UPDATE users SET password_hash = ?, recovery_code_hash = NULL, recovery_code_suffix = NULL, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?');
     $stmt->execute([password_hash($newPassword, PASSWORD_DEFAULT), (int)$user['id']]);
     auth_rate_clear_identifier($pdo, 'recovery', $login);
     json_out(['ok' => true]);

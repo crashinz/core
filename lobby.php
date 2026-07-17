@@ -11,6 +11,7 @@ $ejectionNotice = $_SESSION['room_ejection_notice'] ?? null;
 unset($_SESSION['room_ejection_notice']);
 $lobbyError = null;
 cleanup_stale_participants($pdo);
+$roleColors = role_color_settings($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $name = trim($_POST['name'] ?? '');
@@ -65,7 +66,7 @@ $rooms = $roomsStmt->fetchAll();
   <title><?= e(branded_page_title('Lobby', $pdo)) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
 </head>
-<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>">
+<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="picker-shell">
   <section class="picker-main">
     <div class="topbar">
@@ -85,10 +86,9 @@ $rooms = $roomsStmt->fetchAll();
       </div>
       <div id="lobby-menu">
         <?php if (in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
-        <button id="admin-open" type="button"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Admin</button>
+        <a href="<?= e(app_url('/admin.php?return=lobby')) ?>"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Admin</a>
         <?php endif; ?>
-        <button id="password-open" type="button"><img src="<?= e(app_url('/assets/images/secure.png')) ?>" alt="">Update Password</button>
-        <button id="recovery-open" type="button"><img src="<?= e(app_url('/assets/images/account-recovery.png')) ?>" alt="">Account Recovery</button>
+        <a href="<?= e(app_url('/account.php?return=lobby')) ?>"><img src="<?= e(app_url('/assets/images/secure.png')) ?>" alt="">Account</a>
         <form class="menu-form" method="post" action="<?= e(app_url('/logout.php')) ?>">
           <?= csrf_input() ?>
           <button type="submit"><img src="<?= e(app_url('/assets/images/logout.png')) ?>" alt="">Log Out</button>
@@ -230,6 +230,7 @@ $rooms = $roomsStmt->fetchAll();
   </div>
 </div>
 <?php endif; ?>
+<?php if (false): // Dormant upstream-compatible modal markup; shared pages are authoritative in Build 000045. ?>
 <div class="modal" id="password-modal">
   <form class="modal-box password-box" id="password-form">
     <?= csrf_input() ?>
@@ -516,6 +517,7 @@ $rooms = $roomsStmt->fetchAll();
     </div>
   </div>
 </div>
+<?php endif; ?>
 <?php endif; ?>
 <script src="<?= e(app_url('/assets/js/lobby.js')) ?>"></script>
 </body>

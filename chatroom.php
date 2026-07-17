@@ -60,6 +60,7 @@ $linkIconCatalog = link_icon_catalog($pdo);
 $csrfToken = csrf_token();
 $innerTranquillityPlayer = inner_tranquillity_player_capability($room);
 $runtimeDiagnostics = runtime_diagnostics_capability();
+$roleColors = role_color_settings($pdo);
 $roomAssetVersion = static function (string $path): string {
     $absolutePath = __DIR__ . $path;
     $version = is_file($absolutePath) ? (string)filemtime($absolutePath) : (string)time();
@@ -83,7 +84,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <link rel="stylesheet" href="<?= e($innerTranquillityPlayer['assets']['css']) ?>">
   <?php endif; ?>
 </head>
-<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>" data-runtime-diagnostics-enabled="<?= $runtimeDiagnostics['enabled'] ? 'true' : 'false' ?>" data-runtime-diagnostics-mode="<?= e($runtimeDiagnostics['mode']) ?>" data-runtime-verification-controls="<?= $runtimeDiagnostics['verification_controls'] ? 'true' : 'false' ?>">
+<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>" data-runtime-diagnostics-enabled="<?= $runtimeDiagnostics['enabled'] ? 'true' : 'false' ?>" data-runtime-diagnostics-mode="<?= e($runtimeDiagnostics['mode']) ?>" data-runtime-verification-controls="<?= $runtimeDiagnostics['verification_controls'] ? 'true' : 'false' ?>">
 <div class="room-layout">
   <div class="version-banner" id="version-banner" hidden>
     <span id="version-banner-text">A new ChatSpace version is available.</span>
@@ -751,6 +752,12 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="room-action-clear-history" class="danger" type="button">Clear Room History</button>
 </div>
 <div id="room-menu">
+  <?php if (in_array((string)$user['role'], ['admin', 'developer'], true)): ?>
+  <button id="admin-link" type="button" data-href="<?= e(app_url('/admin.php?return=room&id=' . rawurlencode((string)$room['public_id']))) ?>">Admin</button>
+  <?php endif; ?>
+  <button id="chat-options-btn" type="button">Chat Options</button>
+  <button id="report-problem-btn" type="button">Report Problem</button>
+  <button id="account-link" type="button" data-href="<?= e(app_url('/account.php?return=room&id=' . rawurlencode((string)$room['public_id']))) ?>">Account</button>
   <button id="lock-session-btn" type="button"><img src="<?= e(app_url('/assets/images/secure.png')) ?>" alt="">Lock Session</button>
   <button id="rooms-link" type="button" data-href="<?= e(app_url('/lobby.php')) ?>"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Lobby</button>
   <button id="logout-link" type="button"><img src="<?= e(app_url('/assets/images/logout.png')) ?>" alt="">Log Out</button>
@@ -758,6 +765,36 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <form id="logout-form" method="post" action="<?= e(app_url('/logout.php')) ?>" hidden>
   <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
 </form>
+<div class="modal" id="chat-options-modal" aria-hidden="true">
+  <div class="modal-box chat-options-box" role="dialog" aria-modal="true" aria-labelledby="chat-options-title">
+    <div class="modal-head">
+      <strong id="chat-options-title">Chat Options</strong>
+      <button class="window-close" id="chat-options-close" type="button" aria-label="Close">×</button>
+    </div>
+    <fieldset class="chat-display-options">
+      <legend>Message display</legend>
+      <label><input type="radio" name="chat-display-mode" value="detailed"> Detailed</label>
+      <label><input type="radio" name="chat-display-mode" value="compact"> Compact</label>
+    </fieldset>
+  </div>
+</div>
+<div class="modal" id="report-problem-modal" aria-hidden="true">
+  <div class="modal-box diagnostic-report-box" role="dialog" aria-modal="true" aria-labelledby="report-problem-title">
+    <div class="modal-head">
+      <strong id="report-problem-title">Report Problem</strong>
+      <button class="window-close" id="report-problem-close" type="button" aria-label="Close">×</button>
+    </div>
+    <form id="report-problem-form">
+      <label>What went wrong?
+        <textarea id="report-problem-summary" maxlength="500" rows="5" required></textarea>
+      </label>
+      <label class="diagnostic-screenshot-option" hidden><input id="report-problem-screenshot" type="checkbox"> Include a locally censored schematic</label>
+      <p class="minor">Reports exclude chat contents, credentials, private files, raw media, SDP, and ICE.</p>
+      <div class="form-error" id="report-problem-status" role="status"></div>
+      <div class="modal-actions"><button class="btn btn-primary" type="submit">Submit Report</button></div>
+    </form>
+  </div>
+</div>
 <div class="session-lock" id="session-lock" aria-hidden="true">
   <form class="session-lock-box" id="session-lock-form">
     <div class="session-lock-brand">

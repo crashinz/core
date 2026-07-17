@@ -113,10 +113,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     json_out(['error' => 'Unknown action'], 400);
 }
 
+function broadcast_role_colors(PDO $pdo): void {
+    $colors = role_color_settings($pdo);
+    foreach ($pdo->query('SELECT id FROM room_sessions')->fetchAll() as $session) {
+        emit_event($pdo, (int)$session['id'], 'role_colors_update', $colors);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'Unsupported method'], 405);
 
 $body = input_json();
 $action = (string)($body['action'] ?? '');
+
+if ($action === 'save_role_colors' || $action === 'reset_role_colors') {
+    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+    $result = role_color_validate_settings($body, $action === 'reset_role_colors');
+    if (empty($result['ok'])) {
+        $status = (int)($result['http_status'] ?? 400);
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
+    set_app_setting($pdo, 'role_colors_mode', $result['mode']);
+    foreach ($result['palette'] as $role => $colors) {
+        set_app_setting($pdo, "role_color_{$role}_bg", $colors['background']);
+        set_app_setting($pdo, "role_color_{$role}_text", $colors['text']);
+    }
+    broadcast_role_colors($pdo);
+    log_tool($pdo, (int)$me['id'], 'admin_role_colors_update', null, null, $action === 'reset_role_colors' ? 'Reset username role colors' : 'Updated username role colors');
+    json_out(['ok' => true, 'roleColors' => role_color_settings($pdo), 'settings' => admin_settings($pdo)]);
+}
+
+if ($action === 'save_diagnostic_screenshots') {
+    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+    $enabled = !empty($body['diagnostic_screenshots_enabled']);
+    $retention = (int)($body['diagnostic_screenshot_retention_days'] ?? 0);
+    if ($enabled && ($retention < 1 || $retention > 365)) json_out(['error' => 'Enabled screenshots require a retention period from 1 to 365 days.'], 400);
+    if (!$enabled && ($retention < 0 || $retention > 365)) json_out(['error' => 'Retention must be from 0 to 365 days.'], 400);
+    set_app_setting($pdo, 'diagnostic_screenshots_enabled', $enabled ? '1' : '0');
+    set_app_setting($pdo, 'diagnostic_screenshot_retention_days', (string)$retention);
+    log_tool($pdo, (int)$me['id'], 'admin_diagnostic_screenshot_settings', null, null, $enabled ? "Enabled censored screenshots with {$retention}-day retention" : 'Disabled censored screenshots');
+    json_out(['ok' => true, 'settings' => admin_settings($pdo)]);
+}
 
 if ($action === 'save_settings') {
     $policyValidation = avatar_size_policy_validate_settings($body);

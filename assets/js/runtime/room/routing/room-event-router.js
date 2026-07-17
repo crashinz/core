@@ -226,6 +226,10 @@ export class RoomEventRouter {
                 this.#context?.onUserRoleUpdate?.(payload, event);
                 return true;
 
+            case "role_colors_update":
+                this.#context?.onRoleColorsUpdate?.(payload, event);
+                return true;
+
             case "typing":
                 this.#context?.onTyping?.(payload, event);
                 return true;

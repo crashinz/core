@@ -15,6 +15,8 @@ if (is_file(CHATSPACE_CONFIG)) {
 }
 
 require_once __DIR__ . '/avatar_size_policy.php';
+require_once __DIR__ . '/role_color_policy.php';
+require_once __DIR__ . '/runtime_issue_service.php';
 
 function app_base_path(): string {
     static $base = null;
@@ -146,12 +148,16 @@ function mysqlize_schema(string $schema): string {
     }
     $shortColumns = [
         'email' => 'VARCHAR(191)',
+        'username' => 'VARCHAR(32)',
         'public_id' => 'VARCHAR(64)',
         'session_public_id' => 'VARCHAR(64)',
         'password_hash' => 'VARCHAR(255)',
         'recovery_code_hash' => 'VARCHAR(255)',
         'recovery_code_suffix' => 'VARCHAR(16)',
         'display_name' => 'VARCHAR(191)',
+        'profile_location' => 'VARCHAR(80)',
+        'profile_about' => 'VARCHAR(500)',
+        'profile_visibility' => 'VARCHAR(24)',
         'role' => 'VARCHAR(32)',
         'avatar_path' => 'VARCHAR(512)',
         'avatar_url' => 'VARCHAR(512)',
@@ -210,7 +216,7 @@ function mysqlize_schema(string $schema): string {
     foreach (['current_room_id'] as $intColumn) {
         $schema = preg_replace('/\b' . $intColumn . '\s+INT/', $intColumn . ' INT', $schema) ?? $schema;
     }
-    foreach (['last_seen_at', 'created_at', 'started_at', 'joined_at', 'updated_at', 'sent_at', 'edited_at', 'deleted_at', 'expires_at', 'resolved_at', 'cleared_at', 'last_attempt_at', 'locked_until', 'dissolved_at', 'membership_effective_at', 'membership_ended_at'] as $dateColumn) {
+    foreach (['last_seen_at', 'created_at', 'started_at', 'joined_at', 'updated_at', 'sent_at', 'edited_at', 'deleted_at', 'expires_at', 'resolved_at', 'cleared_at', 'last_attempt_at', 'locked_until', 'dissolved_at', 'membership_effective_at', 'membership_ended_at', 'email_changed_at', 'password_changed_at'] as $dateColumn) {
         $schema = preg_replace('/\b' . $dateColumn . '\s+VARCHAR\(1024\)/', $dateColumn . ' DATETIME', $schema) ?? $schema;
     }
     $schema = preg_replace('/CREATE TABLE IF NOT EXISTS ([^(]+)\s*\((.*?)\);/s', 'CREATE TABLE IF NOT EXISTS $1 ($2) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;', $schema) ?? $schema;
@@ -324,6 +330,7 @@ function migrate(PDO $pdo): void {
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT NOT NULL UNIQUE,
+            username TEXT DEFAULT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             recovery_code_hash TEXT DEFAULT NULL,
             recovery_code_suffix TEXT DEFAULT NULL,
@@ -379,6 +386,11 @@ function migrate(PDO $pdo): void {
             session_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             display_name TEXT NOT NULL,
+            profile_location TEXT NOT NULL DEFAULT '',
+            profile_about TEXT NOT NULL DEFAULT '',
+            profile_visibility TEXT NOT NULL DEFAULT 'community',
+            email_changed_at TEXT DEFAULT NULL,
+            password_changed_at TEXT DEFAULT NULL,
             avatar_path TEXT DEFAULT 'preset:Default',
             avatar_orientation TEXT NOT NULL DEFAULT 'original',
             avatar_display_size_px INTEGER DEFAULT NULL,
@@ -864,6 +876,12 @@ function migrate(PDO $pdo): void {
             $pdo->exec("ALTER TABLE users ADD COLUMN avatar_orientation VARCHAR(32) NOT NULL DEFAULT 'original'");
         }
         foreach ([
+            'username' => 'VARCHAR(32) DEFAULT NULL',
+            'profile_location' => "VARCHAR(80) NOT NULL DEFAULT ''",
+            'profile_about' => "VARCHAR(500) NOT NULL DEFAULT ''",
+            'profile_visibility' => "VARCHAR(24) NOT NULL DEFAULT 'community'",
+            'email_changed_at' => 'DATETIME DEFAULT NULL',
+            'password_changed_at' => 'DATETIME DEFAULT NULL',
             'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -872,6 +890,11 @@ function migrate(PDO $pdo): void {
             if (!in_array($column, $mysqlUserColNames, true)) {
                 $pdo->exec("ALTER TABLE users ADD COLUMN {$column} {$definition}");
             }
+        }
+        try {
+            $pdo->exec('CREATE UNIQUE INDEX idx_users_username ON users(username)');
+        } catch (Throwable $error) {
+            // Existing installs already have this index.
         }
         $mysqlParticipantCols = $pdo->query('SHOW COLUMNS FROM participants')->fetchAll();
         $mysqlParticipantColNames = array_map(fn(array $col): string => (string)($col['Field'] ?? ''), $mysqlParticipantCols);
@@ -945,6 +968,7 @@ function migrate(PDO $pdo): void {
             $pdo->exec('ALTER TABLE game_lobbies ADD COLUMN round_number INTEGER NOT NULL DEFAULT 1');
         }
         migrate_avatar_relationship_group_schema($pdo);
+        runtime_issue_install_schema($pdo);
         seed_app_settings($pdo);
         seed_link_icon_catalog($pdo);
         return;
@@ -968,6 +992,12 @@ function migrate(PDO $pdo): void {
         $pdo->exec("ALTER TABLE users ADD COLUMN avatar_orientation TEXT NOT NULL DEFAULT 'original'");
     }
     foreach ([
+        'username' => 'TEXT DEFAULT NULL',
+        'profile_location' => "TEXT NOT NULL DEFAULT ''",
+        'profile_about' => "TEXT NOT NULL DEFAULT ''",
+        'profile_visibility' => "TEXT NOT NULL DEFAULT 'community'",
+        'email_changed_at' => 'TEXT DEFAULT NULL',
+        'password_changed_at' => 'TEXT DEFAULT NULL',
         'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -977,6 +1007,7 @@ function migrate(PDO $pdo): void {
             $pdo->exec("ALTER TABLE users ADD COLUMN {$column} {$definition}");
         }
     }
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)');
     $settingsCols = $pdo->query('PRAGMA table_info(app_settings)')->fetchAll();
     $settingsColNames = array_map(fn(array $col): string => (string)$col['name'], $settingsCols);
     if (in_array('key', $settingsColNames, true) && !in_array('setting_key', $settingsColNames, true)) {
@@ -984,6 +1015,7 @@ function migrate(PDO $pdo): void {
     }
     seed_app_settings($pdo);
     seed_link_icon_catalog($pdo);
+    runtime_issue_install_schema($pdo);
 
     $cols = $pdo->query('PRAGMA table_info(rooms)')->fetchAll();
     $hasPublicId = false;
@@ -1269,7 +1301,9 @@ function seed_app_settings(PDO $pdo): void {
         'age_gate_min_age' => '13',
         'community_name' => '',
         'community_logo_path' => '',
-    ], avatar_size_policy_setting_defaults());
+        'diagnostic_screenshots_enabled' => '0',
+        'diagnostic_screenshot_retention_days' => '0',
+    ], avatar_size_policy_setting_defaults(), role_color_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -1786,6 +1820,7 @@ function csrf_input(): string {
 }
 
 csrf_protect_post();
+runtime_issue_install_server_capture();
 
 function emit_event(PDO $pdo, int $sessionId, string $type, array $payload): void {
     $stmt = $pdo->prepare('INSERT INTO events (session_id, type, payload) VALUES (?,?,?)');
