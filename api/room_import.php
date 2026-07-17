@@ -49,11 +49,13 @@ $url = trim((string)($body['url'] ?? ''));
 
 try {
     if ($action === 'preview') {
+        security_authorize_outside_content_or_json($pdo, $user, 'room_import_preview', ['source' => 'room_import']);
         $preview = room_import_preview_from_url($url);
         json_out(['ok' => true, 'preview' => $preview]);
     }
 
     if ($action === 'create') {
+        security_authorize_outside_content_or_json($pdo, $user, 'room_import_create', ['source' => 'room_import']);
         $preview = room_import_preview_from_url($url);
         $localized = room_import_localize($preview);
         $sourceName = trim((string)($body['name'] ?? ''));

@@ -4,11 +4,8 @@ declare(strict_types=1);
 const CHATSPACE_CONFIG = __DIR__ . '/config.php';
 const CHATSPACE_DEFAULT_SQLITE = __DIR__ . '/../db/chatspace.sqlite';
 
-session_set_cookie_params([
-    'httponly' => true,
-    'samesite' => 'Lax',
-]);
-session_start();
+require_once __DIR__ . '/security_policy.php';
+security_bootstrap();
 
 if (is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
@@ -1351,11 +1348,17 @@ function auth_rate_seconds(int $seconds): string {
 }
 
 function auth_rate_scope_max(PDO $pdo, string $scope): int {
+    if (str_starts_with($scope, 'outside:')) {
+        return max(1, (int)app_setting_float($pdo, 'outside_content_rate_limit', 60));
+    }
     $key = $scope === 'recovery' ? 'auth_recovery_max_attempts' : 'auth_login_max_attempts';
     return max(1, (int)app_setting_float($pdo, $key, $scope === 'recovery' ? 5 : 5));
 }
 
-function auth_rate_ip_max(PDO $pdo): int {
+function auth_rate_ip_max(PDO $pdo, string $scope = ''): int {
+    if (str_starts_with($scope, 'outside:')) {
+        return max(1, (int)app_setting_float($pdo, 'outside_content_ip_rate_limit', 300));
+    }
     return max(1, (int)app_setting_float($pdo, 'auth_ip_max_attempts', 30));
 }
 
@@ -1426,7 +1429,7 @@ function auth_rate_record_failure(PDO $pdo, string $scope, string $identifier): 
         if ($row && (string)($row['last_attempt_at'] ?? '') >= $windowCutoff) {
             $attempts = ((int)$row['attempts']) + 1;
         }
-        $max = $key['dimension'] === 'ip' ? auth_rate_ip_max($pdo) : auth_rate_scope_max($pdo, $scope);
+        $max = $key['dimension'] === 'ip' ? auth_rate_ip_max($pdo, $scope) : auth_rate_scope_max($pdo, $scope);
         $lock = $attempts >= $max ? $lockedUntil : null;
         $write->execute([$scope, $key['dimension'], $key['hash'], $attempts, $now, $lock]);
     }
@@ -1577,25 +1580,16 @@ function absolutize_preview_url(string $assetUrl, string $pageUrl): string {
 }
 
 function fetch_url_metadata(string $url): array {
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'timeout' => 2.5,
-            'follow_location' => 1,
-            'max_redirects' => 3,
-            'ignore_errors' => true,
-            'header' => "User-Agent: ChatSpaceCE-LinkPreview/1.0\r\nAccept: text/html,application/xhtml+xml\r\n",
-        ],
-        'ssl' => [
-            'verify_peer' => true,
-            'verify_peer_name' => true,
-        ],
-    ]);
-    $handle = @fopen($url, 'rb', false, $context);
-    if (!$handle) return [];
-    $html = stream_get_contents($handle, 131072);
-    fclose($handle);
-    if (!is_string($html) || $html === '') return [];
+    try {
+        $fetched = security_fetch_remote_url($url, 131072, 'text/html,application/xhtml+xml', [
+            'redirects' => 3,
+            'timeout' => 4,
+            'user_agent' => 'ChatSpaceCE-LinkPreview/1.0',
+        ]);
+        $html = (string)$fetched['body'];
+    } catch (Throwable) {
+        return [];
+    }
     $title = html_meta_value($html, 'og:title') ?: html_meta_value($html, 'twitter:title');
     if (!$title && preg_match('~<title[^>]*>(.*?)</title>~is', $html, $m)) {
         $title = trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
@@ -1657,7 +1651,7 @@ function save_room_background_upload(array $upload, ?array $thumbUpload = null):
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($upload['tmp_name']) ?: '';
     $allowed = ['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'];
-    if (!in_array($mime, $allowed, true)) {
+    if (!in_array($mime, $allowed, true) || !security_valid_uploaded_file_signature((string)$upload['tmp_name'], $mime)) {
         throw new RuntimeException('Unsupported background type');
     }
     $isVideo = str_starts_with($mime, 'video/');
@@ -1682,12 +1676,16 @@ function save_room_background_upload(array $upload, ?array $thumbUpload = null):
         throw new RuntimeException('Could not save background');
     }
     $path = '/assets/uploads/backgrounds/' . $file;
+    security_assert_storage_destination('room_background_upload', $path);
     $thumbPath = null;
     if ($isVideo && $thumbUpload && !empty($thumbUpload['tmp_name']) && is_uploaded_file($thumbUpload['tmp_name'])) {
         $thumbInfo = new finfo(FILEINFO_MIME_TYPE);
         $thumbMime = $thumbInfo->file($thumbUpload['tmp_name']) ?: '';
-        if (in_array($thumbMime, ['image/jpeg', 'image/png', 'image/webp'], true) && (int)($thumbUpload['size'] ?? 0) <= 2 * 1024 * 1024) {
-            $thumbFile = $base . '-thumb.jpg';
+        if (in_array($thumbMime, ['image/jpeg', 'image/png', 'image/webp'], true)
+            && security_valid_image_file((string)$thumbUpload['tmp_name'], $thumbMime)
+            && (int)($thumbUpload['size'] ?? 0) <= 2 * 1024 * 1024) {
+            $thumbExt = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$thumbMime];
+            $thumbFile = $base . '-thumb.' . $thumbExt;
             $thumbDest = $dir . '/' . $thumbFile;
             if (move_uploaded_file($thumbUpload['tmp_name'], $thumbDest)) {
                 $thumbPath = '/assets/uploads/backgrounds/' . $thumbFile;
@@ -1726,9 +1724,7 @@ function current_user(): ?array {
 }
 
 function authenticate_user(int $userId): void {
-    session_regenerate_id(true);
-    $_SESSION['user_id'] = $userId;
-    unset($_SESSION['_csrf_token']);
+    security_mark_authenticated($userId);
 }
 
 function require_user(): array {

@@ -17,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'Unsupported method'], 405);
+security_require_recent_authentication_or_json();
 $body = input_json();
 $action = (string)($body['action'] ?? '');
 

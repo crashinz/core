@@ -14,6 +14,7 @@ cleanup_stale_participants($pdo);
 $roleColors = role_color_settings($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    security_authorize_outside_content_or_json($pdo, $user, 'room_create', ['source' => 'lobby_form']);
     $name = trim($_POST['name'] ?? '');
     if ($name !== '') {
         try {
@@ -21,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bgMime = null;
             $bgThumbPath = null;
             if (!empty($_FILES['background']['tmp_name']) && is_uploaded_file($_FILES['background']['tmp_name'])) {
+                security_authorize_outside_content_or_json($pdo, $user, 'room_background_upload', ['source' => 'lobby_form']);
                 $saved = save_room_background_upload($_FILES['background'], $_FILES['background_thumb'] ?? null);
                 $bgPath = $saved['path'];
                 $bgMime = $saved['mime'];

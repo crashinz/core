@@ -60,6 +60,7 @@ if ($action === 'update') {
     $bgThumbPath = $room['background_thumb_path'] ?? null;
     $backgroundChanged = false;
     if (!empty($_FILES['background']['tmp_name']) && is_uploaded_file($_FILES['background']['tmp_name'])) {
+        security_authorize_outside_content_or_json($pdo, $user, 'room_background_upload', ['room_id' => (int)$room['id'], 'source' => 'room_admin']);
         try {
             $saved = save_room_background_upload($_FILES['background'], $_FILES['background_thumb'] ?? null);
             $bgPath = $saved['path'];

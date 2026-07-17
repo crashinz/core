@@ -12,4 +12,5 @@ if (!password_verify($password, (string)$user['password_hash'])) {
     json_out(['error' => 'Incorrect password.'], 403);
 }
 
+security_mark_recent_authentication();
 json_out(['ok' => true]);

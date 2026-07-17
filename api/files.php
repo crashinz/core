@@ -76,6 +76,15 @@ if ($isVoiceNote) {
 } elseif (!isset($allowedFiles[$mimeType])) {
     json_out(['error' => 'Only images, PDFs, and documents are supported'], 400);
 }
+if (!security_valid_uploaded_file_signature($tmpName, $mimeType, $originalExt)) {
+    json_out(['error' => $isVoiceNote ? 'Voice note content did not match its media type' : 'File content did not match its declared format'], 400);
+}
+security_authorize_outside_content_or_json(
+    $pdo,
+    ['id' => (int)$participant['user_id']],
+    $isVoiceNote ? 'voice_note_upload' : 'chat_file_upload',
+    ['session_id' => $sessionId, 'channel' => (string)($_POST['channel'] ?? 'room')]
+);
 
 $channel = (string)($_POST['channel'] ?? 'room');
 if (!in_array($channel, ['room', 'community', 'link', 'dm', 'game'], true)) $channel = 'room';
@@ -104,6 +113,7 @@ if (!move_uploaded_file($tmpName, $target)) {
 }
 
 $publicPath = '/assets/uploads/' . ($isVoiceNote ? 'voice/' : 'files/') . $filename;
+security_assert_storage_destination($isVoiceNote ? 'voice_note_upload' : 'chat_file_upload', $publicPath);
 
 function file_reply_accessible(PDO $pdo, array $message, string $channel, int $sessionId, array $participant): bool {
     if (($message['scope'] ?? '') !== $channel) return false;

@@ -6,6 +6,7 @@ $branding = install_branding($pdo);
 $ageGateEnabled = app_setting($pdo, 'age_gate_enabled', '0') === '1';
 $ageGateMinAge = max(1, min(120, (int)app_setting($pdo, 'age_gate_min_age', '13')));
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    security_authorize_outside_content_or_json($pdo, null, 'registration_avatar', ['source' => 'registration']);
     $email = strtolower(trim($_POST['email'] ?? ''));
     $name = trim($_POST['display_name'] ?? '');
     $password = (string)($_POST['password'] ?? '');
@@ -15,12 +16,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mime = $finfo->file($_FILES['avatar']['tmp_name']) ?: '';
         $allowed = ['image/gif' => 'gif', 'image/webp' => 'webp'];
         $dims = @getimagesize($_FILES['avatar']['tmp_name']);
-        $validDims = $dims && $dims[0] >= 42 && $dims[1] >= 42 && $dims[0] <= 250 && $dims[1] <= 250;
+        $validDims = security_valid_image_file((string)$_FILES['avatar']['tmp_name'], $mime)
+            && $dims[0] >= 42 && $dims[1] >= 42 && $dims[0] <= 250 && $dims[1] <= 250;
         if (isset($allowed[$mime]) && (int)$_FILES['avatar']['size'] <= 5 * 1024 * 1024 && $validDims) {
             $file = bin2hex(random_bytes(12)) . '.' . $allowed[$mime];
             $dest = __DIR__ . '/assets/uploads/avatars/' . $file;
             move_uploaded_file($_FILES['avatar']['tmp_name'], $dest);
             $avatarPath = '/assets/uploads/avatars/' . $file;
+            security_assert_storage_destination('registration_avatar', $avatarPath);
         }
     }
     $ageVerified = !$ageGateEnabled || !empty($_POST['age_gate_confirm']);

@@ -73,6 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    security_authorize_outside_content_or_json($pdo, $user, 'room_create', ['source' => 'lobby_api']);
     $name = trim((string)($_POST['name'] ?? ''));
     if ($name === '') json_out(['error' => 'Room name required'], 400);
 
@@ -81,6 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $bgMime = null;
         $bgThumbPath = null;
         if (!empty($_FILES['background']['tmp_name']) && is_uploaded_file($_FILES['background']['tmp_name'])) {
+            security_authorize_outside_content_or_json($pdo, $user, 'room_background_upload', ['source' => 'lobby_api']);
             $saved = save_room_background_upload($_FILES['background'], $_FILES['background_thumb'] ?? null);
             $bgPath = $saved['path'];
             $bgMime = $saved['mime'];

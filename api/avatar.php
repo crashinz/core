@@ -74,6 +74,7 @@ if (empty($_FILES['avatar']['tmp_name'])
     || !is_uploaded_file($_FILES['avatar']['tmp_name'])) {
     json_out(['error' => 'Avatar image required'], 400);
 }
+security_authorize_outside_content_or_json($pdo, ['id' => (int)$p['user_id']], 'avatar_upload', ['session_id' => $sessionId]);
 
 $finfo = new finfo(FILEINFO_MIME_TYPE);
 $mime = $finfo->file($_FILES['avatar']['tmp_name']) ?: '';
@@ -108,6 +109,7 @@ if (!move_uploaded_file($_FILES['avatar']['tmp_name'], $dest)) {
     json_out(['error' => 'Avatar image could not be stored. Try again.'], 500);
 }
 $public = '/assets/uploads/avatars/' . $file;
+security_assert_storage_destination('avatar_upload', $public);
 
 try {
     $pdo->beginTransaction();

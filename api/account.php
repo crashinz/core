@@ -77,6 +77,7 @@ if ($action === 'update_email') {
     $password = (string)($body['current_password'] ?? '');
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) json_out(['error' => 'Enter a valid email address.'], 400);
     if (!password_verify($password, (string)$user['password_hash'])) json_out(['error' => 'Current password is not correct.'], 403);
+    security_mark_recent_authentication();
     $duplicate = $pdo->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id <> ? LIMIT 1');
     $duplicate->execute([$email, (int)$user['id']]);
     if ($duplicate->fetchColumn()) json_out(['error' => 'That email is already in use.'], 409);
@@ -90,6 +91,7 @@ $newPassword = (string)($body['new_password'] ?? '');
 $confirmPassword = (string)($body['confirm_password'] ?? '');
 if ($oldPassword === '' || $newPassword === '' || $confirmPassword === '') json_out(['error' => 'All password fields are required.'], 400);
 if (!password_verify($oldPassword, (string)$user['password_hash'])) json_out(['error' => 'Old password is not correct.'], 403);
+security_mark_recent_authentication();
 if (strlen($newPassword) < 8) json_out(['error' => 'New password must be at least 8 characters.'], 400);
 if ($newPassword !== $confirmPassword) json_out(['error' => 'New password and confirmation do not match.'], 400);
 if (password_verify($newPassword, (string)$user['password_hash'])) json_out(['error' => 'New password must be different from the old password.'], 400);

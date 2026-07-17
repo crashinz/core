@@ -4,11 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/room_importer.php';
 
 function backup_portable_file_allowed(string $path): bool {
-    return $path !== ''
-        && str_starts_with($path, '/assets/')
-        && !str_contains($path, '..')
-        && !str_starts_with($path, '/assets/js/')
-        && !str_starts_with($path, '/assets/css/');
+    return preg_match('~^/assets/uploads/(?:avatars|backgrounds|imported-rooms|gestures|link-icons|files|voice|branding)/[A-Za-z0-9][A-Za-z0-9._-]{0,190}$~', $path) === 1;
 }
 
 function backup_portable_file_path(string $path): string {
@@ -16,16 +12,54 @@ function backup_portable_file_path(string $path): string {
 }
 
 function backup_write_portable_files(array $files): void {
+    $totalBytes = 0;
     foreach ($files as $file) {
         if (!is_array($file)) continue;
         $path = (string)($file['path'] ?? '');
-        if (!backup_portable_file_allowed($path)) continue;
+        if (!backup_portable_file_allowed($path)) throw new RuntimeException('Portable bundle contains an invalid file destination.');
         $data = base64_decode((string)($file['data'] ?? ''), true);
-        if ($data === false) continue;
+        if ($data === false || $data === '') throw new RuntimeException('Portable bundle contains invalid file data.');
+        $bytes = strlen($data);
+        if ($bytes > 220 * 1024 * 1024) throw new RuntimeException('Portable bundle contains an oversized file.');
+        $totalBytes += $bytes;
+        if ($totalBytes > 512 * 1024 * 1024) throw new RuntimeException('Portable bundle expands beyond the allowed size.');
         $full = backup_portable_file_path($path);
         $dir = dirname($full);
         if (!is_dir($dir)) mkdir($dir, 0775, true);
-        file_put_contents($full, $data);
+        $temporary = $dir . DIRECTORY_SEPARATOR . '.import-' . bin2hex(random_bytes(10)) . '.part';
+        if (file_put_contents($temporary, $data, LOCK_EX) !== $bytes) {
+            @unlink($temporary);
+            throw new RuntimeException('Portable bundle file could not be stored.');
+        }
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = (string)($finfo->file($temporary) ?: '');
+        $extension = strtolower(pathinfo($full, PATHINFO_EXTENSION));
+        $allowedByExtension = [
+            'gif' => ['image/gif'], 'webp' => ['image/webp'], 'png' => ['image/png'], 'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'],
+            'mp3' => ['audio/mpeg', 'audio/mp3'], 'ogg' => ['audio/ogg', 'application/ogg'], 'wav' => ['audio/wav', 'audio/x-wav'],
+            'm4a' => ['audio/mp4'], 'aac' => ['audio/aac'], 'webm' => ['audio/webm', 'video/webm'], 'mp4' => ['video/mp4'],
+            'pdf' => ['application/pdf'], 'doc' => ['application/msword'],
+            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+            'rtf' => ['application/rtf', 'text/rtf'], 'txt' => ['text/plain'],
+        ];
+        $normalizedMime = $mime === 'application/zip' && $extension === 'docx'
+            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : $mime;
+        if (!isset($allowedByExtension[$extension])
+            || !in_array($mime, $allowedByExtension[$extension], true)
+            || !security_valid_uploaded_file_signature($temporary, $normalizedMime, $extension)) {
+            @unlink($temporary);
+            throw new RuntimeException('Portable bundle file content did not match its destination.');
+        }
+        if (is_file($full) && !hash_equals(hash_file('sha256', $full), hash_file('sha256', $temporary))) {
+            @unlink($temporary);
+            throw new RuntimeException('Portable bundle would overwrite an existing file with different content.');
+        }
+        if (!is_file($full) && !rename($temporary, $full)) {
+            @unlink($temporary);
+            throw new RuntimeException('Portable bundle file could not be finalized.');
+        }
+        @unlink($temporary);
     }
 }
 
@@ -193,7 +227,8 @@ function backup_restore_sqlite_upload(string $tmpPath, bool $uploadedFile, int $
     }
 
     $dbPath = sqlite_path();
-    $backup = $dbPath . '.pre-restore-' . gmdate('Ymd-His') . '.bak';
+    $backup = security_private_storage_directory('database-backups') . DIRECTORY_SEPARATOR
+        . 'chatspace-pre-restore-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(4)) . '.sqlite';
     if (is_file($dbPath)) copy($dbPath, $backup);
     if (!copy($checkPath, $dbPath)) {
         @unlink($checkPath);
@@ -209,6 +244,11 @@ function backup_restore_sqlite_upload(string $tmpPath, bool $uploadedFile, int $
 function backup_import_uploaded_file(PDO $pdo, array $upload, int $actorId = 0): array {
     if (empty($upload['tmp_name']) || !is_uploaded_file($upload['tmp_name'])) {
         throw new RuntimeException('Import file required.');
+    }
+    $maxBytes = app_setting_bytes($pdo, 'database_import_max_size_mb', 512);
+    $actualBytes = filesize((string)$upload['tmp_name']);
+    if ($actualBytes === false || $actualBytes < 1 || $actualBytes > $maxBytes) {
+        throw new RuntimeException('Import file exceeds the configured backup size limit.');
     }
     $tmp = $upload['tmp_name'];
     $decoded = json_decode((string)file_get_contents($tmp), true);

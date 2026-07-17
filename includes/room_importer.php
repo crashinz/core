@@ -4,92 +4,27 @@ declare(strict_types=1);
 require_once __DIR__ . '/base.php';
 
 function room_import_safe_url(string $url): string {
-    $url = trim($url);
-    if ($url === '') throw new RuntimeException('URL required.');
-    if (!preg_match('#^https?://#i', $url)) throw new RuntimeException('Only HTTP and HTTPS URLs can be imported.');
-    $parts = parse_url($url);
-    if (!$parts || empty($parts['scheme']) || empty($parts['host'])) {
-        throw new RuntimeException('That URL does not look valid.');
-    }
-    $scheme = strtolower((string)$parts['scheme']);
-    if (!in_array($scheme, ['http', 'https'], true)) {
-        throw new RuntimeException('Only HTTP and HTTPS URLs can be imported.');
-    }
-    if (!preview_host_is_safe((string)$parts['host'])) {
-        throw new RuntimeException('That host is not allowed for imports.');
-    }
-    return $url;
+    if (trim($url) === '') throw new RuntimeException('URL required.');
+    return (string)security_remote_target($url)['url'];
 }
 
 function room_import_fetch_url(string $url, int $maxBytes, string $accept, int $redirects = 3, string $referer = '', bool $allowHostFallback = true): array {
     $url = room_import_safe_url($url);
-    $headers = room_import_fetch_headers($accept, $referer);
-    if (function_exists('curl_init')) {
-        try {
-            $result = room_import_fetch_url_curl($url, $maxBytes, $headers);
-            if (($result['status'] ?? 0) >= 300 && ($result['status'] ?? 0) < 400 && !empty($result['location']) && $redirects > 0) {
-                return room_import_fetch_url(absolutize_preview_url((string)$result['location'], $url), $maxBytes, $accept, $redirects - 1, $referer ?: $url, $allowHostFallback);
-            }
-            if (($result['status'] ?? 0) >= 400) throw new RuntimeException('The remote server returned HTTP ' . (int)$result['status'] . '.');
-            return ['body' => $result['body'], 'url' => $result['url'], 'content_type' => $result['content_type']];
-        } catch (Throwable $e) {
-            // Fall through to streams; some hosts behave differently across transports.
-        }
-    }
-    $contextOptions = [
-        'http' => [
-            'method' => 'GET',
-            'timeout' => 14,
-            'follow_location' => 0,
-            'ignore_errors' => true,
-            'header' => implode("\r\n", $headers) . "\r\n",
-        ],
-        'ssl' => [
-            'verify_peer' => true,
-            'verify_peer_name' => true,
-        ],
-    ];
-    $handle = false;
-    $lastError = null;
-    for ($attempt = 0; $attempt < 3; $attempt++) {
-        $context = stream_context_create($contextOptions);
-        $handle = @fopen($url, 'rb', false, $context);
-        if ($handle) break;
-        $lastError = error_get_last();
-        usleep(180000 * ($attempt + 1));
-    }
-    if (!$handle) {
+    try {
+        return security_fetch_remote_url($url, $maxBytes, $accept, [
+            'redirects' => $redirects,
+            'referer' => $referer,
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        ]);
+    } catch (Throwable $error) {
         if ($allowHostFallback) {
             $fallback = room_import_www_fallback_url($url);
             if ($fallback !== null) {
                 return room_import_fetch_url($fallback, $maxBytes, $accept, $redirects, $referer, false);
             }
         }
-        $detail = is_array($lastError) && !empty($lastError['message']) ? ' ' . $lastError['message'] : '';
-        throw new RuntimeException('Could not fetch that URL.' . $detail);
+        throw $error;
     }
-    $body = stream_get_contents($handle, $maxBytes + 1);
-    $meta = stream_get_meta_data($handle);
-    fclose($handle);
-    if (!is_string($body)) throw new RuntimeException('Could not read the remote URL.');
-    if (strlen($body) > $maxBytes) throw new RuntimeException('The remote file is too large to import.');
-
-    $headers = $meta['wrapper_data'] ?? [];
-    if (is_string($headers)) $headers = [$headers];
-    $status = 0;
-    $location = '';
-    $contentType = '';
-    foreach ($headers as $header) {
-        if (preg_match('~^HTTP/\S+\s+(\d+)~i', (string)$header, $m)) $status = (int)$m[1];
-        if (stripos((string)$header, 'Location:') === 0) $location = trim(substr((string)$header, 9));
-        if (stripos((string)$header, 'Content-Type:') === 0) $contentType = trim(substr((string)$header, 13));
-    }
-    if ($status >= 300 && $status < 400 && $location !== '' && $redirects > 0) {
-        return room_import_fetch_url(absolutize_preview_url($location, $url), $maxBytes, $accept, $redirects - 1, $referer ?: $url);
-    }
-    if ($status >= 400) throw new RuntimeException('The remote server returned HTTP ' . $status . '.');
-
-    return ['body' => $body, 'url' => (string)($meta['uri'] ?? $url), 'content_type' => $contentType];
 }
 
 function room_import_fetch_headers(string $accept, string $referer = ''): array {
@@ -104,47 +39,13 @@ function room_import_fetch_headers(string $accept, string $referer = ''): array 
 }
 
 function room_import_fetch_url_curl(string $url, int $maxBytes, array $headers): array {
-    $body = '';
-    $responseHeaders = [];
-    $ch = curl_init($url);
-    if (!$ch) throw new RuntimeException('Could not initialize importer request.');
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => false,
-        CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_HEADER => false,
-        CURLOPT_TIMEOUT => 16,
-        CURLOPT_CONNECTTIMEOUT => 8,
-        CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_ENCODING => '',
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_SSL_VERIFYHOST => 2,
-        CURLOPT_HEADERFUNCTION => function ($ch, string $header) use (&$responseHeaders): int {
-            $responseHeaders[] = trim($header);
-            return strlen($header);
-        },
-        CURLOPT_WRITEFUNCTION => function ($ch, string $chunk) use (&$body, $maxBytes): int {
-            if (strlen($body) + strlen($chunk) > $maxBytes) return 0;
-            $body .= $chunk;
-            return strlen($chunk);
-        },
-    ]);
-    if (defined('CURLOPT_PROTOCOLS')) curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-    if (defined('CURLOPT_REDIR_PROTOCOLS')) curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-    $ok = curl_exec($ch);
-    $errno = curl_errno($ch);
-    $error = curl_error($ch);
-    $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    $effective = (string)curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
-    $contentType = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-    curl_close($ch);
-    if (!$ok || $errno) throw new RuntimeException($error ?: 'Could not fetch that URL.');
-    if ($body === '') throw new RuntimeException('Remote URL returned no content.');
-    $location = '';
-    foreach ($responseHeaders as $header) {
-        if (stripos($header, 'Location:') === 0) $location = trim(substr($header, 9));
-        if ($contentType === '' && stripos($header, 'Content-Type:') === 0) $contentType = trim(substr($header, 13));
+    $accept = '*/*';
+    $referer = '';
+    foreach ($headers as $header) {
+        if (stripos((string)$header, 'Accept:') === 0) $accept = trim(substr((string)$header, 7));
+        if (stripos((string)$header, 'Referer:') === 0) $referer = trim(substr((string)$header, 8));
     }
-    return ['body' => $body, 'url' => $effective ?: $url, 'content_type' => $contentType, 'status' => $status, 'location' => $location];
+    return security_fetch_remote_url($url, $maxBytes, $accept, ['redirects' => 0, 'referer' => $referer]);
 }
 
 function room_import_www_fallback_url(string $url): ?string {
@@ -667,7 +568,13 @@ function room_import_download_asset(string $url, string $kind, string $referer =
     if (!is_dir($dir)) mkdir($dir, 0775, true);
     $file = bin2hex(random_bytes(12)) . '.' . $types[$mime];
     $dest = $dir . '/' . $file;
+    $publicPath = '/assets/uploads/imported-rooms/' . $file;
+    security_assert_storage_destination('room_import_create', $publicPath);
     if (file_put_contents($dest, $body, LOCK_EX) === false) return null;
+    if (!security_valid_uploaded_file_signature($dest, $mime, $types[$mime])) {
+        @unlink($dest);
+        return null;
+    }
 
 $rootDir = dirname(__DIR__);
 
@@ -680,7 +587,7 @@ if ($baseUrl === '/') {
     $baseUrl = '';
 }
 
-return $baseUrl . '/assets/uploads/imported-rooms/' . $file;
+return $baseUrl . $publicPath;
 
 }
 

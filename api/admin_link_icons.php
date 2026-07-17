@@ -21,6 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'Unsupported met
 $action = (string)($_POST['action'] ?? 'create');
 
 if ($action === 'create') {
+    security_authorize_outside_content_or_json($pdo, $me, 'admin_link_icon_upload', ['source' => 'admin']);
     $label = trim((string)($_POST['label'] ?? ''));
     if ($label === '') json_out(['error' => 'Icon label is required'], 400);
     if (empty($_FILES['icon']['tmp_name']) || !is_uploaded_file($_FILES['icon']['tmp_name'])) {
@@ -30,7 +31,7 @@ if ($action === 'create') {
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($_FILES['icon']['tmp_name']) ?: '';
     $allowed = ['image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif', 'image/jpeg' => 'jpg'];
-    if (!isset($allowed[$mime]) || (int)$_FILES['icon']['size'] > 2 * 1024 * 1024) {
+    if (!isset($allowed[$mime]) || !security_valid_image_file((string)$_FILES['icon']['tmp_name'], $mime) || (int)$_FILES['icon']['size'] > 2 * 1024 * 1024) {
         json_out(['error' => 'Use a PNG, WEBP, GIF, or JPG icon under 2 MB.'], 400);
     }
 
@@ -54,6 +55,7 @@ if ($action === 'create') {
         json_out(['error' => 'Could not save icon image'], 500);
     }
     $public = '/assets/uploads/link-icons/' . $file;
+    security_assert_storage_destination('admin_link_icon_upload', $public);
     upsert_link_icon_catalog($pdo, $iconName, $label, $public, false);
     log_tool($pdo, (int)$me['id'], 'link_icon_create', null, null, 'Created link icon: ' . $label);
     json_out(['ok' => true, 'icon' => ['icon_name' => $iconName, 'label' => $label, 'file_path' => $public, 'built_in' => false]]);

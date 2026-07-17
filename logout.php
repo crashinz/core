@@ -19,5 +19,5 @@ if ($user) {
     db()->prepare('UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, webcam_enabled = 0 WHERE user_id = ?')->execute([(int)$user['id']]);
     db()->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$user['id']]);
 }
-session_destroy();
+security_destroy_session();
 redirect_to('/login.php');

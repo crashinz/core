@@ -4,13 +4,10 @@ require_once __DIR__ . '/../includes/database_backups.php';
 require_once __DIR__ . '/../includes/room_importer.php';
 
 $me = require_staff();
+security_require_recent_authentication_or_json();
 
 function portable_file_allowed(string $path): bool {
-    return $path !== ''
-        && str_starts_with($path, '/assets/')
-        && !str_contains($path, '..')
-        && !str_starts_with($path, '/assets/js/')
-        && !str_starts_with($path, '/assets/css/');
+    return backup_portable_file_allowed($path);
 }
 
 function portable_file_path(string $path): string {
@@ -150,6 +147,7 @@ function export_core_bundle(PDO $pdo, int $actorId, array $options = []): void {
     if ($includeRooms) $labels[] = 'rooms';
     if ($includeSettings) $labels[] = 'settings';
     log_tool($pdo, $actorId, 'admin_portable_export', null, null, 'Exported ' . ($labels ? implode(', ', $labels) : 'empty portable bundle') . ' and files');
+    security_protect_private_response();
     header('Content-Type: application/json');
     header('Content-Disposition: attachment; filename="chatspace-core-' . gmdate('Ymd-His') . '.json"');
     echo json_encode($bundle, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -166,6 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'downloa
     $dbPath = sqlite_path();
     if (!is_file($dbPath)) json_out(['error' => 'Database not found'], 404);
     log_tool(db(), (int)$me['id'], 'admin_database_download', null, null, 'Downloaded database backup');
+    security_protect_private_response();
     header('Content-Type: application/vnd.sqlite3');
     header('Content-Disposition: attachment; filename="chatspace-' . gmdate('Ymd-His') . '.sqlite"');
     header('Content-Length: ' . filesize($dbPath));
@@ -183,12 +182,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && in_array(($_GET['action'] ?? ''), ['
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'Unsupported method'], 405);
+security_authorize_outside_content_or_json(db(), $me, 'database_import', ['source' => 'admin_database']);
 
 if (empty($_FILES['database']['tmp_name']) || !is_uploaded_file($_FILES['database']['tmp_name'])) {
     json_out(['error' => 'Import file required'], 400);
 }
 
 $tmp = $_FILES['database']['tmp_name'];
+$actualBytes = filesize((string)$tmp);
+if ($actualBytes === false || $actualBytes < 1 || $actualBytes > app_setting_bytes(db(), 'database_import_max_size_mb', 512)) {
+    json_out(['error' => 'Import file exceeds the configured backup size limit.'], 400);
+}
 $decoded = json_decode((string)file_get_contents($tmp), true);
 if (is_array($decoded) && ($decoded['format'] ?? '') === 'chatspace-ce-portable-bundle') {
     try {

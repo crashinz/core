@@ -43,6 +43,7 @@ function setup_requirements(): array {
         'gd' => ['label' => 'GD image handling', 'ok' => extension_loaded('gd'), 'required' => true],
         'mbstring' => ['label' => 'mbstring text handling', 'ok' => extension_loaded('mbstring'), 'required' => true],
         'openssl' => ['label' => 'OpenSSL password/session safety', 'ok' => extension_loaded('openssl'), 'required' => true],
+        'curl' => ['label' => 'cURL secure remote imports', 'ok' => extension_loaded('curl'), 'required' => true],
         'zip' => ['label' => 'Zip backups/packages', 'ok' => extension_loaded('zip'), 'required' => false],
         'uploads' => ['label' => 'Writable uploads directory', 'ok' => is_writable(__DIR__ . '/assets/uploads') || is_writable(__DIR__ . '/assets'), 'required' => true],
         'includes' => ['label' => 'Writable includes directory', 'ok' => is_writable(__DIR__ . '/includes'), 'required' => true],
@@ -88,6 +89,7 @@ function write_setup_config(array $cfg): void {
 }
 
 function setup_avatar_upload(): string {
+    security_authorize_outside_content_or_json(chatspace_configured() ? db() : null, null, 'setup_avatar', ['setup_allowed' => !setup_admin_exists(), 'source' => 'setup']);
     if (empty($_FILES['avatar']['tmp_name']) || !is_uploaded_file($_FILES['avatar']['tmp_name'])) {
         throw new RuntimeException('Admin avatar is required.');
     }
@@ -95,7 +97,7 @@ function setup_avatar_upload(): string {
     $mime = $finfo->file($_FILES['avatar']['tmp_name']) ?: '';
     $allowed = ['image/gif' => 'gif', 'image/webp' => 'webp'];
     $dims = @getimagesize($_FILES['avatar']['tmp_name']);
-    if (!isset($allowed[$mime]) || (int)$_FILES['avatar']['size'] > 5 * 1024 * 1024 || !$dims || $dims[0] < 42 || $dims[1] < 42 || $dims[0] > 250 || $dims[1] > 250) {
+    if (!isset($allowed[$mime]) || !security_valid_image_file((string)$_FILES['avatar']['tmp_name'], $mime) || (int)$_FILES['avatar']['size'] > 5 * 1024 * 1024 || !$dims || $dims[0] < 42 || $dims[1] < 42 || $dims[0] > 250 || $dims[1] > 250) {
         throw new RuntimeException('Use an optimized GIF or WEBP avatar under 5 MB and between 42x42 and 250x250.');
     }
     $dir = __DIR__ . '/assets/uploads/avatars';
@@ -105,13 +107,16 @@ function setup_avatar_upload(): string {
     if (!move_uploaded_file($_FILES['avatar']['tmp_name'], $dest)) {
         throw new RuntimeException('Could not save admin avatar.');
     }
-    return '/assets/uploads/avatars/' . $file;
+    $public = '/assets/uploads/avatars/' . $file;
+    security_assert_storage_destination('setup_avatar', $public);
+    return $public;
 }
 
 function setup_brand_logo_upload(): string {
     if (empty($_FILES['community_logo']['tmp_name']) || !is_uploaded_file($_FILES['community_logo']['tmp_name'])) {
         return '';
     }
+    security_authorize_outside_content_or_json(chatspace_configured() ? db() : null, null, 'setup_branding', ['setup_allowed' => !setup_admin_exists(), 'source' => 'setup']);
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($_FILES['community_logo']['tmp_name']) ?: '';
     $allowed = [
@@ -121,7 +126,7 @@ function setup_brand_logo_upload(): string {
         'image/webp' => 'webp',
     ];
     $dims = @getimagesize($_FILES['community_logo']['tmp_name']);
-    if (!isset($allowed[$mime]) || (int)$_FILES['community_logo']['size'] > 5 * 1024 * 1024 || !$dims || $dims[0] < 42 || $dims[1] < 42 || $dims[0] > 2000 || $dims[1] > 2000) {
+    if (!isset($allowed[$mime]) || !security_valid_image_file((string)$_FILES['community_logo']['tmp_name'], $mime) || (int)$_FILES['community_logo']['size'] > 5 * 1024 * 1024 || !$dims || $dims[0] < 42 || $dims[1] < 42 || $dims[0] > 2000 || $dims[1] > 2000) {
         throw new RuntimeException('Use a PNG, JPG, GIF, or WEBP logo under 5 MB and between 42x42 and 2000x2000.');
     }
     $dir = __DIR__ . '/assets/uploads/branding';
@@ -131,7 +136,9 @@ function setup_brand_logo_upload(): string {
     if (!move_uploaded_file($_FILES['community_logo']['tmp_name'], $dest)) {
         throw new RuntimeException('Could not save community logo.');
     }
-    return '/assets/uploads/branding/' . $file;
+    $public = '/assets/uploads/branding/' . $file;
+    security_assert_storage_destination('setup_branding', $public);
+    return $public;
 }
 
 function setup_response(array $payload, int $status = 200): never {
@@ -144,7 +151,12 @@ function setup_restore_backup_upload(): array {
     if (empty($_FILES['database']['tmp_name']) || !is_uploaded_file($_FILES['database']['tmp_name'])) {
         throw new RuntimeException('Choose a backup file to import.');
     }
+    security_authorize_outside_content_or_json(db(), null, 'setup_database_import', ['setup_allowed' => !setup_admin_exists(false), 'source' => 'setup_restore']);
     $tmp = $_FILES['database']['tmp_name'];
+    $actualBytes = filesize((string)$tmp);
+    if ($actualBytes === false || $actualBytes < 1 || $actualBytes > app_setting_bytes(db(), 'database_import_max_size_mb', 512)) {
+        throw new RuntimeException('Import file exceeds the configured backup size limit.');
+    }
     $decoded = json_decode((string)file_get_contents($tmp), true);
     if (is_array($decoded) && ($decoded['format'] ?? '') === 'chatspace-ce-portable-bundle') {
         $result = backup_import_core_bundle(db(), $decoded, 0);

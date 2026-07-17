@@ -27,6 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if (!$isStaff && (int)$record['owner_user_id'] !== (int)$me['id']) json_out(['error' => 'Forbidden'], 403);
         $path = runtime_issue_private_root() . DIRECTORY_SEPARATOR . basename((string)$record['storage_name']);
         if (!is_file($path)) json_out(['error' => 'Screenshot file not found.'], 404);
+        security_protect_private_response();
         header('Content-Type: image/png');
         header('Content-Length: ' . filesize($path));
         header('Content-Disposition: inline; filename="diagnostic-' . e((string)$record['public_id']) . '.png"');
@@ -57,6 +58,7 @@ try {
         json_out(['ok' => true] + $result);
     }
     if ($action === 'screenshot') {
+        security_authorize_outside_content_or_json($pdo, $me, 'diagnostic_screenshot', ['source' => 'runtime_issue']);
         $result = runtime_issue_store_screenshot($pdo, (int)($body['issue_id'] ?? 0), (int)($body['occurrence_id'] ?? 0), (int)$me['id'], (string)($body['data_url'] ?? ''));
         json_out(['ok' => true, 'screenshot' => $result]);
     }

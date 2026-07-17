@@ -118,6 +118,7 @@ if (!class_exists('ZipArchive')) json_out(['error' => 'PHP ZipArchive is require
 if (empty($_FILES['gesture']) || !is_uploaded_file($_FILES['gesture']['tmp_name'])) {
     json_out(['error' => 'Gesture file required'], 400);
 }
+security_authorize_outside_content_or_json($pdo, ['id' => $userId], 'gesture_upload', ['session_id' => $sessionId]);
 
 $file = $_FILES['gesture'];
 $name = (string)($file['name'] ?? 'gesture.agst');
@@ -137,6 +138,26 @@ if ((int)$ownedStmt->fetchColumn() >= $ownedLimit) {
 
 $zip = new ZipArchive();
 if ($zip->open($file['tmp_name']) !== true) json_out(['error' => 'Gesture package could not be opened'], 400);
+if ($zip->numFiles < 1 || $zip->numFiles > 20) {
+    $zip->close();
+    json_out(['error' => 'Gesture package contains too many files'], 400);
+}
+$archiveUncompressedBytes = 0;
+for ($archiveIndex = 0; $archiveIndex < $zip->numFiles; $archiveIndex++) {
+    $archiveStat = $zip->statIndex($archiveIndex);
+    $archiveName = package_asset_name((string)($archiveStat['name'] ?? ''), '');
+    $archiveSize = (int)($archiveStat['size'] ?? 0);
+    $archiveCompressed = max(1, (int)($archiveStat['comp_size'] ?? 0));
+    if ($archiveName === '' || $archiveSize < 0 || $archiveSize > 25 * 1024 * 1024 || $archiveSize > $archiveCompressed * 200) {
+        $zip->close();
+        json_out(['error' => 'Gesture package contains an unsafe archive entry'], 400);
+    }
+    $archiveUncompressedBytes += $archiveSize;
+    if ($archiveUncompressedBytes > 35 * 1024 * 1024) {
+        $zip->close();
+        json_out(['error' => 'Gesture package expands beyond the allowed size'], 400);
+    }
+}
 $tocRaw = $zip->getFromName('toc.json');
 $legacyMetaRaw = $tocRaw === false ? $zip->getFromName('meta.json') : false;
 $manifestRaw = $tocRaw !== false ? $tocRaw : $legacyMetaRaw;
@@ -156,7 +177,8 @@ $audioBytes = $zip->getFromName($audioName);
 $zip->close();
 
 if ($gifBytes === false) json_out(['error' => 'Gesture package must include the GIF referenced by toc.json'], 400);
-if (strncmp($gifBytes, 'GIF', 3) !== 0) json_out(['error' => 'Gesture animation must be a GIF'], 400);
+if (strncmp($gifBytes, 'GIF', 3) !== 0 || @getimagesizefromstring($gifBytes) === false) json_out(['error' => 'Gesture animation must be a valid GIF'], 400);
+if (strlen($gifBytes) > 25 * 1024 * 1024) json_out(['error' => 'Gesture animation is too large'], 400);
 
 $gestureName = trim((string)($manifest['name'] ?? pathinfo($name, PATHINFO_FILENAME)));
 if ($gestureName === '') $gestureName = 'Uploaded Gesture';
@@ -164,6 +186,12 @@ $gestureText = clean_gesture_text((string)($manifest['text'] ?? $manifest['fallb
 if ($gestureText === '') $gestureText = $gestureName;
 $gestureName = function_exists('mb_substr') ? mb_substr($gestureName, 0, 80, 'UTF-8') : substr($gestureName, 0, 80);
 $gestureText = function_exists('mb_substr') ? mb_substr($gestureText, 0, 180, 'UTF-8') : substr($gestureText, 0, 180);
+
+if ($audioBytes !== false && strlen($audioBytes) > 0) {
+    $audioPrefix = substr($audioBytes, 0, 32);
+    $validMp3 = str_starts_with($audioPrefix, 'ID3') || (strlen($audioPrefix) >= 2 && ord($audioPrefix[0]) === 0xFF && (ord($audioPrefix[1]) & 0xE0) === 0xE0);
+    if (!$validMp3 || strlen($audioBytes) > 10 * 1024 * 1024) json_out(['error' => 'Gesture audio must be a valid MP3 under 10 MB'], 400);
+}
 
 $publicId = uuid_v4();
 $uploadDir = __DIR__ . '/../assets/uploads/gestures';
@@ -182,6 +210,8 @@ if ($audioBytes !== false && strlen($audioBytes) > 0) {
 }
 
 $gifPath = '/assets/uploads/gestures/' . $gifFile;
+security_assert_storage_destination('gesture_upload', $gifPath);
+if ($audioPath !== null) security_assert_storage_destination('gesture_upload', $audioPath);
 $stmt = $pdo->prepare(
     'INSERT INTO gestures (public_id, owner_user_id, name, gesture_text, gif_path, audio_path, audio_is_silent, is_public, file_size)
      VALUES (?,?,?,?,?,?,?,?,?)'
