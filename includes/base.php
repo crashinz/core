@@ -14,6 +14,7 @@ if (is_file(CHATSPACE_CONFIG)) {
 require_once __DIR__ . '/avatar_size_policy.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/runtime_issue_service.php';
+require_once __DIR__ . '/gesture_catalog_service.php';
 
 function app_base_path(): string {
     static $base = null;
@@ -970,6 +971,7 @@ function migrate(PDO $pdo): void {
         }
         migrate_avatar_relationship_group_schema($pdo);
         runtime_issue_install_schema($pdo);
+        gesture_catalog_install_schema($pdo);
         seed_app_settings($pdo);
         seed_link_icon_catalog($pdo);
         return;
@@ -1018,6 +1020,7 @@ function migrate(PDO $pdo): void {
     seed_app_settings($pdo);
     seed_link_icon_catalog($pdo);
     runtime_issue_install_schema($pdo);
+    gesture_catalog_install_schema($pdo);
 
     $cols = $pdo->query('PRAGMA table_info(rooms)')->fetchAll();
     $hasPublicId = false;
@@ -1306,7 +1309,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], avatar_size_policy_setting_defaults(), role_color_setting_defaults());
+    ], avatar_size_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -1354,6 +1357,9 @@ function auth_rate_seconds(int $seconds): string {
 }
 
 function auth_rate_scope_max(PDO $pdo, string $scope): int {
+    if (str_starts_with($scope, 'gesture:')) {
+        return max(1, (int)app_setting_float($pdo, 'gesture_mutation_rate_limit', 120));
+    }
     if (str_starts_with($scope, 'outside:')) {
         return max(1, (int)app_setting_float($pdo, 'outside_content_rate_limit', 60));
     }
@@ -1362,6 +1368,9 @@ function auth_rate_scope_max(PDO $pdo, string $scope): int {
 }
 
 function auth_rate_ip_max(PDO $pdo, string $scope = ''): int {
+    if (str_starts_with($scope, 'gesture:')) {
+        return max(1, (int)app_setting_float($pdo, 'gesture_mutation_ip_rate_limit', 600));
+    }
     if (str_starts_with($scope, 'outside:')) {
         return max(1, (int)app_setting_float($pdo, 'outside_content_ip_rate_limit', 300));
     }
