@@ -61,6 +61,7 @@ framework/templates/
 /framework/build-prompts/
 /framework/verification/
 /player/
+/deployment/
 
 # Root Markdown files are private/internal by default.
 # README.md remains public. AI_BOOTSTRAP.md therefore

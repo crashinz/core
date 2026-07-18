@@ -35,7 +35,6 @@ $roleColors = role_color_settings($pdo);
   <div class="shared-status" id="admin-page-status" role="status"></div>
 
   <section class="shared-panel" data-admin-panel="errors">
-    <div class="admin-chat-diagnostic-tabs" aria-label="Communication diagnostics"><span>Room Chat</span><span>Community Chat</span><strong>Errors</strong></div>
     <div class="issue-workspace">
       <aside>
         <label>Status <select id="issue-status-filter"><option value="">All</option><option value="new">New</option><option value="confirmed">Confirmed</option><option value="investigating">Investigating</option><option value="fixed-pending-verification">Fixed pending verification</option><option value="resolved">Resolved</option><option value="expected">Expected</option><option value="ignored">Ignored</option><option value="regressed">Regressed</option></select></label>

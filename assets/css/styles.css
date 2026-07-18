@@ -140,9 +140,6 @@ body[data-role-colors-mode="disabled"] :is(.role-label, .role-color-preview, .pe
 .person-row.role-developer, .linked-half.role-developer { background: var(--role-developer-bg, #142d74); color: var(--role-developer-text, #fff); }
 .person-row.role-guide, .linked-half.role-guide { background: var(--role-guide-bg, #095e3a); color: var(--role-guide-text, #fff); }
 .person-row.role-owner, .linked-half.role-owner { background: var(--role-owner-bg, #9a6914); color: var(--role-owner-text, #fff); }
-.admin-chat-diagnostic-tabs { display: flex; gap: 5px; margin-bottom: 14px; color: var(--text-muted); }
-.admin-chat-diagnostic-tabs > * { padding: 7px 10px; border-bottom: 2px solid transparent; }
-.admin-chat-diagnostic-tabs strong { color: var(--text); border-bottom-color: var(--accent); }
 .issue-workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; }
 .issue-workspace > aside { min-width: 0; }
 .issue-list { display: grid; gap: 6px; margin-top: 10px; max-height: 70vh; overflow: auto; }

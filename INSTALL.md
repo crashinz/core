@@ -91,7 +91,18 @@ location ^~ /assets/uploads/ {
 
 ## Packaging Notes
 
-The release zip is flat by design. Extract it directly into the target folder.
+The owner may maintain a local ignored `deployment/production-staging/` mirror
+for manual hosting updates. Its state manifests compare SHA-256 content hashes;
+each checkpoint upload folder contains only new or content-changed production
+files. `delete-from-host.txt` is review guidance only. ChatSpace never connects
+to hosting or deletes hosted files automatically.
+
+During updates, preserve the hosted `includes/config.php`, SQLite or
+MySQL/MariaDB data, all user uploads, configured private storage, runtime issue
+screenshots, installation-specific state, and enabled private-player assets.
+Upload the complete production `api/` tree when establishing a baseline. A
+deterministic ZIP may be produced at a final checkpoint, but ZIP deployment is
+optional and is not assumed by the staging workflow.
 
 `.distignore` is the authoritative release-packaging exclusion record. Local
 verification infrastructure, private player assets, generated configuration,
