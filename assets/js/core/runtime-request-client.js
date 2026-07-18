@@ -216,9 +216,16 @@ export class RuntimeRequestClient {
                 throw this.#error("CSRF_REJECTED", safeApplicationMessage, context);
             }
             if (!response.ok) {
-                throw this.#error("HTTP_ERROR", applicationMessage
+                const responseError = this.#error("HTTP_ERROR", applicationMessage
                     ? safeApplicationMessage
                     : `Room API request failed (${response.status}).`, context);
+                Object.defineProperty(responseError, "responsePayload", {
+                    value: data && typeof data === "object" && !Array.isArray(data) ? data : null,
+                    enumerable: false,
+                    configurable: false,
+                    writable: false,
+                });
+                throw responseError;
             }
             if (!data || typeof data !== "object" || Array.isArray(data)) {
                 throw this.#error("API_CONTRACT_ERROR", "The room API returned an invalid response contract.", context);

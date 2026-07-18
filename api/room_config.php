@@ -100,6 +100,7 @@ $participants = array_map(function(array $p) use ($roomOwnerId, $pdo): array {
         'avatar_path' => $p['avatar_path'],
         'avatar_url' => $p['webcam_path'] ?: resolve_avatar($p['avatar_path']),
         'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
+        'avatar_orientation_version' => max(1, (int)($p['avatar_orientation_version'] ?? 1)),
         'aura_effect' => $p['aura_effect'] ?? null,
         'position_x' => (float)$p['position_x'],
         'position_y' => (float)$p['position_y'],

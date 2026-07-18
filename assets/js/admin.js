@@ -38,9 +38,13 @@ document.querySelectorAll('[data-admin-tab]').forEach(button => button.addEventL
 async function loadIssues() {
   const filter = document.getElementById('issue-status-filter').value;
   const data = await request(`/api/runtime_issues.php?action=list${filter ? `&status=${encodeURIComponent(filter)}` : ''}`);
+  const countData = filter ? await request('/api/runtime_issues.php?action=list') : data;
   const list = document.getElementById('issue-list');
   list.textContent = '';
-  document.getElementById('issue-count').textContent = String((data.issues || []).length);
+  const issueCount = (countData.issues || []).length;
+  const issueBadge = document.getElementById('issue-count');
+  issueBadge.textContent = String(issueCount);
+  issueBadge.setAttribute('aria-label', `${issueCount} issue${issueCount === 1 ? '' : 's'}`);
   for (const issue of data.issues || []) {
     const button = document.createElement('button');
     button.type = 'button';

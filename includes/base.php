@@ -335,6 +335,7 @@ function migrate(PDO $pdo): void {
             role TEXT NOT NULL DEFAULT 'user',
             avatar_path TEXT DEFAULT 'preset:Default',
             avatar_orientation TEXT NOT NULL DEFAULT 'original',
+            avatar_orientation_version INTEGER NOT NULL DEFAULT 1,
             avatar_display_size_px INTEGER DEFAULT NULL,
             webcam_display_width_px INTEGER DEFAULT NULL,
             webcam_display_height_px INTEGER DEFAULT NULL,
@@ -390,6 +391,7 @@ function migrate(PDO $pdo): void {
             password_changed_at TEXT DEFAULT NULL,
             avatar_path TEXT DEFAULT 'preset:Default',
             avatar_orientation TEXT NOT NULL DEFAULT 'original',
+            avatar_orientation_version INTEGER NOT NULL DEFAULT 1,
             avatar_display_size_px INTEGER DEFAULT NULL,
             webcam_display_width_px INTEGER DEFAULT NULL,
             webcam_display_height_px INTEGER DEFAULT NULL,
@@ -879,6 +881,7 @@ function migrate(PDO $pdo): void {
             'profile_visibility' => "VARCHAR(24) NOT NULL DEFAULT 'community'",
             'email_changed_at' => 'DATETIME DEFAULT NULL',
             'password_changed_at' => 'DATETIME DEFAULT NULL',
+            'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
             'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -905,6 +908,7 @@ function migrate(PDO $pdo): void {
             $pdo->exec("ALTER TABLE participants ADD COLUMN avatar_orientation VARCHAR(32) NOT NULL DEFAULT 'original'");
         }
         foreach ([
+            'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
             'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -995,6 +999,7 @@ function migrate(PDO $pdo): void {
         'profile_visibility' => "TEXT NOT NULL DEFAULT 'community'",
         'email_changed_at' => 'TEXT DEFAULT NULL',
         'password_changed_at' => 'TEXT DEFAULT NULL',
+        'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
         'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -1061,6 +1066,7 @@ function migrate(PDO $pdo): void {
         $pdo->exec("ALTER TABLE participants ADD COLUMN avatar_orientation TEXT NOT NULL DEFAULT 'original'");
     }
     foreach ([
+        'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
         'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -6570,15 +6576,21 @@ function avatar_orientation_normalize(mixed $orientation): string {
         : 'original';
 }
 
+function avatar_orientation_projection(array $participant): array {
+    return [
+        'avatar_orientation' => avatar_orientation_normalize($participant['avatar_orientation'] ?? null),
+        'avatar_orientation_version' => max(1, (int)($participant['avatar_orientation_version'] ?? 1)),
+    ];
+}
+
 function avatar_orientation_update(
     PDO $pdo,
     int $userId,
-    mixed $expectedOrientation,
-    mixed $requestedOrientation
+    mixed $expectedVersion,
+    mixed $requestedOrientation,
+    mixed $legacyExpectedOrientation = null
 ): array {
-    if (!is_string($expectedOrientation)
-        || !in_array(trim($expectedOrientation), avatar_orientation_values(), true)
-        || !is_string($requestedOrientation)
+    if (!is_string($requestedOrientation)
         || !in_array(trim($requestedOrientation), avatar_orientation_values(), true)) {
         return [
             'ok' => false,
@@ -6587,15 +6599,27 @@ function avatar_orientation_update(
             'http_status' => 400,
         ];
     }
-    $expectedOrientation = trim($expectedOrientation);
     $requestedOrientation = trim($requestedOrientation);
+    $expectedVersion = filter_var($expectedVersion, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    $legacyExpectedOrientation = is_string($legacyExpectedOrientation)
+        && in_array(trim($legacyExpectedOrientation), avatar_orientation_values(), true)
+            ? trim($legacyExpectedOrientation)
+            : null;
+    if ($expectedVersion === false && $legacyExpectedOrientation === null) {
+        return [
+            'ok' => false,
+            'code' => 'AVATAR_ORIENTATION_VERSION_INVALID',
+            'error' => 'Avatar orientation state is unavailable. Refresh and try again.',
+            'http_status' => 400,
+        ];
+    }
     $ownsTransaction = !$pdo->inTransaction();
     try {
         if ($ownsTransaction) {
             if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
             else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
         }
-        $sql = 'SELECT avatar_path, avatar_orientation FROM users WHERE id = ? LIMIT 1';
+        $sql = 'SELECT avatar_path, avatar_orientation, avatar_orientation_version FROM users WHERE id = ? LIMIT 1';
         if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$userId]);
@@ -6610,25 +6634,42 @@ function avatar_orientation_update(
             ];
         }
         $currentOrientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
-        if ($currentOrientation !== $expectedOrientation) {
+        $currentVersion = max(1, (int)($user['avatar_orientation_version'] ?? 1));
+        if ($currentOrientation === $requestedOrientation) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'avatar_orientation' => $currentOrientation,
+                'avatar_orientation_version' => $currentVersion,
+                'avatar_path' => (string)($user['avatar_path'] ?? 'preset:Default'),
+            ];
+        }
+        $stale = $expectedVersion !== false
+            ? $currentVersion !== (int)$expectedVersion
+            : $currentOrientation !== $legacyExpectedOrientation;
+        if ($stale) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
             return [
                 'ok' => false,
                 'code' => 'AVATAR_ORIENTATION_STALE',
-                'error' => 'Avatar orientation changed. Refresh and try again.',
+                'error' => 'Avatar orientation changed in another operation.',
                 'current_orientation' => $currentOrientation,
+                'current_orientation_version' => $currentVersion,
                 'http_status' => 409,
             ];
         }
-        $pdo->prepare('UPDATE users SET avatar_orientation = ? WHERE id = ?')
-            ->execute([$requestedOrientation, $userId]);
-        $pdo->prepare('UPDATE participants SET avatar_orientation = ? WHERE user_id = ?')
-            ->execute([$requestedOrientation, $userId]);
+        $nextVersion = $currentVersion + 1;
+        $pdo->prepare('UPDATE users SET avatar_orientation = ?, avatar_orientation_version = ? WHERE id = ?')
+            ->execute([$requestedOrientation, $nextVersion, $userId]);
+        $pdo->prepare('UPDATE participants SET avatar_orientation = ?, avatar_orientation_version = ? WHERE user_id = ?')
+            ->execute([$requestedOrientation, $nextVersion, $userId]);
         if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
         return [
             'ok' => true,
-            'idempotent' => $currentOrientation === $requestedOrientation,
+            'idempotent' => false,
             'avatar_orientation' => $requestedOrientation,
+            'avatar_orientation_version' => $nextVersion,
             'avatar_path' => (string)($user['avatar_path'] ?? 'preset:Default'),
         ];
     } catch (Throwable $error) {
@@ -6697,14 +6738,17 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     if ($matches) {
         $participant = $matches[0];
         $userOrientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
+        $userOrientationVersion = max(1, (int)($user['avatar_orientation_version'] ?? 1));
         $userSize = avatar_size_preferences_from_row($user);
         $participantSize = avatar_size_preferences_from_row($participant);
         if (avatar_orientation_normalize($participant['avatar_orientation'] ?? null) !== $userOrientation
+            || max(1, (int)($participant['avatar_orientation_version'] ?? 1)) !== $userOrientationVersion
             || $participantSize !== $userSize) {
             $pdo->prepare(
-                'UPDATE participants SET avatar_orientation = ?, avatar_display_size_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
+                'UPDATE participants SET avatar_orientation = ?, avatar_orientation_version = ?, avatar_display_size_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
             )->execute([
                 $userOrientation,
+                $userOrientationVersion,
                 $userSize['avatarDisplayPreferencePx'],
                 $userSize['webcamDisplayWidthPreferencePx'],
                 $userSize['webcamDisplayHeightPreferencePx'],
@@ -6712,6 +6756,7 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
                 (int)$participant['id'],
             ]);
             $participant['avatar_orientation'] = $userOrientation;
+            $participant['avatar_orientation_version'] = $userOrientationVersion;
             $participant['avatar_display_size_px'] = $userSize['avatarDisplayPreferencePx'];
             $participant['webcam_display_width_px'] = $userSize['webcamDisplayWidthPreferencePx'];
             $participant['webcam_display_height_px'] = $userSize['webcamDisplayHeightPreferencePx'];
@@ -6737,16 +6782,18 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     $x = random_int(12, 68) / 100;
     $y = random_int(18, 58) / 100;
     $orientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
+    $orientationVersion = max(1, (int)($user['avatar_orientation_version'] ?? 1));
     $size = avatar_size_preferences_from_row($user);
     $pdo->prepare(
-        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_orientation, avatar_display_size_px, webcam_display_width_px, webcam_display_height_px, avatar_size_version, aura_effect, join_token, position_x, position_y, last_seen_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
+        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_orientation, avatar_orientation_version, avatar_display_size_px, webcam_display_width_px, webcam_display_height_px, avatar_size_version, aura_effect, join_token, position_x, position_y, last_seen_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
     )->execute([
         $sessionId,
         (int)$user['id'],
         $user['display_name'],
         $user['avatar_path'] ?: 'preset:Default',
         $orientation,
+        $orientationVersion,
         $size['avatarDisplayPreferencePx'],
         $size['webcamDisplayWidthPreferencePx'],
         $size['webcamDisplayHeightPreferencePx'],

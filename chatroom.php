@@ -46,6 +46,7 @@ emit_event($pdo, (int)$session['id'], 'participant_join', array_merge([
     'avatar_path' => $participant['avatar_path'],
     'avatar_url' => resolve_avatar($participant['avatar_path']),
     'avatar_orientation' => avatar_orientation_normalize($participant['avatar_orientation'] ?? null),
+    'avatar_orientation_version' => max(1, (int)($participant['avatar_orientation_version'] ?? 1)),
     'aura_effect' => $participant['aura_effect'] ?? null,
     'position_x' => (float)$participant['position_x'],
     'position_y' => (float)$participant['position_y'],
@@ -648,15 +649,17 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <form class="modal-box avatar-size-box" id="avatar-size-form">
     <div class="modal-head">
       <div>
-        <h2 id="avatar-size-title">Avatar Display Size</h2>
+        <h2 id="avatar-size-title">Maximum Avatar Display Size</h2>
         <div class="minor" id="avatar-size-cap"></div>
       </div>
       <button class="icon-btn" id="avatar-size-close" type="button" aria-label="Close">&times;</button>
     </div>
     <section id="avatar-size-avatar-fields">
-      <label>Preferred maximum edge (px)
-        <input id="avatar-size-edge" name="avatar_display_size_px" type="number" min="42" step="1" inputmode="numeric">
+      <p class="minor">Sets the largest displayed width or height of your avatar. The original aspect ratio is preserved.</p>
+      <label>Maximum edge
+        <span class="avatar-size-input-with-unit"><input id="avatar-size-edge" name="avatar_display_size_px" type="number" min="42" step="1" inputmode="numeric"><span>px</span></span>
       </label>
+      <div class="avatar-size-readout" id="avatar-size-current"></div>
     </section>
     <section id="avatar-size-webcam-fields" hidden>
       <label>Size preset
@@ -686,7 +689,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     </section>
     <div class="admin-row-status" id="avatar-size-status" aria-live="polite"></div>
     <div class="delete-message-actions">
-      <button class="btn" id="avatar-size-reset" type="button">Use community default</button>
+      <button class="btn" id="avatar-size-reset" type="button">Use server default</button>
       <button class="btn" id="avatar-size-cancel" type="button">Cancel</button>
       <button class="btn btn-primary" id="avatar-size-save" type="submit">Save</button>
     </div>
@@ -694,7 +697,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 </div>
 <div id="ctx-menu">
   <button id="ctx-change-avatar" type="button">Change Avatar</button>
-  <button id="ctx-avatar-size" type="button">Avatar Size</button>
+  <button id="ctx-avatar-size" type="button">Maximum Avatar Display Size</button>
   <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
     <button id="ctx-orientation" type="button" aria-haspopup="menu" aria-expanded="false">Orientation <span>&gt;</span></button>
     <div class="ctx-submenu" id="ctx-orientation-submenu" role="menu" aria-label="Avatar orientation">
@@ -753,11 +756,11 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 </div>
 <div id="room-menu">
   <?php if (in_array((string)$user['role'], ['admin', 'developer'], true)): ?>
-  <button id="admin-link" type="button" data-href="<?= e(app_url('/admin.php?return=room&id=' . rawurlencode((string)$room['public_id']))) ?>">Admin</button>
+  <a id="admin-link" data-room-navigation="utility" href="<?= e(app_url('/admin.php?return=room&id=' . rawurlencode((string)$room['public_id']))) ?>" target="_blank" rel="noopener noreferrer">Admin</a>
   <?php endif; ?>
   <button id="chat-options-btn" type="button">Chat Options</button>
   <button id="report-problem-btn" type="button">Report Problem</button>
-  <button id="account-link" type="button" data-href="<?= e(app_url('/account.php?return=room&id=' . rawurlencode((string)$room['public_id']))) ?>">Account</button>
+  <a id="account-link" data-room-navigation="utility" href="<?= e(app_url('/account.php?return=room&id=' . rawurlencode((string)$room['public_id']))) ?>" target="_blank" rel="noopener noreferrer">Account</a>
   <button id="lock-session-btn" type="button"><img src="<?= e(app_url('/assets/images/secure.png')) ?>" alt="">Lock Session</button>
   <button id="rooms-link" type="button" data-href="<?= e(app_url('/lobby.php')) ?>"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Lobby</button>
   <button id="logout-link" type="button"><img src="<?= e(app_url('/assets/images/logout.png')) ?>" alt="">Log Out</button>
@@ -771,11 +774,14 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       <strong id="chat-options-title">Chat Options</strong>
       <button class="window-close" id="chat-options-close" type="button" aria-label="Close">×</button>
     </div>
-    <fieldset class="chat-display-options">
-      <legend>Message display</legend>
-      <label><input type="radio" name="chat-display-mode" value="detailed"> Detailed</label>
-      <label><input type="radio" name="chat-display-mode" value="compact"> Compact</label>
-    </fieldset>
+    <div class="settings-choice-row">
+      <span class="settings-choice-name" id="chat-display-label">Message display</span>
+      <fieldset class="segmented-radio" aria-labelledby="chat-display-label">
+        <label><input type="radio" name="chat-display-mode" value="detailed"><span>Detailed</span></label>
+        <label><input type="radio" name="chat-display-mode" value="compact"><span>Compact</span></label>
+      </fieldset>
+      <p class="settings-choice-description" id="chat-display-description"></p>
+    </div>
   </div>
 </div>
 <div class="modal" id="report-problem-modal" aria-hidden="true">

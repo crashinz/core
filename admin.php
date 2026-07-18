@@ -23,18 +23,18 @@ $roleColors = role_color_settings($pdo);
     <a class="btn" href="<?= e($back) ?>">Back</a>
   </header>
   <nav class="shared-tabs admin-shared-tabs" aria-label="Admin sections">
-    <button class="active" data-admin-tab="errors" type="button">Errors <span id="issue-count">0</span></button>
-    <button data-admin-tab="users" type="button">Users</button>
+    <button class="active" data-admin-tab="users" type="button">Users</button>
     <button data-admin-tab="settings" type="button">Settings</button>
     <button data-admin-tab="appearance" type="button">Appearance</button>
     <button data-admin-tab="database" type="button">Database</button>
     <button data-admin-tab="link-icons" type="button">Link Icons</button>
     <button data-admin-tab="moderation" type="button">Moderation</button>
     <button data-admin-tab="logs" type="button">Tool Logs</button>
+    <button data-admin-tab="errors" type="button">Errors <span class="admin-tab-badge" id="issue-count" aria-label="0 issues">0</span></button>
   </nav>
   <div class="shared-status" id="admin-page-status" role="status"></div>
 
-  <section class="shared-panel active" data-admin-panel="errors">
+  <section class="shared-panel" data-admin-panel="errors">
     <div class="admin-chat-diagnostic-tabs" aria-label="Communication diagnostics"><span>Room Chat</span><span>Community Chat</span><strong>Errors</strong></div>
     <div class="issue-workspace">
       <aside>
@@ -45,7 +45,7 @@ $roleColors = role_color_settings($pdo);
     </div>
   </section>
 
-  <section class="shared-panel" data-admin-panel="users">
+  <section class="shared-panel active" data-admin-panel="users">
     <h2>Users</h2>
     <form id="admin-user-create" class="shared-form inline-form">
       <input name="display_name" placeholder="Display name" required>
@@ -78,7 +78,7 @@ $roleColors = role_color_settings($pdo);
       <label>GIPHY key <input name="gif_giphy_api_key" type="password"></label>
       <label>Tenor key <input name="gif_tenor_api_key" type="password"></label>
       <label>Klipy key <input name="gif_klipy_api_key" type="password"></label>
-      <label class="check-label"><input name="age_gate_enabled" type="checkbox"> Enable age gate</label>
+      <label class="settings-checkbox-row"><strong>Enable age gate</strong><input name="age_gate_enabled" type="checkbox"><span>Require users to confirm they meet the configured minimum age.</span></label>
       <div class="shared-form-actions"><button class="btn btn-primary" type="submit">Save Settings</button><button class="btn" id="reset-size-policy" type="button">Reset Display Size Defaults</button></div>
     </form>
   </section>
@@ -94,9 +94,8 @@ $roleColors = role_color_settings($pdo);
       </div>
       <div class="shared-form-actions"><button class="btn btn-primary" type="submit">Save Colors</button><button class="btn" id="reset-role-colors" type="button">Reset Defaults</button></div>
     </form>
-    <h2>Diagnostic Screenshots</h2>
     <form id="diagnostic-screenshot-form" class="shared-form compact-form">
-      <label class="check-label"><input name="diagnostic_screenshots_enabled" type="checkbox"> Enable locally censored schematic screenshots</label>
+      <label class="settings-checkbox-row"><strong>Diagnostic Screenshots</strong><input name="diagnostic_screenshots_enabled" type="checkbox"><span>Enable locally censored schematic screenshots</span></label>
       <label>Unresolved retention days <input name="diagnostic_screenshot_retention_days" type="number" min="0" max="365" value="0"></label>
       <p class="minor">Capture remains disabled until a retention period is selected. Uncensored page pixels are never created.</p>
       <button class="btn btn-primary" type="submit">Save Screenshot Policy</button>

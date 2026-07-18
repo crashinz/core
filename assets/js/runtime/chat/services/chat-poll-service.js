@@ -101,6 +101,12 @@ export class ChatPollService {
      */
     #polling = false;
 
+    /** Consecutive failed poll requests. */
+    #failureCount = 0;
+
+    /** Delay selected for the next poll request. */
+    #nextPollDelay = 25;
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -136,6 +142,10 @@ export class ChatPollService {
         this.stop();
 
         this.#context = null;
+
+        this.#failureCount = 0;
+
+        this.#nextPollDelay = 25;
 
     }
 
@@ -263,6 +273,10 @@ export class ChatPollService {
                     query
                 );
 
+            this.#failureCount = 0;
+
+            this.#nextPollDelay = context.pollInterval ?? 25;
+
             (data.events || []).forEach(
                 event => this.#routeRoomEvent(event)
             );
@@ -273,8 +287,23 @@ export class ChatPollService {
 
         } catch (error) {
 
+            this.#failureCount += 1;
+
+            const baseDelay = Math.max(250, Number(context.failureBackoffBase ?? 1000));
+
+            const maximumDelay = Math.max(baseDelay, Number(context.failureBackoffMax ?? 30000));
+
+            this.#nextPollDelay = Math.min(
+                maximumDelay,
+                baseDelay * (2 ** Math.min(this.#failureCount - 1, 5))
+            );
+
             context.warnError?.(
-                error
+                error,
+                Object.freeze({
+                    failureCount: this.#failureCount,
+                    retryDelay: this.#nextPollDelay,
+                })
             );
 
         } finally {
@@ -324,7 +353,13 @@ export class ChatPollService {
                 this.#lastEventId,
 
             lastCommunityEventId:
-                this.#lastCommunityEventId
+                this.#lastCommunityEventId,
+
+            failureCount:
+                this.#failureCount,
+
+            nextPollDelay:
+                this.#nextPollDelay
 
         });
 
@@ -390,7 +425,7 @@ export class ChatPollService {
         this.#pollTimer =
             setTimeout(
                 () => this.poll(),
-                this.#requireContext().pollInterval ?? 25
+                this.#nextPollDelay
             );
 
     }

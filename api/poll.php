@@ -1,4 +1,28 @@
 <?php
+declare(strict_types=1);
+
+ob_start();
+$pollRequestId = bin2hex(random_bytes(8));
+set_exception_handler(static function (Throwable $error) use ($pollRequestId): never {
+    while (ob_get_level() > 0) ob_end_clean();
+    error_log(sprintf(
+        'room-poll failure [%s] %s: %s',
+        $pollRequestId,
+        get_class($error),
+        $error->getMessage()
+    ));
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    echo json_encode([
+        'error' => 'Room events are temporarily unavailable.',
+        'code' => 'ROOM_POLL_FAILED',
+        'request_id' => $pollRequestId,
+        'recoverable' => true,
+    ], JSON_UNESCAPED_SLASHES);
+    exit;
+});
+
 require_once __DIR__ . '/../includes/base.php';
 header('Cache-Control: no-cache, no-store, must-revalidate');
 $pdo = db();
@@ -120,42 +144,31 @@ for ($i = 0; $i < $pollAttempts; $i++) {
     }
     $stmt->execute([$sessionId, $last]);
     $rows = $stmt->fetchAll();
-    $communityRows = avatar_relationship_transaction($pdo, function() use (
-        $pdo,
-        $communityStmt,
+    $linkAccess = $linkConversationId !== ''
+        ? avatar_relationship_chat_access($pdo, $sessionId, (int)$me['id'], $linkConversationId)
+        : null;
+    $communityStmt->execute([
         $lastCommunity,
         $sessionId,
-        $me,
-        $linkConversationId,
+        $sessionId,
+        (int)$me['id'],
+        (int)$me['id'],
+        (int)$me['user_id'],
+        (int)$me['user_id'],
         $dmLeft,
-        $dmRight
-    ): array {
-        $linkAccess = $linkConversationId !== ''
-            ? avatar_relationship_chat_access($pdo, $sessionId, (int)$me['id'], $linkConversationId, 0, true)
-            : null;
-        $communityStmt->execute([
-            $lastCommunity,
-            $sessionId,
-            $sessionId,
-            (int)$me['id'],
-            (int)$me['id'],
-            (int)$me['user_id'],
-            (int)$me['user_id'],
-            $dmLeft,
-            $dmRight,
-            $sessionId,
-            $sessionId,
-            (int)$me['id'],
-            (int)$me['id'],
-        ]);
-        return array_values(array_filter($communityStmt->fetchAll(), function(array $event) use ($linkAccess): bool {
-            if ((string)($event['scope'] ?? '') !== 'link') return true;
-            if (!$linkAccess || (string)($event['link_key'] ?? '') !== (string)$linkAccess['conversation_id']) return false;
-            $payload = json_decode((string)$event['payload'], true) ?: [];
-            $messageId = (int)($payload['message_id'] ?? $payload['id'] ?? 0);
-            return $messageId <= 0 || $messageId > (int)$linkAccess['visible_after_message_id'];
-        }));
-    });
+        $dmRight,
+        $sessionId,
+        $sessionId,
+        (int)$me['id'],
+        (int)$me['id'],
+    ]);
+    $communityRows = array_values(array_filter($communityStmt->fetchAll(), function(array $event) use ($linkAccess): bool {
+        if ((string)($event['scope'] ?? '') !== 'link') return true;
+        if (!$linkAccess || (string)($event['link_key'] ?? '') !== (string)$linkAccess['conversation_id']) return false;
+        $payload = json_decode((string)$event['payload'], true) ?: [];
+        $messageId = (int)($payload['message_id'] ?? $payload['id'] ?? 0);
+        return $messageId <= 0 || $messageId > (int)$linkAccess['visible_after_message_id'];
+    }));
     if ($rows || $communityRows) {
         json_out([
         'events' => array_map($mapRoomEvent, $rows),

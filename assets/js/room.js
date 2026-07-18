@@ -151,6 +151,7 @@ const avatarSizeModal = document.getElementById('avatar-size-modal');
 const avatarSizeForm = document.getElementById('avatar-size-form');
 const avatarSizeTitle = document.getElementById('avatar-size-title');
 const avatarSizeCap = document.getElementById('avatar-size-cap');
+const avatarSizeCurrent = document.getElementById('avatar-size-current');
 const avatarSizeAvatarFields = document.getElementById('avatar-size-avatar-fields');
 const avatarSizeWebcamFields = document.getElementById('avatar-size-webcam-fields');
 const avatarSizeEdge = document.getElementById('avatar-size-edge');
@@ -182,6 +183,8 @@ let textMenuMode = 'copy';
 let lastLatencyMs = null;
 let ctxMenuParticipantId = null;
 let avatarOrientationPending = false;
+let avatarOrientationIntentGeneration = 0;
+let avatarOrientationQueuedIntent = null;
 let avatarSizePending = false;
 let avatarSizeModalMode = 'avatar';
 let avatarSizeResetRequested = false;
@@ -296,7 +299,7 @@ async function initializeAvatarRuntime() {
         message: error.message,
         ...error.details,
       });
-      runtimeIssueCaptureService?.captureRequestFailure(error).catch(() => {});
+      runtimeIssueCaptureService?.captureRequestFailure(error)?.catch(() => {});
     },
   });
 
@@ -847,13 +850,21 @@ function configureRoomEventRouter() {
         || nextSizeProjection.webcam_display_width_px !== person.webcam_display_width_px
         || nextSizeProjection.webcam_display_height_px !== person.webcam_display_height_px
       );
+      const currentOrientationVersion = Math.max(1, Number(person.avatar_orientation_version || 1));
+      const incomingOrientationVersion = Math.max(1, Number(
+        payload.avatar_orientation_version || currentOrientationVersion
+      ));
+      const staleOrientationProjection = incomingOrientationVersion < currentOrientationVersion;
 
       participants.update(payload.participant_id, {
         avatar_path: nextAvatarPath,
         avatar_url: nextAvatarUrl,
-        avatar_orientation: payload.avatar_orientation === undefined
+        avatar_orientation: staleOrientationProjection || payload.avatar_orientation === undefined
           ? normalizeAvatarOrientation(person.avatar_orientation)
           : normalizeAvatarOrientation(payload.avatar_orientation),
+        avatar_orientation_version: staleOrientationProjection
+          ? currentOrientationVersion
+          : incomingOrientationVersion,
         avatar_event_id: eventId || Number(person.avatar_event_id || 0),
         avatar_version: avatarSourceChanged ? Date.now() : person.avatar_version,
         webcam_path: payload.webcam_path || null,
@@ -879,6 +890,8 @@ function configureRoomEventRouter() {
         participantId: Number(person.id),
         eventId: eventId || null,
         orientation: normalizeAvatarOrientation(person.avatar_orientation),
+        orientationVersion: Number(person.avatar_orientation_version || 1),
+        staleProjection: staleOrientationProjection,
       });
     },
     onAvatarSizePolicy(payload, event = {}) {
@@ -1277,6 +1290,8 @@ function configureChatPoll() {
     getConfig: () => cfg,
     shouldStop: () => roomExitInProgress,
     pollInterval: 25,
+    failureBackoffBase: 1000,
+    failureBackoffMax: 30000,
     fetchPoll(query) {
       return runtimeRequestClient.getJson('/api/poll.php?' + query, {
         operation: 'poll-room-events',
@@ -1289,7 +1304,13 @@ function configureChatPoll() {
     handleCommunityEvent(event) {
       roomRuntime?.events?.routeCommunityEvent(event);
     },
-    warnError(error) {
+    warnError(error, retry = {}) {
+      recordRuntimeDiagnostic('requests', 'room-poll-retry-scheduled', {
+        code: error?.code || null,
+        status: error?.details?.status || null,
+        failureCount: Number(retry.failureCount || 0),
+        retryDelay: Number(retry.retryDelay || 0),
+      });
       warnRuntimeRequest(error);
     },
   });
@@ -2799,7 +2820,7 @@ async function applyAuraToLayer(layer, key) {
 }
 
 function applyParticipantAura(person) {
-  avatarRuntime?.aura?.applyParticipantAura(person).catch(console.warn);
+  avatarRuntime?.aura?.applyParticipantAura(person)?.catch(console.warn);
 }
 
 function renderRoomEffectsModal() {
@@ -2996,15 +3017,20 @@ function attachSmartBackgroundVideo(video) {
   const source = video.querySelector('source')?.getAttribute('src') || video.getAttribute('src') || '';
   const src = source ? mediaUrl(source) : '';
   const state = { start: 0, end: null, ready: false, seeking: false, raf: 0, destroyed: false };
+  const playBackground = () => {
+    const playResult = video.play?.();
+    if (!playResult || typeof playResult.catch !== 'function') return;
+    playResult.catch(error => {
+      if (error?.name === 'AbortError' && (state.destroyed || !video.isConnected)) return;
+      console.error('Room background video playback failed.', error);
+    });
+  };
 
   const loopToStart = () => {
     if (!state.ready || state.seeking || state.destroyed || !video.isConnected) return;
     state.seeking = true;
     video.currentTime = state.start;
-    video.play?.().catch(error => {
-      if (error?.name === 'AbortError' && (state.destroyed || !video.isConnected)) return;
-      console.error('Room background video playback failed.', error);
-    });
+    playBackground();
     window.setTimeout(() => { state.seeking = false; }, 90);
   };
 
@@ -3032,10 +3058,7 @@ function attachSmartBackgroundVideo(video) {
       state.end = Number(edges.end || 0) || null;
       state.ready = true;
       if (state.start > 0 && video.currentTime < state.start) video.currentTime = state.start;
-      video.play?.().catch(error => {
-        if (error?.name === 'AbortError' && (state.destroyed || !video.isConnected)) return;
-        console.error('Room background video playback failed.', error);
-      });
+      playBackground();
     }).catch(() => {
       state.ready = true;
     });
@@ -3518,12 +3541,9 @@ document.getElementById('rooms-link')?.addEventListener('click', async e => {
   const href = e.currentTarget.dataset.href || e.currentTarget.href || appUrl('/lobby.php');
   await leaveRoomWithLocalExit(href);
 });
-for (const id of ['admin-link', 'account-link']) {
-  document.getElementById(id)?.addEventListener('click', async e => {
-    e.preventDefault();
-    await leaveRoomWithLocalExit(e.currentTarget.dataset.href);
-  });
-}
+document.querySelectorAll('[data-room-navigation="utility"]').forEach(link => {
+  link.addEventListener('click', closeRoomMenu);
+});
 document.getElementById('logout-link')?.addEventListener('click', async e => {
   e.preventDefault();
   await leaveRoomWithLocalExit(null, () => {
@@ -3584,7 +3604,6 @@ function syncAvatarOrientationControls(participant) {
   const orientation = normalizeAvatarOrientation(participant?.avatar_orientation);
   if (ctxOrientation) {
     ctxOrientation.textContent = `Orientation: ${AVATAR_ORIENTATION_LABELS[orientation]} >`;
-    ctxOrientation.disabled = avatarOrientationPending;
     ctxOrientation.setAttribute('aria-expanded', ctxOrientationWrap?.classList.contains('open') ? 'true' : 'false');
   }
   ctxOrientationSubmenu?.querySelectorAll('[data-avatar-orientation]').forEach(button => {
@@ -3592,64 +3611,117 @@ function syncAvatarOrientationControls(participant) {
     const selected = value === orientation;
     button.textContent = `${button.dataset.label || AVATAR_ORIENTATION_LABELS[value]}${selected ? ' (Current)' : ''}`;
     button.setAttribute('aria-checked', selected ? 'true' : 'false');
-    button.disabled = avatarOrientationPending;
   });
 }
 
-async function setAvatarOrientation(requestedOrientation) {
+function applyAvatarOrientationProjection(participant, orientation, version, reason) {
+  const currentVersion = Math.max(1, Number(participant?.avatar_orientation_version || 1));
+  const nextVersion = Math.max(1, Number(version || currentVersion));
+  if (!participant || nextVersion < currentVersion) return false;
+  participants.update(participant.id, {
+    avatar_orientation: normalizeAvatarOrientation(orientation),
+    avatar_orientation_version: nextVersion,
+  });
+  renderParticipant(participant);
+  recordRuntimeDiagnostic('avatarOrientation', reason, {
+    participantId: Number(participant.id),
+    orientation: normalizeAvatarOrientation(participant.avatar_orientation),
+    orientationVersion: Number(participant.avatar_orientation_version || 1),
+  });
+  return true;
+}
+
+async function processAvatarOrientationIntents() {
   if (avatarOrientationPending) return;
+  avatarOrientationPending = true;
+  try {
+    while (avatarOrientationQueuedIntent) {
+      const intent = avatarOrientationQueuedIntent;
+      avatarOrientationQueuedIntent = null;
+      let retryCount = 0;
+      while (true) {
+        const me = participants.get(cfg.myParticipantId);
+        if (!me || intent.generation < avatarOrientationIntentGeneration && avatarOrientationQueuedIntent) break;
+        const expectedOrientation = normalizeAvatarOrientation(me.avatar_orientation);
+        const expectedVersion = Math.max(1, Number(me.avatar_orientation_version || 1));
+        const formData = new FormData();
+        formData.append('action', 'set_orientation');
+        formData.append('session_id', cfg.sessionId);
+        formData.append('join_token', cfg.myJoinToken);
+        formData.append('expected_orientation', expectedOrientation);
+        formData.append('expected_orientation_version', String(expectedVersion));
+        formData.append('avatar_orientation', intent.orientation);
+        try {
+          const response = await runtimeRequestClient.postForm('/api/avatar.php', formData, {
+            operation: 'set-avatar-orientation',
+            endpointCategory: 'avatar',
+          });
+          applyAvatarOrientationProjection(
+            me,
+            response.avatar_orientation,
+            response.avatar_orientation_version,
+            'avatar-orientation-updated'
+          );
+          if (avatarOrientationQueuedIntent) {
+            participants.update(me.id, { avatar_orientation: avatarOrientationQueuedIntent.orientation });
+            renderParticipant(me);
+          }
+          break;
+        } catch (error) {
+          const payload = error?.responsePayload;
+          const stale = Number(error?.details?.status || 0) === 409
+            && payload?.code === 'AVATAR_ORIENTATION_STALE';
+          if (stale) {
+            applyAvatarOrientationProjection(
+              me,
+              payload.current_orientation,
+              payload.current_orientation_version,
+              'avatar-orientation-conflict-reconciled'
+            );
+            const superseded = Boolean(avatarOrientationQueuedIntent)
+              || intent.generation < avatarOrientationIntentGeneration;
+            if (!superseded && retryCount < 1) {
+              retryCount += 1;
+              continue;
+            }
+            if (superseded) break;
+          }
+          recordRuntimeDiagnostic('avatarOrientation', 'avatar-orientation-update-failed', {
+            participantId: Number(me.id),
+            attemptedOrientation: intent.orientation,
+            code: error?.code || null,
+            status: error?.details?.status || null,
+            retryCount,
+          });
+          showWarning(error?.message || 'Could not update avatar orientation.');
+          break;
+        }
+      }
+    }
+  } finally {
+    avatarOrientationPending = false;
+    syncAvatarOrientationControls(participants.get(cfg.myParticipantId));
+  }
+}
+
+function setAvatarOrientation(requestedOrientation) {
   const me = participants.get(cfg.myParticipantId);
   if (!me) return;
-  const expectedOrientation = normalizeAvatarOrientation(me.avatar_orientation);
   const nextOrientation = normalizeAvatarOrientation(requestedOrientation);
   if (nextOrientation !== requestedOrientation) {
     showWarning('That avatar orientation is not available.');
     return;
   }
-  if (nextOrientation === expectedOrientation) {
-    closeContextMenu();
-    return;
-  }
-
-  avatarOrientationPending = true;
+  avatarOrientationIntentGeneration += 1;
+  avatarOrientationQueuedIntent = {
+    generation: avatarOrientationIntentGeneration,
+    orientation: nextOrientation,
+  };
   participants.update(me.id, { avatar_orientation: nextOrientation });
   renderParticipant(me);
   syncAvatarOrientationControls(me);
-  const formData = new FormData();
-  formData.append('action', 'set_orientation');
-  formData.append('session_id', cfg.sessionId);
-  formData.append('join_token', cfg.myJoinToken);
-  formData.append('expected_orientation', expectedOrientation);
-  formData.append('avatar_orientation', nextOrientation);
-  try {
-    const response = await runtimeRequestClient.postForm('/api/avatar.php', formData, {
-      operation: 'set-avatar-orientation',
-      endpointCategory: 'avatar',
-    });
-    const acceptedOrientation = normalizeAvatarOrientation(response.avatar_orientation);
-    participants.update(me.id, { avatar_orientation: acceptedOrientation });
-    renderParticipant(me);
-    recordRuntimeDiagnostic('avatarOrientation', 'avatar-orientation-updated', {
-      participantId: Number(me.id),
-      previousOrientation: expectedOrientation,
-      orientation: acceptedOrientation,
-      idempotent: Boolean(response.idempotent),
-    });
-    closeContextMenu();
-  } catch (error) {
-    participants.update(me.id, { avatar_orientation: expectedOrientation });
-    renderParticipant(me);
-    recordRuntimeDiagnostic('avatarOrientation', 'avatar-orientation-update-failed', {
-      participantId: Number(me.id),
-      attemptedOrientation: nextOrientation,
-      code: error?.code || null,
-      status: error?.details?.status || null,
-    });
-    showWarning(error?.message || 'Could not update avatar orientation.');
-  } finally {
-    avatarOrientationPending = false;
-    syncAvatarOrientationControls(participants.get(cfg.myParticipantId));
-  }
+  closeContextMenu();
+  void processAvatarOrientationIntents();
 }
 
 function participantSizeFields(preferences = {}) {
@@ -3725,13 +3797,21 @@ function openAvatarSizeModal(mode, options = {}) {
     : me.webcam_display_width_px == null && me.webcam_display_height_px == null;
   avatarSizeAvatarFields.hidden = avatarSizeModalMode !== 'avatar';
   avatarSizeWebcamFields.hidden = avatarSizeModalMode !== 'webcam';
+  avatarSizeAvatarFields.querySelectorAll('input, select, button').forEach(control => {
+    control.disabled = avatarSizeModalMode !== 'avatar';
+  });
+  avatarSizeWebcamFields.querySelectorAll('input, select, button').forEach(control => {
+    control.disabled = avatarSizeModalMode !== 'webcam';
+  });
   avatarSizeTitle.textContent = avatarSizeModalMode === 'avatar'
-    ? 'Avatar Display Size'
+    ? 'Maximum Avatar Display Size'
     : (avatarSizeStartWebcam ? 'Webcam Display Size Before Starting' : 'Webcam Display Size');
 
   if (avatarSizeModalMode === 'avatar') {
     const cap = Number(policy.avatarDisplayMaxPx || 200);
-    avatarSizeCap.textContent = `Community maximum: ${cap}px`;
+    const dimensions = avatarRenderedDimensions(me);
+    avatarSizeCap.textContent = `Server maximum: ${cap} px`;
+    avatarSizeCurrent.textContent = `Current displayed size: ${Math.round(dimensions.width)} × ${Math.round(dimensions.height)} px`;
     avatarSizeEdge.max = String(cap);
     avatarSizeEdge.value = String(avatarRuntime.displayPolicy.effectiveAvatarMaxEdge(me));
   } else {
@@ -3739,6 +3819,7 @@ function openAvatarSizeModal(mode, options = {}) {
     const maxHeight = Number(policy.webcamDisplayMaxHeightPx || 200);
     const box = avatarRuntime.displayPolicy.effectiveWebcamBox(me);
     avatarSizeCap.textContent = `Community maximum: ${maxWidth} x ${maxHeight}px`;
+    avatarSizeCurrent.textContent = '';
     avatarSizeWebcamWidth.max = String(maxWidth);
     avatarSizeWebcamHeight.max = String(maxHeight);
     avatarSizeWebcamWidth.value = String(box.width);
@@ -3995,6 +4076,12 @@ function syncChatOptions() {
   document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
     input.checked = input.value === mode;
   });
+  const description = document.getElementById('chat-display-description');
+  if (description) {
+    description.textContent = mode === 'compact'
+      ? 'Hides avatars and places the timestamp, username, and message inline.'
+      : 'Shows avatars and the full message layout.';
+  }
 }
 
 function openChatOptions() {
@@ -4019,6 +4106,13 @@ document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
   input.addEventListener('change', event => {
     if (!event.currentTarget.checked) return;
     chatMessageRenderer().setDisplayMode(event.currentTarget.value);
+    syncChatOptions();
+  });
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    event.currentTarget.checked = true;
+    event.currentTarget.dispatchEvent(new Event('change', { bubbles: true }));
   });
 });
 
@@ -4873,8 +4967,7 @@ ctxOrientation?.addEventListener('click', event => {
 ctxOrientationSubmenu?.addEventListener('click', event => {
   const button = event.target.closest('[data-avatar-orientation]');
   if (!button) return;
-  setAvatarOrientation(String(button.dataset.avatarOrientation || ''))
-    .catch(error => showWarning(error?.message || 'Could not update avatar orientation.'));
+  setAvatarOrientation(String(button.dataset.avatarOrientation || ''));
 });
 
 ctxAuras?.addEventListener('click', () => {
@@ -6008,7 +6101,7 @@ bindModalCloseButtons(['voice-device-close', 'voice-device-cancel'], closeVoiceD
 
 voiceDeviceRefresh?.addEventListener('click', async () => {
   setVoiceDeviceStatus('Requesting microphone permission and refreshing devices...', 'working');
-  await voiceRuntime?.media?.requestDevicePermissionAndPopulate().catch(err => {
+  await voiceRuntime?.media?.requestDevicePermissionAndPopulate()?.catch(err => {
     console.warn(err);
     setVoiceDeviceStatus('Microphone permission was not granted. Default devices can still be used.', 'error');
   });

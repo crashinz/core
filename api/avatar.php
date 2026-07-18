@@ -10,8 +10,9 @@ if ($action === 'set_orientation') {
     $result = avatar_orientation_update(
         $pdo,
         (int)$p['user_id'],
-        $_POST['expected_orientation'] ?? null,
-        $_POST['avatar_orientation'] ?? null
+        $_POST['expected_orientation_version'] ?? null,
+        $_POST['avatar_orientation'] ?? null,
+        $_POST['expected_orientation'] ?? null
     );
     if (empty($result['ok'])) {
         $status = (int)($result['http_status'] ?? 400);
@@ -24,6 +25,7 @@ if ($action === 'set_orientation') {
         'avatar_path' => (string)$result['avatar_path'],
         'avatar_url' => resolve_avatar((string)$result['avatar_path']),
         'avatar_orientation' => $orientation,
+        'avatar_orientation_version' => (int)$result['avatar_orientation_version'],
         'webcam_path' => $p['webcam_path'] ?? null,
         'webcam_enabled' => !empty($p['webcam_enabled']),
     ], avatar_size_participant_event_fields($pdo, $p)));
@@ -31,6 +33,7 @@ if ($action === 'set_orientation') {
         'ok' => true,
         'idempotent' => !empty($result['idempotent']),
         'avatar_orientation' => $orientation,
+        'avatar_orientation_version' => (int)$result['avatar_orientation_version'],
     ]);
 }
 
@@ -58,6 +61,7 @@ if ($action === 'set_display_preferences') {
         'avatar_path' => (string)$updatedParticipant['avatar_path'],
         'avatar_url' => resolve_avatar((string)$updatedParticipant['avatar_path']),
         'avatar_orientation' => avatar_orientation_normalize($updatedParticipant['avatar_orientation'] ?? null),
+        'avatar_orientation_version' => max(1, (int)($updatedParticipant['avatar_orientation_version'] ?? 1)),
         'webcam_path' => $updatedParticipant['webcam_path'] ?? null,
         'webcam_enabled' => !empty($updatedParticipant['webcam_enabled']),
     ], avatar_size_participant_event_fields($pdo, $updatedParticipant)));
@@ -135,6 +139,7 @@ emit_event($pdo, $sessionId, 'avatar', array_merge([
     'avatar_path' => $public,
     'avatar_url' => $public,
     'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
+    'avatar_orientation_version' => max(1, (int)($updatedParticipant['avatar_orientation_version'] ?? 1)),
     'webcam_path' => null,
     'webcam_enabled' => false,
 ], avatar_size_participant_event_fields($pdo, $updatedParticipant)));
@@ -144,5 +149,6 @@ json_out([
     'avatar_path' => $public,
     'avatar_url' => $public,
     'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
+    'avatar_orientation_version' => max(1, (int)($updatedParticipant['avatar_orientation_version'] ?? 1)),
     'preferences' => avatar_size_preferences_public($pdo, $updatedParticipant),
 ]);
