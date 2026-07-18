@@ -1,28 +1,8 @@
 <?php
 declare(strict_types=1);
 
-ob_start();
-$pollRequestId = bin2hex(random_bytes(8));
-set_exception_handler(static function (Throwable $error) use ($pollRequestId): never {
-    while (ob_get_level() > 0) ob_end_clean();
-    error_log(sprintf(
-        'room-poll failure [%s] %s: %s',
-        $pollRequestId,
-        get_class($error),
-        $error->getMessage()
-    ));
-    http_response_code(500);
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-cache, no-store, must-revalidate');
-    echo json_encode([
-        'error' => 'Room events are temporarily unavailable.',
-        'code' => 'ROOM_POLL_FAILED',
-        'request_id' => $pollRequestId,
-        'recoverable' => true,
-    ], JSON_UNESCAPED_SLASHES);
-    exit;
-});
-
+require_once __DIR__ . '/../includes/api_exception_handler.php';
+api_install_exception_handler('room-poll', 'ROOM_POLL_FAILED', 'Room events are temporarily unavailable.');
 require_once __DIR__ . '/../includes/base.php';
 header('Cache-Control: no-cache, no-store, must-revalidate');
 $pdo = db();
@@ -51,8 +31,6 @@ $sessionId = resolve_session_id($pdo, $sessionKey);
 $last = (int)($_GET['last_event_id'] ?? 0);
 $lastCommunity = (int)($_GET['last_community_event_id'] ?? 0);
 $me = auth_participant($pdo, $sessionId, $joinToken);
-cleanup_stale_participants($pdo, $sessionId);
-cleanup_room_effects($pdo, $sessionId);
 $dmLeft = 'dm:' . (int)$me['user_id'] . ':%';
 $dmRight = 'dm:%:' . (int)$me['user_id'];
 $initialLinkAccess = avatar_relationship_chat_access($pdo, $sessionId, (int)$me['id']);

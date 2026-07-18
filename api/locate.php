@@ -2,7 +2,6 @@
 require_once __DIR__ . '/../includes/base.php';
 $user = require_user();
 $pdo = db();
-cleanup_stale_participants($pdo);
 $q = trim((string)($_GET['q'] ?? ''));
 $like = '%' . $q . '%';
 $stmt = $pdo->prepare(

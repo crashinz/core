@@ -103,19 +103,11 @@ if ($action === 'unlink') {
         (int)$p['id'],
         'legacy-unlink'
     );
-    $pdo->prepare("UPDATE participants SET linked_to_participant_id = NULL, link_mode = 'normal' WHERE id = ? OR linked_to_participant_id = ?")
-        ->execute([(int)$p['id'], (int)$p['id']]);
-    if (!empty($relationshipDeparture['idempotent']) && empty($relationshipDeparture['relationship'])) {
-        emit_event($pdo, $sessionId, 'link', [
-            'participant_id' => (int)$p['id'],
-            'linked_to' => null,
-            'link_mode' => 'normal',
-            'relationship_removed' => true,
-            'relationship_id' => null,
-            'relationship_version' => null,
-            'relationship_status' => null,
-            'relationship' => null,
-        ]);
+    if (empty($relationshipDeparture['ok'])) {
+        json_out(
+            ['error' => 'Relationship could not be left.'] + $relationshipDeparture,
+            (int)($relationshipDeparture['http_status'] ?? 409)
+        );
     }
     json_out(['ok' => true, 'relationship_departure' => $relationshipDeparture]);
 }

@@ -13,7 +13,6 @@ if ($communityEjection) {
 }
 
 function lobby_room_rows(PDO $pdo, array $user): array {
-    cleanup_stale_participants($pdo);
     $onlineCutoff = stale_cutoff($pdo);
     $stmt = $pdo->prepare(
         'SELECT r.*, u.display_name AS owner_name,

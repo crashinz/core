@@ -30,10 +30,10 @@ if ($activeEjection) {
     redirect_to('/lobby.php');
 }
 $session = active_session_for_room($pdo, $roomId);
-cleanup_stale_participants($pdo, (int)$session['id']);
 $participant = participant_for_user($pdo, (int)$session['id'], $user);
-$pdo->prepare('UPDATE users SET current_room_id = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([$roomId, (int)$user['id']]);
-$pdo->prepare('UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP, webcam_path = NULL, webcam_enabled = 0 WHERE id = ?')->execute([(int)$participant['id']]);
+$pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = 0 WHERE id = ?')->execute([(int)$participant['id']]);
+touch_participant_presence($pdo, $participant, 1);
+runtime_maintenance_for_session($pdo, (int)$session['id']);
 $participant['webcam_path'] = null;
 $participant['webcam_enabled'] = 0;
 

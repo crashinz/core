@@ -1,4 +1,8 @@
 <?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../includes/api_exception_handler.php';
+api_install_exception_handler('media-signal', 'MEDIA_SIGNAL_FAILED', 'Media signaling is temporarily unavailable.');
 require_once __DIR__ . '/../includes/base.php';
 require_once __DIR__ . '/../includes/media_signal_contract.php';
 
@@ -39,69 +43,6 @@ function media_voice_participants(PDO $pdo, int $sessionId): array {
     ], $stmt->fetchAll());
 }
 
-function media_client_epoch(mixed $value): string {
-    $epoch = trim((string)$value);
-    if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{7,95}$/', $epoch)) {
-        json_out(['error' => 'Invalid media client epoch'], 400);
-    }
-    return $epoch;
-}
-
-function media_signal_now(): string {
-    return gmdate('Y-m-d H:i:s');
-}
-
-function media_signal_expiry(): string {
-    return gmdate('Y-m-d H:i:s', time() + 600);
-}
-
-function media_signal_register_client(PDO $pdo, int $sessionId, int $participantId, string $clientEpoch): array {
-    $now = media_signal_now();
-    $stmt = $pdo->prepare('SELECT client_epoch, started_at FROM media_signal_clients WHERE participant_id = ? AND session_id = ? LIMIT 1');
-    $stmt->execute([$participantId, $sessionId]);
-    $current = $stmt->fetch();
-    $startedAt = $current && hash_equals((string)$current['client_epoch'], $clientEpoch)
-        ? (string)$current['started_at']
-        : $now;
-
-    if ($current) {
-        $pdo->prepare('UPDATE media_signal_clients SET client_epoch = ?, started_at = ?, updated_at = ? WHERE participant_id = ? AND session_id = ?')
-            ->execute([$clientEpoch, $startedAt, $now, $participantId, $sessionId]);
-    } else {
-        try {
-            $pdo->prepare('INSERT INTO media_signal_clients (participant_id, session_id, client_epoch, started_at, updated_at) VALUES (?,?,?,?,?)')
-                ->execute([$participantId, $sessionId, $clientEpoch, $startedAt, $now]);
-        } catch (PDOException $e) {
-            if ((string)$e->getCode() !== '23000') throw $e;
-            $retry = $pdo->prepare('UPDATE media_signal_clients SET client_epoch = ?, started_at = ?, updated_at = ? WHERE participant_id = ? AND session_id = ?');
-            $retry->execute([$clientEpoch, $startedAt, $now, $participantId, $sessionId]);
-        }
-    }
-
-    $pdo->prepare('DELETE FROM media_signals WHERE expires_at IS NOT NULL AND expires_at < ?')->execute([$now]);
-    $pdo->prepare('DELETE FROM media_signal_clients WHERE updated_at < ?')->execute([gmdate('Y-m-d H:i:s', time() - 86400)]);
-
-    return ['epoch' => $clientEpoch, 'started_at' => $startedAt];
-}
-
-function media_signal_recipient_epoch(PDO $pdo, int $sessionId, int $participantId): ?string {
-    if ($participantId <= 0) return null;
-    $stmt = $pdo->prepare('SELECT client_epoch FROM media_signal_clients WHERE participant_id = ? AND session_id = ? LIMIT 1');
-    $stmt->execute([$participantId, $sessionId]);
-    $value = $stmt->fetchColumn();
-    return is_string($value) && $value !== '' ? $value : null;
-}
-
-function media_signal_insert(PDO $pdo, int $sessionId, string $media, int $from, int $to, string $type, mixed $data, ?string $senderEpoch = null): array {
-    $recipientEpoch = media_signal_recipient_epoch($pdo, $sessionId, $to);
-    $pdo->prepare('INSERT INTO media_signals (session_id, media, from_participant_id, to_participant_id, sender_epoch, recipient_epoch, type, data, expires_at) VALUES (?,?,?,?,?,?,?,?,?)')
-        ->execute([$sessionId, $media, $from, $to, $senderEpoch, $recipientEpoch, $type, json_encode($data, JSON_UNESCAPED_SLASHES), media_signal_expiry()]);
-    return [
-        'signal_id' => (int)$pdo->lastInsertId(),
-        'recipient_epoch' => $recipientEpoch,
-    ];
-}
-
 function media_from_signal_data(array $body): string {
     $media = (string)($body['media'] ?? '');
     if (in_array($media, ['voice', 'webcam'], true)) return $media;
@@ -117,6 +58,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     media_auth($pdo, $sessionId, $participantId, $_GET['join_token'] ?? '');
     $clientEpoch = media_client_epoch($_GET['client_epoch'] ?? '');
     $client = media_signal_register_client($pdo, $sessionId, $participantId, $clientEpoch);
+    if (!hash_equals((string)$client['epoch'], $clientEpoch)) {
+        json_out([
+            'error' => 'Media client epoch was superseded.',
+            'code' => 'MEDIA_CLIENT_EPOCH_SUPERSEDED',
+            'recoverable' => true,
+            'client_epoch' => (string)$client['epoch'],
+        ], 409);
+    }
     $media = (string)($_GET['media'] ?? 'all');
 
     $delivery = '((to_participant_id = ? AND (recipient_epoch = ? OR (recipient_epoch IS NULL AND created_at >= ?))) OR (to_participant_id = 0 AND created_at >= ?))';
@@ -164,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'signals' => $signals,
         'signal_errors' => $signalErrors,
         'last_signal_id' => $lastSignalId,
-        'client_epoch' => $clientEpoch,
+        'client_epoch' => (string)$client['epoch'],
         'voice_participants' => media_voice_participants($pdo, $sessionId),
     ]);
 }
@@ -179,7 +128,15 @@ $participant = media_auth($pdo, $sessionId, $participantId, $body['join_token'] 
 $clientEpoch = null;
 if (in_array($action, ['join', 'leave', 'status', 'signal'], true)) {
     $clientEpoch = media_client_epoch($body['client_epoch'] ?? '');
-    media_signal_register_client($pdo, $sessionId, (int)$participant['id'], $clientEpoch);
+    $client = media_signal_register_client($pdo, $sessionId, (int)$participant['id'], $clientEpoch);
+    if (!hash_equals((string)$client['epoch'], $clientEpoch)) {
+        json_out([
+            'error' => 'Media client epoch was superseded.',
+            'code' => 'MEDIA_CLIENT_EPOCH_SUPERSEDED',
+            'recoverable' => true,
+            'client_epoch' => (string)$client['epoch'],
+        ], 409);
+    }
 }
 
 if ($action === 'webcam_on' || $action === 'webcam_off') {

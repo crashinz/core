@@ -15,9 +15,9 @@ if (!$room && ctype_digit($roomKey)) {
 if (!$room) json_out(['error' => 'Room not found'], 404);
 
 $session = active_session_for_room($pdo, (int)$room['id']);
-cleanup_stale_participants($pdo, (int)$session['id']);
-cleanup_room_effects($pdo, (int)$session['id']);
 $participant = participant_for_user($pdo, (int)$session['id'], $user);
+touch_participant_presence($pdo, $participant, 1);
+runtime_maintenance_for_session($pdo, (int)$session['id']);
 $canModerateMessages = can_use_host_tools($user, $room);
 $historyLimit = max(1, min(1000, (int)app_setting($pdo, 'room_chat_history_limit', '100')));
 $roomLimitSql = 'LIMIT ' . $historyLimit;
@@ -79,9 +79,6 @@ function community_message_payload(array $m, string $channel, array $reactionsMa
     }
     return $row;
 }
-
-$pdo->prepare('UPDATE users SET current_room_id = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$room['id'], (int)$user['id']]);
-$pdo->prepare('UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$participant['id']]);
 
 $stmt = $pdo->prepare('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ?');
 $stmt->execute([(int)$session['id']]);

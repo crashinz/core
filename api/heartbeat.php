@@ -1,14 +1,22 @@
 <?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../includes/api_exception_handler.php';
+api_install_exception_handler('heartbeat', 'HEARTBEAT_FAILED', 'Room presence is temporarily unavailable.');
 require_once __DIR__ . '/../includes/base.php';
 
 header('Cache-Control: no-cache, no-store, must-revalidate');
 
 $pdo = db();
 $sessionId = resolve_session_id($pdo, $_GET['session_id'] ?? '');
-auth_participant($pdo, $sessionId, $_GET['join_token'] ?? '');
+$participant = auth_participant($pdo, $sessionId, $_GET['join_token'] ?? '');
 session_write_close();
 
 $mode = (string)($_GET['mode'] ?? 'all');
+if ($mode === 'presence' || $mode === 'all') {
+    touch_participant_presence($pdo, $participant);
+    runtime_maintenance_for_session($pdo, $sessionId);
+}
 
 function heartbeat_presence(PDO $pdo, int $sessionId): array {
     $stmt = $pdo->prepare('SELECT id, webcam_path, webcam_enabled, last_seen_at FROM participants WHERE session_id = ?');
