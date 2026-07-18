@@ -3214,7 +3214,7 @@ export class VoiceMediaService {
 
                 }
 
-                await this.#makePeerOffer(participantId, pc);
+                await this.#makePeerOffer(participantId, pc, options);
                 pc.__voicePendingNegotiation =
                     false;
 
@@ -3382,7 +3382,11 @@ export class VoiceMediaService {
 
     }
 
-    async #makePeerOffer(participantId, pc = this.#peers.get(Number(participantId))) {
+    async #makePeerOffer(
+        participantId,
+        pc = this.#peers.get(Number(participantId)),
+        options = {}
+    ) {
 
         if (
             !pc ||
@@ -3546,7 +3550,13 @@ export class VoiceMediaService {
                         pc.__voicePeerInstanceId,
 
                     targetPeerInstanceId:
-                        pc.__voiceRemotePeerInstanceId || null
+                        pc.__voiceRemotePeerInstanceId || null,
+
+                    mediaReason:
+                        options.mediaReason || null,
+
+                    webcamOperation:
+                        options.webcamOperation || null
 
                 }
             );
@@ -4048,7 +4058,13 @@ export class VoiceMediaService {
                                 pc.__voicePeerInstanceId,
 
                             targetPeerInstanceId:
-                                signal.data?.peer_instance_id || null
+                                signal.data?.peer_instance_id || null,
+
+                            mediaReason:
+                                signal.data?.media_reason || null,
+
+                            webcamOperation:
+                                signal.data?.webcam_operation || null
 
                         }
                     );
@@ -5026,6 +5042,35 @@ export class VoiceMediaService {
         const id =
             Number(participantId);
 
+        const remoteVoiceActive =
+            this.#voiceParticipants.some(participant =>
+                Number(participant?.id) === id
+            );
+
+        if (!remoteVoiceActive) {
+
+            this.#pendingRemoteAudioTracks.delete(id);
+            this.#removeAudioElement(
+                id,
+                "remote-audio-reattach-skipped-not-in-voice"
+            );
+
+            this.#recordAudioPathDiagnostic({
+
+                event:
+                    "remote-audio-reattach-skipped-not-in-voice",
+
+                reason,
+
+                remoteParticipantId:
+                    id
+
+            });
+
+            return;
+
+        }
+
         const pc =
             this.#peers.get(id) || null;
 
@@ -5785,7 +5830,9 @@ export class VoiceMediaService {
 
         const signalHasVideo =
             signal.media === "webcam" ||
-            signal.data?.chatspace_media === "video";
+            signal.data?.chatspace_media === "video" ||
+            signal.data?.media_reason === "webcam" ||
+            Boolean(signal.data?.webcam_operation);
 
         const shouldHandleMedia =
             Boolean(
@@ -6437,7 +6484,13 @@ export class VoiceMediaService {
                     metadata.peerInstanceId || null,
 
                 target_peer_instance_id:
-                    metadata.targetPeerInstanceId || null
+                    metadata.targetPeerInstanceId || null,
+
+                media_reason:
+                    metadata.mediaReason || null,
+
+                webcam_operation:
+                    metadata.webcamOperation || null
 
             };
 

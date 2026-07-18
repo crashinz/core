@@ -97,6 +97,7 @@ const voiceTitleEl = document.getElementById('voice-title');
 const voiceListEl = document.getElementById('voice-list');
 const voiceCountLabel = document.getElementById('voice-count-label');
 const ctxMenu = document.getElementById('ctx-menu');
+const ctxInteract = document.getElementById('ctx-interact');
 const textCtxMenu = document.getElementById('text-ctx-menu');
 const msgActionMenu = document.getElementById('msg-action-menu');
 const tabCtxMenu = document.getElementById('tab-ctx-menu');
@@ -436,7 +437,7 @@ function configureAvatarCoordinator() {
         action: 'unlink',
         session_id: cfg.sessionId,
         join_token: cfg.myJoinToken,
-      }).catch(warnRuntimeRequest);
+      });
     },
     persistPosition(participant) {
       return apiPost('/api/users.php', {
@@ -1519,13 +1520,49 @@ function isWebcamAssetUrl(url) {
 
 function addAvatarContextListeners(el) {
   if (!el) return;
+  el.tabIndex = 0;
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-label', 'Avatar actions');
+  let longPressTimer = null;
+  let longPressStart = null;
+  const cancelLongPress = () => {
+    if (longPressTimer) clearTimeout(longPressTimer);
+    longPressTimer = null;
+    longPressStart = null;
+  };
+  const openForElement = (x, y, focusMenu = false) => {
+    const current = participants.get(Number(el.dataset.participantId));
+    if (!current) return;
+    openAvatarContextMenu(x, y, current, { returnFocus: el, focusMenu });
+  };
   el.addEventListener('contextmenu', e => {
     e.preventDefault();
     e.stopPropagation();
-    const current = participants.get(Number(el.dataset.participantId));
-    if (!current) return;
-    openAvatarContextMenu(e.clientX, e.clientY, current);
+    openForElement(e.clientX, e.clientY);
   });
+  el.addEventListener('keydown', e => {
+    if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    openForElement(rect.left + rect.width / 2, rect.top + rect.height / 2, true);
+  });
+  el.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    cancelLongPress();
+    longPressStart = { x: e.clientX, y: e.clientY };
+    longPressTimer = setTimeout(() => {
+      openForElement(e.clientX, e.clientY, true);
+      cancelLongPress();
+    }, 550);
+  });
+  el.addEventListener('pointermove', e => {
+    if (!longPressStart) return;
+    if (Math.hypot(e.clientX - longPressStart.x, e.clientY - longPressStart.y) > 8) {
+      cancelLongPress();
+    }
+  });
+  el.addEventListener('pointerup', cancelLongPress);
+  el.addEventListener('pointercancel', cancelLongPress);
 }
 
 function setAvatarImageSource(img, nextSrc, flip = false) {
@@ -3903,7 +3940,21 @@ async function saveAvatarSizePreferences() {
   }
 }
 
-function openAvatarContextMenu(x, y, participant) {
+let ctxMenuReturnFocus = null;
+
+function relationshipEligibilityLabel(reason) {
+  return ({
+    self: 'Use your personal avatar controls.',
+    blocked: 'Interaction is unavailable while either user is blocked.',
+    'already-related': 'These avatars already share a relationship.',
+    'initiator-relationship': 'Leave your current relationship before starting another.',
+    'target-relationship': 'This user is already in a relationship.',
+    'pending-request': 'A relationship request is already pending.',
+    'target-unavailable': 'This user is not currently available.',
+  })[reason] || 'Interaction is not currently available.';
+}
+
+function openAvatarContextMenu(x, y, participant, options = {}) {
   closeTextContextMenu();
   closeRoomMenu();
   closeMediaPicker();
@@ -3912,6 +3963,10 @@ function openAvatarContextMenu(x, y, participant) {
   const isLinked = avatarRuntime?.relationships?.isLinked(participant) || false;
   const relationship = avatarRuntime?.relationships?.relationshipForParticipant(participant.id) || null;
   const isBlocked = isUserBlocked(participant.user_id);
+  const me = participants.get(Number(cfg.myParticipantId));
+  const interaction = !isOwn && me
+    ? avatarRuntime?.coordinator?.relationshipEligibility(me, participant)
+    : null;
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
   document.getElementById('ctx-avatar-size').style.display = isOwn ? 'block' : 'none';
@@ -3920,6 +3975,11 @@ function openAvatarContextMenu(x, y, participant) {
   ctxToggleWebcam.style.display = isOwn ? 'block' : 'none';
   document.getElementById('ctx-webcam-size').style.display = isOwn && Boolean(webcamIntent || webcamStream) ? 'block' : 'none';
   document.getElementById('ctx-dm').style.display = !isOwn && !isBlocked ? 'block' : 'none';
+  if (ctxInteract) {
+    ctxInteract.style.display = !isOwn ? 'block' : 'none';
+    ctxInteract.disabled = !interaction?.allowed;
+    ctxInteract.title = interaction?.allowed ? 'Link Avatars or Sit in Lap' : relationshipEligibilityLabel(interaction?.reason);
+  }
   document.getElementById('ctx-tools-wrap').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-tools-divider').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-community-eject').style.display = showHostTools && Boolean(cfg.canCommunityEject) ? 'block' : 'none';
@@ -3931,17 +3991,23 @@ function openAvatarContextMenu(x, y, participant) {
   document.getElementById('ctx-unlink').style.display = isLinked && !isBlocked ? 'block' : 'none';
   ctxToggleWebcam.textContent = (webcamIntent || webcamStream) ? 'Disable Webcam' : 'Enable Webcam';
   syncAvatarOrientationControls(participant);
-  ctxMenu.style.left = `${x}px`;
-  ctxMenu.style.top = `${y}px`;
+  ctxMenuReturnFocus = options.returnFocus || null;
   ctxMenu.classList.add('visible');
+  positionFloatingMenu(ctxMenu, x, y);
+  if (options.focusMenu) {
+    ctxMenu.querySelector('button:not([disabled]):not([style*="display: none"])')?.focus();
+  }
 }
 
-function closeContextMenu() {
+function closeContextMenu(options = {}) {
   ctxMenu.classList.remove('visible');
   document.getElementById('ctx-tools-wrap')?.classList.remove('open');
   ctxOrientationWrap?.classList.remove('open');
   ctxOrientation?.setAttribute('aria-expanded', 'false');
   ctxMenuParticipantId = null;
+  const returnFocus = ctxMenuReturnFocus;
+  ctxMenuReturnFocus = null;
+  if (options.restoreFocus && returnFocus?.isConnected) returnFocus.focus();
 }
 
 function openTextContextMenu(x, y, mode) {
@@ -4609,7 +4675,9 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    closeFloatingShells(['game']);
+    const restoreAvatarFocus = ctxMenu.classList.contains('visible');
+    closeFloatingShells(['game', ...(restoreAvatarFocus ? ['context'] : [])]);
+    if (restoreAvatarFocus) closeContextMenu({ restoreFocus: true });
     closeLinkIconModal();
     document.getElementById('host-warn-modal')?.classList.remove('open');
     document.getElementById('host-kick-modal')?.classList.remove('open');
@@ -4810,9 +4878,9 @@ document.getElementById('delete-message-confirm')?.addEventListener('click', asy
   await chatMessageActions().deleteMessage(msg, chatKey);
 });
 
-function unlinkCurrentPartner() {
+async function unlinkCurrentPartner() {
   const partnerId = activeLinkPartnerId() || linkedPartner()?.id;
-  avatarRuntime?.coordinator?.unlinkCurrentParticipant({
+  return avatarRuntime?.coordinator?.unlinkCurrentParticipant({
     participantId: cfg.myParticipantId,
     partnerId,
   });
@@ -4988,6 +5056,15 @@ bindModalCloseButtons(['aura-close', 'aura-cancel'], closeAuraModal);
 document.getElementById('ctx-unlink').addEventListener('click', () => {
   closeContextMenu();
   unlinkCurrentPartner();
+});
+
+ctxInteract?.addEventListener('click', () => {
+  const target = participants.get(Number(ctxMenuParticipantId));
+  const me = participants.get(Number(cfg.myParticipantId));
+  closeContextMenu();
+  if (!me || !target) return;
+  avatarRuntime?.coordinator?.requestLinkChoiceForInteraction(me, target);
+  document.getElementById('link-choice-link')?.focus();
 });
 
 document.getElementById('ctx-manage-relationship')?.addEventListener('click', () => {

@@ -51,12 +51,12 @@ function media_from_signal_data(array $body): string {
     return 'voice';
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $sessionId = resolve_session_id($pdo, $_GET['session_id'] ?? '');
-    $participantId = (int)($_GET['participant_id'] ?? 0);
-    $after = (int)($_GET['after'] ?? 0);
-    media_auth($pdo, $sessionId, $participantId, $_GET['join_token'] ?? '');
-    $clientEpoch = media_client_epoch($_GET['client_epoch'] ?? '');
+function media_signal_poll_payload(PDO $pdo, array $query): array {
+    $sessionId = resolve_session_id($pdo, $query['session_id'] ?? '');
+    $participantId = (int)($query['participant_id'] ?? 0);
+    $after = (int)($query['after'] ?? 0);
+    media_auth($pdo, $sessionId, $participantId, $query['join_token'] ?? '');
+    $clientEpoch = media_client_epoch($query['client_epoch'] ?? '');
     $client = media_signal_register_client($pdo, $sessionId, $participantId, $clientEpoch);
     if (!hash_equals((string)$client['epoch'], $clientEpoch)) {
         json_out([
@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             'client_epoch' => (string)$client['epoch'],
         ], 409);
     }
-    $media = (string)($_GET['media'] ?? 'all');
+    $media = (string)($query['media'] ?? 'all');
 
     $delivery = '((to_participant_id = ? AND (recipient_epoch = ? OR (recipient_epoch IS NULL AND created_at >= ?))) OR (to_participant_id = 0 AND created_at >= ?))';
     $deliveryArgs = [$participantId, $clientEpoch, $client['started_at'], $client['started_at']];
@@ -109,13 +109,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         ];
     }
 
-    json_out([
+    return [
         'signals' => $signals,
         'signal_errors' => $signalErrors,
         'last_signal_id' => $lastSignalId,
         'client_epoch' => (string)$client['epoch'],
         'voice_participants' => media_voice_participants($pdo, $sessionId),
-    ]);
+    ];
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $payload = db_with_sqlite_lock_retry(
+        $pdo,
+        static fn(): array => media_signal_poll_payload($pdo, $_GET),
+        'media-signal-poll'
+    );
+    json_out($payload);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'POST required'], 405);

@@ -810,7 +810,21 @@ export class AvatarRelationshipService {
             );
 
         if (relationship) {
-            return relationship.metadata;
+            const persisted = this.#persistedRelationshipsByLegacyKey.get(
+                this.linkKeyFor(firstParticipant?.id, secondParticipant?.id)
+            );
+            const authoritativeRelationship = persisted || relationship;
+            const lapMember = authoritativeRelationship.mode === "lap"
+                ? authoritativeRelationship.members.find(member => member.relationshipRole === "lap")
+                : null;
+            const explicitLapSide = normalizeLapSide(lapMember?.lapSide);
+
+            return explicitLapSide
+                ? Object.freeze({
+                    ...relationship.metadata,
+                    orientation: explicitLapSide
+                })
+                : relationship.metadata;
         }
 
         const initiator =
@@ -1843,6 +1857,86 @@ export class AvatarRelationshipService {
         }
 
         return participant;
+
+    }
+
+    /**
+     * Projects one accepted persisted snapshot into the legacy participant
+     * fields still consumed by presentation compatibility paths.
+     *
+     * @param {Object} relationship
+     * @param {Array<number|string>} previousMemberIds
+     * @returns {Object[]}
+     */
+    applyPersistedRelationshipProjection(relationship, previousMemberIds = []) {
+
+        if (!relationship || typeof relationship !== "object") {
+            return [];
+        }
+
+        const active = String(relationship.status || "active") === "active";
+        const memberIds = active
+            ? Array.from(relationship.memberIds || relationship.members || [])
+                .map(member => Number(member?.participantId || member?.participant_id || member || 0))
+                .filter(participantId => participantId > 0)
+            : [];
+        const affectedIds = Array.from(new Set([
+            ...Array.from(previousMemberIds || []).map(Number),
+            ...memberIds
+        ])).filter(participantId => participantId > 0);
+        const changed = [];
+
+        affectedIds.forEach(participantId => {
+            const participant = this.#participant(participantId);
+            if (!participant) return;
+            this.#clearParticipant(participant);
+            changed.push(participant);
+        });
+
+        const projection = active
+            ? relationship.legacyProjection || relationship.legacy_projection || null
+            : null;
+        const initiatorId = Number(
+            projection?.initiatorParticipantId || projection?.initiator_participant_id || 0
+        );
+        const targetId = Number(
+            projection?.targetParticipantId || projection?.target_participant_id || 0
+        );
+
+        if (memberIds.includes(initiatorId) && memberIds.includes(targetId)) {
+            const initiator = this.#participant(initiatorId);
+            const target = this.#participant(targetId);
+            if (initiator && target) {
+                initiator.linked_to = targetId;
+                initiator.link_mode = this.normalizeLinkMode(projection?.mode || relationship.mode);
+                target.linked_to = null;
+                target.link_mode = "normal";
+            }
+        }
+
+        return changed;
+
+    }
+
+    /**
+     * Retires a locally cached active relationship while retaining its known
+     * generation so an equal or older snapshot cannot resurrect it.
+     *
+     * @param {string} relationshipId
+     * @returns {Object|null}
+     */
+    retirePersistedRelationship(relationshipId) {
+
+        const id = String(relationshipId || "");
+        const relationship = this.#persistedRelationships.get(id) || null;
+        if (!relationship) return null;
+
+        this.#persistedRelationships.delete(id);
+        if (relationship.legacyLinkKey) {
+            this.#persistedRelationshipsByLegacyKey.delete(relationship.legacyLinkKey);
+        }
+
+        return relationship;
 
     }
 

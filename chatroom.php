@@ -695,7 +695,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     </div>
   </form>
 </div>
-<div id="ctx-menu">
+<div id="ctx-menu" role="menu" aria-label="Avatar actions">
   <button id="ctx-change-avatar" type="button">Change Avatar</button>
   <button id="ctx-avatar-size" type="button">Maximum Avatar Display Size</button>
   <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
@@ -711,6 +711,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
   <button id="ctx-webcam-size" type="button">Webcam Size</button>
   <button id="ctx-dm" type="button">Send DM</button>
+  <button id="ctx-interact" type="button">Interact</button>
   <button id="ctx-block" class="danger" type="button">Block</button>
   <button id="ctx-unblock" type="button">Unblock</button>
   <button id="ctx-manage-relationship" type="button">Manage Relationship</button>

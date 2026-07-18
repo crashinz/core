@@ -132,7 +132,14 @@ function media_signal_normalize_payload(string $signalType, mixed $data): array 
             'description' => $validated['description'],
         ];
 
-        foreach (['negotiation_id', 'generation', 'peer_instance_id', 'target_peer_instance_id'] as $key) {
+        foreach ([
+            'negotiation_id',
+            'generation',
+            'peer_instance_id',
+            'target_peer_instance_id',
+            'media_reason',
+            'webcam_operation',
+        ] as $key) {
             if (isset($data[$key]) && is_scalar($data[$key])) {
                 $payload[$key] = (string)$data[$key];
             }

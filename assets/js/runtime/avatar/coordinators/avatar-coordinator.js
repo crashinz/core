@@ -1180,6 +1180,23 @@ export class AvatarCoordinator {
             return null;
         }
 
+        const changedParticipants =
+            this.#relationships.applyPersistedRelationshipProjection(
+                reconciled,
+                previousRelationship?.memberIds || []
+            );
+        const activeMemberIds = new Set(
+            String(relationship.status || "active") === "active"
+                ? Array.from(relationship.members || [])
+                    .map(member => Number(member?.participantId || member?.participant_id || 0))
+                : []
+        );
+        const departedParticipantIds = Array.from(previousRelationship?.memberIds || [])
+            .map(Number)
+            .filter(participantId => participantId > 0 && !activeMemberIds.has(participantId));
+        const restoredParticipants =
+            this.#restoreIndependentParticipants(departedParticipantIds);
+
         const configurationTransitionAccepted =
             String(payload.action || "") === "configuration-updated"
                 ? this.#transitionRelationshipConfiguration(reconciled, payload)
@@ -1206,6 +1223,10 @@ export class AvatarCoordinator {
         this.#syncRelationshipPresentation({
             scheduleRefresh: !configurationTransitionAccepted
         });
+        this.#renderParticipants(Array.from(new Set([
+            ...changedParticipants,
+            ...restoredParticipants
+        ])));
         this.#lifecycleOperationCount += 1;
 
         this.#context?.recordRelationshipDiagnostic?.({
@@ -1686,7 +1707,7 @@ export class AvatarCoordinator {
      *
      * @returns {boolean}
      */
-    requestLinkChoiceForDrag(participant, target) {
+    requestLinkChoice(participant, target, options = {}) {
 
         if (!participant || !target) {
             return false;
@@ -1698,10 +1719,10 @@ export class AvatarCoordinator {
             return false;
         }
 
-        const participantId =
-            Number(participant.id);
+        const participantId = Number(participant.id);
+        const suppressRepeatedChoice = options.suppressRepeatedChoice === true;
 
-        if (this.#suppressedLinkChoiceParticipantIds.has(participantId)) {
+        if (suppressRepeatedChoice && this.#suppressedLinkChoiceParticipantIds.has(participantId)) {
             return false;
         }
 
@@ -1715,6 +1736,15 @@ export class AvatarCoordinator {
             participant,
             target
         );
+
+        this.#recordEligibilityDiagnostic(
+            decision,
+            `pending-choice-opened:${String(options.source || "interaction")}`
+        );
+
+        if (!suppressRepeatedChoice) {
+            return true;
+        }
 
         this.#suppressedLinkChoiceParticipantIds.add(participantId);
 
@@ -1731,6 +1761,29 @@ export class AvatarCoordinator {
         this.#linkChoiceSuppressionTimers.set(participantId, timer);
 
         return true;
+
+    }
+
+    /**
+     * Opens the authoritative chooser from drag interaction.
+     */
+    requestLinkChoiceForDrag(participant, target) {
+
+        return this.requestLinkChoice(participant, target, {
+            source: "drag",
+            suppressRepeatedChoice: true
+        });
+
+    }
+
+    /**
+     * Opens the authoritative chooser from an accessible avatar action.
+     */
+    requestLinkChoiceForInteraction(participant, target) {
+
+        return this.requestLinkChoice(participant, target, {
+            source: "avatar-context"
+        });
 
     }
 
@@ -1923,7 +1976,7 @@ export class AvatarCoordinator {
      *
      * @returns {boolean}
      */
-    unlinkCurrentParticipant(options = {}) {
+    async unlinkCurrentParticipant(options = {}) {
 
         const config =
             this.#context?.getConfig?.();
@@ -1931,36 +1984,61 @@ export class AvatarCoordinator {
         const participantId =
             Number(options.participantId || config?.myParticipantId);
 
-        const partnerId =
-            Number(options.partnerId || 0);
+        const previousRelationship =
+            this.#relationships.relationshipForParticipant(participantId);
 
-        const changed =
-            this.#relationships.unlinkParticipant(participantId);
-
-        if (partnerId) {
-            const partner =
-                this.#relationships.clearParticipant(partnerId);
-
-            if (partner && !changed.includes(partner)) {
-                changed.push(partner);
-            }
-        }
-
-        if (!changed.length) {
+        if (!previousRelationship) {
             return false;
         }
 
-        changed.forEach(participant => {
-            this.clearScheduledRelationshipRefresh(participant.id);
-        });
+        try {
+            const response = await this.#context?.persistUnlink?.();
+            const relationship = response?.relationship_departure?.relationship || null;
+            let changed = [];
 
-        this.#renderParticipants(changed);
-        this.#context?.onCurrentParticipantUnlinked?.();
-        this.#context?.persistUnlink?.();
-        this.#syncRelationshipPresentation();
-        this.#lifecycleOperationCount += 1;
+            if (relationship) {
+                this.reconcileRemoteRelationship({
+                    action: relationship.status === "active" ? "member-left" : "relationship-dissolved",
+                    relationship_id: relationship.id || relationship.relationship_id,
+                    relationship_version: Number(relationship.version),
+                    relationship_status: relationship.status,
+                    relationship
+                });
+                changed = previousRelationship.memberIds
+                    .map(memberId => this.#participant(memberId))
+                    .filter(Boolean);
+            } else {
+                this.#relationships.retirePersistedRelationship(previousRelationship.id);
+                changed = this.#relationships.applyPersistedRelationshipProjection(
+                    { ...previousRelationship, status: "dissolved", members: [], memberIds: [] },
+                    previousRelationship.memberIds
+                );
+                changed = Array.from(new Set([
+                    ...changed,
+                    ...this.#restoreIndependentParticipants(previousRelationship.memberIds)
+                ]));
+                this.#syncRelationshipPresentation();
+            }
 
-        return true;
+            changed.forEach(participant => {
+                this.clearScheduledRelationshipRefresh(participant.id);
+            });
+            this.#renderParticipants(changed);
+            const independentParticipants = previousRelationship.memberIds
+                .map(memberId => this.#participant(memberId))
+                .filter(participant => participant && !this.#relationships.relationshipForParticipant(participant.id));
+            if (independentParticipants.length) {
+                await this.#context?.persistPositions?.(independentParticipants);
+            }
+            this.#context?.onCurrentParticipantUnlinked?.();
+            this.#lifecycleOperationCount += 1;
+            return true;
+        } catch (error) {
+            this.#context?.showWarning?.(
+                error?.message || "The relationship could not be left."
+            );
+            return false;
+        }
 
     }
 
@@ -2679,7 +2757,6 @@ export class AvatarCoordinator {
             );
 
         const metadata =
-            relationship?.metadata ||
             this.#relationships.relationshipMetadataForPair(
                 initiator,
                 target
@@ -2778,6 +2855,35 @@ export class AvatarCoordinator {
             height:
                 this.#baseAvatarSize()
         };
+
+    }
+
+    /**
+     * Restores departed members through AvatarLayoutService while keeping
+     * runtime orchestration and DOM synchronization in their current owners.
+     */
+    #restoreIndependentParticipants(participantIds = []) {
+
+        const ids = new Set(
+            Array.from(participantIds || []).map(Number).filter(participantId => participantId > 0)
+        );
+        if (!ids.size) return [];
+
+        const participants = Array.from(ids)
+            .map(participantId => this.#participant(participantId))
+            .filter(Boolean);
+        const occupiedParticipants = Array.from(this.#participants.values())
+            .filter(participant => participant?.online !== false && !participant?.exiting);
+        const stageSize = this.#stageSize();
+        const changed = this.#layout.restoreIndependentLayout({
+            participants,
+            occupiedParticipants,
+            stageWidth: stageSize.width,
+            stageHeight: stageSize.height
+        });
+
+        changed.forEach(participant => this.#context?.positionAvatar?.(participant));
+        return changed;
 
     }
 

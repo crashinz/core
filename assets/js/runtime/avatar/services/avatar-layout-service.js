@@ -813,6 +813,103 @@ export class AvatarLayoutService {
 
     }
 
+    /**
+     * Restores relationship-departed avatars to deterministic independent
+     * positions without changing their authoritative rendered dimensions.
+     *
+     * @param {Object} options
+     * @returns {Object[]}
+     */
+    restoreIndependentLayout({
+        participants = [],
+        occupiedParticipants = [],
+        stageWidth,
+        stageHeight,
+        gap = 12
+    } = {}) {
+
+        const width = Number(stageWidth || 0);
+        const height = Number(stageHeight || 0);
+        const spacing = Math.max(0, Number(gap || 0));
+        const moving = Array.from(participants || [])
+            .filter(Boolean)
+            .sort((first, second) => Number(first.id) - Number(second.id));
+
+        if (!moving.length || width <= 0 || height <= 0) {
+            return [];
+        }
+
+        const dimensionsFor = participant => {
+            const dimensions = this.#runtime.renderer?.renderedAvatarDimensions(participant) || {};
+            return {
+                width: Math.max(1, Number(dimensions.width || 1)),
+                height: Math.max(1, Number(dimensions.height || 1))
+            };
+        };
+        const boxFor = participant => {
+            const dimensions = dimensionsFor(participant);
+            return {
+                x: Math.max(0, Math.min(width - dimensions.width, Number(participant.position_x || 0) * width)),
+                y: Math.max(0, Math.min(height - dimensions.height, Number(participant.position_y || 0) * height)),
+                ...dimensions
+            };
+        };
+        const overlaps = (candidate, box) => !(
+            candidate.x + candidate.width + spacing <= box.x ||
+            box.x + box.width + spacing <= candidate.x ||
+            candidate.y + candidate.height + spacing <= box.y ||
+            box.y + box.height + spacing <= candidate.y
+        );
+        const movingIds = new Set(moving.map(participant => Number(participant.id)));
+        const occupied = Array.from(occupiedParticipants || [])
+            .filter(participant => participant && !movingIds.has(Number(participant.id)))
+            .map(boxFor);
+
+        moving.forEach(participant => {
+            const origin = boxFor(participant);
+            const candidates = [origin];
+
+            occupied.forEach(box => {
+                candidates.push(
+                    { ...origin, x: box.x + box.width + spacing },
+                    { ...origin, x: box.x - origin.width - spacing },
+                    { ...origin, y: box.y + box.height + spacing },
+                    { ...origin, y: box.y - origin.height - spacing }
+                );
+            });
+            for (let ring = 1; ring <= 12; ring += 1) {
+                const distance = ring * 24;
+                candidates.push(
+                    { ...origin, x: origin.x + distance },
+                    { ...origin, x: origin.x - distance },
+                    { ...origin, y: origin.y + distance },
+                    { ...origin, y: origin.y - distance }
+                );
+            }
+
+            const selected = candidates
+                .map(candidate => ({
+                    ...candidate,
+                    x: Math.max(0, Math.min(width - candidate.width, candidate.x)),
+                    y: Math.max(0, Math.min(height - candidate.height, candidate.y))
+                }))
+                .filter(candidate => !occupied.some(box => overlaps(candidate, box)))
+                .sort((first, second) => {
+                    const firstDistance = Math.hypot(first.x - origin.x, first.y - origin.y);
+                    const secondDistance = Math.hypot(second.x - origin.x, second.y - origin.y);
+                    return firstDistance - secondDistance || first.y - second.y || first.x - second.x;
+                })[0] || origin;
+
+            participant.position_x = selected.x / width;
+            participant.position_y = selected.y / height;
+            occupied.push(selected);
+        });
+
+        this.#layoutCount += moving.length;
+        return moving;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------

@@ -119,7 +119,12 @@ function db(): PDO {
         $pdo->exec('PRAGMA busy_timeout = ' . CHATSPACE_SQLITE_BUSY_TIMEOUT_MS);
     }
 
-    if (!db_schema_is_current($pdo)) migrate($pdo);
+    $schemaCurrent = db_with_sqlite_lock_retry(
+        $pdo,
+        static fn(): bool => db_schema_is_current($pdo),
+        'schema-version-read'
+    );
+    if (!$schemaCurrent) migrate($pdo);
     return $pdo;
 }
 
@@ -233,7 +238,8 @@ function db_schema_is_current(PDO $pdo): bool {
         $stmt = $pdo->prepare('SELECT value FROM app_settings WHERE setting_key = ? LIMIT 1');
         $stmt->execute(['schema_version']);
         return hash_equals(CHATSPACE_SCHEMA_VERSION, (string)($stmt->fetchColumn() ?: ''));
-    } catch (Throwable) {
+    } catch (Throwable $error) {
+        if (db_is_transient_lock_error($error)) throw $error;
         return false;
     }
 }
