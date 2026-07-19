@@ -18,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         json_out([
             'settings' => admin_settings($pdo),
             'avatarSizePolicy' => avatar_size_policy($pdo),
+            'webcamCapability' => webcam_capability($pdo),
         ]);
     }
 
@@ -154,6 +155,27 @@ if ($action === 'save_diagnostic_screenshots') {
     set_app_setting($pdo, 'diagnostic_screenshot_retention_days', (string)$retention);
     log_tool($pdo, (int)$me['id'], 'admin_diagnostic_screenshot_settings', null, null, $enabled ? "Enabled censored screenshots with {$retention}-day retention" : 'Disabled censored screenshots');
     json_out(['ok' => true, 'settings' => admin_settings($pdo)]);
+}
+
+if ($action === 'save_webcam_capability') {
+    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+    $allow = !empty($body['allow_webcam_use']);
+    $result = webcam_capability_update($pdo, $allow);
+    log_tool(
+        $pdo,
+        (int)$me['id'],
+        'admin_webcam_capability_update',
+        null,
+        null,
+        $allow ? 'Enabled installation webcam use' : 'Disabled installation webcam use'
+    );
+    json_out([
+        'ok' => true,
+        'idempotent' => !empty($result['idempotent']),
+        'webcamCapability' => $result['capability'],
+        'stoppedParticipantCount' => (int)$result['stoppedParticipantCount'],
+        'settings' => admin_settings($pdo),
+    ]);
 }
 
 if ($action === 'save_settings') {

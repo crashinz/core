@@ -26,6 +26,7 @@ $roleColors = role_color_settings($pdo);
     <button class="active" data-admin-tab="users" type="button">Users</button>
     <button data-admin-tab="settings" type="button">Settings</button>
     <button data-admin-tab="appearance" type="button">Appearance</button>
+    <button data-admin-tab="webcam" type="button">Webcam</button>
     <button data-admin-tab="database" type="button">Database</button>
     <button data-admin-tab="link-icons" type="button">Link Icons</button>
     <button data-admin-tab="moderation" type="button">Moderation</button>
@@ -98,6 +99,18 @@ $roleColors = role_color_settings($pdo);
       <label>Unresolved retention days <input name="diagnostic_screenshot_retention_days" type="number" min="0" max="365" value="0"></label>
       <p class="minor">Capture remains disabled until a retention period is selected. Uncensored page pixels are never created.</p>
       <button class="btn btn-primary" type="submit">Save Screenshot Policy</button>
+    </form>
+  </section>
+
+  <section class="shared-panel" data-admin-panel="webcam">
+    <h2>Webcam</h2>
+    <form id="webcam-capability-form" class="shared-form compact-form">
+      <label class="settings-checkbox-row">
+        <strong>Allow webcam use</strong>
+        <input name="allow_webcam_use" type="checkbox">
+        <span>When disabled, active webcam sharing stops and participants see avatars. Voice remains available.</span>
+      </label>
+      <button class="btn btn-primary" type="submit">Save Webcam Setting</button>
     </form>
   </section>
 

@@ -144,6 +144,8 @@ const auraPreviewAvatar = document.getElementById('aura-preview-avatar');
 const auraPreviewLayer = document.querySelector('#aura-modal .aura-preview-layer');
 const avatarFileInput = document.getElementById('avatar-file-input');
 const ctxToggleWebcam = document.getElementById('ctx-toggle-webcam');
+const ctxWebcamVisibility = document.getElementById('ctx-webcam-visibility');
+const ctxWebcamReceive = document.getElementById('ctx-webcam-receive');
 const ctxAuras = document.getElementById('ctx-auras');
 const ctxOrientationWrap = document.getElementById('ctx-orientation-wrap');
 const ctxOrientation = document.getElementById('ctx-orientation');
@@ -179,6 +181,8 @@ const reportProblemSummary = document.getElementById('report-problem-summary');
 const reportProblemScreenshot = document.getElementById('report-problem-screenshot');
 const reportProblemStatus = document.getElementById('report-problem-status');
 const chatOptionsModal = document.getElementById('chat-options-modal');
+const webcamOptionsReset = document.getElementById('webcam-options-reset');
+let webcamPreferencesPending = false;
 let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastLatencyMs = null;
@@ -794,6 +798,19 @@ function configureRoomEventRouter() {
     onParticipantWebcam(payload) {
       applyWebcamState(payload.participant_id, Boolean(payload.webcam_enabled || payload.webcam_path), payload.webcam_path || null, 'room-event-webcam');
     },
+    onWebcamCapability(payload) {
+      cfg.webcamCapability = payload;
+      voiceRuntime?.viewerPolicy?.applyCapability(payload, 'installation-webcam-capability');
+      syncChatOptions();
+      if (!payload.allowWebcamUse && (webcamIntent || webcamStream)) {
+        disableLocalWebcam('installation-capability-disabled').catch(warnRuntimeRequest);
+      } else if (!payload.allowWebcamUse) {
+        voiceRuntime?.media?.reconcileWebcamCapability(
+          false,
+          'installation-webcam-capability-disabled',
+        ).catch(warnRuntimeRequest);
+      }
+    },
     onParticipantAvatar(payload, event = {}) {
       const person = participants.get(payload.participant_id);
       if (!person) return;
@@ -1042,6 +1059,10 @@ function configureRoomEventRouter() {
 }
 
 function configureVoiceRuntime() {
+  voiceRuntime?.viewerPolicy?.configure({
+    storage: window.localStorage,
+    onChange: reconcileWebcamViewerPolicy,
+  });
   voiceRuntime?.media?.configure({
     window,
     navigator,
@@ -1054,6 +1075,10 @@ function configureVoiceRuntime() {
     getConfig: () => cfg,
     getParticipants: () => participants,
     getWebcamStream: () => webcamStream,
+    shouldReceiveRemoteWebcam(participantId) {
+      const person = participants.get(Number(participantId));
+      return voiceRuntime?.viewerPolicy?.effectiveFor(person)?.receive !== false;
+    },
     getWebcamLifecycleState: () => ({
       intent: webcamIntent,
       acquisitionState: webcamAcquisitionState,
@@ -1504,7 +1529,6 @@ function urlPreviewHtml(preview) {
 function avatarUrl(p) {
   if (!p) return cfg.avatarPresets.Default;
   if (isUserBlocked(p.user_id)) return appUrl('/assets/images/baghead.png');
-  if (p.webcam_path) return `${mediaUrl(p.webcam_path)}?v=${Date.now()}`;
   if (p.avatar_url && !p.avatar_url.startsWith('data:')) {
     const url = mediaUrl(p.avatar_url);
     return `${url}${url.includes('?') ? '&' : '?'}v=${p.avatar_version || 0}`;
@@ -1574,6 +1598,7 @@ function setAvatarImageSource(img, nextSrc, flip = false) {
 
 function attachParticipantVideo(participantId, stream, own = false, presentationIdentity = {}) {
   const person = participants.get(Number(participantId));
+  const viewerPolicy = webcamViewerPolicyFor(person, own);
   const previousPreviewTrackId = person?.webcamVideoEl?.srcObject?.getVideoTracks?.()[0]?.id || null;
   recordVoiceLifecycleDiagnostic({
     event: 'attachParticipantVideo-called',
@@ -1607,6 +1632,16 @@ function attachParticipantVideo(participantId, stream, own = false, presentation
     });
     return;
   }
+  if (!own && viewerPolicy.receive === false) {
+    pendingRemoteVideoStreams.delete(Number(participantId));
+    recordVoiceLifecycleDiagnostic({
+      event: 'attachParticipantVideo-skipped-by-viewer-policy',
+      participantId: Number(participantId),
+      reason: viewerPolicy.reason,
+      streamTrackCount: stream?.getTracks?.().length || 0,
+    });
+    return;
+  }
   pendingRemoteVideoStreams.delete(Number(participantId));
   avatarRuntime?.renderer?.attachWebcam(person, stream, {
     stage: roomStage,
@@ -1614,6 +1649,8 @@ function attachParticipantVideo(participantId, stream, own = false, presentation
     own,
     source: presentationIdentity.source || (own ? 'local-capture' : 'unknown'),
     presentationIdentity,
+    presentationVisible: own || viewerPolicy.show,
+    presentationReason: viewerPolicy.reason,
     onWebcamPresentationDiagnostic: recordVoiceLifecycleDiagnostic,
     onWebcamPresentationError(error, detail) {
       console.error('Webcam playback failed.', detail, error);
@@ -2137,6 +2174,7 @@ function renderParticipant(p, options = {}) {
       });
     },
   });
+  applyWebcamPresentationPolicy(merged, 'participant-render');
   refreshLinkClasses();
   positionAvatar(merged);
   applyParticipantAura(merged);
@@ -4044,12 +4082,31 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
     ? avatarRuntime?.coordinator?.relationshipEligibility(me, participant)
     : null;
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
+  const webcamPolicy = webcamViewerPolicyFor(participant, isOwn);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
   document.getElementById('ctx-avatar-size').style.display = isOwn ? 'block' : 'none';
   if (ctxOrientationWrap) ctxOrientationWrap.style.display = isOwn ? 'block' : 'none';
   if (ctxAuras) ctxAuras.style.display = isOwn ? 'block' : 'none';
   ctxToggleWebcam.style.display = isOwn ? 'block' : 'none';
+  ctxToggleWebcam.disabled = isOwn && !webcamUseAllowed() && !(webcamIntent || webcamStream);
+  ctxToggleWebcam.title = ctxToggleWebcam.disabled
+    ? 'Webcam use is disabled for this installation.'
+    : '';
   document.getElementById('ctx-webcam-size').style.display = isOwn && Boolean(webcamIntent || webcamStream) ? 'block' : 'none';
+  if (ctxWebcamVisibility) {
+    ctxWebcamVisibility.style.display = !isOwn ? 'block' : 'none';
+    ctxWebcamVisibility.disabled = !webcamPolicy.webcamActive || !webcamUseAllowed();
+    ctxWebcamVisibility.textContent = !webcamPolicy.show
+      ? 'Show this webcam for me'
+      : 'Hide this webcam for me';
+  }
+  if (ctxWebcamReceive) {
+    ctxWebcamReceive.style.display = !isOwn ? 'block' : 'none';
+    ctxWebcamReceive.disabled = !webcamPolicy.webcamActive || !webcamUseAllowed();
+    ctxWebcamReceive.textContent = !webcamPolicy.receive
+      ? 'Resume receiving this webcam'
+      : 'Stop receiving this webcam';
+  }
   document.getElementById('ctx-dm').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   if (ctxInteract) {
     ctxInteract.style.display = !isOwn ? 'block' : 'none';
@@ -4207,6 +4264,66 @@ function openRoomActionMenu() {
   roomActionMenu.style.top = `${Math.min(r.bottom + 6, window.innerHeight - mr.height - 8)}px`;
 }
 
+function webcamUseAllowed() {
+  return voiceRuntime?.viewerPolicy?.capability?.().allowWebcamUse !== false;
+}
+
+function webcamViewerPolicyFor(person, own = false) {
+  return voiceRuntime?.viewerPolicy?.effectiveFor(person, { own }) || Object.freeze({
+    webcamActive: Boolean(person?.webcam_enabled || person?.webcam_path),
+    show: true,
+    receive: true,
+    reason: 'policy-unavailable',
+  });
+}
+
+function applyWebcamPresentationPolicy(person, reason = 'viewer-policy') {
+  if (!person || Number(person.id) === Number(cfg?.myParticipantId)) return false;
+  const policy = webcamViewerPolicyFor(person);
+  const changed = avatarRuntime?.renderer?.setWebcamPresentationVisible(
+    person,
+    policy.show,
+    {
+      reason: `${reason}:${policy.reason}`,
+      onWebcamPresentationDiagnostic: recordVoiceLifecycleDiagnostic,
+    }
+  ) || false;
+  if (changed) {
+    positionAvatar(person);
+    avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+      participant: person,
+      reason: 'webcam-viewer-presentation-change',
+    });
+  }
+  return changed;
+}
+
+function reconcileWebcamViewerPolicy(change = {}) {
+  if (!cfg) return;
+  const targets = [...participants.values()].filter(person => (
+    Number(person.id) !== Number(cfg.myParticipantId)
+    && (!change.userId || Number(person.user_id) === Number(change.userId))
+  ));
+  targets.forEach(person => applyWebcamPresentationPolicy(person, change.reason || 'viewer-policy'));
+  if (change.changes?.receiveChanged) {
+    targets.forEach(person => {
+      const policy = webcamViewerPolicyFor(person);
+      voiceRuntime?.media?.reconcileRemoteWebcamReceivePolicy(
+        person.id,
+        policy.receive,
+        'viewer-policy'
+      ).catch(warnRuntimeRequest);
+    });
+  }
+  recordRuntimeDiagnostic('webcamViewerPolicy', 'viewer-policy-reconciled', {
+    reason: change.reason || 'viewer-policy',
+    participantCount: targets.length,
+    presentationChanged: Boolean(change.changes?.presentationChanged),
+    receiveChanged: Boolean(change.changes?.receiveChanged),
+    capabilityChanged: Boolean(change.changes?.capabilityChanged),
+  });
+}
+
 document.getElementById('room-menu-btn').addEventListener('click', e => {
   e.stopPropagation();
   if (roomMenu.classList.contains('visible')) closeRoomMenu();
@@ -4223,6 +4340,53 @@ function syncChatOptions() {
     description.textContent = mode === 'compact'
       ? 'Hides avatars and places the timestamp, username, and message inline.'
       : 'Shows avatars and the full message layout.';
+  }
+  const webcamPreferences = voiceRuntime?.viewerPolicy?.preferences?.() || {
+    showWebcams: true,
+    receiveWebcams: true,
+  };
+  document.querySelectorAll('input[name="webcam-visibility-mode"]').forEach(input => {
+    input.checked = input.value === (webcamPreferences.showWebcams ? 'show' : 'hide');
+    input.disabled = webcamPreferencesPending;
+  });
+  document.querySelectorAll('input[name="webcam-receive-mode"]').forEach(input => {
+    input.checked = input.value === (webcamPreferences.receiveWebcams ? 'receive' : 'stop');
+    input.disabled = webcamPreferencesPending;
+  });
+  if (webcamOptionsReset) webcamOptionsReset.disabled = webcamPreferencesPending;
+  const capabilityNotice = document.getElementById('webcam-capability-notice');
+  if (capabilityNotice) capabilityNotice.hidden = webcamUseAllowed();
+}
+
+async function saveWebcamViewerPreferences({ showWebcams, receiveWebcams, resetOverrides = false }) {
+  if (webcamPreferencesPending) return;
+  webcamPreferencesPending = true;
+  syncChatOptions();
+  try {
+    const current = voiceRuntime?.viewerPolicy?.preferences?.() || { version: 1 };
+    const result = await apiPost('/api/webcam_preferences.php', {
+      expected_version: current.version,
+      show_webcams: Boolean(showWebcams),
+      receive_webcams: Boolean(receiveWebcams),
+    });
+    const overridesCleared = resetOverrides
+      ? voiceRuntime?.viewerPolicy?.resetParticipantOverrides('account-reset', { notify: false }) || false
+      : false;
+    voiceRuntime?.viewerPolicy?.applyServerProjection({
+      capability: result.capability || voiceRuntime?.viewerPolicy?.capability?.(),
+      preferences: result.preferences,
+    }, resetOverrides ? 'account-webcam-options-reset' : 'account-webcam-preferences');
+    if (overridesCleared && current.receiveWebcams === result.preferences?.receiveWebcams) {
+      reconcileWebcamViewerPolicy({
+        reason: 'account-webcam-options-reset',
+        changes: { presentationChanged: true, receiveChanged: true },
+      });
+    }
+  } catch (error) {
+    showWarning(error.message || 'Could not save webcam options.');
+  } finally {
+    webcamPreferencesPending = false;
+    syncChatOptions();
   }
 }
 
@@ -4255,6 +4419,45 @@ document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
     event.preventDefault();
     event.currentTarget.checked = true;
     event.currentTarget.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+});
+document.querySelectorAll('input[name="webcam-visibility-mode"]').forEach(input => {
+  input.addEventListener('change', event => {
+    if (!event.currentTarget.checked) return;
+    const current = voiceRuntime?.viewerPolicy?.preferences?.() || { receiveWebcams: true };
+    saveWebcamViewerPreferences({
+      showWebcams: event.currentTarget.value === 'show',
+      receiveWebcams: current.receiveWebcams,
+    });
+  });
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    event.currentTarget.checked = true;
+    event.currentTarget.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+});
+document.querySelectorAll('input[name="webcam-receive-mode"]').forEach(input => {
+  input.addEventListener('change', event => {
+    if (!event.currentTarget.checked) return;
+    const current = voiceRuntime?.viewerPolicy?.preferences?.() || { showWebcams: true };
+    saveWebcamViewerPreferences({
+      showWebcams: current.showWebcams,
+      receiveWebcams: event.currentTarget.value === 'receive',
+    });
+  });
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    event.currentTarget.checked = true;
+    event.currentTarget.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+});
+webcamOptionsReset?.addEventListener('click', () => {
+  saveWebcamViewerPreferences({
+    showWebcams: true,
+    receiveWebcams: true,
+    resetOverrides: true,
   });
 });
 
@@ -5147,6 +5350,22 @@ document.getElementById('ctx-dm').addEventListener('click', () => {
   if (p) openDmWithUser({ id: p.user_id, display_name: p.display_name, avatar_url: avatarUrl(p) });
 });
 
+ctxWebcamVisibility?.addEventListener('click', () => {
+  const person = participants.get(Number(ctxMenuParticipantId));
+  closeContextMenu();
+  if (!person || Number(person.id) === Number(cfg.myParticipantId)) return;
+  const policy = webcamViewerPolicyFor(person);
+  voiceRuntime?.viewerPolicy?.setParticipantPresentation(person.user_id, !policy.show);
+});
+
+ctxWebcamReceive?.addEventListener('click', () => {
+  const person = participants.get(Number(ctxMenuParticipantId));
+  closeContextMenu();
+  if (!person || Number(person.id) === Number(cfg.myParticipantId)) return;
+  const policy = webcamViewerPolicyFor(person);
+  voiceRuntime?.viewerPolicy?.setParticipantReceive(person.user_id, !policy.receive);
+});
+
 document.getElementById('ctx-tools')?.addEventListener('click', e => {
   e.stopPropagation();
   ctxOrientationWrap?.classList.remove('open');
@@ -5286,6 +5505,9 @@ function releaseWebcamStream(stream) {
 }
 
 async function acquireLocalWebcamCapture(constraints, operation = 'enable') {
+  if (!webcamUseAllowed()) {
+    throw new Error('Webcam use is disabled for this installation.');
+  }
   const token = beginWebcamOperation(true, operation);
   let stream = null;
   try {
@@ -5354,6 +5576,10 @@ function watchLocalWebcamStream(stream, operationToken = null) {
 }
 
 async function replaceLocalWebcamCapture(nextStream, operation = 'replace', operationToken = null) {
+  if (!webcamUseAllowed()) {
+    releaseWebcamStream(nextStream);
+    throw new Error('Webcam use is disabled for this installation.');
+  }
   const nextTrack = nextStream?.getVideoTracks?.().find(track => track.readyState === 'live') || null;
   if (!nextTrack) throw new Error('Replacement webcam stream has no live video track.');
   const token = operationToken || beginWebcamOperation(true, operation);
@@ -5417,38 +5643,55 @@ async function replaceLocalWebcamCapture(nextStream, operation = 'replace', oper
   };
 }
 
-ctxToggleWebcam.addEventListener('click', async () => {
-  closeContextMenu();
-  if (webcamIntent || webcamStream) {
-    const disableToken = beginWebcamOperation(false, 'disable');
-    const previousWebcamStream = webcamStream;
-    recordVoiceLifecycleDiagnostic({
-      event: 'local-webcam-disable-start',
-      participantId: Number(cfg.myParticipantId),
-      operationGeneration: disableToken.generation,
-      tracks: previousWebcamStream?.getTracks?.().map(track => ({
-        id: track.id,
-        kind: track.kind,
-        readyState: track.readyState,
-        enabled: track.enabled,
-        muted: track.muted,
-      })) || [],
-    });
-    webcamStream = null;
-    releaseWebcamStream(previousWebcamStream);
-    applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-off');
-    const persistence = apiPost('/api/media_signal.php', {
-      action: 'webcam_off',
-      media: 'webcam',
-      session_id: cfg.sessionId,
-      join_token: cfg.myJoinToken,
-    });
-    const negotiation = renegotiateMediaPeers({
+async function disableLocalWebcam(reason = 'user-disable') {
+  const operation = reason === 'user-disable' ? 'disable' : reason;
+  const disableToken = beginWebcamOperation(false, operation);
+  const previousWebcamStream = webcamStream;
+  recordVoiceLifecycleDiagnostic({
+    event: 'local-webcam-disable-start',
+    participantId: Number(cfg.myParticipantId),
+    reason,
+    operationGeneration: disableToken.generation,
+    tracks: previousWebcamStream?.getTracks?.().map(track => ({
+      id: track.id,
+      kind: track.kind,
+      readyState: track.readyState,
+      enabled: track.enabled,
+      muted: track.muted,
+    })) || [],
+  });
+  webcamStream = null;
+  releaseWebcamStream(previousWebcamStream);
+  applyWebcamState(cfg.myParticipantId, false, null, reason);
+  const persistence = apiPost('/api/media_signal.php', {
+    action: 'webcam_off',
+    media: 'webcam',
+    session_id: cfg.sessionId,
+    join_token: cfg.myJoinToken,
+  });
+  const privateNegotiation = !webcamUseAllowed();
+  const negotiation = privateNegotiation
+    ? voiceRuntime?.media?.reconcileWebcamCapability(
+      false,
+      'webcam-capability-disabled',
+    )
+    : renegotiateMediaPeers({
       reason: 'local-webcam-disable',
       mediaReason: 'webcam',
       webcamOperation: 'disable',
     });
-    await Promise.all([persistence, negotiation]);
+  await Promise.all([persistence, negotiation]);
+  return Object.freeze({ status: 'completed', reason, generation: disableToken.generation });
+}
+
+ctxToggleWebcam.addEventListener('click', async () => {
+  closeContextMenu();
+  if (webcamIntent || webcamStream) {
+    await disableLocalWebcam('user-disable');
+    return;
+  }
+  if (!webcamUseAllowed()) {
+    showWarning('Webcam use is disabled for this installation.');
     return;
   }
   if (!avatarSizeStartConfirmed) {
@@ -6310,6 +6553,10 @@ async function bootRoom() {
     operation: 'bootstrap-room',
     endpointCategory: 'room-config',
   });
+  voiceRuntime?.viewerPolicy?.applyServerProjection({
+    capability: cfg.webcamCapability,
+    preferences: cfg.webcamViewerPreferences,
+  }, 'room-bootstrap');
   avatarRuntime?.displayPolicy?.configure(cfg.avatarSizePolicy || {});
   window.ChatSpaceAvatar?.configure?.(avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {});
   cfg.innerTranquillityPlayer = innerTranquillityPlayerCapability();

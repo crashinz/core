@@ -1761,6 +1761,10 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   z-index: 2;
   background: var(--panel);
 }
+
+.avatar-webcam-video.webcam-viewer-hidden {
+  display: none !important;
+}
 .settings-choice-row {
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
@@ -1779,6 +1783,18 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.2);
   border-radius: 7px;
+}
+.segmented-radio-wide {
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
+}
+.chat-options-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 14px;
+}
+.webcam-capability-notice {
+  margin: 12px 0 0;
+  color: var(--danger);
 }
 .segmented-radio label { display: block; color: var(--text-muted); cursor: pointer; }
 .segmented-radio label + label { border-left: 1px solid rgba(255,255,255,.2); }

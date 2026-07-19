@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 const CHATSPACE_CONFIG = __DIR__ . '/config.php';
 const CHATSPACE_DEFAULT_SQLITE = __DIR__ . '/../db/chatspace.sqlite';
-const CHATSPACE_SCHEMA_VERSION = '2026-07-18-avatar-polling-part-b';
+const CHATSPACE_SCHEMA_VERSION = '2026-07-18-webcam-viewer-policy';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 require_once __DIR__ . '/security_policy.php';
@@ -14,6 +14,7 @@ if (is_file(CHATSPACE_CONFIG)) {
 }
 
 require_once __DIR__ . '/avatar_size_policy.php';
+require_once __DIR__ . '/webcam_policy.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/runtime_issue_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
@@ -401,6 +402,9 @@ function migrate(PDO $pdo): void {
             webcam_display_width_px INTEGER DEFAULT NULL,
             webcam_display_height_px INTEGER DEFAULT NULL,
             avatar_size_version INTEGER NOT NULL DEFAULT 1,
+            webcam_show_preference INTEGER NOT NULL DEFAULT 1,
+            webcam_receive_preference INTEGER NOT NULL DEFAULT 1,
+            webcam_preferences_version INTEGER NOT NULL DEFAULT 1,
             aura_effect TEXT DEFAULT NULL,
             current_room_id INTEGER DEFAULT NULL,
             last_seen_at TEXT DEFAULT NULL,
@@ -955,6 +959,9 @@ function migrate(PDO $pdo): void {
             'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
             'avatar_size_version' => 'INTEGER NOT NULL DEFAULT 1',
+            'webcam_show_preference' => 'INTEGER NOT NULL DEFAULT 1',
+            'webcam_receive_preference' => 'INTEGER NOT NULL DEFAULT 1',
+            'webcam_preferences_version' => 'INTEGER NOT NULL DEFAULT 1',
         ] as $column => $definition) {
             if (!in_array($column, $mysqlUserColNames, true)) {
                 $pdo->exec("ALTER TABLE users ADD COLUMN {$column} {$definition}");
@@ -1075,6 +1082,9 @@ function migrate(PDO $pdo): void {
         'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
         'avatar_size_version' => 'INTEGER NOT NULL DEFAULT 1',
+        'webcam_show_preference' => 'INTEGER NOT NULL DEFAULT 1',
+        'webcam_receive_preference' => 'INTEGER NOT NULL DEFAULT 1',
+        'webcam_preferences_version' => 'INTEGER NOT NULL DEFAULT 1',
     ] as $column => $definition) {
         if (!in_array($column, $userColNames, true)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN {$column} {$definition}");
@@ -1379,7 +1389,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], avatar_size_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults());
+    ], avatar_size_policy_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'

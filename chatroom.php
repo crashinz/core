@@ -710,6 +710,8 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="ctx-auras" type="button">Auras</button>
   <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
   <button id="ctx-webcam-size" type="button">Webcam Size</button>
+  <button id="ctx-webcam-visibility" type="button">Hide this webcam for me</button>
+  <button id="ctx-webcam-receive" type="button">Stop receiving this webcam</button>
   <button id="ctx-dm" type="button">Send DM</button>
   <button id="ctx-interact" type="button">Interact</button>
   <button id="ctx-block" class="danger" type="button">Block</button>
@@ -782,6 +784,26 @@ if (session_status() === PHP_SESSION_ACTIVE) {
         <label><input type="radio" name="chat-display-mode" value="compact"><span>Compact</span></label>
       </fieldset>
       <p class="settings-choice-description" id="chat-display-description"></p>
+    </div>
+    <div class="settings-choice-row">
+      <span class="settings-choice-name" id="webcam-visibility-label">Webcam display</span>
+      <fieldset class="segmented-radio segmented-radio-wide" aria-labelledby="webcam-visibility-label">
+        <label><input type="radio" name="webcam-visibility-mode" value="show"><span>Show webcams</span></label>
+        <label><input type="radio" name="webcam-visibility-mode" value="hide"><span>Show avatars</span></label>
+      </fieldset>
+      <p class="settings-choice-description">Hiding webcams changes only what you see. Video may still be received.</p>
+    </div>
+    <div class="settings-choice-row">
+      <span class="settings-choice-name" id="webcam-receive-label">Webcam receiving</span>
+      <fieldset class="segmented-radio segmented-radio-wide" aria-labelledby="webcam-receive-label">
+        <label><input type="radio" name="webcam-receive-mode" value="receive"><span>Receive video</span></label>
+        <label><input type="radio" name="webcam-receive-mode" value="stop"><span>Stop receiving</span></label>
+      </fieldset>
+      <p class="settings-choice-description">Stops inbound webcam video while keeping voice available.</p>
+    </div>
+    <p class="settings-choice-description webcam-capability-notice" id="webcam-capability-notice" hidden>Webcam use is disabled for this installation.</p>
+    <div class="chat-options-actions">
+      <button class="btn" id="webcam-options-reset" type="button">Reset webcam options</button>
     </div>
   </div>
 </div>

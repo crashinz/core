@@ -67,22 +67,29 @@ function media_signal_poll_payload(PDO $pdo, array $query): array {
         ], 409);
     }
     $media = (string)($query['media'] ?? 'all');
+    $webcamAllowed = webcam_capability($pdo)['allowWebcamUse'];
 
     $delivery = '((to_participant_id = ? AND (recipient_epoch = ? OR (recipient_epoch IS NULL AND created_at >= ?))) OR (to_participant_id = 0 AND created_at >= ?))';
     $deliveryArgs = [$participantId, $clientEpoch, $client['started_at'], $client['started_at']];
 
-    if (in_array($media, ['voice', 'webcam'], true)) {
+    if ($media === 'webcam' && !$webcamAllowed) {
+        $stmt = null;
+        $rows = [];
+    } elseif (in_array($media, ['voice', 'webcam'], true)) {
         $stmt = $pdo->prepare("SELECT id, media, from_participant_id, sender_epoch, type, data FROM media_signals WHERE session_id = ? AND media = ? AND {$delivery} AND id > ? AND (expires_at IS NULL OR expires_at >= ?) ORDER BY id ASC LIMIT 80");
         $stmt->execute([$sessionId, $media, ...$deliveryArgs, $after, media_signal_now()]);
+        $rows = $stmt->fetchAll();
     } else {
-        $stmt = $pdo->prepare("SELECT id, media, from_participant_id, sender_epoch, type, data FROM media_signals WHERE session_id = ? AND {$delivery} AND id > ? AND (expires_at IS NULL OR expires_at >= ?) ORDER BY id ASC LIMIT 80");
+        $webcamFilter = $webcamAllowed ? '' : " AND media <> 'webcam'";
+        $stmt = $pdo->prepare("SELECT id, media, from_participant_id, sender_epoch, type, data FROM media_signals WHERE session_id = ?{$webcamFilter} AND {$delivery} AND id > ? AND (expires_at IS NULL OR expires_at >= ?) ORDER BY id ASC LIMIT 80");
         $stmt->execute([$sessionId, ...$deliveryArgs, $after, media_signal_now()]);
+        $rows = $stmt->fetchAll();
     }
     $signals = [];
     $signalErrors = [];
     $lastSignalId = $after;
 
-    foreach ($stmt->fetchAll() as $row) {
+    foreach ($rows as $row) {
         $lastSignalId = max($lastSignalId, (int)$row['id']);
         $decoded = json_decode($row['data'], true);
         $normalized = media_signal_normalize_payload((string)$row['type'], $decoded);
@@ -96,6 +103,13 @@ function media_signal_poll_payload(PDO $pdo, array $query): array {
                 'error' => $normalized['error'],
                 'diagnostics' => $normalized['diagnostics'] ?? [],
             ];
+            continue;
+        }
+
+        if (!$webcamAllowed && webcam_signal_requests_video([
+            'media' => $row['media'],
+            'type' => $row['type'],
+        ], $normalized['data'])) {
             continue;
         }
 
@@ -150,6 +164,12 @@ if (in_array($action, ['join', 'leave', 'status', 'signal'], true)) {
 
 if ($action === 'webcam_on' || $action === 'webcam_off') {
     $enabled = $action === 'webcam_on';
+    if ($enabled && !webcam_capability($pdo)['allowWebcamUse']) {
+        json_out([
+            'error' => 'Webcam use is disabled for this installation.',
+            'code' => 'WEBCAM_USE_DISABLED',
+        ], 403);
+    }
     $pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = ? WHERE id = ?')
         ->execute([$enabled ? 1 : 0, (int)$participant['id']]);
     $payload = [
@@ -199,6 +219,13 @@ if ($action === 'signal') {
             'detail' => $normalized['error'],
             'diagnostics' => $normalized['diagnostics'] ?? [],
         ], 400);
+    }
+    if (!webcam_capability($pdo)['allowWebcamUse']
+        && webcam_signal_requests_video($body, $normalized['data'])) {
+        json_out([
+            'error' => 'Webcam use is disabled for this installation.',
+            'code' => 'WEBCAM_USE_DISABLED',
+        ], 403);
     }
     $persisted = media_signal_insert($pdo, $sessionId, media_from_signal_data($body), (int)$participant['id'], $to, $type, $normalized['data'], $clientEpoch);
     json_out(['ok' => true] + $persisted);

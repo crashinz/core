@@ -230,9 +230,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
         $pdo = db();
         $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path) VALUES (?,?,?,?,?)');
         $stmt->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name, 'admin', $avatar]);
+        $adminUserId = (int)$pdo->lastInsertId();
         set_app_setting($pdo, 'community_name', $communityName);
         if ($communityLogo !== '') set_app_setting($pdo, 'community_logo_path', $communityLogo);
-        authenticate_user((int)$pdo->lastInsertId());
+        $allowWebcamUse = !empty($_POST['allow_webcam_use']);
+        set_app_setting($pdo, 'allow_webcam_use', $allowWebcamUse ? '1' : '0');
+        log_tool(
+            $pdo,
+            $adminUserId,
+            'setup_webcam_capability',
+            null,
+            null,
+            $allowWebcamUse ? 'Enabled installation webcam use' : 'Disabled installation webcam use'
+        );
+        authenticate_user($adminUserId);
         redirect_to('/setup.php?done=1');
     } catch (Throwable $e) {
         $error = $e->getMessage();
@@ -365,6 +376,14 @@ $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['
                 <span class="file-picker-btn">Choose Logo</span>
                 <span class="file-picker-name" id="setup-community-logo-name">No file selected</span>
               </span>
+            </label>
+          </div>
+          <div class="setup-branding-fields">
+            <h2>Webcam</h2>
+            <label class="settings-checkbox-row">
+              <strong>Allow webcam use</strong>
+              <input name="allow_webcam_use" type="checkbox" value="1" checked>
+              <span>Allow participants to share webcam video. Voice remains available independently.</span>
             </label>
           </div>
           <button class="btn btn-primary setup-submit" type="submit">Create Admin User</button>

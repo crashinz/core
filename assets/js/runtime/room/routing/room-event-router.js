@@ -210,6 +210,10 @@ export class RoomEventRouter {
                 this.#context?.onParticipantWebcam?.(payload, event);
                 return true;
 
+            case "webcam_capability":
+                this.#context?.onWebcamCapability?.(payload, event);
+                return true;
+
             case "avatar":
                 this.#context?.onParticipantAvatar?.(payload, event);
                 return true;

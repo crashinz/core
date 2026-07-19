@@ -117,7 +117,7 @@ document.getElementById('admin-user-create').addEventListener('submit', async ev
 async function loadSettings() {
   const data = await request('/api/admin_system.php?action=settings'); settings = data.settings || {};
   for (const [name, value] of Object.entries(settings)) {
-    for (const form of [document.getElementById('admin-settings-form'), document.getElementById('role-color-form'), document.getElementById('diagnostic-screenshot-form')]) {
+    for (const form of [document.getElementById('admin-settings-form'), document.getElementById('role-color-form'), document.getElementById('diagnostic-screenshot-form'), document.getElementById('webcam-capability-form')]) {
       const input = form?.elements?.[name]; if (!input) continue;
       if (input.type === 'checkbox') input.checked = value === '1'; else input.value = value;
     }
@@ -139,6 +139,16 @@ if (!IS_ADMIN) appearanceControls.forEach(control => { control.disabled = true; 
 document.getElementById('role-color-form').addEventListener('submit', async event => { event.preventDefault(); try { const data = await post('/api/admin_system.php', roleColorBody('save_role_colors')); settings = data.settings; applyRoleColors(); showStatus('Role colors saved.'); } catch (error) { showStatus(error.message, true); } });
 document.getElementById('reset-role-colors').addEventListener('click', async () => { try { const data = await post('/api/admin_system.php', { action: 'reset_role_colors' }); settings = data.settings; await loadSettings(); showStatus('Role colors reset.'); } catch (error) { showStatus(error.message, true); } });
 document.getElementById('diagnostic-screenshot-form').addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; try { const data = await post('/api/admin_system.php', { action: 'save_diagnostic_screenshots', diagnostic_screenshots_enabled: form.elements.diagnostic_screenshots_enabled.checked ? 1 : 0, diagnostic_screenshot_retention_days: form.elements.diagnostic_screenshot_retention_days.value }); settings = data.settings; showStatus('Screenshot policy saved.'); } catch (error) { showStatus(error.message, true); } });
+const webcamCapabilityForm = document.getElementById('webcam-capability-form');
+if (!IS_ADMIN) webcamCapabilityForm?.querySelectorAll('input, button').forEach(control => { control.disabled = true; });
+webcamCapabilityForm?.addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.currentTarget;
+  try {
+    const data = await post('/api/admin_system.php', { action: 'save_webcam_capability', allow_webcam_use: form.elements.allow_webcam_use.checked ? 1 : 0 });
+    settings = data.settings || settings;
+    showStatus(form.elements.allow_webcam_use.checked ? 'Webcam use enabled.' : `Webcam use disabled${data.stoppedParticipantCount ? ` for ${data.stoppedParticipantCount} active participant${data.stoppedParticipantCount === 1 ? '' : 's'}` : ''}.`);
+  } catch (error) { showStatus(error.message, true); }
+});
 
 async function loadLogs() { const data = await request('/api/admin_system.php?action=logs'); document.getElementById('admin-tool-logs').innerHTML = (data.logs || []).map(log => `<div class="admin-list-row"><div><strong>${esc(log.action)} · ${esc(log.actor_name)}</strong><div class="minor">${esc(log.created_at)} · ${esc(log.detail || '')}</div></div></div>`).join('') || '<p class="minor">No tool logs.</p>'; }
 async function moderationList(action, elementId, undoAction) { const data = await request(`/api/admin_system.php?action=${action}`); const rows = data.blocks || data.ejections || []; const element = document.getElementById(elementId); element.textContent = ''; for (const row of rows) { const item = document.createElement('div'); item.className = 'admin-list-row'; const label = row.blocker_name ? `${row.blocker_name} blocked ${row.blocked_name}` : `${row.display_name}${row.room_name ? ` · ${row.room_name}` : ''}`; item.innerHTML = `<span>${esc(label)}</span><button class="btn btn-danger" type="button">Undo</button>`; item.querySelector('button').addEventListener('click', async () => { const body = row.blocker_name ? { action: undoAction, blocker_user_id: row.blocker_user_id, blocked_user_id: row.blocked_user_id } : { action: undoAction, id: row.id }; await post('/api/admin_system.php', body); await loadModeration(); }); element.appendChild(item); } if (!rows.length) element.innerHTML = '<p class="minor">None active.</p>'; }

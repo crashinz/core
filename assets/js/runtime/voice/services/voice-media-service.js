@@ -813,30 +813,25 @@ export class VoiceMediaService {
 
                 });
 
+                const requestData = options.privateNegotiation
+                    ? {
+                        request_id: requestId,
+                        generation: this.#clientEpoch,
+                        late_join_ready: Boolean(options.lateJoinReady)
+                    }
+                    : {
+                        reason: options.reason || "remote-offer-request",
+                        media_reason: options.mediaReason || "initial-peer",
+                        webcam_operation: options.webcamOperation || null,
+                        request_id: requestId,
+                        generation: this.#clientEpoch,
+                        late_join_ready: Boolean(options.lateJoinReady)
+                    };
+
                 await this.#sendSignal(
                     id,
                     "renegotiate",
-                    {
-
-                        reason:
-                            options.reason || "remote-offer-request",
-
-                        media_reason:
-                            options.mediaReason || "initial-peer",
-
-                        webcam_operation:
-                            options.webcamOperation || null,
-
-                        request_id:
-                            requestId,
-
-                        generation:
-                            this.#clientEpoch,
-
-                        late_join_ready:
-                            Boolean(options.lateJoinReady)
-
-                    }
+                    requestData
                 );
 
                 return SIGNAL_OUTCOME.CONSUMED;
@@ -934,6 +929,69 @@ export class VoiceMediaService {
     }
 
     /**
+     * Reconciles active peer ownership when installation webcam use changes.
+     * Webcam-only peers have no useful lifecycle while the capability is off;
+     * voice peers retain their canonical audio transceiver and renegotiate video
+     * to inactive without replacing the connection.
+     */
+    async reconcileWebcamCapability(allowed, reason = "installation-webcam-capability") {
+
+        if (this.#lifecycle.isDestroyed()) return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        if (allowed) return SIGNAL_OUTCOME.CONSUMED;
+
+        const peers =
+            Array.from(this.#peers.values());
+
+        this.#recordVideoLifecycleDiagnostic({
+
+            event:
+                "webcam-capability-disabled-reconcile",
+
+            reason,
+
+            voiceJoined:
+                this.#lifecycle.isJoined(),
+
+            peerCount:
+                peers.length
+
+        });
+
+        for (const pc of peers) {
+
+            const participantId =
+                Number(pc.__voiceRemoteParticipantId);
+
+            this.#remoteVideoPresentations.delete(participantId);
+            this.#context?.detachParticipantVideo?.(participantId);
+
+            if (!this.#lifecycle.isJoined()) {
+
+                this.#releasePeer(
+                    pc,
+                    "webcam-capability-disabled",
+                    { detachVideo: true }
+                );
+
+                continue;
+
+            }
+
+            await this.#requestPeerNegotiation(
+                participantId,
+                pc,
+                reason,
+                { privateNegotiation: true }
+            );
+
+        }
+
+        return SIGNAL_OUTCOME.CONSUMED;
+
+    }
+
+    /**
      * Reconciles remote webcam presentation from the active canonical receiver.
      * Re-enabling a sender on an existing transceiver does not fire ontrack again.
      *
@@ -955,7 +1013,7 @@ export class VoiceMediaService {
         const pc =
             this.#peers.get(id) || null;
 
-        if (!enabled) {
+        if (!enabled || !this.#shouldReceiveRemoteWebcam(id)) {
 
             this.#remoteVideoPresentations.delete(id);
 
@@ -1054,6 +1112,55 @@ export class VoiceMediaService {
 
     }
 
+    /**
+     * Reconciles inbound video on the existing canonical video transceiver.
+     * Audio ownership and peer identity are preserved.
+     */
+    async reconcileRemoteWebcamReceivePolicy(participantId, receive, reason = "viewer-policy") {
+
+        if (this.#lifecycle.isDestroyed()) return SIGNAL_OUTCOME.STALE_GENERATION;
+
+        const id = Number(participantId);
+        if (!id || id === this.#localParticipantId()) return SIGNAL_OUTCOME.DEFERRED;
+
+        const participant = this.#participants().get(id) || null;
+        const remoteWebcamActive = Boolean(participant?.webcam_enabled || participant?.webcam_path);
+        const pc = this.#peers.get(id) || null;
+
+        this.#recordVideoLifecycleDiagnostic({
+            event: "remote-webcam-receive-policy-reconcile",
+            remoteParticipantId: id,
+            receive: Boolean(receive),
+            remoteWebcamActive,
+            peerPreserved: Boolean(pc),
+            reason,
+            ...(pc ? this.#peerSnapshot(pc) : {})
+        });
+
+        if (!pc && (!receive || !remoteWebcamActive)) return SIGNAL_OUTCOME.CONSUMED;
+
+        const outcome = pc
+            ? await this.#requestPeerNegotiation(id, pc, "viewer-video-policy", {
+                privateNegotiation: true,
+                allowReceiveOnly: Boolean(receive)
+            })
+            : await this.connectMediaPeer(id, {
+                reason: "viewer-video-policy",
+                privateNegotiation: true,
+                allowReceiveOnly: true
+            });
+
+        if (receive && remoteWebcamActive) {
+            const setTimer = this.#context?.setTimeout || setTimeout;
+            setTimer(() => {
+                this.reconcileRemoteWebcamPresentation(id, true, "viewer-policy-renegotiated");
+            }, 0);
+        }
+
+        return outcome;
+
+    }
+
     async reconcileRemoteWebcamReadiness(participantId, enabled, reason = "participant-state") {
 
         if (this.#lifecycle.isDestroyed()) return SIGNAL_OUTCOME.STALE_GENERATION;
@@ -1063,7 +1170,7 @@ export class VoiceMediaService {
 
         if (!id || id === this.#localParticipantId()) return SIGNAL_OUTCOME.DEFERRED;
 
-        if (!enabled) {
+        if (!enabled || !this.#shouldReceiveRemoteWebcam(id)) {
 
             this.#remoteWebcamReadinessRequests.delete(id);
             return SIGNAL_OUTCOME.CONSUMED;
@@ -1953,7 +2060,8 @@ export class VoiceMediaService {
             if (
                 !id ||
                 id === this.#localParticipantId() ||
-                !Boolean(participant.webcam_enabled || participant.webcam_path)
+                !Boolean(participant.webcam_enabled || participant.webcam_path) ||
+                !this.#shouldReceiveRemoteWebcam(id)
             ) {
 
                 continue;
@@ -1991,6 +2099,14 @@ export class VoiceMediaService {
     #webcamStream() {
 
         return this.#context?.getWebcamStream?.() || null;
+
+    }
+
+    #shouldReceiveRemoteWebcam(participantId) {
+
+        return this.#context?.shouldReceiveRemoteWebcam?.(
+            Number(participantId)
+        ) !== false;
 
     }
 
@@ -2866,8 +2982,12 @@ export class VoiceMediaService {
 
         if (!transceiver || !sender) return;
 
-        const nextDirection =
-            track ? "sendrecv" : "recvonly";
+        const receive = kind !== "video" || this.#shouldReceiveRemoteWebcam(
+            pc.__voiceRemoteParticipantId
+        );
+        const nextDirection = track
+            ? (receive ? "sendrecv" : "sendonly")
+            : (receive ? "recvonly" : "inactive");
 
         if (transceiver.direction !== nextDirection) {
 
@@ -3210,6 +3330,36 @@ export class VoiceMediaService {
 
                 if (pc.signalingState !== "stable") {
 
+                    const pendingSignature =
+                        pc.__voicePendingLocalOfferSignature || null;
+
+                    const requestedSignature =
+                        this.#localMediaNegotiationSignature(pc);
+
+                    if (
+                        pendingSignature &&
+                        pendingSignature === requestedSignature
+                    ) {
+
+                        pc.__voicePendingNegotiation =
+                            false;
+
+                        this.#recordNegotiationDiagnostic({
+
+                            event:
+                                "pending-negotiation-coalesced-with-local-offer",
+
+                            requestSignature:
+                                requestedSignature,
+
+                            ...this.#peerSnapshot(pc)
+
+                        });
+
+                        return SIGNAL_OUTCOME.DUPLICATE;
+
+                    }
+
                     return SIGNAL_OUTCOME.DEFERRED;
 
                 }
@@ -3300,35 +3450,28 @@ export class VoiceMediaService {
 
         try {
 
+            const requestData = options.privateNegotiation
+                ? {
+                    request_id: requestId,
+                    peer_instance_id: pc.__voicePeerInstanceId,
+                    generation: pc.__voiceGeneration,
+                    target_peer_instance_id: pc.__voiceRemotePeerInstanceId || null
+                }
+                : {
+                    reason,
+                    media_reason: options.mediaReason || reason,
+                    webcam_operation: options.webcamOperation || null,
+                    request_id: requestId,
+                    media_signature: requestSignature,
+                    peer_instance_id: pc.__voicePeerInstanceId,
+                    generation: pc.__voiceGeneration,
+                    target_peer_instance_id: pc.__voiceRemotePeerInstanceId || null
+                };
+
             await this.#sendSignal(
                 participantId,
                 "renegotiate",
-                {
-
-                    reason,
-
-                    media_reason:
-                        options.mediaReason || reason,
-
-                    webcam_operation:
-                        options.webcamOperation || null,
-
-                    request_id:
-                        requestId,
-
-                    media_signature:
-                        requestSignature,
-
-                    peer_instance_id:
-                        pc.__voicePeerInstanceId,
-
-                    generation:
-                        pc.__voiceGeneration,
-
-                    target_peer_instance_id:
-                        pc.__voiceRemotePeerInstanceId || null
-
-                },
+                requestData,
                 {
 
                     generation:
@@ -3525,6 +3668,9 @@ export class VoiceMediaService {
             pc.__voicePendingLocalOffer =
                 negotiationId;
 
+            pc.__voicePendingLocalOfferSignature =
+                this.#localMediaNegotiationSignature(pc);
+
             this.#scheduleTransportRtpProbe(
                 pc,
                 "after-local-offer",
@@ -3535,7 +3681,7 @@ export class VoiceMediaService {
                 }
             );
 
-            await this.#sendSignal(
+            const persistedOffer = await this.#sendSignal(
                 participantId,
                 "offer",
                 pc.localDescription,
@@ -3560,6 +3706,19 @@ export class VoiceMediaService {
 
                 }
             );
+
+            if (
+                this.#isActivePeer(pc) &&
+                pc.__voicePendingLocalOffer === negotiationId
+            ) {
+
+                pc.__voicePendingLocalOfferSignalId =
+                    Number(persistedOffer?.signal_id) || null;
+
+                pc.__voicePendingLocalOfferRecipientEpoch =
+                    persistedOffer?.recipient_epoch || null;
+
+            }
 
             if (this.#isActivePeer(pc)) {
 
@@ -3627,6 +3786,15 @@ export class VoiceMediaService {
             [];
 
         pc.__voicePendingLocalOffer =
+            null;
+
+        pc.__voicePendingLocalOfferSignalId =
+            null;
+
+        pc.__voicePendingLocalOfferRecipientEpoch =
+            null;
+
+        pc.__voicePendingLocalOfferSignature =
             null;
 
         pc.__voiceAppliedRemoteAnswer =
@@ -3911,6 +4079,18 @@ export class VoiceMediaService {
 
                         }
 
+                        pc.__voicePendingLocalOffer =
+                            null;
+
+                        pc.__voicePendingLocalOfferSignalId =
+                            null;
+
+                        pc.__voicePendingLocalOfferRecipientEpoch =
+                            null;
+
+                        pc.__voicePendingLocalOfferSignature =
+                            null;
+
                     } catch (error) {
 
                         this.#recoverFailedPeer(pc, "rollback-collision", error);
@@ -4074,6 +4254,12 @@ export class VoiceMediaService {
                         "local-answer-complete"
                     );
 
+                    this.reconcileRemoteWebcamPresentation(
+                        from,
+                        true,
+                        "local-answer-complete"
+                    );
+
                     if (this.#isActivePeer(pc)) {
 
                         pc.__voiceLifecycleState =
@@ -4211,8 +4397,23 @@ export class VoiceMediaService {
                     pc.__voicePendingLocalOffer =
                         null;
 
+                    pc.__voicePendingLocalOfferSignalId =
+                        null;
+
+                    pc.__voicePendingLocalOfferRecipientEpoch =
+                        null;
+
+                    pc.__voicePendingLocalOfferSignature =
+                        null;
+
                     this.#reattachRemoteAudioFromPeer(
                         from,
+                        "remote-answer-complete"
+                    );
+
+                    this.reconcileRemoteWebcamPresentation(
+                        from,
+                        true,
                         "remote-answer-complete"
                     );
 
@@ -4743,6 +4944,18 @@ export class VoiceMediaService {
         });
 
         if (track.kind === "video") {
+
+            if (!this.#shouldReceiveRemoteWebcam(id)) {
+
+                this.#recordVideoLifecycleDiagnostic({
+                    event: "remote-video-track-presentation-skipped-by-viewer-policy",
+                    remoteParticipantId: Number(id),
+                    track: this.#trackSnapshot(track),
+                    ...this.#peerSnapshot(pc)
+                });
+                return;
+
+            }
 
             this.#listenToPeerTrack(
                 pc,
@@ -5520,6 +5733,63 @@ export class VoiceMediaService {
 
             return result;
 
+        }).catch(error => {
+
+            const webcamCapabilityDisabled =
+                error?.code === "HTTP_ERROR" &&
+                error?.responsePayload?.code === "WEBCAM_USE_DISABLED";
+
+            if (!webcamCapabilityDisabled) throw error;
+
+            const participantId =
+                Number(toId);
+
+            const pc =
+                this.#peers.get(participantId) || null;
+
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "signal-cancelled-webcam-capability-disabled",
+
+                signalKind:
+                    type,
+
+                senderParticipantId:
+                    this.#localParticipantId(),
+
+                recipientParticipantId:
+                    participantId,
+
+                negotiationId:
+                    payload.negotiation_id || null,
+
+                peerInstanceId:
+                    payload.peer_instance_id || null,
+
+                generation:
+                    payload.generation || null,
+
+                ...(pc ? this.#peerSnapshot(pc) : {})
+
+            });
+
+            if (pc && !this.#lifecycle.isJoined()) {
+
+                this.#releasePeer(
+                    pc,
+                    "webcam-capability-disabled-signal-rejected",
+                    { detachVideo: true }
+                );
+
+            }
+
+            return Object.freeze({
+                ok: false,
+                cancelled: true,
+                code: "WEBCAM_USE_DISABLED"
+            });
+
         });
 
     }
@@ -5828,18 +6098,25 @@ export class VoiceMediaService {
         const remoteHasWebcam =
             Boolean(remote?.webcam_enabled || remote?.webcam_path);
 
+        const remoteWebcamReceivable =
+            remoteHasWebcam && this.#shouldReceiveRemoteWebcam(from);
+
         const signalHasVideo =
             signal.media === "webcam" ||
             signal.data?.chatspace_media === "video" ||
             signal.data?.media_reason === "webcam" ||
             Boolean(signal.data?.webcam_operation);
 
+        const signalHasReceivableVideo =
+            signalHasVideo && this.#shouldReceiveRemoteWebcam(from);
+
         const shouldHandleMedia =
             Boolean(
                 this.#lifecycle.isJoined() ||
                 this.#webcamStream() ||
-                remoteHasWebcam ||
-                signalHasVideo
+                this.#peers.has(from) ||
+                remoteWebcamReceivable ||
+                signalHasReceivableVideo
             );
 
         if (!shouldHandleMedia && signal.type !== "leave") {
@@ -5859,7 +6136,11 @@ export class VoiceMediaService {
                 from
             );
 
-            if (this.#peers.has(from) && !remoteHasWebcam) {
+            if (
+                this.#peers.has(from) &&
+                !remoteWebcamReceivable &&
+                !this.#webcamStream()
+            ) {
 
                 const leavingPeer =
                     this.#peers.get(from);
@@ -5944,6 +6225,71 @@ export class VoiceMediaService {
                 pc.signalingState === "have-local-offer" &&
                 !pc.__voiceRemotePeerInstanceId
             ) {
+
+                const pendingOfferSignalId =
+                    Number(pc.__voicePendingLocalOfferSignalId) || null;
+
+                const pendingOfferRecipientEpoch =
+                    pc.__voicePendingLocalOfferRecipientEpoch || null;
+
+                if (!pendingOfferSignalId) {
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "late-join-readiness-deferred-for-offer-persistence",
+
+                        requestId,
+
+                        signalId:
+                            Number(signal.id) || null,
+
+                        requestGeneration,
+
+                        senderEpoch,
+
+                        ...this.#peerSnapshot(pc)
+
+                    });
+
+                    return SIGNAL_OUTCOME.DEFERRED;
+
+                }
+
+                if (
+                    (
+                        pendingOfferRecipientEpoch &&
+                        senderEpoch &&
+                        pendingOfferRecipientEpoch === senderEpoch
+                    ) ||
+                    pendingOfferSignalId > Number(signal.id)
+                ) {
+
+                    this.#recordNegotiationDiagnostic({
+
+                        event:
+                            "late-join-readiness-coalesced-with-fresh-offer",
+
+                        requestId,
+
+                        signalId:
+                            Number(signal.id) || null,
+
+                        pendingOfferSignalId,
+
+                        pendingOfferRecipientEpoch,
+
+                        requestGeneration,
+
+                        senderEpoch,
+
+                        ...this.#peerSnapshot(pc)
+
+                    });
+
+                    return SIGNAL_OUTCOME.CONSUMED;
+
+                }
 
                 this.#recordNegotiationDiagnostic({
 
@@ -6467,7 +6813,7 @@ export class VoiceMediaService {
                 description
             );
 
-            return {
+            const payload = {
 
                 kind:
                     type,
@@ -6484,15 +6830,13 @@ export class VoiceMediaService {
                     metadata.peerInstanceId || null,
 
                 target_peer_instance_id:
-                    metadata.targetPeerInstanceId || null,
-
-                media_reason:
-                    metadata.mediaReason || null,
-
-                webcam_operation:
-                    metadata.webcamOperation || null
+                    metadata.targetPeerInstanceId || null
 
             };
+
+            if (metadata.mediaReason) payload.media_reason = metadata.mediaReason;
+            if (metadata.webcamOperation) payload.webcam_operation = metadata.webcamOperation;
+            return payload;
 
         }
 
@@ -7597,6 +7941,15 @@ export class VoiceMediaService {
 
             pendingNegotiationId:
                 pc.__voicePendingLocalOffer || null,
+
+            pendingOfferSignalId:
+                Number(pc.__voicePendingLocalOfferSignalId) || null,
+
+            pendingOfferRecipientEpoch:
+                pc.__voicePendingLocalOfferRecipientEpoch || null,
+
+            pendingOfferSignature:
+                pc.__voicePendingLocalOfferSignature || null,
 
             appliedRemoteAnswer:
                 pc.__voiceAppliedRemoteAnswer || null,

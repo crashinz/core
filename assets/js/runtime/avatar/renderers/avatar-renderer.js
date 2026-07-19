@@ -392,8 +392,14 @@ export class AvatarRenderer {
         }
         label.textContent = options.displayName || "";
 
-        if (participant.webcamVideoEl && options.webcamEnabled) {
+        if (
+            participant.webcamVideoEl &&
+            options.webcamEnabled &&
+            participant.webcamPresentationVisible !== false
+        ) {
             image.classList.add("avatar-hidden-behind-webcam");
+        } else {
+            image.classList.remove("avatar-hidden-behind-webcam");
         }
 
         return participant;
@@ -427,7 +433,11 @@ export class AvatarRenderer {
                     baseSize: fallbackSize,
                     lapInitiator: Boolean(options.lapInitiator),
                     webcam: options.webcam === undefined
-                        ? Boolean(participant?.webcam_enabled && participant?.webcamVideoEl)
+                        ? Boolean(
+                            participant?.webcam_enabled &&
+                            participant?.webcamVideoEl &&
+                            participant?.webcamPresentationVisible !== false
+                        )
                         : Boolean(options.webcam)
                 }
             ) || {
@@ -706,6 +716,7 @@ export class AvatarRenderer {
         participant.typingEl = null;
         participant.speechEl = null;
         participant.webcamVideoEl = null;
+        participant.webcamPresentationVisible = true;
 
     }
 
@@ -842,7 +853,13 @@ export class AvatarRenderer {
                 }
             }
         );
-        participant.avatarEl?.classList.add("avatar-hidden-behind-webcam");
+        this.setWebcamPresentationVisible(
+            participant,
+            options.presentationVisible !== false,
+            {
+                reason: options.presentationReason || "webcam-attachment"
+            }
+        );
 
         options.onWebcamPresentationDiagnostic?.({
             event: sameLiveCanonicalTrack
@@ -872,6 +889,43 @@ export class AvatarRenderer {
     }
 
     /**
+     * Changes only local webcam presentation. The media stream, receiver,
+     * peer, signaling state, and authoritative participant webcam state remain
+     * untouched so hide-only behavior has no transport side effects.
+     */
+    setWebcamPresentationVisible(participant, visible, options = {}) {
+
+        if (!participant) return false;
+
+        const nextVisible = Boolean(visible);
+        const previousVisible = participant.webcamPresentationVisible !== false;
+        participant.webcamPresentationVisible = nextVisible;
+
+        const video = participant.webcamVideoEl;
+        if (video) {
+            video.hidden = !nextVisible;
+            video.classList.toggle("webcam-viewer-hidden", !nextVisible);
+            video.setAttribute("aria-hidden", nextVisible ? "false" : "true");
+        }
+        participant.avatarEl?.classList.toggle(
+            "avatar-hidden-behind-webcam",
+            Boolean(nextVisible && video && participant.webcam_enabled)
+        );
+
+        if (previousVisible !== nextVisible) this.#renderCount += 1;
+        options.onWebcamPresentationDiagnostic?.({
+            event: "webcam-viewer-presentation-changed",
+            participantId: Number(participant.id),
+            visible: nextVisible,
+            reason: options.reason || "viewer-policy",
+            mediaPreserved: Boolean(video?.srcObject),
+            remoteTrackId: video?.srcObject?.getVideoTracks?.()[0]?.id || null
+        });
+        return previousVisible !== nextVisible;
+
+    }
+
+    /**
      * Detaches webcam presentation for a participant.
      *
      * @param {Object} participant
@@ -890,6 +944,7 @@ export class AvatarRenderer {
 
         const video = participant.webcamVideoEl;
         participant.webcamVideoEl = null;
+        participant.webcamPresentationVisible = true;
         participant.avatarEl?.classList.remove("avatar-hidden-behind-webcam");
 
         options.onWebcamPresentationDiagnostic?.({

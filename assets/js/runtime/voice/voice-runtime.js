@@ -42,6 +42,12 @@ import {
 
 } from "./services/voice-media-service.js";
 
+import {
+
+    WebcamViewerPolicyService
+
+} from "./services/webcam-viewer-policy-service.js";
+
 //--------------------------------------------------
 // Voice Runtime
 //--------------------------------------------------
@@ -59,6 +65,11 @@ export class VoiceRuntime extends CoreModule {
      * Voice media workflow service.
      */
     #media = null;
+
+    /**
+     * Current-viewer webcam presentation and receive policy.
+     */
+    #viewerPolicy = null;
 
     //--------------------------------------------------
     // Constructor
@@ -105,6 +116,12 @@ export class VoiceRuntime extends CoreModule {
 
     }
 
+    get viewerPolicy() {
+
+        return this.#viewerPolicy;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -125,7 +142,10 @@ export class VoiceRuntime extends CoreModule {
                 "000027",
 
             media:
-                this.#media?.getDiagnostics() ?? null
+                this.#media?.getDiagnostics() ?? null,
+
+            viewerPolicy:
+                this.#viewerPolicy?.getDiagnostics() ?? null
 
         });
 
@@ -140,6 +160,7 @@ export class VoiceRuntime extends CoreModule {
      */
     onInitialize() {
 
+        this.#createViewerPolicyService();
         this.#createMediaService();
 
     }
@@ -150,6 +171,7 @@ export class VoiceRuntime extends CoreModule {
     onDestroy() {
 
         this.#media?.destroy();
+        this.#viewerPolicy?.destroy();
 
     }
 
@@ -168,6 +190,17 @@ export class VoiceRuntime extends CoreModule {
             );
 
         this.#media.initialize();
+
+    }
+
+    #createViewerPolicyService() {
+
+        this.#viewerPolicy =
+            new WebcamViewerPolicyService(
+                this
+            );
+
+        this.#viewerPolicy.initialize();
 
     }
 

@@ -1,4 +1,10 @@
 <?php
+require_once __DIR__ . '/../includes/api_exception_handler.php';
+api_install_exception_handler(
+    'avatar-relationships',
+    'AVATAR_RELATIONSHIP_FAILED',
+    'Avatar relationship changes are temporarily unavailable.'
+);
 require_once __DIR__ . '/../includes/base.php';
 
 $pdo = db();
