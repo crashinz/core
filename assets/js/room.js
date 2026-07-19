@@ -1951,10 +1951,11 @@ function avatarStageSize(person) {
   }) || AVATAR_STAGE_SIZE;
 }
 
-function avatarRenderedDimensions(person) {
+function avatarRenderedDimensions(person, options = {}) {
   return avatarRuntime?.renderer?.renderedAvatarDimensions(person, {
     fallbackSize: AVATAR_STAGE_SIZE,
     lapInitiator: isLapLinkInitiator(person),
+    ...options,
   }) || {
     width: AVATAR_STAGE_SIZE,
     height: AVATAR_STAGE_SIZE,
@@ -3816,11 +3817,57 @@ function setWebcamPresetFromInputs() {
   if (!avatarSizeWebcamPreset) return;
   const width = Number(avatarSizeWebcamWidth?.value || 0);
   const height = Number(avatarSizeWebcamHeight?.value || 0);
-  const exact = ['100x100', '150x150', '200x200'].find(value => {
-    const [presetWidth, presetHeight] = value.split('x').map(Number);
-    return width === presetWidth && height === presetHeight;
+  const presets = avatarRuntime?.displayPolicy?.webcamDisplayPresets?.() || {};
+  const exact = Object.entries(presets).find(([, dimensions]) => (
+    width === dimensions.width && height === dimensions.height
+  ));
+  avatarSizeWebcamPreset.value = exact?.[0] || 'custom';
+}
+
+function setWebcamSizeInputs(resolution, options = {}) {
+  if (!resolution?.ok) {
+    setAvatarSizeStatus(resolution?.error || 'Choose a valid webcam display size.', 'error');
+    return false;
+  }
+  avatarSizeInputSync = true;
+  avatarSizeWebcamWidth.value = String(resolution.width);
+  avatarSizeWebcamHeight.value = String(resolution.height);
+  avatarSizeAspectRatio = resolution.width / Math.max(resolution.height, 1);
+  avatarSizeAspectLock.checked = true;
+  avatarSizeInputSync = false;
+  if (options.status !== false) {
+    const source = `${resolution.sourceWidth} x ${resolution.sourceHeight}`;
+    const effective = `${resolution.width} x ${resolution.height}`;
+    setAvatarSizeStatus(
+      resolution.adjusted ? `${source}px uses ${effective}px within the community limits.` : `${effective}px selected.`,
+      'ok'
+    );
+  }
+  return true;
+}
+
+function currentAvatarWebcamResolution(me) {
+  const dimensions = avatarRenderedDimensions(me, { webcam: false });
+  return avatarRuntime?.displayPolicy?.resolveWebcamDisplayChoice?.('match', {
+    avatarDimensions: dimensions,
   });
-  avatarSizeWebcamPreset.value = avatarSizeResetRequested ? 'default' : (exact || 'custom');
+}
+
+function refreshWebcamPresetLabels() {
+  if (!avatarSizeWebcamPreset) return;
+  const labels = {
+    small: 'Small - 120 x 120',
+    medium: 'Medium - 160 x 160',
+    large: 'Large - 200 x 200',
+  };
+  Object.entries(labels).forEach(([choice, label]) => {
+    const option = avatarSizeWebcamPreset.querySelector(`option[value="${choice}"]`);
+    const resolution = avatarRuntime?.displayPolicy?.resolveWebcamDisplayChoice?.(choice);
+    if (!option || !resolution?.ok) return;
+    option.textContent = resolution.adjusted
+      ? `${label} (uses ${resolution.width} x ${resolution.height})`
+      : label;
+  });
 }
 
 function openAvatarSizeModal(mode, options = {}) {
@@ -3852,18 +3899,32 @@ function openAvatarSizeModal(mode, options = {}) {
     avatarSizeEdge.max = String(cap);
     avatarSizeEdge.value = String(avatarRuntime.displayPolicy.effectiveAvatarMaxEdge(me));
   } else {
+    avatarSizeResetRequested = false;
     const maxWidth = Number(policy.webcamDisplayMaxWidthPx || 200);
     const maxHeight = Number(policy.webcamDisplayMaxHeightPx || 200);
     const box = avatarRuntime.displayPolicy.effectiveWebcamBox(me);
     avatarSizeCap.textContent = `Community maximum: ${maxWidth} x ${maxHeight}px`;
-    avatarSizeCurrent.textContent = '';
+    avatarSizeCurrent.textContent = 'Avatar and webcam display sizes are saved separately.';
     avatarSizeWebcamWidth.max = String(maxWidth);
     avatarSizeWebcamHeight.max = String(maxHeight);
-    avatarSizeWebcamWidth.value = String(box.width);
-    avatarSizeWebcamHeight.value = String(box.height);
-    avatarSizeAspectRatio = box.width / Math.max(box.height, 1);
-    avatarSizeAspectLock.checked = true;
-    setWebcamPresetFromInputs();
+    refreshWebcamPresetLabels();
+    const choice = avatarRuntime.displayPolicy.webcamPreferenceChoice(me);
+    avatarSizeWebcamPreset.value = choice;
+    if (choice === 'match') {
+      setWebcamSizeInputs(currentAvatarWebcamResolution(me), { status: false });
+    } else {
+      setWebcamSizeInputs({
+        ok: true,
+        width: box.width,
+        height: box.height,
+        sourceWidth: Number(me.webcam_display_width_px),
+        sourceHeight: Number(me.webcam_display_height_px),
+        adjusted: box.width !== Number(me.webcam_display_width_px)
+          || box.height !== Number(me.webcam_display_height_px),
+      }, { status: false });
+      avatarSizeWebcamPreset.value = choice;
+    }
+    document.getElementById('avatar-size-reset').textContent = 'Match current avatar size';
 
     const relationship = avatarRuntime?.relationships?.relationshipForParticipant(me.id) || null;
     const candidates = avatarRuntime?.displayPolicy?.webcamSizeMatchCandidates(
@@ -3883,6 +3944,10 @@ function openAvatarSizeModal(mode, options = {}) {
     avatarSizeMatchWrap.hidden = candidates.length === 0;
   }
 
+  if (avatarSizeModalMode === 'avatar') {
+    document.getElementById('avatar-size-reset').textContent = 'Use server default';
+  }
+
   closeContextMenu();
   setAvatarSizeStatus();
   avatarSizeModal.classList.add('open');
@@ -3896,6 +3961,17 @@ async function saveAvatarSizePreferences() {
   if (avatarSizePending) return;
   const me = participants.get(cfg.myParticipantId);
   if (!me) return;
+  if (avatarSizeModalMode === 'webcam') {
+    const resolution = avatarRuntime?.displayPolicy?.resolveWebcamDisplayChoice?.('custom', {
+      width: avatarSizeWebcamWidth.value,
+      height: avatarSizeWebcamHeight.value,
+    });
+    if (!resolution?.ok) {
+      setAvatarSizeStatus(resolution?.error || 'Choose a valid webcam display size.', 'error');
+      return;
+    }
+    if (!setWebcamSizeInputs(resolution, { status: false })) return;
+  }
   avatarSizePending = true;
   const saveButton = document.getElementById('avatar-size-save');
   saveButton.disabled = true;
@@ -4948,16 +5024,15 @@ bindModalCloseButtons(['avatar-size-close', 'avatar-size-cancel'], closeAvatarSi
 
 document.getElementById('avatar-size-reset')?.addEventListener('click', () => {
   const policy = avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {};
-  avatarSizeResetRequested = true;
   if (avatarSizeModalMode === 'avatar') {
+    avatarSizeResetRequested = true;
     avatarSizeEdge.value = String(policy.avatarDisplayMaxPx || 200);
+    setAvatarSizeStatus('Server default selected.', 'ok');
   } else {
-    avatarSizeWebcamWidth.value = String(policy.webcamDisplayMaxWidthPx || 200);
-    avatarSizeWebcamHeight.value = String(policy.webcamDisplayMaxHeightPx || 200);
-    avatarSizeAspectRatio = Number(avatarSizeWebcamWidth.value) / Math.max(Number(avatarSizeWebcamHeight.value), 1);
-    setWebcamPresetFromInputs();
+    avatarSizeResetRequested = false;
+    avatarSizeWebcamPreset.value = 'match';
+    setWebcamSizeInputs(currentAvatarWebcamResolution(participants.get(cfg.myParticipantId)));
   }
-  setAvatarSizeStatus('Community default selected.', 'ok');
 });
 
 avatarSizeEdge?.addEventListener('input', () => {
@@ -4965,22 +5040,13 @@ avatarSizeEdge?.addEventListener('input', () => {
 });
 
 avatarSizeWebcamPreset?.addEventListener('change', () => {
-  const policy = avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {};
   const value = avatarSizeWebcamPreset.value;
   if (value === 'custom') return;
-  avatarSizeInputSync = true;
-  if (value === 'default') {
-    avatarSizeResetRequested = true;
-    avatarSizeWebcamWidth.value = String(policy.webcamDisplayMaxWidthPx || 200);
-    avatarSizeWebcamHeight.value = String(policy.webcamDisplayMaxHeightPx || 200);
-  } else {
-    const [width, height] = value.split('x').map(Number);
-    avatarSizeResetRequested = false;
-    avatarSizeWebcamWidth.value = String(Math.min(width, Number(policy.webcamDisplayMaxWidthPx || 200)));
-    avatarSizeWebcamHeight.value = String(Math.min(height, Number(policy.webcamDisplayMaxHeightPx || 200)));
-  }
-  avatarSizeAspectRatio = Number(avatarSizeWebcamWidth.value) / Math.max(Number(avatarSizeWebcamHeight.value), 1);
-  avatarSizeInputSync = false;
+  avatarSizeResetRequested = false;
+  const resolution = value === 'match'
+    ? currentAvatarWebcamResolution(participants.get(cfg.myParticipantId))
+    : avatarRuntime?.displayPolicy?.resolveWebcamDisplayChoice?.(value);
+  setWebcamSizeInputs(resolution);
 });
 
 avatarSizeWebcamWidth?.addEventListener('input', () => {

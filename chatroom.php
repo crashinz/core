@@ -664,10 +664,10 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     <section id="avatar-size-webcam-fields" hidden>
       <label>Size preset
         <select id="avatar-size-webcam-preset">
-          <option value="default">Community default</option>
-          <option value="100x100">100 x 100</option>
-          <option value="150x150">150 x 150</option>
-          <option value="200x200">200 x 200</option>
+          <option value="match">Match current avatar size</option>
+          <option value="small">Small &mdash; 120 &times; 120</option>
+          <option value="medium">Medium &mdash; 160 &times; 160</option>
+          <option value="large">Large &mdash; 200 &times; 200</option>
           <option value="custom">Custom</option>
         </select>
       </label>

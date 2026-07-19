@@ -16,6 +16,12 @@ const FALLBACK_POLICY = Object.freeze({
 
 const MIN_DISPLAY_SIZE = 42;
 
+const WEBCAM_DISPLAY_PRESETS = Object.freeze({
+    small: Object.freeze({ width: 120, height: 120 }),
+    medium: Object.freeze({ width: 160, height: 160 }),
+    large: Object.freeze({ width: 200, height: 200 })
+});
+
 export class AvatarDisplayPolicyService {
 
     #runtime;
@@ -63,16 +69,118 @@ export class AvatarDisplayPolicyService {
     }
 
     effectiveWebcamBox(participant = {}) {
-        return Object.freeze({
-            width: this.#boundedPreference(
-                participant.webcam_display_width_px,
-                this.#policy.webcamDisplayMaxWidthPx
-            ),
-            height: this.#boundedPreference(
-                participant.webcam_display_height_px,
-                this.#policy.webcamDisplayMaxHeightPx
-            )
+        const width = this.#preferenceOrCap(
+            participant.webcam_display_width_px,
+            this.#policy.webcamDisplayMaxWidthPx
+        );
+        const height = this.#preferenceOrCap(
+            participant.webcam_display_height_px,
+            this.#policy.webcamDisplayMaxHeightPx
+        );
+        return this.#fitWithinWebcamMaximum(width, height);
+    }
+
+    minimumDisplaySize() {
+        return MIN_DISPLAY_SIZE;
+    }
+
+    webcamDisplayPresets() {
+        return WEBCAM_DISPLAY_PRESETS;
+    }
+
+    webcamPreferenceChoice(participant = {}) {
+        const width = Number.parseInt(participant.webcam_display_width_px, 10);
+        const height = Number.parseInt(participant.webcam_display_height_px, 10);
+        if (!Number.isFinite(width) || !Number.isFinite(height)) return "match";
+        const preset = Object.entries(WEBCAM_DISPLAY_PRESETS).find(([, dimensions]) => (
+            width === dimensions.width && height === dimensions.height
+        ));
+        return preset?.[0] || "custom";
+    }
+
+    resolveWebcamDisplayChoice(choice, options = {}) {
+        const normalizedChoice = ["match", "small", "medium", "large", "custom"]
+            .includes(choice) ? choice : "custom";
+        let source;
+        if (normalizedChoice === "match") {
+            source = options.avatarDimensions || {};
+        } else if (WEBCAM_DISPLAY_PRESETS[normalizedChoice]) {
+            source = WEBCAM_DISPLAY_PRESETS[normalizedChoice];
+        } else {
+            source = {
+                width: options.width,
+                height: options.height
+            };
+        }
+        return this.resolveWebcamDisplaySize(source.width, source.height, {
+            choice: normalizedChoice
         });
+    }
+
+    resolveWebcamDisplaySize(widthValue, heightValue, options = {}) {
+        const width = Number(widthValue);
+        const height = Number(heightValue);
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+            return Object.freeze({
+                ok: false,
+                code: "WEBCAM_DISPLAY_SIZE_INVALID",
+                error: "Enter a valid webcam width and height."
+            });
+        }
+
+        const maximumWidth = this.#policy.webcamDisplayMaxWidthPx;
+        const maximumHeight = this.#policy.webcamDisplayMaxHeightPx;
+        const minimumScale = Math.max(
+            1,
+            MIN_DISPLAY_SIZE / width,
+            MIN_DISPLAY_SIZE / height
+        );
+        const maximumScale = Math.min(
+            1,
+            maximumWidth / width,
+            maximumHeight / height
+        );
+        if (minimumScale > maximumScale && minimumScale > 1 && maximumScale < 1) {
+            return Object.freeze({
+                ok: false,
+                code: "WEBCAM_DISPLAY_ASPECT_RATIO_UNAVAILABLE",
+                error: `That aspect ratio cannot fit between ${MIN_DISPLAY_SIZE} px and the ${maximumWidth} x ${maximumHeight} px community maximum.`
+            });
+        }
+
+        const scale = minimumScale > 1 ? minimumScale : maximumScale;
+        const widthResolved = Math.max(1, Math.round(width * scale));
+        const heightResolved = Math.max(1, Math.round(height * scale));
+        if (
+            widthResolved < MIN_DISPLAY_SIZE ||
+            heightResolved < MIN_DISPLAY_SIZE ||
+            widthResolved > maximumWidth ||
+            heightResolved > maximumHeight
+        ) {
+            return Object.freeze({
+                ok: false,
+                code: "WEBCAM_DISPLAY_ASPECT_RATIO_UNAVAILABLE",
+                error: `That aspect ratio cannot fit between ${MIN_DISPLAY_SIZE} px and the ${maximumWidth} x ${maximumHeight} px community maximum.`
+            });
+        }
+
+        const resolution = {
+            ok: true,
+            choice: options.choice || "custom",
+            sourceWidth: Math.round(width),
+            sourceHeight: Math.round(height),
+            width: widthResolved,
+            height: heightResolved,
+            adjusted: widthResolved !== Math.round(width) || heightResolved !== Math.round(height)
+        };
+        if (resolution.choice === "custom" && resolution.adjusted) {
+            return Object.freeze({
+                ok: false,
+                code: "WEBCAM_DISPLAY_SIZE_OUT_OF_RANGE",
+                error: `Custom width and height must each be from ${MIN_DISPLAY_SIZE} px through the ${maximumWidth} x ${maximumHeight} px community maximum.`
+            });
+        }
+        return Object.freeze(resolution);
     }
 
     renderedConstraints(participant = {}, options = {}) {
@@ -177,6 +285,23 @@ export class AvatarDisplayPolicyService {
         const parsed = Number.parseInt(value, 10);
         if (!Number.isFinite(parsed) || parsed < MIN_DISPLAY_SIZE) return cap;
         return Math.min(cap, parsed);
+    }
+
+    #preferenceOrCap(value, cap) {
+        const parsed = Number.parseInt(value, 10);
+        return Number.isFinite(parsed) && parsed >= MIN_DISPLAY_SIZE ? parsed : cap;
+    }
+
+    #fitWithinWebcamMaximum(width, height) {
+        const scale = Math.min(
+            1,
+            this.#policy.webcamDisplayMaxWidthPx / Math.max(width, 1),
+            this.#policy.webcamDisplayMaxHeightPx / Math.max(height, 1)
+        );
+        return Object.freeze({
+            width: Math.max(1, Math.round(width * scale)),
+            height: Math.max(1, Math.round(height * scale))
+        });
     }
 }
 

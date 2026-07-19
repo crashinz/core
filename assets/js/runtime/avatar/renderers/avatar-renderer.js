@@ -426,7 +426,9 @@ export class AvatarRenderer {
                 {
                     baseSize: fallbackSize,
                     lapInitiator: Boolean(options.lapInitiator),
-                    webcam: Boolean(participant?.webcam_enabled && participant?.webcamVideoEl)
+                    webcam: options.webcam === undefined
+                        ? Boolean(participant?.webcam_enabled && participant?.webcamVideoEl)
+                        : Boolean(options.webcam)
                 }
             ) || {
                 kind: "avatar",
