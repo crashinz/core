@@ -441,8 +441,19 @@ export class ChatMessageRenderer {
 
         } else {
 
+            const avatarMarkup =
+                context.avatarPresentationHtml(
+                    participant || message,
+                    {
+                        source: context.messageAvatarUrl(message, participant),
+                        displayName,
+                        className: "msg-avatar",
+                        title: false
+                    }
+                );
+
             row.innerHTML =
-                `<div class="bubble"><div class="msg-head"><div class="msg-name ${roleClass}" title="${roleLabel}"><img src="${context.esc(context.messageAvatarUrl(message, participant))}" alt=""><span class="msg-name-copy"><span class="msg-name-text">${displayName}</span>${flagTime}</span></div>${optionsButton}</div>${this.replyPreviewHtml(message)}<div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${this.renderReactions(message)}</div></div>`;
+                `<div class="bubble"><div class="msg-head"><div class="msg-name ${roleClass}" title="${roleLabel}">${avatarMarkup}<span class="msg-name-copy"><span class="msg-name-text">${displayName}</span>${flagTime}</span></div>${optionsButton}</div>${this.replyPreviewHtml(message)}<div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${this.renderReactions(message)}</div></div>`;
 
         }
 
@@ -456,6 +467,13 @@ export class ChatMessageRenderer {
                 message
             );
 
+        });
+
+        row.querySelector(".msg-name")?.addEventListener("contextmenu", event => {
+            if (!participant || typeof context.openParticipantActionMenu !== "function") return;
+            event.preventDefault();
+            event.stopPropagation();
+            context.openParticipantActionMenu(event.clientX, event.clientY, participant);
         });
 
         if (message.channel !== "game") {
@@ -644,7 +662,11 @@ export class ChatMessageRenderer {
                 items.some(item => Number(item.participant_id) === cfg.myParticipantId);
 
             const avatars =
-                items.map(item => `<img src="${context.esc(context.mediaUrl(item.avatar_url || cfg.avatarPresets.Default))}" alt="${context.esc(item.display_name || "User")}" title="${context.esc(item.display_name || "User")}">`).join("");
+                items.map(item => context.avatarPresentationHtml(item, {
+                    source: context.mediaUrl(item.avatar_url || cfg.avatarPresets.Default),
+                    displayName: item.display_name || "User",
+                    className: "reaction-avatar"
+                })).join("");
 
             return `<button class="reaction-chip${own ? " own" : ""}" type="button" data-msg-reaction="${context.esc(emoji)}"><span class="reaction-emoji">${context.esc(emoji)}</span><span class="reaction-avatars">${avatars}</span></button>`;
 

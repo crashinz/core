@@ -20,7 +20,7 @@ function game_auth(PDO $pdo, int $sessionId, int $participantId, string $token):
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $sessionId = resolve_session_id($pdo, $_GET['session_id'] ?? '');
-    game_auth($pdo, $sessionId, (int)($_GET['participant_id'] ?? 0), (string)($_GET['join_token'] ?? ''));
+    $viewer = game_auth($pdo, $sessionId, (int)($_GET['participant_id'] ?? 0), (string)($_GET['join_token'] ?? ''));
     $pdo->prepare(
         'UPDATE game_sessions
             SET ended_at = CURRENT_TIMESTAMP
@@ -31,8 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $stmt = $pdo->prepare(
         'SELECT a.lobby_code, a.game_type, a.started_by_participant_id, p.display_name AS started_by_name,
                 gl.user1_id, gl.user2_id, gl.round_number,
-                p1.display_name AS user1_name, p1.avatar_path AS user1_avatar, p1.webcam_path AS user1_webcam,
-                p2.display_name AS user2_name, p2.avatar_path AS user2_avatar, p2.webcam_path AS user2_webcam
+                p1.user_id AS user1_user_id, p1.display_name AS user1_name, p1.avatar_path AS user1_avatar, p1.webcam_path AS user1_webcam,
+                p2.user_id AS user2_user_id, p2.display_name AS user2_name, p2.avatar_path AS user2_avatar, p2.webcam_path AS user2_webcam
          FROM game_sessions a
          JOIN game_lobbies gl ON gl.lobby_code = a.lobby_code
          LEFT JOIN participants p ON p.id = a.started_by_participant_id
@@ -48,10 +48,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'started_by_id' => (int)$r['started_by_participant_id'],
         'started_by_name' => $r['started_by_name'] ?: 'Someone',
         'round_number' => max(1, (int)($r['round_number'] ?? 1)),
-        'players' => array_values(array_filter([
-            $r['user1_id'] ? ['participant_id' => (int)$r['user1_id'], 'display_name' => $r['user1_name'] ?: 'Player 1', 'avatar_url' => $r['user1_webcam'] ?: resolve_avatar($r['user1_avatar'] ?? 'preset:Default'), 'seat' => 1] : null,
-            $r['user2_id'] ? ['participant_id' => (int)$r['user2_id'], 'display_name' => $r['user2_name'] ?: 'Player 2', 'avatar_url' => $r['user2_webcam'] ?: resolve_avatar($r['user2_avatar'] ?? 'preset:Default'), 'seat' => 2] : null,
-        ])),
+        'players' => array_map(
+            fn(array $player): array => avatar_visibility_project_payload($pdo, (int)$viewer['user_id'], $player),
+            array_values(array_filter([
+                $r['user1_id'] ? ['participant_id' => (int)$r['user1_id'], 'user_id' => (int)$r['user1_user_id'], 'display_name' => $r['user1_name'] ?: 'Player 1', 'avatar_path' => $r['user1_avatar'], 'avatar_url' => $r['user1_webcam'] ?: resolve_avatar($r['user1_avatar'] ?? 'preset:Default'), 'seat' => 1] : null,
+                $r['user2_id'] ? ['participant_id' => (int)$r['user2_id'], 'user_id' => (int)$r['user2_user_id'], 'display_name' => $r['user2_name'] ?: 'Player 2', 'avatar_path' => $r['user2_avatar'], 'avatar_url' => $r['user2_webcam'] ?: resolve_avatar($r['user2_avatar'] ?? 'preset:Default'), 'seat' => 2] : null,
+            ]))
+        ),
     ], $stmt->fetchAll())]);
 }
 

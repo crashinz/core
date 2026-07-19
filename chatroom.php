@@ -45,6 +45,8 @@ emit_event($pdo, (int)$session['id'], 'participant_join', array_merge([
     'is_owner' => (int)$room['owner_id'] === (int)$user['id'],
     'avatar_path' => $participant['avatar_path'],
     'avatar_url' => resolve_avatar($participant['avatar_path']),
+    'avatar_source_width_px' => max(1, (int)($participant['avatar_source_width_px'] ?? 150)),
+    'avatar_source_height_px' => max(1, (int)($participant['avatar_source_height_px'] ?? 150)),
     'avatar_orientation' => avatar_orientation_normalize($participant['avatar_orientation'] ?? null),
     'avatar_orientation_version' => max(1, (int)($participant['avatar_orientation_version'] ?? 1)),
     'aura_effect' => $participant['aura_effect'] ?? null,
@@ -712,6 +714,8 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="ctx-webcam-size" type="button">Webcam Size</button>
   <button id="ctx-webcam-visibility" type="button">Hide this webcam for me</button>
   <button id="ctx-webcam-receive" type="button">Stop receiving this webcam</button>
+  <button id="ctx-avatar-visibility" type="button">Hide this avatar until it changes</button>
+  <button id="ctx-avatar-user-visibility" type="button">Hide avatars from this user</button>
   <button id="ctx-dm" type="button">Send DM</button>
   <button id="ctx-interact" type="button">Interact</button>
   <button id="ctx-block" class="danger" type="button">Block</button>
@@ -802,6 +806,21 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       <p class="settings-choice-description">Stops inbound webcam video while keeping voice available.</p>
     </div>
     <p class="settings-choice-description webcam-capability-notice" id="webcam-capability-notice" hidden>Webcam use is disabled for this installation.</p>
+    <section class="hidden-avatar-options" aria-labelledby="hidden-avatar-options-title">
+      <div class="settings-choice-name" id="hidden-avatar-options-title">Hidden Avatars</div>
+      <p class="settings-choice-description">These choices affect only what you see.</p>
+      <div id="hidden-avatar-list" class="hidden-avatar-list"></div>
+      <div id="hidden-avatar-empty" class="minor">No avatars are hidden.</div>
+      <button class="btn" id="hidden-avatar-show-all" type="button" hidden>Show all</button>
+      <div class="hidden-avatar-confirm" id="hidden-avatar-confirm" hidden>
+        <span>Show every avatar you have hidden?</span>
+        <div>
+          <button class="btn" id="hidden-avatar-show-all-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="hidden-avatar-show-all-confirm" type="button">Show all</button>
+        </div>
+      </div>
+      <div class="minor" id="hidden-avatar-status" role="status" aria-live="polite"></div>
+    </section>
     <div class="chat-options-actions">
       <button class="btn" id="webcam-options-reset" type="button">Reset webcam options</button>
     </div>

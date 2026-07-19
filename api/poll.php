@@ -61,7 +61,7 @@ $mapRoomEvent = function(array $event) use ($pdo, $sessionId, $me): array {
     return [
         'id' => (int)$event['id'],
         'type' => (string)$event['type'],
-        'payload' => $payload,
+        'payload' => avatar_visibility_project_payload($pdo, (int)$me['user_id'], $payload),
     ];
 };
 $communityStmt = $pdo->prepare(
@@ -153,10 +153,19 @@ for ($i = 0; $i < $pollAttempts; $i++) {
         'community_events' => array_map(fn($e) => [
             'id' => (int)$e['id'],
             'type' => $e['type'],
-            'payload' => json_decode($e['payload'], true) ?: [],
+            'payload' => avatar_visibility_project_payload(
+                $pdo,
+                (int)$me['user_id'],
+                json_decode($e['payload'], true) ?: []
+            ),
         ], $communityRows),
+        'avatar_visibility_preferences' => avatar_visibility_preferences($pdo, (int)$me['user_id']),
         ]);
     }
     usleep($pollSleepMicroseconds);
 }
-json_out(['events' => [], 'community_events' => []]);
+json_out([
+    'events' => [],
+    'community_events' => [],
+    'avatar_visibility_preferences' => avatar_visibility_preferences($pdo, (int)$me['user_id']),
+]);

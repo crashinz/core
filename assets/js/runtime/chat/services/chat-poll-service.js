@@ -277,6 +277,8 @@ export class ChatPollService {
 
             this.#nextPollDelay = context.pollInterval ?? 25;
 
+            context.handleProjection?.(data);
+
             (data.events || []).forEach(
                 event => this.#routeRoomEvent(event)
             );

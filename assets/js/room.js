@@ -146,6 +146,8 @@ const avatarFileInput = document.getElementById('avatar-file-input');
 const ctxToggleWebcam = document.getElementById('ctx-toggle-webcam');
 const ctxWebcamVisibility = document.getElementById('ctx-webcam-visibility');
 const ctxWebcamReceive = document.getElementById('ctx-webcam-receive');
+const ctxAvatarVisibility = document.getElementById('ctx-avatar-visibility');
+const ctxAvatarUserVisibility = document.getElementById('ctx-avatar-user-visibility');
 const ctxAuras = document.getElementById('ctx-auras');
 const ctxOrientationWrap = document.getElementById('ctx-orientation-wrap');
 const ctxOrientation = document.getElementById('ctx-orientation');
@@ -214,6 +216,7 @@ let voiceNoteRecorder = null;
 let voiceNoteChunks = [];
 let voiceNoteStream = null;
 let voiceNoteCancelled = false;
+let lastVoiceParticipants = [];
 let latestAppVersion = '';
 const APP_VERSION_CACHE_KEY = 'chatspace_seen_version';
 const SESSION_LOCK_PREFIX = 'chatspace_session_locked_';
@@ -336,6 +339,8 @@ async function initializeAvatarRuntime() {
   configureAvatarRelationshipManagement();
   configureAvatarDragController();
   configureAvatarAura();
+  configureAvatarVisibility();
+  configureParticipantActionCatalog();
   configureChatMessageRenderer();
   configureChatPrivateChats();
   configureChatEventRouter();
@@ -557,6 +562,51 @@ function configureAvatarAura() {
   });
 }
 
+function configureAvatarVisibility() {
+  avatarRuntime?.visibility?.configure({
+    mutate(body) {
+      return apiPost('/api/avatar_visibility_preferences.php', body);
+    },
+    onMutationResult(result) {
+      applyRevealedAvatarSources(result?.revealedAvatars || []);
+    },
+    onChange(change) {
+      reconcileAvatarVisibility(change);
+    },
+  });
+}
+
+function applyRevealedAvatarSources(revealed = []) {
+  const byUser = new Map(revealed.map(item => [Number(item.user_id), item]));
+  if (!byUser.size) return;
+  participants.forEach(person => {
+    const source = byUser.get(Number(person.user_id));
+    if (source) participants.update(person.id, source);
+  });
+  chatMessageState()?.forEachChannelMessage?.(message => {
+    const source = byUser.get(Number(message.user_id));
+    if (source) Object.assign(message, source);
+    (message.reactions || []).forEach(reaction => {
+      const reactionSource = byUser.get(Number(reaction.user_id));
+      if (reactionSource) Object.assign(reaction, reactionSource);
+    });
+  });
+  (cfg?.dmUsers || []).forEach(user => {
+    const source = byUser.get(Number(user.id));
+    if (source) Object.assign(user, source);
+  });
+}
+
+function configureParticipantActionCatalog() {
+  roomRuntime?.participantActions?.configure({
+    getViewer: () => participants.get(Number(cfg?.myParticipantId)) || null,
+    getAvatarVisibility: participant => avatarVisibilityFor(participant),
+    getWebcamPolicy: participant => webcamViewerPolicyFor(participant),
+    isBlocked: isUserBlocked,
+    webcamAllowed: webcamUseAllowed,
+  });
+}
+
 function configureChatMessageRenderer() {
   chatRuntime?.renderer?.configure({
     document,
@@ -573,12 +623,14 @@ function configureChatMessageRenderer() {
     fullTimestamp,
     parseServerDate,
     messageAvatarUrl,
+    avatarPresentationHtml,
     participantRoleClass,
     participantRoleLabel,
     displayNameFor,
     messageVisible,
     gestureFromMessage,
     openMessageActionMenu,
+    openParticipantActionMenu: openAvatarContextMenu,
     applyReaction,
   });
 }
@@ -851,6 +903,12 @@ function configureRoomEventRouter() {
       const incomingSizeVersion = Number(payload.avatar_size_version || currentSizeVersion);
       const staleSizeProjection = incomingSizeVersion < currentSizeVersion;
       const nextSizeProjection = staleSizeProjection ? {} : {
+        avatar_source_width_px: payload.avatar_source_width_px === undefined
+          ? person.avatar_source_width_px
+          : payload.avatar_source_width_px,
+        avatar_source_height_px: payload.avatar_source_height_px === undefined
+          ? person.avatar_source_height_px
+          : payload.avatar_source_height_px,
         avatar_display_size_px: payload.avatar_display_size_px === undefined
           ? person.avatar_display_size_px
           : payload.avatar_display_size_px,
@@ -1166,6 +1224,8 @@ function configureGameRuntime() {
     appUrl,
     mediaUrl,
     esc,
+    avatarPresentationHtml,
+    avatarVisibilityFor,
     getConfig: () => cfg,
     getCsrfToken: () => CSRF_TOKEN,
     activeChatKey,
@@ -1329,6 +1389,10 @@ function configureChatPoll() {
     },
     handleCommunityEvent(event) {
       roomRuntime?.events?.routeCommunityEvent(event);
+    },
+    handleProjection(data) {
+      const projection = data?.avatar_visibility_preferences;
+      if (projection) avatarRuntime?.visibility?.applyServerProjection(projection, 'room-poll');
     },
     warnError(error, retry = {}) {
       recordRuntimeDiagnostic('requests', 'room-poll-retry-scheduled', {
@@ -1528,6 +1592,7 @@ function urlPreviewHtml(preview) {
 
 function avatarUrl(p) {
   if (!p) return cfg.avatarPresets.Default;
+  if (avatarVisibilityFor(p).hidden) return '';
   if (isUserBlocked(p.user_id)) return appUrl('/assets/images/baghead.png');
   if (p.avatar_url && !p.avatar_url.startsWith('data:')) {
     const url = mediaUrl(p.avatar_url);
@@ -1536,6 +1601,23 @@ function avatarUrl(p) {
   if (p.avatar_url) return p.avatar_url;
   if (p.avatar_path?.startsWith('preset:')) return cfg.avatarPresets[p.avatar_path.slice(7)] || cfg.avatarPresets.Default;
   return mediaUrl(p.avatar_path || cfg.avatarPresets.Default);
+}
+
+function avatarVisibilityFor(subject, own = false) {
+  return avatarRuntime?.visibility?.effectiveFor(subject, {
+    own: own || Number(subject?.user_id || 0) === Number(cfg?.myUserId || 0),
+  }) || Object.freeze({ hidden: Boolean(subject?.avatar_hidden), exact: false, user: false, scope: null, notice: null });
+}
+
+function avatarPresentationHtml(subject, options = {}) {
+  const policy = avatarVisibilityFor(subject, options.own);
+  const className = esc(options.className || '');
+  const displayName = esc(options.displayName || subject?.display_name || 'User');
+  if (policy.hidden) {
+    return `<span class="avatar-hidden-placeholder ${className}" role="img" aria-label="Avatar hidden by you" title="${esc(policy.notice || 'Avatar hidden by you')}"><span>Avatar hidden by you</span></span>`;
+  }
+  const source = options.source || avatarUrl(subject);
+  return `<img${className ? ` class="${className}"` : ''} src="${esc(source || cfg?.avatarPresets?.Default || '')}" alt="${displayName}"${options.title === false ? '' : ` title="${displayName}"`}>`;
 }
 
 function isWebcamAssetUrl(url) {
@@ -1829,6 +1911,7 @@ function syncLocalWebcamPreview(reason = 'local-capture-sync') {
 
 function messageAvatarUrl(msg, participant = null) {
   if (participant) return avatarUrl(participant);
+  if (avatarVisibilityFor(msg).hidden) return '';
   if (isUserBlocked(msg?.user_id)) return appUrl('/assets/images/baghead.png');
   if (msg?.avatar_url) return mediaUrl(msg.avatar_url);
   if (msg?.avatar_path?.startsWith('preset:')) return cfg.avatarPresets[msg.avatar_path.slice(7)] || cfg.avatarPresets.Default;
@@ -2125,7 +2208,7 @@ function runAvatarPixelEffect(person, mode = 'in') {
 
 async function renderParticipantWhenReady(p, options = {}) {
   const prepared = Object.assign({}, p);
-  await preloadImage(avatarUrl(prepared));
+  if (!avatarVisibilityFor(prepared).hidden) await preloadImage(avatarUrl(prepared));
   renderParticipant(prepared, options);
 }
 
@@ -2158,6 +2241,8 @@ function renderParticipant(p, options = {}) {
     makeDraggable,
     addContextListeners: addAvatarContextListeners,
     avatarSource: avatarUrl(merged),
+    avatarHidden: avatarVisibilityFor(merged).hidden,
+    avatarHiddenNotice: avatarVisibilityFor(merged).notice,
     orientation: normalizeAvatarOrientation(merged.avatar_orientation),
     displayName: displayNameFor(merged),
     webcam: nowWebcam,
@@ -2510,7 +2595,7 @@ function renderPeople() {
     const game = gameRuntime?.lifecycle?.gameForParticipant(p.id);
     const gameBadge = game ? `<span class="user-game-badge" title="${esc(gameName(game.game_type))}"><img src="${esc(gameIconUrl(game.game_type))}" alt=""></span>` : '';
     const nameIcon = game ? `<img class="person-game-name-icon" src="${esc(gameIconUrl(game.game_type))}" alt="" title="${esc(gameName(game.game_type))}">` : '';
-    return `<span class="user-avatar-wrap"><img src="${esc(avatarUrl(p) || '')}" alt=""><span class="status-dot ${p.online ? 'on' : ''}"></span>${gameBadge}</span><div><strong class="person-name-line">${nameIcon}<span>${esc(displayNameFor(p) || '')}</span></strong><div class="minor">${p.id === cfg.myParticipantId ? 'You' : (p.online ? 'Online' : 'Away')}</div></div>`;
+    return `<span class="user-avatar-wrap">${avatarPresentationHtml(p, { displayName: displayNameFor(p), title: false })}<span class="status-dot ${p.online ? 'on' : ''}"></span>${gameBadge}</span><div><strong class="person-name-line">${nameIcon}<span>${esc(displayNameFor(p) || '')}</span></strong><div class="minor">${p.id === cfg.myParticipantId ? 'You' : (p.online ? 'Online' : 'Away')}</div></div>`;
   };
 people.forEach(p => {
   // optional but safe (prevents flicker states)
@@ -4082,7 +4167,6 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
     ? avatarRuntime?.coordinator?.relationshipEligibility(me, participant)
     : null;
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
-  const webcamPolicy = webcamViewerPolicyFor(participant, isOwn);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
   document.getElementById('ctx-avatar-size').style.display = isOwn ? 'block' : 'none';
   if (ctxOrientationWrap) ctxOrientationWrap.style.display = isOwn ? 'block' : 'none';
@@ -4093,20 +4177,6 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
     ? 'Webcam use is disabled for this installation.'
     : '';
   document.getElementById('ctx-webcam-size').style.display = isOwn && Boolean(webcamIntent || webcamStream) ? 'block' : 'none';
-  if (ctxWebcamVisibility) {
-    ctxWebcamVisibility.style.display = !isOwn ? 'block' : 'none';
-    ctxWebcamVisibility.disabled = !webcamPolicy.webcamActive || !webcamUseAllowed();
-    ctxWebcamVisibility.textContent = !webcamPolicy.show
-      ? 'Show this webcam for me'
-      : 'Hide this webcam for me';
-  }
-  if (ctxWebcamReceive) {
-    ctxWebcamReceive.style.display = !isOwn ? 'block' : 'none';
-    ctxWebcamReceive.disabled = !webcamPolicy.webcamActive || !webcamUseAllowed();
-    ctxWebcamReceive.textContent = !webcamPolicy.receive
-      ? 'Resume receiving this webcam'
-      : 'Stop receiving this webcam';
-  }
   document.getElementById('ctx-dm').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   if (ctxInteract) {
     ctxInteract.style.display = !isOwn ? 'block' : 'none';
@@ -4118,10 +4188,9 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
   document.getElementById('ctx-community-eject').style.display = showHostTools && Boolean(cfg.canCommunityEject) ? 'block' : 'none';
   document.getElementById('ctx-tools-wrap').classList.remove('open');
   ctxOrientationWrap?.classList.remove('open');
-  document.getElementById('ctx-block').style.display = !isOwn && !isBlocked ? 'block' : 'none';
-  document.getElementById('ctx-unblock').style.display = !isOwn && isBlocked ? 'block' : 'none';
   document.getElementById('ctx-manage-relationship').style.display = relationship ? 'block' : 'none';
   document.getElementById('ctx-unlink').style.display = isLinked && !isBlocked ? 'block' : 'none';
+  syncParticipantActionMenu(participant, isOwn);
   ctxToggleWebcam.textContent = (webcamIntent || webcamStream) ? 'Disable Webcam' : 'Enable Webcam';
   syncAvatarOrientationControls(participant);
   ctxMenuReturnFocus = options.returnFocus || null;
@@ -4130,6 +4199,29 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
   if (options.focusMenu) {
     ctxMenu.querySelector('button:not([disabled]):not([style*="display: none"])')?.focus();
   }
+}
+
+function syncParticipantActionButton(button, action, visible = true) {
+  if (!button) return;
+  button.style.display = visible && action?.applicable !== false ? 'block' : 'none';
+  if (!action) return;
+  button.textContent = action.label;
+  button.disabled = Boolean(action.disabled);
+  button.classList.toggle('is-active', Boolean(action.active));
+  button.setAttribute('aria-pressed', action.active ? 'true' : 'false');
+}
+
+function syncParticipantActionMenu(participant, isOwn = false) {
+  const actions = new Map((roomRuntime?.participantActions?.actionsFor(participant) || []).map(action => [action.id, action]));
+  const exact = actions.get('avatar.current-visibility');
+  const user = actions.get('avatar.user-visibility');
+  const block = actions.get('user.block');
+  syncParticipantActionButton(ctxAvatarVisibility, exact, !isOwn);
+  syncParticipantActionButton(ctxAvatarUserVisibility, user, !isOwn);
+  syncParticipantActionButton(ctxWebcamVisibility, actions.get('webcam.presentation'), !isOwn);
+  syncParticipantActionButton(ctxWebcamReceive, actions.get('webcam.receive'), !isOwn);
+  syncParticipantActionButton(document.getElementById('ctx-block'), block, !isOwn && !block?.active);
+  syncParticipantActionButton(document.getElementById('ctx-unblock'), block, !isOwn && Boolean(block?.active));
 }
 
 function closeContextMenu(options = {}) {
@@ -4324,6 +4416,66 @@ function reconcileWebcamViewerPolicy(change = {}) {
   });
 }
 
+function reconcileAvatarVisibility(change = {}) {
+  if (!cfg) return;
+  participants.forEach(person => renderParticipant(person));
+  renderPeople();
+  renderActiveChat();
+  renderHiddenAvatarOptions();
+  gameRuntime?.lifecycle?.loadGames();
+  renderVoiceList(lastVoiceParticipants);
+  if (document.getElementById('locate-modal')?.classList.contains('open')) loadFriends();
+  const snapshot = avatarRuntime?.visibility?.snapshot?.() || { version: 1, entries: [] };
+  recordRuntimeDiagnostic('avatarVisibility', 'viewer-policy-reconciled', {
+    reason: change.reason || 'viewer-policy',
+    preferenceVersion: Number(change.version || snapshot.version || 1),
+    entryCount: Number(change.entryCount ?? snapshot.entries.length),
+  });
+}
+
+function renderHiddenAvatarOptions() {
+  const list = document.getElementById('hidden-avatar-list');
+  const empty = document.getElementById('hidden-avatar-empty');
+  const showAll = document.getElementById('hidden-avatar-show-all');
+  if (!list || !empty || !showAll) return;
+  const entries = avatarRuntime?.visibility?.snapshot?.().entries || [];
+  list.innerHTML = '';
+  entries.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'hidden-avatar-row';
+    const copy = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = entry.displayName;
+    const notice = document.createElement('span');
+    notice.className = 'minor';
+    notice.textContent = entry.notice;
+    copy.append(name, notice);
+    const button = document.createElement('button');
+    button.className = 'btn';
+    button.type = 'button';
+    button.textContent = entry.scope === 'user' ? 'Show avatars from this user' : 'Show this avatar';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const target = { user_id: entry.targetUserId, display_name: entry.displayName };
+        if (entry.scope === 'user') await avatarRuntime?.visibility?.setUserHidden(target, false);
+        else await avatarRuntime?.visibility?.setExactHidden(target, false);
+        const status = document.getElementById('hidden-avatar-status');
+        if (status) status.textContent = 'Avatar shown.';
+      } catch (error) {
+        showWarning(error?.message || 'Avatar visibility could not be changed.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+    row.append(copy, button);
+    list.appendChild(row);
+  });
+  empty.hidden = entries.length > 0;
+  showAll.hidden = entries.length === 0;
+  if (!entries.length) document.getElementById('hidden-avatar-confirm')?.setAttribute('hidden', '');
+}
+
 document.getElementById('room-menu-btn').addEventListener('click', e => {
   e.stopPropagation();
   if (roomMenu.classList.contains('visible')) closeRoomMenu();
@@ -4356,6 +4508,7 @@ function syncChatOptions() {
   if (webcamOptionsReset) webcamOptionsReset.disabled = webcamPreferencesPending;
   const capabilityNotice = document.getElementById('webcam-capability-notice');
   if (capabilityNotice) capabilityNotice.hidden = webcamUseAllowed();
+  renderHiddenAvatarOptions();
 }
 
 async function saveWebcamViewerPreferences({ showWebcams, receiveWebcams, resetOverrides = false }) {
@@ -4407,6 +4560,27 @@ document.getElementById('chat-options-btn')?.addEventListener('click', openChatO
 document.getElementById('chat-options-close')?.addEventListener('click', closeChatOptions);
 chatOptionsModal?.addEventListener('click', event => {
   if (event.target === chatOptionsModal) closeChatOptions();
+});
+document.getElementById('hidden-avatar-show-all')?.addEventListener('click', () => {
+  document.getElementById('hidden-avatar-confirm')?.removeAttribute('hidden');
+  document.getElementById('hidden-avatar-show-all-confirm')?.focus();
+});
+document.getElementById('hidden-avatar-show-all-cancel')?.addEventListener('click', () => {
+  document.getElementById('hidden-avatar-confirm')?.setAttribute('hidden', '');
+});
+document.getElementById('hidden-avatar-show-all-confirm')?.addEventListener('click', async () => {
+  const button = document.getElementById('hidden-avatar-show-all-confirm');
+  button.disabled = true;
+  try {
+    await avatarRuntime?.visibility?.showAll();
+    document.getElementById('hidden-avatar-confirm')?.setAttribute('hidden', '');
+    const status = document.getElementById('hidden-avatar-status');
+    if (status) status.textContent = 'All hidden avatars are visible.';
+  } catch (error) {
+    showWarning(error?.message || 'Hidden avatars could not be reset.');
+  } finally {
+    button.disabled = false;
+  }
 });
 document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
   input.addEventListener('change', event => {
@@ -5366,6 +5540,28 @@ ctxWebcamReceive?.addEventListener('click', () => {
   voiceRuntime?.viewerPolicy?.setParticipantReceive(person.user_id, !policy.receive);
 });
 
+async function setAvatarVisibilityFromMenu(scope) {
+  const person = participants.get(Number(ctxMenuParticipantId));
+  closeContextMenu();
+  if (!person || Number(person.id) === Number(cfg.myParticipantId)) return;
+  const current = avatarVisibilityFor(person);
+  try {
+    if (scope === 'user') {
+      await avatarRuntime?.visibility?.setUserHidden(person, !current.user);
+    } else {
+      await avatarRuntime?.visibility?.setExactHidden(person, !current.exact);
+    }
+    const next = avatarVisibilityFor(person);
+    const status = document.getElementById('hidden-avatar-status');
+    if (status) status.textContent = next.notice || 'Avatar shown.';
+  } catch (error) {
+    showWarning(error?.message || 'Avatar visibility could not be changed.');
+  }
+}
+
+ctxAvatarVisibility?.addEventListener('click', () => setAvatarVisibilityFromMenu('avatar'));
+ctxAvatarUserVisibility?.addEventListener('click', () => setAvatarVisibilityFromMenu('user'));
+
 document.getElementById('ctx-tools')?.addEventListener('click', e => {
   e.stopPropagation();
   ctxOrientationWrap?.classList.remove('open');
@@ -6249,9 +6445,8 @@ async function loadFriends() {
     if (document.getElementById('friend-search').value !== q) return;
     (data.friends || []).forEach(f => {
       const knownParticipant = [...participants.values()].find(p => Number(p.user_id) === Number(f.id));
-      const locateAvatar = knownParticipant
-        ? (knownParticipant.avatarEl?.currentSrc || knownParticipant.avatarEl?.src || avatarUrl(knownParticipant))
-        : mediaUrl(f.avatar_url);
+      const locateSubject = knownParticipant || f;
+      const locateAvatar = knownParticipant ? avatarUrl(knownParticipant) : mediaUrl(f.avatar_url);
       const dmTarget = knownParticipant
         ? { ...f, avatar_url: locateAvatar, avatar_path: knownParticipant.avatar_path }
         : f;
@@ -6262,7 +6457,7 @@ async function loadFriends() {
           ? `<button class="btn locate-action-btn" type="button" disabled aria-label="Room unavailable" title="Room unavailable"><img src="${esc(appUrl('/assets/images/lobby.png'))}" alt=""></button>`
           : `<a class="btn locate-action-btn" href="${esc(appUrl('/chatroom.php?id=' + encodeURIComponent(f.room_id)))}" aria-label="Go to room" title="Go"><img src="${esc(appUrl('/assets/images/lobby.png'))}" alt=""></a>`)
         : '<span class="minor locate-away">Away</span>';
-      row.innerHTML = `<img src="${esc(locateAvatar)}" alt=""><div><strong>${esc(f.display_name)}</strong><div class="minor">${f.room_name ? esc(f.room_name) : 'Not in a room'}</div></div><button class="btn locate-action-btn dm-locate-btn" type="button" aria-label="Send DM" title="DM"><img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""></button>${go}`;
+      row.innerHTML = `${avatarPresentationHtml(locateSubject, { source: locateAvatar, displayName: f.display_name, title: false })}<div><strong>${esc(f.display_name)}</strong><div class="minor">${f.room_name ? esc(f.room_name) : 'Not in a room'}</div></div><button class="btn locate-action-btn dm-locate-btn" type="button" aria-label="Send DM" title="DM"><img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""></button>${go}`;
       row.querySelector('.dm-locate-btn').addEventListener('click', () => {
         document.getElementById('locate-modal').classList.remove('open');
         openDmWithUser(dmTarget);
@@ -6514,6 +6709,7 @@ function voiceControlIcon(kind) {
 
 function renderVoiceList(list, state = voiceRuntime?.media?.getState() || {}) {
   const voiceParticipants = Array.isArray(list) ? list : [];
+  lastVoiceParticipants = voiceParticipants;
   const mutedSelf = Boolean(state.muted);
   const deafenedSelf = Boolean(state.deafened);
   const speakingSelf = Boolean(state.speaking);
@@ -6538,7 +6734,7 @@ function renderVoiceList(list, state = voiceRuntime?.media?.getState() || {}) {
          <button class="voice-control${deafened ? ' active' : ''}" data-voice-deafen type="button" title="${deafened ? 'Undeafen' : 'Deafen'}" aria-label="${deafened ? 'Undeafen' : 'Deafen'}">${voiceControlIcon('headphones')}</button>`
       : `${muted ? `<span class="voice-status-icon active" title="Mic muted">${voiceControlIcon('mic')}</span>` : ''}
          ${deafened ? `<span class="voice-status-icon active" title="Deafened">${voiceControlIcon('headphones')}</span>` : ''}`;
-    row.innerHTML = `<span class="user-avatar-wrap"><img src="${esc(avatarUrl(person))}" alt=""><span class="voice-speaking-dot${speaking ? ' speaking' : ''}"></span></span><div><strong class="person-name-line"><span>${esc(displayNameFor(person))}</span></strong><div class="minor">${own ? 'You' : statusText}</div></div><div class="voice-card-actions">${controls}</div>`;
+    row.innerHTML = `<span class="user-avatar-wrap">${avatarPresentationHtml(person, { own, displayName: displayNameFor(person), title: false })}<span class="voice-speaking-dot${speaking ? ' speaking' : ''}"></span></span><div><strong class="person-name-line"><span>${esc(displayNameFor(person))}</span></strong><div class="minor">${own ? 'You' : statusText}</div></div><div class="voice-card-actions">${controls}</div>`;
     row.querySelector('[data-voice-mute]')?.addEventListener('click', () => setVoiceMuted(!mutedSelf));
     row.querySelector('[data-voice-deafen]')?.addEventListener('click', () => setVoiceDeafened(!deafenedSelf));
     voiceListEl.appendChild(row);
@@ -6549,10 +6745,15 @@ async function bootRoom() {
   await initializeAvatarRuntime();
 
   const roomId = document.body.dataset.roomId;
-  cfg = await runtimeRequestClient.getJson(`/api/room_config.php?id=${encodeURIComponent(roomId)}`, {
+  const roomConfig = await runtimeRequestClient.getJson(`/api/room_config.php?id=${encodeURIComponent(roomId)}`, {
     operation: 'bootstrap-room',
     endpointCategory: 'room-config',
   });
+  avatarRuntime?.visibility?.applyServerProjection(
+    roomConfig.avatarVisibilityPreferences || {},
+    'room-bootstrap'
+  );
+  cfg = roomConfig;
   voiceRuntime?.viewerPolicy?.applyServerProjection({
     capability: cfg.webcamCapability,
     preferences: cfg.webcamViewerPreferences,

@@ -26,8 +26,8 @@ if (!$game) json_out(['error' => 'Game not found'], 404);
 $playerIds = array_filter([(int)($game['user1_id'] ?? 0), (int)($game['user2_id'] ?? 0)]);
 if (!in_array((int)$participant['id'], $playerIds, true)) json_out(['error' => 'Join the game to use game chat'], 403);
 
-$messagePayload = function(array $row): array {
-    return [
+$messagePayload = function(array $row) use ($pdo, $participant): array {
+    return avatar_visibility_project_payload($pdo, (int)$participant['user_id'], [
         'id' => (int)$row['id'],
         'channel' => 'game',
         'lobby_code' => $row['lobby_code'],
@@ -43,7 +43,7 @@ $messagePayload = function(array $row): array {
         'mime_type' => $row['mime_type'] ?? null,
         'original_name' => $row['original_name'] ?? null,
         'sent_at' => $row['sent_at'],
-    ];
+    ]);
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {

@@ -114,11 +114,20 @@ if (!move_uploaded_file($_FILES['avatar']['tmp_name'], $dest)) {
 }
 $public = '/assets/uploads/avatars/' . $file;
 security_assert_storage_destination('avatar_upload', $public);
+$avatarIdentity = avatar_identity_for_source($public, $dest);
+$avatarWidth = max(1, (int)$dims[0]);
+$avatarHeight = max(1, (int)$dims[1]);
 
 try {
     $pdo->beginTransaction();
-    $pdo->prepare('UPDATE users SET avatar_path = ? WHERE id = ?')->execute([$public, (int)$p['user_id']]);
-    $pdo->prepare('UPDATE participants SET avatar_path = ?, webcam_path = NULL, webcam_enabled = 0 WHERE user_id = ?')->execute([$public, (int)$p['user_id']]);
+    avatar_identity_apply(
+        $pdo,
+        (int)$p['user_id'],
+        $public,
+        $avatarIdentity,
+        $avatarWidth,
+        $avatarHeight
+    );
     $pdo->commit();
 } catch (Throwable $error) {
     if ($pdo->inTransaction()) $pdo->rollBack();
@@ -130,6 +139,8 @@ $participantStmt = $pdo->prepare('SELECT * FROM participants WHERE id = ? LIMIT 
 $participantStmt->execute([(int)$p['id']]);
 $updatedParticipant = $participantStmt->fetch() ?: array_merge($p, [
     'avatar_path' => $public,
+    'avatar_source_width_px' => $avatarWidth,
+    'avatar_source_height_px' => $avatarHeight,
     'webcam_path' => null,
     'webcam_enabled' => 0,
 ]);
@@ -138,6 +149,8 @@ emit_event($pdo, $sessionId, 'avatar', array_merge([
     'participant_id' => (int)$p['id'],
     'avatar_path' => $public,
     'avatar_url' => $public,
+    'avatar_source_width_px' => $avatarWidth,
+    'avatar_source_height_px' => $avatarHeight,
     'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
     'avatar_orientation_version' => max(1, (int)($updatedParticipant['avatar_orientation_version'] ?? 1)),
     'webcam_path' => null,
@@ -148,6 +161,8 @@ json_out([
     'ok' => true,
     'avatar_path' => $public,
     'avatar_url' => $public,
+    'avatar_source_width_px' => $avatarWidth,
+    'avatar_source_height_px' => $avatarHeight,
     'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
     'avatar_orientation_version' => max(1, (int)($updatedParticipant['avatar_orientation_version'] ?? 1)),
     'preferences' => avatar_size_preferences_public($pdo, $updatedParticipant),

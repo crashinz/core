@@ -40,48 +40,64 @@ function media_signal_register_client(PDO $pdo, int $sessionId, int $participant
         return ['epoch' => $clientEpoch, 'started_at' => (string)$current['started_at'], 'refreshed' => false];
     }
 
-    return db_with_sqlite_lock_retry($pdo, function () use (
-        $pdo, $sessionId, $participantId, $clientEpoch, $now, $current, $select
-    ): array {
-        $startedAt = $current && hash_equals((string)$current['client_epoch'], $clientEpoch)
-            ? (string)$current['started_at']
-            : $now;
-        if (!$current) {
-            try {
-                $pdo->prepare(
-                    'INSERT INTO media_signal_clients
-                        (participant_id, session_id, client_epoch, started_at, updated_at)
-                     VALUES (?,?,?,?,?)'
-                )->execute([$participantId, $sessionId, $clientEpoch, $startedAt, $now]);
-                return ['epoch' => $clientEpoch, 'started_at' => $startedAt, 'refreshed' => true];
-            } catch (PDOException $error) {
-                if (!in_array((string)$error->getCode(), ['19', '23000'], true)) throw $error;
+    try {
+        return db_with_sqlite_lock_retry($pdo, function () use (
+            $pdo, $sessionId, $participantId, $clientEpoch, $now, $current, $select
+        ): array {
+            $startedAt = $current && hash_equals((string)$current['client_epoch'], $clientEpoch)
+                ? (string)$current['started_at']
+                : $now;
+            if (!$current) {
+                try {
+                    $pdo->prepare(
+                        'INSERT INTO media_signal_clients
+                            (participant_id, session_id, client_epoch, started_at, updated_at)
+                         VALUES (?,?,?,?,?)'
+                    )->execute([$participantId, $sessionId, $clientEpoch, $startedAt, $now]);
+                    return ['epoch' => $clientEpoch, 'started_at' => $startedAt, 'refreshed' => true];
+                } catch (PDOException $error) {
+                    if (!in_array((string)$error->getCode(), ['19', '23000'], true)) throw $error;
+                }
+            } else {
+                $update = $pdo->prepare(
+                    'UPDATE media_signal_clients
+                        SET client_epoch = ?, started_at = ?, updated_at = ?
+                      WHERE participant_id = ? AND session_id = ?
+                        AND client_epoch = ? AND updated_at = ?'
+                );
+                $update->execute([
+                    $clientEpoch, $startedAt, $now, $participantId, $sessionId,
+                    (string)$current['client_epoch'], (string)$current['updated_at'],
+                ]);
+                if ($update->rowCount() === 1) {
+                    return ['epoch' => $clientEpoch, 'started_at' => $startedAt, 'refreshed' => true];
+                }
             }
-        } else {
-            $update = $pdo->prepare(
-                'UPDATE media_signal_clients
-                    SET client_epoch = ?, started_at = ?, updated_at = ?
-                  WHERE participant_id = ? AND session_id = ?
-                    AND client_epoch = ? AND updated_at = ?'
-            );
-            $update->execute([
-                $clientEpoch, $startedAt, $now, $participantId, $sessionId,
-                (string)$current['client_epoch'], (string)$current['updated_at'],
-            ]);
-            if ($update->rowCount() === 1) {
-                return ['epoch' => $clientEpoch, 'started_at' => $startedAt, 'refreshed' => true];
-            }
-        }
 
-        $select->execute([$participantId, $sessionId]);
-        $resolved = $select->fetch() ?: null;
-        if (!$resolved) throw new RuntimeException('Media client lease could not be established.');
+            $select->execute([$participantId, $sessionId]);
+            $resolved = $select->fetch() ?: null;
+            if (!$resolved) throw new RuntimeException('Media client lease could not be established.');
+            return [
+                'epoch' => (string)$resolved['client_epoch'],
+                'started_at' => (string)$resolved['started_at'],
+                'refreshed' => false,
+            ];
+        }, 'media-client-lease');
+    } catch (Throwable $error) {
+        $leaseCutoff = gmdate('Y-m-d H:i:s', time() - CHATSPACE_MEDIA_CLIENT_LEASE_SECONDS);
+        if (!db_is_transient_lock_error($error)
+            || !$current
+            || !hash_equals((string)$current['client_epoch'], $clientEpoch)
+            || (string)$current['updated_at'] < $leaseCutoff) {
+            throw $error;
+        }
         return [
-            'epoch' => (string)$resolved['client_epoch'],
-            'started_at' => (string)$resolved['started_at'],
+            'epoch' => $clientEpoch,
+            'started_at' => (string)$current['started_at'],
             'refreshed' => false,
+            'refresh_deferred' => true,
         ];
-    }, 'media-client-lease');
+    }
 }
 
 function media_signal_recipient_epoch(PDO $pdo, int $sessionId, int $participantId): ?string

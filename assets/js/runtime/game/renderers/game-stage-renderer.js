@@ -170,7 +170,11 @@ export class GameStageRenderer {
 
             const players =
                 (game.players || []).map(player =>
-                    `<img src="${this.#esc(this.#mediaUrl(player.avatar_url))}" alt="${this.#esc(player.display_name)}" title="${this.#esc(player.display_name)}">`
+                    this.#context?.avatarPresentationHtml?.(player, {
+                        source: this.#mediaUrl(player.avatar_url),
+                        displayName: player.display_name,
+                        className: "game-row-avatar"
+                    }) || `<img src="${this.#esc(this.#mediaUrl(player.avatar_url))}" alt="${this.#esc(player.display_name)}">`
                 ).join("");
 
             const action =
@@ -321,11 +325,15 @@ export class GameStageRenderer {
 
             if (img) {
 
-                img.src =
-                    this.#mediaUrl(
-                        player?.avatar_url ||
-                        this.#context?.appUrl?.("/assets/images/baghead.png")
-                    );
+                const hidden = Boolean(player && this.#context?.avatarVisibilityFor?.(player)?.hidden);
+                img.classList.toggle("avatar-hidden-placeholder", hidden);
+                img.alt = hidden ? "Avatar hidden by you" : (player?.display_name || "Waiting");
+                img.title = hidden ? "Avatar hidden by you" : (player?.display_name || "");
+                if (hidden) img.removeAttribute("src");
+                else img.src = this.#mediaUrl(
+                    player?.avatar_url ||
+                    this.#context?.appUrl?.("/assets/images/baghead.png")
+                );
 
             }
 

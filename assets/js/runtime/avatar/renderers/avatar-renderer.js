@@ -75,12 +75,21 @@
 //--------------------------------------------------
 
 const DEFAULT_AVATAR_FALLBACK_SIZE = 150;
+const HIDDEN_AVATAR_LABEL = "Avatar hidden by you";
 const AVATAR_ORIENTATION_SCALE = Object.freeze({
     original: "",
     "flip-horizontal": "-1 1",
     "flip-vertical": "1 -1",
     "flip-both": "-1 -1"
 });
+
+function hiddenAvatarPlaceholderSource(participant = {}) {
+    const width = Math.max(1, Number(participant.avatar_source_width_px || DEFAULT_AVATAR_FALLBACK_SIZE));
+    const height = Math.max(1, Number(participant.avatar_source_height_px || DEFAULT_AVATAR_FALLBACK_SIZE));
+    const fontSize = Math.max(9, Math.min(14, Math.round(Math.min(width, height) / 10)));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#2b2e36"/><text x="50%" y="48%" fill="#f3f4f6" font-family="Arial,sans-serif" font-size="${fontSize}" text-anchor="middle">Avatar hidden</text><text x="50%" y="62%" fill="#f3f4f6" font-family="Arial,sans-serif" font-size="${fontSize}" text-anchor="middle">by you</text></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 
 //--------------------------------------------------
 // Avatar Renderer
@@ -343,12 +352,17 @@ export class AvatarRenderer {
                 }
             );
 
+        const avatarHidden = Boolean(options.avatarHidden);
+        const renderedSource = avatarHidden
+            ? hiddenAvatarPlaceholderSource(participant)
+            : options.avatarSource;
+
         this.setAvatarImageSource(
             image,
-            options.avatarSource,
+            renderedSource,
             {
                 flip:
-                    Boolean(options.flipImage),
+                    Boolean(options.flipImage && !avatarHidden),
 
                 window:
                     options.window
@@ -358,6 +372,10 @@ export class AvatarRenderer {
             image,
             options.orientation
         );
+        image.classList.toggle("avatar-hidden-by-viewer", avatarHidden);
+        image.alt = avatarHidden ? HIDDEN_AVATAR_LABEL : "";
+        image.title = avatarHidden ? String(options.avatarHiddenNotice || HIDDEN_AVATAR_LABEL) : "";
+        image.setAttribute("aria-label", avatarHidden ? HIDDEN_AVATAR_LABEL : `${options.displayName || "User"} avatar`);
 
         this.#notifyRenderedSizeAfterImageLoad(
             participant,
@@ -366,7 +384,7 @@ export class AvatarRenderer {
                 previousSource,
                 previousDimensions,
                 nextSource:
-                    options.avatarSource,
+                    renderedSource,
                 fallbackSize:
                     options.fallbackSize,
                 visualMaxSize:
@@ -453,11 +471,13 @@ export class AvatarRenderer {
         }
 
         const naturalWidth =
+            Number(participant?.avatar_source_width_px) ||
             Number(image?.naturalWidth) ||
             Number(image?.videoWidth) ||
             fallbackSize;
 
         const naturalHeight =
+            Number(participant?.avatar_source_height_px) ||
             Number(image?.naturalHeight) ||
             Number(image?.videoHeight) ||
             fallbackSize;

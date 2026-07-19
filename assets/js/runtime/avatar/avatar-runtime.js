@@ -127,6 +127,12 @@ import {
 
 import {
 
+    AvatarVisibilityService
+
+} from "./services/avatar-visibility-service.js";
+
+import {
+
     AvatarTransitionService
 
 } from "./services/avatar-transition-service.js";
@@ -193,6 +199,8 @@ export class AvatarRuntime extends CoreModule {
     #state = null;
 
     #displayPolicy = null;
+
+    #visibility = null;
 
     /**
      * Relationship runtime component.
@@ -303,6 +311,12 @@ export class AvatarRuntime extends CoreModule {
     get displayPolicy() {
 
         return this.#displayPolicy;
+
+    }
+
+    get visibility() {
+
+        return this.#visibility;
 
     }
 
@@ -467,6 +481,9 @@ export class AvatarRuntime extends CoreModule {
             displayPolicy:
                 this.#displayPolicy?.getDiagnostics() ?? null,
 
+            visibility:
+                this.#visibility?.getDiagnostics() ?? null,
+
             relationships:
                 this.#relationships?.getDiagnostics() ?? null,
 
@@ -522,6 +539,8 @@ export class AvatarRuntime extends CoreModule {
         this.#createState();
 
         this.#createDisplayPolicy();
+
+        this.#createVisibility();
 
         this.#createRelationships();
 
@@ -599,6 +618,8 @@ export class AvatarRuntime extends CoreModule {
         this.#relationships?.destroy();
 
         this.#displayPolicy?.destroy();
+
+        this.#visibility?.destroy();
 
         this.#state?.destroy();
 
@@ -686,6 +707,17 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#displayPolicy.initialize();
+
+    }
+
+    #createVisibility() {
+
+        this.#visibility =
+            new AvatarVisibilityService(
+                this
+            );
+
+        this.#visibility.initialize();
 
     }
 

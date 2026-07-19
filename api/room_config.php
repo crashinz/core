@@ -96,6 +96,8 @@ $participants = array_map(function(array $p) use ($roomOwnerId, $pdo): array {
         'is_owner' => (int)$p['user_id'] === $roomOwnerId,
         'avatar_path' => $p['avatar_path'],
         'avatar_url' => resolve_avatar($p['avatar_path']),
+        'avatar_source_width_px' => max(1, (int)($p['avatar_source_width_px'] ?? 150)),
+        'avatar_source_height_px' => max(1, (int)($p['avatar_source_height_px'] ?? 150)),
         'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
         'avatar_orientation_version' => max(1, (int)($p['avatar_orientation_version'] ?? 1)),
         'aura_effect' => $p['aura_effect'] ?? null,
@@ -309,6 +311,7 @@ if ($dmPartnerIds) {
     $stmt->execute($dmPartnerIds);
     $dmUsers = array_map(fn(array $u): array => [
         'id' => (int)$u['id'],
+        'user_id' => (int)$u['id'],
         'display_name' => $u['display_name'],
         'avatar_url' => resolve_avatar($u['avatar_path']),
     ], $stmt->fetchAll());
@@ -328,7 +331,7 @@ $relationships = avatar_relationship_payloads_for_session(
 $relationshipRepairDiagnostics = avatar_relationship_repair($pdo, ['session_id' => (int)$session['id'], 'apply' => false]);
 $relationshipDivergence = $relationshipRepairDiagnostics['actions'] ?? [];
 
-json_out([
+$roomConfig = [
     'roomId' => (int)$room['id'],
     'roomPublicId' => $room['public_id'],
     'roomName' => $room['name'],
@@ -382,10 +385,12 @@ json_out([
     'avatarSizePolicy' => avatar_size_policy($pdo),
     'webcamCapability' => webcam_capability($pdo),
     'webcamViewerPreferences' => webcam_viewer_preferences($pdo, (int)$user['id']),
+    'avatarVisibilityPreferences' => avatar_visibility_preferences($pdo, (int)$user['id']),
     'backgroundPath' => $room['background_path'],
     'backgroundMime' => $room['background_mime'],
     'backgroundTile' => !empty($room['import_url']) && !empty($room['background_path']) && !str_starts_with((string)$room['background_mime'], 'video/'),
     'importUrl' => $room['import_url'] ?? null,
     'importLayout' => !empty($room['import_layout_json']) ? json_decode((string)$room['import_layout_json'], true) : null,
     'musicPlaylist' => !empty($room['music_playlist_json']) ? json_decode((string)$room['music_playlist_json'], true) : [],
-]);
+];
+json_out(avatar_visibility_project_payload($pdo, (int)$user['id'], $roomConfig));

@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 const CHATSPACE_CONFIG = __DIR__ . '/config.php';
 const CHATSPACE_DEFAULT_SQLITE = __DIR__ . '/../db/chatspace.sqlite';
-const CHATSPACE_SCHEMA_VERSION = '2026-07-18-webcam-viewer-policy';
+const CHATSPACE_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 require_once __DIR__ . '/security_policy.php';
@@ -14,6 +14,7 @@ if (is_file(CHATSPACE_CONFIG)) {
 }
 
 require_once __DIR__ . '/avatar_size_policy.php';
+require_once __DIR__ . '/avatar_visibility_policy.php';
 require_once __DIR__ . '/webcam_policy.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/runtime_issue_service.php';
@@ -170,6 +171,8 @@ function mysqlize_schema(string $schema): string {
         'role' => 'VARCHAR(32)',
         'avatar_path' => 'VARCHAR(512)',
         'avatar_url' => 'VARCHAR(512)',
+        'avatar_identity' => 'VARCHAR(64)',
+        'preference_key' => 'VARCHAR(191)',
         'avatar_orientation' => 'VARCHAR(32)',
         'background_path' => 'VARCHAR(512)',
         'background_mime' => 'VARCHAR(128)',
@@ -396,6 +399,10 @@ function migrate(PDO $pdo): void {
             display_name TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
             avatar_path TEXT DEFAULT 'preset:Default',
+            avatar_identity TEXT DEFAULT NULL,
+            avatar_source_width_px INTEGER DEFAULT NULL,
+            avatar_source_height_px INTEGER DEFAULT NULL,
+            avatar_visibility_version INTEGER NOT NULL DEFAULT 1,
             avatar_orientation TEXT NOT NULL DEFAULT 'original',
             avatar_orientation_version INTEGER NOT NULL DEFAULT 1,
             avatar_display_size_px INTEGER DEFAULT NULL,
@@ -455,6 +462,9 @@ function migrate(PDO $pdo): void {
             email_changed_at TEXT DEFAULT NULL,
             password_changed_at TEXT DEFAULT NULL,
             avatar_path TEXT DEFAULT 'preset:Default',
+            avatar_identity TEXT DEFAULT NULL,
+            avatar_source_width_px INTEGER DEFAULT NULL,
+            avatar_source_height_px INTEGER DEFAULT NULL,
             avatar_orientation TEXT NOT NULL DEFAULT 'original',
             avatar_orientation_version INTEGER NOT NULL DEFAULT 1,
             avatar_display_size_px INTEGER DEFAULT NULL,
@@ -783,6 +793,23 @@ function migrate(PDO $pdo): void {
             value TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS avatar_hidden_preferences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            viewer_user_id INTEGER NOT NULL,
+            target_user_id INTEGER NOT NULL,
+            scope TEXT NOT NULL,
+            avatar_identity TEXT DEFAULT NULL,
+            preference_key TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(viewer_user_id, target_user_id, preference_key),
+            FOREIGN KEY(viewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(target_user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_avatar_hidden_preferences_viewer
+            ON avatar_hidden_preferences(viewer_user_id, target_user_id, scope);
+
         CREATE TABLE IF NOT EXISTS runtime_maintenance_leases (
             task_key TEXT PRIMARY KEY,
             owner_token TEXT NOT NULL,
@@ -955,6 +982,10 @@ function migrate(PDO $pdo): void {
             'email_changed_at' => 'DATETIME DEFAULT NULL',
             'password_changed_at' => 'DATETIME DEFAULT NULL',
             'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
+            'avatar_identity' => 'VARCHAR(64) DEFAULT NULL',
+            'avatar_source_width_px' => 'INTEGER DEFAULT NULL',
+            'avatar_source_height_px' => 'INTEGER DEFAULT NULL',
+            'avatar_visibility_version' => 'INTEGER NOT NULL DEFAULT 1',
             'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -985,6 +1016,9 @@ function migrate(PDO $pdo): void {
         }
         foreach ([
             'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
+            'avatar_identity' => 'VARCHAR(64) DEFAULT NULL',
+            'avatar_source_width_px' => 'INTEGER DEFAULT NULL',
+            'avatar_source_height_px' => 'INTEGER DEFAULT NULL',
             'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
             'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -1049,6 +1083,7 @@ function migrate(PDO $pdo): void {
         gesture_catalog_install_schema($pdo);
         seed_app_settings($pdo);
         seed_link_icon_catalog($pdo);
+        avatar_identity_backfill($pdo);
         db_record_schema_current($pdo);
         return;
     }
@@ -1078,6 +1113,10 @@ function migrate(PDO $pdo): void {
         'email_changed_at' => 'TEXT DEFAULT NULL',
         'password_changed_at' => 'TEXT DEFAULT NULL',
         'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
+        'avatar_identity' => 'TEXT DEFAULT NULL',
+        'avatar_source_width_px' => 'INTEGER DEFAULT NULL',
+        'avatar_source_height_px' => 'INTEGER DEFAULT NULL',
+        'avatar_visibility_version' => 'INTEGER NOT NULL DEFAULT 1',
         'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -1149,6 +1188,9 @@ function migrate(PDO $pdo): void {
     }
     foreach ([
         'avatar_orientation_version' => 'INTEGER NOT NULL DEFAULT 1',
+        'avatar_identity' => 'TEXT DEFAULT NULL',
+        'avatar_source_width_px' => 'INTEGER DEFAULT NULL',
+        'avatar_source_height_px' => 'INTEGER DEFAULT NULL',
         'avatar_display_size_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_width_px' => 'INTEGER DEFAULT NULL',
         'webcam_display_height_px' => 'INTEGER DEFAULT NULL',
@@ -1310,6 +1352,7 @@ function migrate(PDO $pdo): void {
         $update->execute([uuid_v4(), (int)$row['id']]);
     }
     migrate_avatar_relationship_group_schema($pdo);
+    avatar_identity_backfill($pdo);
     db_record_schema_current($pdo);
 }
 
@@ -6973,6 +7016,10 @@ function resolve_session_id(PDO $pdo, mixed $sessionKey): int {
 }
 
 function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
+    $avatarIdentity = avatar_identity_ensure_user($pdo, (int)$user['id']);
+    $user['avatar_identity'] = $avatarIdentity['identity'];
+    $user['avatar_source_width_px'] = $avatarIdentity['width'];
+    $user['avatar_source_height_px'] = $avatarIdentity['height'];
     $stmt = $pdo->prepare('SELECT * FROM participants WHERE session_id = ? AND user_id = ? ORDER BY id ASC');
     $stmt->execute([$sessionId, (int)$user['id']]);
     $matches = $stmt->fetchAll();
@@ -6984,10 +7031,16 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
         $participantSize = avatar_size_preferences_from_row($participant);
         if (avatar_orientation_normalize($participant['avatar_orientation'] ?? null) !== $userOrientation
             || max(1, (int)($participant['avatar_orientation_version'] ?? 1)) !== $userOrientationVersion
+            || (string)($participant['avatar_identity'] ?? '') !== (string)$user['avatar_identity']
+            || (int)($participant['avatar_source_width_px'] ?? 0) !== (int)$user['avatar_source_width_px']
+            || (int)($participant['avatar_source_height_px'] ?? 0) !== (int)$user['avatar_source_height_px']
             || $participantSize !== $userSize) {
             $pdo->prepare(
-                'UPDATE participants SET avatar_orientation = ?, avatar_orientation_version = ?, avatar_display_size_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
+                'UPDATE participants SET avatar_identity = ?, avatar_source_width_px = ?, avatar_source_height_px = ?, avatar_orientation = ?, avatar_orientation_version = ?, avatar_display_size_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
             )->execute([
+                $user['avatar_identity'],
+                $user['avatar_source_width_px'],
+                $user['avatar_source_height_px'],
                 $userOrientation,
                 $userOrientationVersion,
                 $userSize['avatarDisplayPreferencePx'],
@@ -6996,6 +7049,9 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
                 $userSize['displayPreferenceVersion'],
                 (int)$participant['id'],
             ]);
+            $participant['avatar_identity'] = $user['avatar_identity'];
+            $participant['avatar_source_width_px'] = $user['avatar_source_width_px'];
+            $participant['avatar_source_height_px'] = $user['avatar_source_height_px'];
             $participant['avatar_orientation'] = $userOrientation;
             $participant['avatar_orientation_version'] = $userOrientationVersion;
             $participant['avatar_display_size_px'] = $userSize['avatarDisplayPreferencePx'];
@@ -7026,13 +7082,16 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     $orientationVersion = max(1, (int)($user['avatar_orientation_version'] ?? 1));
     $size = avatar_size_preferences_from_row($user);
     $pdo->prepare(
-        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_orientation, avatar_orientation_version, avatar_display_size_px, webcam_display_width_px, webcam_display_height_px, avatar_size_version, aura_effect, join_token, position_x, position_y, last_seen_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
+        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_identity, avatar_source_width_px, avatar_source_height_px, avatar_orientation, avatar_orientation_version, avatar_display_size_px, webcam_display_width_px, webcam_display_height_px, avatar_size_version, aura_effect, join_token, position_x, position_y, last_seen_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
     )->execute([
         $sessionId,
         (int)$user['id'],
         $user['display_name'],
         $user['avatar_path'] ?: 'preset:Default',
+        $user['avatar_identity'],
+        $user['avatar_source_width_px'],
+        $user['avatar_source_height_px'],
         $orientation,
         $orientationVersion,
         $size['avatarDisplayPreferencePx'],

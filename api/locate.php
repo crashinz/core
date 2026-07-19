@@ -30,12 +30,14 @@ $stmt = $pdo->prepare(
       ORDER BY u.display_name ASC'
 );
 $stmt->execute([stale_cutoff($pdo), (int)$user['id'], (int)$user['id'], $q, $like]);
-$friends = array_map(fn($u) => [
+$friends = array_map(fn($u) => avatar_visibility_project_payload($pdo, (int)$user['id'], [
     'id' => (int)$u['id'],
+    'user_id' => (int)$u['id'],
     'display_name' => $u['display_name'],
+    'avatar_path' => $u['avatar_path'],
     'avatar_url' => resolve_avatar($u['avatar_path']),
     'room_id' => $u['room_public_id'] ?: null,
     'room_name' => $u['room_name'] ?: null,
     'room_ejected' => !empty($u['room_ejected']),
-], $stmt->fetchAll());
+]), $stmt->fetchAll());
 json_out(['friends' => $friends]);

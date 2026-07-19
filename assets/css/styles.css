@@ -1796,6 +1796,34 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   margin: 12px 0 0;
   color: var(--danger);
 }
+.hidden-avatar-options {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255,255,255,.12);
+}
+.hidden-avatar-list { display: grid; gap: 8px; margin-top: 10px; }
+.hidden-avatar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 6px;
+  background: rgba(255,255,255,.035);
+}
+.hidden-avatar-row > div { min-width: 0; }
+.hidden-avatar-row strong,
+.hidden-avatar-row .minor { display: block; overflow-wrap: anywhere; }
+.hidden-avatar-confirm {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(255,191,91,.42);
+  border-radius: 6px;
+  background: rgba(81,55,17,.35);
+}
+.hidden-avatar-confirm > div { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+#hidden-avatar-show-all { margin-top: 10px; }
 .segmented-radio label { display: block; color: var(--text-muted); cursor: pointer; }
 .segmented-radio label + label { border-left: 1px solid rgba(255,255,255,.2); }
 .segmented-radio input {
@@ -2030,6 +2058,34 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background: #11131b;
 }
 .reaction-avatars img:first-child { margin-left: 0; }
+.avatar-hidden-placeholder {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.24);
+  background: #2b2e36;
+  color: #f3f4f6;
+}
+.avatar-hidden-placeholder > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.message .avatar-hidden-placeholder { width: 40px; height: 40px; }
+.reaction-avatars .avatar-hidden-placeholder {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  margin-left: -4px;
+}
+.reaction-avatars .avatar-hidden-placeholder:first-child { margin-left: 0; }
 .edit-msg-input {
   width: 100%;
   min-height: 84px;
@@ -2734,6 +2790,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .person-row.role-owner:hover { filter: brightness(1.12); }
 .person-row:hover, .game-row:hover { background: var(--surface-hover); }
 .person-row .user-avatar-wrap > img { width: 36px; height: 36px; border-radius: 0; object-fit: cover; border: 0; }
+.person-row .user-avatar-wrap > .avatar-hidden-placeholder { width: 36px; height: 36px; border-radius: 0; }
 .person-name-line {
   display: inline-flex;
   align-items: center;
@@ -2756,6 +2813,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   border: 0;
   flex: 0 0 auto;
 }
+.friend-list .person-row > .avatar-hidden-placeholder { width: 36px; height: 36px; border-radius: 0; }
 .friend-list .person-row {
   grid-template-columns: 36px minmax(0, 1fr) 38px 38px;
   gap: 8px;
@@ -2965,6 +3023,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   opacity: 0;
   pointer-events: none;
 }
+.avatar.avatar-hidden-by-viewer { background: #2b2e36; }
 .avatar.avatar-flipping {
   animation: avatarHorizontalFlip .32s cubic-bezier(.4,0,.2,1);
   transform-origin: center;
@@ -3300,6 +3359,8 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background: #11131b;
   margin-right: -6px;
 }
+.game-row-players .avatar-hidden-placeholder { width: 24px; height: 24px; border-radius: 999px; margin-right: -6px; }
+.game-player-card img.avatar-hidden-placeholder { background: #2b2e36; border: 1px solid rgba(255,255,255,.24); }
 .game-btn {
   min-height: 46px;
   display: flex;
@@ -4819,6 +4880,10 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background:
     radial-gradient(520px 280px at 50% 38%, rgba(124,106,247,.13), transparent 72%),
     #000;
+}
+#ctx-menu button.is-active {
+  box-shadow: inset 3px 0 0 #62d6a7;
+  background: rgba(31,111,83,.28);
 }
 .session-lock.open { display: grid; }
 .session-lock-box {

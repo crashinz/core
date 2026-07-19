@@ -45,6 +45,12 @@ import {
 
 } from "./routing/room-event-router.js";
 
+import {
+
+    ParticipantActionCatalogService
+
+} from "./services/participant-action-catalog-service.js";
+
 //--------------------------------------------------
 // Room Runtime
 //--------------------------------------------------
@@ -62,6 +68,8 @@ export class RoomRuntime extends CoreModule {
      * Non-chat event routing runtime component.
      */
     #events = null;
+
+    #participantActions = null;
 
     //--------------------------------------------------
     // Constructor
@@ -108,6 +116,12 @@ export class RoomRuntime extends CoreModule {
 
     }
 
+    get participantActions() {
+
+        return this.#participantActions;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -128,7 +142,10 @@ export class RoomRuntime extends CoreModule {
                 "000026",
 
             events:
-                this.#events?.getDiagnostics() ?? null
+                this.#events?.getDiagnostics() ?? null,
+
+            participantActions:
+                this.#participantActions?.getDiagnostics() ?? null
 
         });
 
@@ -145,6 +162,8 @@ export class RoomRuntime extends CoreModule {
 
         this.#createEventRouter();
 
+        this.#createParticipantActionCatalog();
+
     }
 
     /**
@@ -153,6 +172,8 @@ export class RoomRuntime extends CoreModule {
     onDestroy() {
 
         this.#events?.destroy();
+
+        this.#participantActions?.destroy();
 
     }
 
@@ -171,6 +192,17 @@ export class RoomRuntime extends CoreModule {
             );
 
         this.#events.initialize();
+
+    }
+
+    #createParticipantActionCatalog() {
+
+        this.#participantActions =
+            new ParticipantActionCatalogService(
+                this
+            );
+
+        this.#participantActions.initialize();
 
     }
 

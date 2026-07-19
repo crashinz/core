@@ -14,7 +14,7 @@ function media_auth(PDO $pdo, int $sessionId, int $participantId, ?string $token
     return $participant;
 }
 
-function media_voice_participants(PDO $pdo, int $sessionId): array {
+function media_voice_participants(PDO $pdo, int $sessionId, int $viewerUserId): array {
     $stmt = $pdo->prepare(
         'SELECT v.participant_id, v.muted, v.deafened, v.speaking,
                 p.user_id, p.display_name, p.avatar_path, p.webcam_path,
@@ -28,7 +28,7 @@ function media_voice_participants(PDO $pdo, int $sessionId): array {
           ORDER BY v.joined_at ASC'
     );
     $stmt->execute([$sessionId]);
-    return array_map(fn(array $row): array => [
+    return array_map(fn(array $row): array => avatar_visibility_project_payload($pdo, $viewerUserId, [
         'id' => (int)$row['participant_id'],
         'user_id' => (int)$row['user_id'],
         'display_name' => $row['display_name'],
@@ -40,7 +40,7 @@ function media_voice_participants(PDO $pdo, int $sessionId): array {
         'muted' => (bool)$row['muted'],
         'deafened' => (bool)$row['deafened'],
         'speaking' => (bool)$row['speaking'],
-    ], $stmt->fetchAll());
+    ]), $stmt->fetchAll());
 }
 
 function media_from_signal_data(array $body): string {
@@ -55,7 +55,7 @@ function media_signal_poll_payload(PDO $pdo, array $query): array {
     $sessionId = resolve_session_id($pdo, $query['session_id'] ?? '');
     $participantId = (int)($query['participant_id'] ?? 0);
     $after = (int)($query['after'] ?? 0);
-    media_auth($pdo, $sessionId, $participantId, $query['join_token'] ?? '');
+    $viewer = media_auth($pdo, $sessionId, $participantId, $query['join_token'] ?? '');
     $clientEpoch = media_client_epoch($query['client_epoch'] ?? '');
     $client = media_signal_register_client($pdo, $sessionId, $participantId, $clientEpoch);
     if (!hash_equals((string)$client['epoch'], $clientEpoch)) {
@@ -128,7 +128,7 @@ function media_signal_poll_payload(PDO $pdo, array $query): array {
         'signal_errors' => $signalErrors,
         'last_signal_id' => $lastSignalId,
         'client_epoch' => (string)$client['epoch'],
-        'voice_participants' => media_voice_participants($pdo, $sessionId),
+        'voice_participants' => media_voice_participants($pdo, $sessionId, (int)$viewer['user_id']),
     ];
 }
 
