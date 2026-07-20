@@ -78,7 +78,7 @@ if ($action === 'link') {
 
     if (empty($result['ok'])) {
         $reason = (string)($result['reason'] ?? 'relationship-conflict');
-        $status = $reason === 'blocked' ? 403 : ($reason === 'self' ? 400 : 409);
+        $status = (int)($result['http_status'] ?? ($reason === 'blocked' ? 403 : ($reason === 'self' ? 400 : 409)));
         $messages = [
             'blocked' => 'You cannot link with this user.',
             'missing-initiator' => 'Your room participant is unavailable.',
@@ -90,7 +90,10 @@ if ($action === 'link') {
             'target-relationship' => 'That participant is already in a relationship.',
             'self' => 'Target participant required.',
         ];
-        json_out(['error' => $messages[$reason] ?? 'That relationship is no longer available.'] + $result, $status);
+        $message = trim((string)($result['error'] ?? ''))
+            ?: ($messages[$reason] ?? 'That relationship is no longer available.');
+        unset($result['http_status']);
+        json_out(['error' => $message] + $result, $status);
     }
 
     json_out($result);

@@ -6,6 +6,7 @@ const IS_ADMIN = document.body?.dataset.isAdmin === 'true';
 const appUrl = path => `${APP_BASE}${path}`;
 const statusEl = document.getElementById('admin-page-status');
 let settings = {};
+let relationshipCapacity = null;
 let selectedIssueId = null;
 
 function esc(value) {
@@ -116,11 +117,18 @@ document.getElementById('admin-user-create').addEventListener('submit', async ev
 
 async function loadSettings() {
   const data = await request('/api/admin_system.php?action=settings'); settings = data.settings || {};
+  relationshipCapacity = data.relationshipCapacity || relationshipCapacity;
   for (const [name, value] of Object.entries(settings)) {
     for (const form of [document.getElementById('admin-settings-form'), document.getElementById('role-color-form'), document.getElementById('diagnostic-screenshot-form'), document.getElementById('webcam-capability-form')]) {
       const input = form?.elements?.[name]; if (!input) continue;
       if (input.type === 'checkbox') input.checked = value === '1'; else input.value = value;
     }
+  }
+  const capacityInput = document.getElementById('admin-relationship-capacity-form')?.elements?.maximum_regular_avatar_links;
+  if (capacityInput && relationshipCapacity) capacityInput.value = String(relationshipCapacity.maximumRegularAvatarLinks);
+  const capacityImpact = document.getElementById('admin-relationship-capacity-impact');
+  if (capacityImpact && relationshipCapacity) {
+    capacityImpact.textContent = `Current limit: ${relationshipCapacity.maximumRegularAvatarLinks}. Allowed range: ${relationshipCapacity.minimumRegularAvatarLinks}-${relationshipCapacity.maximumConfigurableRegularAvatarLinks}.`;
   }
   applyRoleColors();
 }
@@ -131,6 +139,36 @@ document.getElementById('admin-settings-form').addEventListener('submit', async 
   try { const data = await post('/api/admin_system.php', body); settings = data.settings || settings; showStatus('Settings saved.'); } catch (error) { showStatus(error.message, true); }
 });
 document.getElementById('reset-size-policy').addEventListener('click', async () => { try { await post('/api/admin_system.php', { action: 'reset_avatar_size_policy' }); await loadSettings(); showStatus('Display size defaults restored.'); } catch (error) { showStatus(error.message, true); } });
+
+const relationshipCapacityForm = document.getElementById('admin-relationship-capacity-form');
+if (!IS_ADMIN) relationshipCapacityForm?.querySelectorAll('input, button').forEach(control => { control.disabled = true; });
+relationshipCapacityForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const value = Number.parseInt(form.elements.maximum_regular_avatar_links.value, 10);
+  const impactEl = document.getElementById('admin-relationship-capacity-impact');
+  try {
+    const impact = await request(`/api/admin_system.php?action=relationship_capacity_impact&value=${encodeURIComponent(value)}`);
+    const affected = Number(impact.relationshipsAboveProposedLimit || 0);
+    if (impact.isLowering && affected > 0) {
+      impactEl.textContent = `${affected} existing relationship${affected === 1 ? '' : 's'} will remain valid above the new limit and cannot accept new regular links until below it.`;
+      if (!confirm(`${impactEl.textContent}\n\nSave the lower limit?`)) return;
+    }
+    const data = await post('/api/admin_system.php', {
+      action: 'save_relationship_capacity',
+      maximum_regular_avatar_links: value,
+      expected_revision: relationshipCapacity?.revision,
+      confirm_above_limit: affected > 0 ? 1 : 0,
+    });
+    relationshipCapacity = data.policy;
+    settings = data.settings || settings;
+    await loadSettings();
+    showStatus(data.idempotent ? 'Relationship limit is unchanged.' : 'Relationship limit saved.');
+  } catch (error) {
+    if (error?.message?.includes('changed')) await loadSettings().catch(() => {});
+    showStatus(error.message, true);
+  }
+});
 
 function roleColorBody(action) { const form = document.getElementById('role-color-form'); const body = { action }; for (const element of form.elements) if (element.name) body[element.name] = element.value; return body; }
 function applyRoleColors() { for (const role of ['admin','developer','guide','owner','user']) { document.documentElement.style.setProperty(`--role-${role}-bg`, settings[`role_color_${role}_bg`] || ''); document.documentElement.style.setProperty(`--role-${role}-text`, settings[`role_color_${role}_text`] || ''); } document.body.dataset.roleColorsMode = settings.role_colors_mode || 'enabled'; }

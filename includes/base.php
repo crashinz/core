@@ -15,6 +15,7 @@ if (is_file(CHATSPACE_CONFIG)) {
 
 require_once __DIR__ . '/avatar_size_policy.php';
 require_once __DIR__ . '/avatar_visibility_policy.php';
+require_once __DIR__ . '/avatar_relationship_capacity_policy.php';
 require_once __DIR__ . '/webcam_policy.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/runtime_issue_service.php';
@@ -1432,7 +1433,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], avatar_size_policy_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults());
+    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -3051,6 +3052,28 @@ function avatar_relationship_create_pair_atomic(
                 400
             );
         }
+        $initiator = avatar_relationship_locked_participant($pdo, $sessionId, $initiatorId);
+        $target = avatar_relationship_locked_participant($pdo, $sessionId, $targetId);
+        if (!$initiator || !$target) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_CONFLICT',
+                'That participant is no longer available.',
+                'participant-unavailable',
+                409
+            );
+        }
+        $admission = avatar_relationship_capacity_pair_admission(
+            $pdo,
+            $initiator,
+            $target,
+            $mode,
+            $lapSide
+        );
+        if (empty($admission['ok'])) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return $admission;
+        }
         $pdo->prepare(
             'UPDATE participants
                 SET linked_to_participant_id = ?, link_mode = ?
@@ -4585,16 +4608,45 @@ function avatar_relationship_lap_seat_eligibility(
                 400
             );
         }
+        $geometrySafeSides = [];
+        foreach ($availability['available_lap_sides'] as $candidateSide) {
+            if ($occupantMember) {
+                $projectedMembers = array_map(static function(array $member) use ($occupantParticipantId, $candidateSide): array {
+                    if ((int)$member['participant_id'] === $occupantParticipantId) $member['lap_side'] = $candidateSide;
+                    return $member;
+                }, $members);
+            } else {
+                $projectedMembers = avatar_relationship_capacity_projected_members(
+                    $members,
+                    $occupant,
+                    'lap',
+                    $hostParticipantId,
+                    $candidateSide
+                );
+            }
+            $geometry = avatar_relationship_capacity_geometry_projection(
+                $pdo,
+                $relationship,
+                $projectedMembers,
+                [$occupant]
+            );
+            if (!empty($geometry['ok'])) $geometrySafeSides[] = $candidateSide;
+        }
         $allowed = $normalizedSide === null
-            || in_array($normalizedSide, $availability['available_lap_sides'], true);
-        $reason = $allowed ? 'eligible' : 'lap-seat-occupied';
+            ? (bool)$geometrySafeSides
+            : in_array($normalizedSide, $geometrySafeSides, true);
+        $seatOccupied = $normalizedSide !== null
+            && !in_array($normalizedSide, $availability['available_lap_sides'], true);
+        $reason = $allowed
+            ? 'eligible'
+            : ($seatOccupied ? 'lap-seat-occupied' : 'relationship-geometry-safety-limit');
         $fingerprintState = [
             'relationship_id' => $relationshipPublicId,
             'relationship_version' => (int)$relationship['version'],
             'occupant_participant_id' => $occupantParticipantId,
             'host_participant_id' => $hostParticipantId,
             'lap_side' => $normalizedSide,
-            'available_lap_sides' => $availability['available_lap_sides'],
+            'available_lap_sides' => $geometrySafeSides,
         ];
         return [
             'ok' => true,
@@ -4604,9 +4656,12 @@ function avatar_relationship_lap_seat_eligibility(
             'relationship_version' => (int)$relationship['version'],
             'host_participant_id' => $hostParticipantId,
             'lap_side' => $normalizedSide,
-            'available_lap_sides' => $availability['available_lap_sides'],
+            'available_lap_sides' => $geometrySafeSides,
             'state_fingerprint' => hash('sha256', json_encode($fingerprintState, JSON_UNESCAPED_SLASHES)),
-        ];
+        ] + (!$allowed && !$seatOccupied ? [
+            'code' => 'RELATIONSHIP_GEOMETRY_SAFETY_LIMIT',
+            'error' => 'That relationship layout exceeds the supported geometry safety limit.',
+        ] : []);
     });
 }
 
@@ -4653,6 +4708,16 @@ function avatar_relationship_add_member_locked(
         $targetParticipantId
     );
     if (empty($roleDecision['ok'])) return $roleDecision;
+    $admission = avatar_relationship_capacity_admission(
+        $pdo,
+        $relationship,
+        $members,
+        $target,
+        $relationshipRole,
+        $roleDecision['lap_host_participant_id'],
+        $roleDecision['lap_side']
+    );
+    if (empty($admission['ok'])) return $admission;
 
     $nextOrder = $members
         ? max(array_map(fn(array $member): int => (int)$member['member_order'], $members)) + 1
@@ -4803,6 +4868,19 @@ function avatar_relationship_create_request(
                 'invitation-lap-side-deferred',
                 400
             );
+        }
+
+        if ($requestType === 'join-request' && (string)$relationship['join_policy'] === 'open') {
+            $admission = avatar_relationship_capacity_admission(
+                $pdo,
+                $relationship,
+                $members,
+                $target,
+                $requestedRelationshipRole,
+                $roleDecision['lap_host_participant_id'],
+                $roleDecision['lap_side']
+            );
+            if (empty($admission['ok'])) return $admission;
         }
 
         $activeRequestKey = (int)$relationship['id'] . ':' . $targetParticipantId;
@@ -5192,6 +5270,13 @@ function avatar_relationship_set_lap_side(
             $actorParticipantId
         );
         if (empty($decision['ok'])) return $decision;
+
+        $projectedMembers = array_map(static function(array $member) use ($actorParticipantId, $normalizedSide): array {
+            if ((int)$member['participant_id'] === $actorParticipantId) $member['lap_side'] = $normalizedSide;
+            return $member;
+        }, $members);
+        $geometry = avatar_relationship_capacity_geometry_projection($pdo, $relationship, $projectedMembers);
+        if (empty($geometry['ok'])) return avatar_relationship_capacity_geometry_error($geometry);
 
         $nextVersion = max(1, (int)$relationship['version']) + 1;
         $update = $pdo->prepare(

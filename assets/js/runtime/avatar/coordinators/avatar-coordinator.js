@@ -1459,8 +1459,112 @@ export class AvatarCoordinator {
     refreshAllRelationships(options = {}) {
 
         const changed = [];
+        const presentations = this.#relationships.relationshipPresentations();
+        const viewport = this.#context?.beginRelationshipCanvasMeasurement?.()
+            || this.#context?.relationshipViewportSize?.()
+            || this.#stageSize();
+        const requiredCanvas = {
+            width: Math.max(1, Number(viewport.width || 0)),
+            height: Math.max(1, Number(viewport.height || 0))
+        };
+        const measurementDiagnostics = [];
 
-        this.#relationships.relationshipPresentations()
+        presentations.forEach(presentation => {
+            const relationship = this.#relationships.relationshipById(presentation.relationshipId);
+            const normalMembers = presentation.visibleNormalMembers
+                .map(member => {
+                    const participant = this.#participant(member.participantId);
+                    return participant ? {
+                        participant,
+                        dimensions: this.#renderedDimensions(participant),
+                        order: member.order
+                    } : null;
+                })
+                .filter(Boolean);
+            const lapAttachments = presentation.visibleLapMembers
+                .map(member => {
+                    const participant = this.#participant(member.participantId);
+                    return participant ? {
+                        participant,
+                        hostParticipantId: member.lapHostParticipantId,
+                        lapSide: member.lapSide,
+                        dimensions: this.#renderedDimensions(participant),
+                        anchor: member.anchor || null
+                    } : null;
+                })
+                .filter(Boolean);
+            const initialAnchorParticipant = normalMembers[0]?.participant || null;
+            const anchor = this.#relationshipGroupAnchors.get(presentation.relationshipId) || (
+                initialAnchorParticipant ? Object.freeze({
+                    x: Number(initialAnchorParticipant.position_x || 0),
+                    y: Number(initialAnchorParticipant.position_y || 0)
+                }) : null
+            );
+            const measurement = this.#layout.applyRelationshipGroupLayout({
+                normalMembers,
+                lapAttachments,
+                stageWidth: requiredCanvas.width,
+                stageHeight: requiredCanvas.height,
+                gap: Number(relationship?.options?.rowSpacing || 0),
+                metadata: relationship?.metadata || presentation.metadata,
+                anchor,
+                formation: relationship?.options?.formation || "horizontal-row",
+                locked: false,
+                apply: false
+            });
+            measurementDiagnostics.push(Object.freeze({
+                relationshipId: presentation.relationshipId,
+                relationshipVersion: Number(relationship?.version || 0),
+                selectedFormation: relationship?.options?.formation || "horizontal-row",
+                rowSpacing: Number(relationship?.options?.rowSpacing || 0),
+                anchor,
+                normalMembers: Object.freeze(normalMembers.map(member => Object.freeze({
+                    participantId: Number(member.participant.id),
+                    order: Number(member.order || 0),
+                    dimensions: Object.freeze({
+                        width: Number(member.dimensions?.width || 0),
+                        height: Number(member.dimensions?.height || 0)
+                    }),
+                    presentation: member.participant.webcam_enabled ? "webcam" : "avatar",
+                    hiddenPlaceholder: Boolean(member.participant.avatar_source_redacted)
+                }))),
+                lapMembers: Object.freeze(lapAttachments.map(member => Object.freeze({
+                    participantId: Number(member.participant.id),
+                    hostParticipantId: Number(member.hostParticipantId),
+                    lapSide: member.lapSide,
+                    dimensions: Object.freeze({
+                        width: Number(member.dimensions?.width || 0),
+                        height: Number(member.dimensions?.height || 0)
+                    })
+                }))),
+                measurement
+            }));
+            if (!Array.isArray(measurement) && measurement?.logicalCanvas) {
+                requiredCanvas.width = Math.max(
+                    requiredCanvas.width,
+                    Number(measurement.logicalCanvas.width || 0)
+                );
+                requiredCanvas.height = Math.max(
+                    requiredCanvas.height,
+                    Number(measurement.logicalCanvas.height || 0)
+                );
+            }
+        });
+
+        const canvasChanged = Boolean(
+            this.#context?.setRelationshipCanvasSize?.(requiredCanvas)
+        );
+        this.#context?.recordRelationshipDiagnostic?.({
+            event: "relationship-canvas-measured",
+            reason: options.reason || "all",
+            viewport,
+            requiredCanvas,
+            canvasChanged,
+            relationshipCount: presentations.length,
+            relationships: measurementDiagnostics
+        });
+
+        presentations
             .forEach(presentation => {
                 changed.push(
                     ...this.#refreshRelationshipPresentation(
@@ -2651,21 +2755,13 @@ export class AvatarCoordinator {
             return;
         }
 
-        participantIds.forEach(participantId => {
-            const participant =
-                this.#participant(participantId);
-
-            if (participant) {
-                this.refreshRelationshipsForParticipant(
-                    participant,
-                    {
-                        animate: false,
-                        persist: false,
-                        reason
-                    }
-                );
-            }
-        });
+        if (participantIds.length) {
+            this.refreshAllRelationships({
+                animate: false,
+                persist: false,
+                reason
+            });
+        }
 
     }
 

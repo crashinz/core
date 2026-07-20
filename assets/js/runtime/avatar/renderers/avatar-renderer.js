@@ -121,6 +121,8 @@ export class AvatarRenderer {
 
     #orientationSyncCount = 0;
 
+    #stageMoveCount = 0;
+
     /**
      * Stage link icon elements keyed by relationship key.
      *
@@ -165,6 +167,7 @@ export class AvatarRenderer {
 
         this.#renderCount = 0;
         this.#orientationSyncCount = 0;
+        this.#stageMoveCount = 0;
 
     }
 
@@ -421,6 +424,33 @@ export class AvatarRenderer {
         }
 
         return participant;
+
+    }
+
+    /**
+     * Moves every renderer-owned participant layer to one authoritative stage
+     * surface without recreating media elements or presentation state.
+     */
+    syncParticipantStage(participant, stage) {
+
+        if (!participant || !stage) return false;
+
+        const layers = [
+            participant.avatarEl,
+            participant.auraEl,
+            participant.webcamVideoEl,
+            participant.labelEl,
+            participant.typingEl,
+            participant.speechEl
+        ].filter(Boolean);
+        if (!layers.length || layers.every(element => element.parentElement === stage)) {
+            return false;
+        }
+
+        layers.forEach(element => stage.appendChild(element));
+        this.#stageMoveCount += 1;
+        this.#renderCount += 1;
+        return true;
 
     }
 
@@ -1648,6 +1678,9 @@ export class AvatarRenderer {
 
             orientationSyncCount:
                 this.#orientationSyncCount,
+
+            stageMoveCount:
+                this.#stageMoveCount,
 
             stageLinkIconCount:
                 this.#stageLinkIcons.size

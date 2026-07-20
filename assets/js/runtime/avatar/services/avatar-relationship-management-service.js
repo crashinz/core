@@ -885,7 +885,15 @@ export class AvatarRelationshipManagementService {
                 );
             }
             const status = Number(error?.details?.status || 0);
-            if (status === 409) {
+            const responsePayload = error?.responsePayload || null;
+            const responseCode = String(responsePayload?.code || "");
+            const authoritativeRejection = [
+                "RELATIONSHIP_REGULAR_LINK_LIMIT_REACHED",
+                "RELATIONSHIP_GEOMETRY_SAFETY_LIMIT"
+            ].includes(responseCode);
+            if (authoritativeRejection) {
+                this.#setStatus(String(responsePayload?.error || error?.message || "Relationship capacity was reached."));
+            } else if (status === 409) {
                 try {
                     await this.refresh({ render: false });
                 } catch (refreshError) {
@@ -898,12 +906,13 @@ export class AvatarRelationshipManagementService {
                 this.#setStatus("Relationship changes could not be saved.");
             }
             if (this.isOpen()) this.#render();
-            this.#context?.showError?.(error);
+            if (!authoritativeRejection) this.#context?.showError?.(error);
             this.#context?.recordDiagnostic?.({
                 event: "relationship-management-mutation-failed",
                 action,
                 relationshipId,
-                status: status || null
+                status: status || null,
+                code: responseCode || null
             });
             return false;
         }

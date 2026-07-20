@@ -30,6 +30,23 @@ Those responsibilities remain outside the runtime.
 
 ---
 
+# Group Wrapping And Capacity
+
+`AvatarGroupLayoutPolicy` owns deterministic complete-unit packing and the
+smallest demand-driven logical extent required by accepted relationship
+geometry. A regular host plus its left/right lap occupants is one atomic unit.
+`AvatarLayoutService` supplies actual rendered geometry, `AvatarRenderer` owns
+the logical canvas presentation, and `AvatarCoordinator` sequences refresh.
+The physical stage remains a native scrolling viewport and has no added range
+when the accepted relationship fits.
+
+The server-owned `AvatarRelationshipCapacityPolicy` is authoritative for the
+configured regular-link count and fixed geometry-safety ceilings. AvatarRuntime
+consumes accepted snapshots and stable rejection messages; it does not infer
+capacity from viewport size or create optimistic membership.
+
+---
+
 # Synchronized Dance Playback
 
 Build 000044 Part 9 adds a finite first-party catalog containing only

@@ -81,6 +81,15 @@ $roleColors = role_color_settings($pdo);
       <label class="settings-checkbox-row"><strong>Enable age gate</strong><input name="age_gate_enabled" type="checkbox"><span>Require users to confirm they meet the configured minimum age.</span></label>
       <div class="shared-form-actions"><button class="btn btn-primary" type="submit">Save Settings</button><button class="btn" id="reset-size-policy" type="button">Reset Display Size Defaults</button></div>
     </form>
+    <form id="admin-relationship-capacity-form" class="shared-form compact-form">
+      <h3>Avatar Relationships</h3>
+      <label>Maximum regular avatar links in one relationship
+        <input name="maximum_regular_avatar_links" type="number" min="2" max="16" step="1" required>
+      </label>
+      <p class="minor">Controls how many regularly linked avatars can belong to one relationship. Left and right lap links do not count toward this limit because they remain attached to an existing regular avatar link.</p>
+      <p class="minor" id="admin-relationship-capacity-impact" aria-live="polite"></p>
+      <button class="btn btn-primary" type="submit">Save Relationship Limit</button>
+    </form>
   </section>
 
   <section class="shared-panel" data-admin-panel="appearance">

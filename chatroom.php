@@ -94,15 +94,16 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     <button class="btn btn-aqua" id="version-refresh" type="button">Refresh</button>
   </div>
   <main class="main">
-    <section class="room-stage" id="room-stage">
-      <?php $roomBgTiled = !empty($room['import_url']) && !empty($room['background_path']) && !str_starts_with((string)$room['background_mime'], 'video/'); ?>
-      <div class="room-bg<?= $roomBgTiled ? ' room-bg-tiled' : '' ?>" <?php if ($room['background_path'] && !str_starts_with((string)$room['background_mime'], 'video/')): ?>style="background-image:url('<?= e(media_url($room['background_path'])) ?>')"<?php endif; ?>>
-        <?php if ($room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
-        <video class="smart-bg-video" autoplay muted playsinline preload="auto"><source src="<?= e(media_url($room['background_path'])) ?>" type="<?= e($room['background_mime']) ?>"></video>
-        <?php endif; ?>
-      </div>
-      <div class="vp-room-layout" id="vp-room-layout" hidden></div>
-      <div class="game-stage-layer" id="game-stage" hidden>
+    <section class="room-stage" id="room-stage" tabindex="0" aria-label="Room stage; scroll to view larger avatar relationships">
+      <div class="room-stage-viewport" id="room-stage-viewport">
+        <?php $roomBgTiled = !empty($room['import_url']) && !empty($room['background_path']) && !str_starts_with((string)$room['background_mime'], 'video/'); ?>
+        <div class="room-bg<?= $roomBgTiled ? ' room-bg-tiled' : '' ?>" <?php if ($room['background_path'] && !str_starts_with((string)$room['background_mime'], 'video/')): ?>style="background-image:url('<?= e(media_url($room['background_path'])) ?>')"<?php endif; ?>>
+          <?php if ($room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
+          <video class="smart-bg-video" autoplay muted playsinline preload="auto"><source src="<?= e(media_url($room['background_path'])) ?>" type="<?= e($room['background_mime']) ?>"></video>
+          <?php endif; ?>
+        </div>
+        <div class="vp-room-layout" id="vp-room-layout" hidden></div>
+        <div class="game-stage-layer" id="game-stage" hidden>
         <div class="game-stage-head">
           <div>
             <div class="side-title">Game</div>
@@ -132,6 +133,9 @@ if (session_status() === PHP_SESSION_ACTIVE) {
           </aside>
         </div>
       </div>
+      </div>
+      <div class="avatar-viewport-layer" id="avatar-viewport-layer"></div>
+      <div class="relationship-canvas" id="relationship-canvas"></div>
     </section>
     <div class="divider" id="horizontal-divider"></div>
     <section class="chat-pane">

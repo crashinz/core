@@ -73,6 +73,20 @@ let layoutLocked = false;
 const roomLayout = document.querySelector('.room-layout');
 const mainEl = document.querySelector('.main');
 const roomStage = document.getElementById('room-stage');
+const roomStageViewport = document.getElementById('room-stage-viewport');
+const avatarViewportLayer = document.getElementById('avatar-viewport-layer');
+const relationshipCanvas = document.getElementById('relationship-canvas');
+let relationshipCanvasResolvedWidth = 0;
+let relationshipCanvasResolvedHeight = 0;
+let relationshipCanvasMeasurementGeneration = 0;
+let relationshipCanvasMeasurementState = Object.freeze({
+  generation: 0,
+  reset: false,
+  viewport: null,
+  requested: null,
+  applied: null,
+  changed: false,
+});
 const vpRoomLayout = document.getElementById('vp-room-layout');
 const vpMusicPlayer = document.getElementById('vp-music-player');
 const vpMusicSelect = document.getElementById('vp-music-select');
@@ -358,6 +372,10 @@ async function initializeAvatarRuntime() {
   configureRoomEffectsRuntime();
   configureImportedRoomRuntime();
   configureChatPoll();
+  runtimeVerificationControls?.register(
+    'avatar-relationship-layout-snapshot',
+    relationshipLayoutVerificationSnapshot,
+  );
 
   return avatarRuntime;
 }
@@ -366,10 +384,16 @@ function configureAvatarCoordinator() {
   avatarRuntime?.coordinator?.configure({
     getConfig: () => cfg,
     stageSize() {
-      return {
-        width: roomStage.clientWidth,
-        height: roomStage.clientHeight,
-      };
+      return relationshipCanvasSize();
+    },
+    relationshipViewportSize() {
+      return relationshipViewportSize();
+    },
+    beginRelationshipCanvasMeasurement() {
+      return beginRelationshipCanvasMeasurement();
+    },
+    setRelationshipCanvasSize(size = {}) {
+      return setRelationshipCanvasSize(size);
     },
     baseAvatarSize() {
       return AVATAR_STAGE_SIZE;
@@ -496,7 +520,9 @@ function configureAvatarCoordinator() {
 function configureAvatarDragController() {
   avatarRuntime?.drag?.configure({
     getConfig: () => cfg,
-    stageElement: () => roomStage,
+    stageElement() {
+      return participantStage(participants.get(Number(cfg?.myParticipantId)));
+    },
     baseAvatarSize() {
       return AVATAR_STAGE_SIZE;
     },
@@ -746,7 +772,7 @@ function configureChatTyping() {
     positionAvatar,
     syncTyping(participant, active) {
       return avatarRuntime?.renderer?.syncTyping(participant, active, {
-        stage: roomStage,
+        stage: participantStage(participant),
         document,
       });
     },
@@ -1286,7 +1312,7 @@ function configureRoomEffectsRuntime() {
     getConfig: () => cfg,
     getParticipants: () => participants,
     getRoomStage() {
-      return roomStage;
+      return roomStageViewport || roomStage;
     },
     setRoomEffectsState(effects, current) {
       cfg.roomEffects = effects || [];
@@ -1321,7 +1347,7 @@ function configureImportedRoomRuntime() {
       return vpRoomLayout;
     },
     getStageElement() {
-      return roomStage;
+      return roomStageViewport || roomStage;
     },
     getMusicPlayerElement() {
       return vpMusicPlayer;
@@ -1726,7 +1752,7 @@ function attachParticipantVideo(participantId, stream, own = false, presentation
   }
   pendingRemoteVideoStreams.delete(Number(participantId));
   avatarRuntime?.renderer?.attachWebcam(person, stream, {
-    stage: roomStage,
+    stage: participantStage(person),
     document,
     own,
     source: presentationIdentity.source || (own ? 'local-capture' : 'unknown'),
@@ -2200,7 +2226,7 @@ function preloadImage(src) {
 function runAvatarPixelEffect(person, mode = 'in') {
   return avatarRuntime?.effects?.runPixelEffect(person, {
     mode,
-    stage: roomStage,
+    stage: participantStage(person),
     document,
     window,
   }) || Promise.resolve();
@@ -2234,7 +2260,7 @@ function renderParticipant(p, options = {}) {
     });
   }
   avatarRuntime?.renderer?.syncParticipant(merged, {
-    stage: roomStage,
+    stage: participantStage(merged),
     document,
     window,
     own: Number(p.id) === Number(cfg.myParticipantId),
@@ -2362,13 +2388,158 @@ function positionFloatingMenu(menu, x, y) {
   menu.style.top = `${top}px`;
 }
 
+function relationshipCanvasSize() {
+  return {
+    width: Math.max(1, relationshipCanvas?.clientWidth || roomStage?.clientWidth || 0),
+    height: Math.max(1, relationshipCanvas?.clientHeight || roomStage?.clientHeight || 0),
+  };
+}
+
+function relationshipViewportSize() {
+  return {
+    width: Math.max(1, roomStage?.clientWidth || 0),
+    height: Math.max(1, roomStage?.clientHeight || 0),
+  };
+}
+
+function beginRelationshipCanvasMeasurement() {
+  relationshipCanvas?.style.removeProperty('--relationship-canvas-width');
+  relationshipCanvas?.style.removeProperty('--relationship-canvas-height');
+  relationshipCanvasResolvedWidth = 0;
+  relationshipCanvasResolvedHeight = 0;
+  if (roomStage) {
+    roomStage.scrollLeft = 0;
+    roomStage.scrollTop = 0;
+  }
+  const viewport = relationshipViewportSize();
+  relationshipCanvasMeasurementGeneration += 1;
+  relationshipCanvasMeasurementState = Object.freeze({
+    generation: relationshipCanvasMeasurementGeneration,
+    reset: true,
+    viewport: Object.freeze({ ...viewport }),
+    requested: null,
+    applied: null,
+    changed: false,
+  });
+  return viewport;
+}
+
+function setRelationshipCanvasSize(size = {}) {
+  const viewport = relationshipViewportSize();
+  const width = Math.max(viewport.width, Math.ceil(Number(size.width || 0)));
+  const height = Math.max(viewport.height, Math.ceil(Number(size.height || 0)));
+  const changed = width !== relationshipCanvasResolvedWidth
+    || height !== relationshipCanvasResolvedHeight;
+  relationshipCanvasResolvedWidth = width;
+  relationshipCanvasResolvedHeight = height;
+  relationshipCanvas?.style.setProperty('--relationship-canvas-width', `${width}px`);
+  relationshipCanvas?.style.setProperty('--relationship-canvas-height', `${height}px`);
+  if (roomStage) {
+    if (width <= roomStage.clientWidth) roomStage.scrollLeft = 0;
+    if (height <= roomStage.clientHeight) roomStage.scrollTop = 0;
+  }
+  relationshipCanvasMeasurementState = Object.freeze({
+    generation: relationshipCanvasMeasurementGeneration,
+    reset: Boolean(relationshipCanvasMeasurementState.reset),
+    viewport: Object.freeze({ ...viewport }),
+    requested: Object.freeze({
+      width: Number(size.width || 0),
+      height: Number(size.height || 0),
+    }),
+    applied: Object.freeze({ width, height }),
+    changed,
+  });
+  return changed;
+}
+
+roomStage?.addEventListener('keydown', event => {
+  if (event.target !== roomStage) return;
+  const stepByKey = {
+    ArrowLeft: { x: -48, y: 0 },
+    ArrowRight: { x: 48, y: 0 },
+    ArrowUp: { x: 0, y: -48 },
+    ArrowDown: { x: 0, y: 48 },
+  };
+  const step = stepByKey[event.key];
+  if (!step) return;
+  const maxLeft = Math.max(0, roomStage.scrollWidth - roomStage.clientWidth);
+  const maxTop = Math.max(0, roomStage.scrollHeight - roomStage.clientHeight);
+  const left = Math.min(maxLeft, Math.max(0, roomStage.scrollLeft + step.x));
+  const top = Math.min(maxTop, Math.max(0, roomStage.scrollTop + step.y));
+  if (left === roomStage.scrollLeft && top === roomStage.scrollTop) return;
+  event.preventDefault();
+  roomStage.scrollTo({ left, top, behavior: 'auto' });
+});
+
+function relationshipLayoutVerificationSnapshot() {
+  const relationshipPresentations = avatarRuntime?.relationships
+    ?.relationshipPresentations?.() || [];
+  return {
+    canvasMeasurement: relationshipCanvasMeasurementState,
+    runtimeDiagnostics: avatarRuntime?.getDiagnostics?.() || null,
+    relationships: relationshipPresentations.map(presentation => {
+      const relationship = avatarRuntime?.relationships
+        ?.relationshipById?.(presentation.relationshipId) || null;
+      const members = presentation.visibleMemberIds.map(participantId => {
+        const participant = participants.get(Number(participantId));
+        const dimensions = participant
+          ? avatarRuntime?.renderer?.renderedAvatarDimensions(participant, {
+            document,
+            window,
+          })
+          : null;
+        return {
+          participantId: Number(participantId),
+          position: participant ? {
+            x: Number(participant.position_x || 0),
+            y: Number(participant.position_y || 0),
+          } : null,
+          dimensions,
+          webcamEnabled: Boolean(participant?.webcam_enabled),
+          webcamPresented: Boolean(participant?.webcamVideoEl),
+          avatarHiddenPlaceholder: Boolean(
+            participant?.avatarSourceRedacted
+            || participant?.avatar_source_redacted
+            || participant?.avatar_hidden_placeholder
+          ),
+        };
+      });
+      return {
+        relationshipId: presentation.relationshipId,
+        relationshipVersion: Number(relationship?.version || 0),
+        selectedFormation: relationship?.options?.formation || 'horizontal-row',
+        effectiveFormation: avatarRuntime?.layout?.getDiagnostics?.()
+          ?.lastRelationshipStrategy?.effectiveFormation || null,
+        rowSpacing: Number(relationship?.options?.rowSpacing || 0),
+        normalMemberOrder: presentation.visibleNormalMembers
+          .map(member => Number(member.participantId)),
+        lapMembers: presentation.visibleLapMembers.map(member => ({
+          participantId: Number(member.participantId),
+          hostParticipantId: Number(member.lapHostParticipantId),
+          lapSide: member.lapSide,
+        })),
+        members,
+      };
+    }),
+  };
+}
+
+function participantStage(participant) {
+  const relationship = participant
+    ? avatarRuntime?.relationships?.relationshipPresentationForParticipant(participant.id)
+    : null;
+  return relationship ? relationshipCanvas : avatarViewportLayer || roomStage;
+}
+
 function positionAvatar(p) {
   const img = p.avatarEl;
   const label = p.labelEl;
   if (!img || !label) return;
   
-  const w = roomStage.clientWidth;
-  const h = roomStage.clientHeight;
+  const stage = participantStage(p);
+  avatarRuntime?.renderer?.syncParticipantStage(p, stage);
+  const w = stage?.clientWidth || roomStage.clientWidth;
+  const h = stage?.clientHeight || roomStage.clientHeight;
   const dimensions = avatarRenderedDimensions(p);
   const frame = avatarRuntime?.layout?.avatarFrame(p, {
     stageWidth: w,
@@ -2382,7 +2553,7 @@ function positionAvatar(p) {
     y: Math.max(0, Math.min(h - dimensions.height, p.position_y * h)),
   };
   avatarRuntime?.renderer?.applyParticipantFrame(p, frame, {
-    stage: roomStage,
+    stage,
   });
   updateStageLinkIcons();
 }
@@ -2411,7 +2582,7 @@ function linkedPairs() {
 function updateStageLinkIcons() {
   if (!cfg) return;
   avatarRuntime?.renderer?.syncStageLinkIcons(linkedPairs(), {
-    stage: roomStage,
+    stage: relationshipCanvas,
     document,
     window,
     appUrl,
@@ -2514,7 +2685,7 @@ function showDmFlight(payload) {
   img.style.left = `${start.x}px`;
   img.style.top = `${start.y}px`;
   img.style.transform = dmFlightTransform(visualAngle, flip, .88);
-  roomStage.appendChild(img);
+  (avatarViewportLayer || roomStage).appendChild(img);
 
   const keyframes = [
     { left: `${start.x}px`, top: `${start.y}px`, opacity: 0, transform: dmFlightTransform(visualAngle, flip, .72) },
@@ -3273,7 +3444,7 @@ function applyRoomBackground(path, mime, tile = false) {
   next.classList.toggle('room-bg-tiled', Boolean(tile));
   if (path && !String(mime || '').startsWith('video/')) next.style.backgroundImage = `url("${mediaUrl(path)}")`;
   next.innerHTML = backgroundMarkup(path, mime);
-  roomStage.appendChild(next);
+  (roomStageViewport || roomStage).appendChild(next);
   initRoomBackgroundVideos(next);
   requestAnimationFrame(() => next.classList.add('show'));
   setTimeout(() => {
@@ -3426,7 +3597,7 @@ function showAvatarSpeech(participantId, msg) {
   const gesture = gestureFromMessage(msg);
   const token = participants.nextSpeechToken(participantId);
   avatarRuntime?.renderer?.ensureSpeechBubble(p, {
-    stage: roomStage,
+    stage: participantStage(p),
     document,
   });
   participants.clearSpeechTimer(participantId);

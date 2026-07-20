@@ -225,6 +225,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
         if ((function_exists('mb_strlen') ? mb_strlen($communityName, 'UTF-8') : strlen($communityName)) > 80) {
             throw new RuntimeException('Community name must be 80 characters or less.');
         }
+        $capacityValidation = avatar_relationship_capacity_validate_setting(
+            $_POST['maximum_regular_avatar_links'] ?? AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_DEFAULT
+        );
+        if (empty($capacityValidation['ok'])) throw new RuntimeException((string)$capacityValidation['error']);
         $communityLogo = setup_brand_logo_upload();
         $avatar = setup_avatar_upload();
         $pdo = db();
@@ -233,6 +237,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
         $adminUserId = (int)$pdo->lastInsertId();
         set_app_setting($pdo, 'community_name', $communityName);
         if ($communityLogo !== '') set_app_setting($pdo, 'community_logo_path', $communityLogo);
+        $capacityPolicy = avatar_relationship_capacity_policy($pdo);
+        $capacityResult = avatar_relationship_capacity_update(
+            $pdo,
+            (int)$capacityValidation['value'],
+            (int)$capacityPolicy['revision'],
+            true,
+            $adminUserId,
+            'setup'
+        );
+        if (empty($capacityResult['ok'])) throw new RuntimeException((string)$capacityResult['error']);
         $allowWebcamUse = !empty($_POST['allow_webcam_use']);
         set_app_setting($pdo, 'allow_webcam_use', $allowWebcamUse ? '1' : '0');
         log_tool(
@@ -377,6 +391,13 @@ $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['
                 <span class="file-picker-name" id="setup-community-logo-name">No file selected</span>
               </span>
             </label>
+          </div>
+          <div class="setup-branding-fields">
+            <h2>Avatar Relationships</h2>
+            <label>Maximum regular avatar links in one relationship
+              <input name="maximum_regular_avatar_links" type="number" min="2" max="16" step="1" value="8" required>
+            </label>
+            <p class="minor">Controls how many regularly linked avatars can belong to one relationship. Left and right lap links do not count toward this limit because they remain attached to an existing regular avatar link.</p>
           </div>
           <div class="setup-branding-fields">
             <h2>Webcam</h2>

@@ -984,8 +984,47 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background: rgba(255,255,255,0.03);
   backdrop-filter: blur(20px);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
   border: 1px solid var(--border);
+}
+.room-stage:focus-visible {
+  outline: 2px solid var(--aqua);
+  outline-offset: -3px;
+}
+.room-stage-viewport {
+  position: sticky;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+.room-stage-viewport > :not(.room-bg),
+.avatar-viewport-layer > .avatar,
+.relationship-canvas > .avatar {
+  pointer-events: auto;
+}
+.avatar-viewport-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  overflow: clip;
+  z-index: 2;
+  pointer-events: none;
+}
+.relationship-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--relationship-canvas-width, 100%);
+  height: var(--relationship-canvas-height, 100%);
+  overflow: hidden;
+  overflow: clip;
+  z-index: 2;
+  pointer-events: none;
 }
 .room-bg { position: absolute; inset: 0; background: linear-gradient(135deg, #172033, #16302d) center/cover; filter: brightness(.45); }
 .room-bg.room-bg-tiled {
@@ -1462,7 +1501,8 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   font-weight: 800;
 }
 .game-player-card.typing .game-typing-pill { display: inline-flex; }
-.room-stage.effect-romantic-mood {
+.room-stage.effect-romantic-mood,
+.room-stage-viewport.effect-romantic-mood {
   box-shadow:
     inset 0 0 38px rgba(255, 94, 184, .45),
     inset 0 0 84px rgba(255, 128, 210, .2),

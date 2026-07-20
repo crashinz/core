@@ -19,7 +19,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             'settings' => admin_settings($pdo),
             'avatarSizePolicy' => avatar_size_policy($pdo),
             'webcamCapability' => webcam_capability($pdo),
+            'relationshipCapacity' => avatar_relationship_capacity_policy($pdo),
         ]);
+    }
+
+    if ($action === 'relationship_capacity_impact') {
+        if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+        $result = avatar_relationship_capacity_impact($pdo, $_GET['value'] ?? null);
+        $status = max(200, (int)($result['http_status'] ?? 200));
+        unset($result['http_status']);
+        json_out($result, $status);
     }
 
     if ($action === 'logs') {
@@ -176,6 +185,24 @@ if ($action === 'save_webcam_capability') {
         'stoppedParticipantCount' => (int)$result['stoppedParticipantCount'],
         'settings' => admin_settings($pdo),
     ]);
+}
+
+if ($action === 'save_relationship_capacity') {
+    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+    $result = avatar_relationship_capacity_update(
+        $pdo,
+        $body['maximum_regular_avatar_links'] ?? null,
+        $body['expected_revision'] ?? null,
+        !empty($body['confirm_above_limit']),
+        (int)$me['id'],
+        'admin'
+    );
+    if (empty($result['ok'])) {
+        $status = max(400, (int)($result['http_status'] ?? 400));
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
+    json_out($result + ['settings' => admin_settings($pdo)]);
 }
 
 if ($action === 'save_settings') {

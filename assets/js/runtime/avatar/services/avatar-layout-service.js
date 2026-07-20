@@ -52,9 +52,7 @@
  * Defines the Avatar Layout Service.
  */
 
-//
-// No imports required.
-//
+import { resolveAvatarGroupLayout } from "./avatar-group-layout-policy.js";
 
 //--------------------------------------------------
 // Avatar Layout Service
@@ -454,8 +452,9 @@ export class AvatarLayoutService {
      * @param {Object} [options.metadata]
      * @param {Object|null} [options.anchor]
      * @param {boolean} [options.locked=false]
+     * @param {boolean} [options.apply=true]
      *
-     * @returns {Object[]}
+     * @returns {Object[]|Object}
      */
     applyRelationshipGroupLayout({
         normalMembers = [],
@@ -466,7 +465,8 @@ export class AvatarLayoutService {
         metadata = null,
         anchor = null,
         formation = "horizontal-row",
-        locked = false
+        locked = false,
+        apply = true
     }) {
 
         const width = Number(stageWidth || 0);
@@ -562,8 +562,26 @@ export class AvatarLayoutService {
             anchor: { x: anchorX, y: anchorY },
             rowSpacing: normalGap
         });
+        const layoutResolution = resolveAvatarGroupLayout({
+            units: hostUnits.map(unit => ({
+                participantId: Number(unit.entry.participant.id),
+                bounds: unit.bounds
+            })),
+            basePlacements: formationResult.placements,
+            stageWidth: width,
+            stageHeight: height,
+            rowSpacing: normalGap,
+            anchor: { x: anchorX, y: anchorY },
+            allowCanvasExpansion: true
+        });
+        const resolvedWidth = Math.ceil(
+            Math.max(width, Number(layoutResolution.canvasWidth || 0))
+        );
+        const resolvedHeight = Math.ceil(
+            Math.max(height, Number(layoutResolution.canvasHeight || 0))
+        );
         const placementByParticipantId = new Map(
-            formationResult.placements.map(placement => [placement.participantId, placement])
+            layoutResolution.placements.map(placement => [placement.participantId, placement])
         );
         const normalBoxes = [];
         const lapBoxes = [];
@@ -587,7 +605,32 @@ export class AvatarLayoutService {
 
         const allBoxes = [...normalBoxes, ...lapBoxes];
         const bounds = this.#relationshipBounds(allBoxes);
-        const translation = this.#clampTranslation(bounds, width, height);
+        const translation = layoutResolution.valid
+            ? Object.freeze({ x: 0, y: 0 })
+            : this.#clampTranslation(bounds, width, height);
+        const logicalCanvas = Object.freeze({
+            width: resolvedWidth,
+            height: resolvedHeight,
+            expanded: resolvedWidth > width || resolvedHeight > height
+        });
+        if (!apply) {
+            return Object.freeze({
+                valid: Boolean(layoutResolution.valid),
+                layoutMode: layoutResolution.mode,
+                rowCount: layoutResolution.rowCount,
+                columnCount: layoutResolution.columnCount,
+                logicalCanvas,
+                policyDiagnostics: layoutResolution.diagnostics || null,
+                bounds: Object.freeze({
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom,
+                    width: bounds.right - bounds.left,
+                    height: bounds.bottom - bounds.top
+                })
+            });
+        }
         const changed = [];
 
         allBoxes.forEach(box => {
@@ -598,8 +641,8 @@ export class AvatarLayoutService {
                 return;
             }
 
-            participant.position_x = (box.x + translation.x) / width;
-            participant.position_y = (box.y + translation.y) / height;
+            participant.position_x = (box.x + translation.x) / resolvedWidth;
+            participant.position_y = (box.y + translation.y) / resolvedHeight;
             changed.push(participant);
 
         });
@@ -609,6 +652,13 @@ export class AvatarLayoutService {
             selectedFormation: formationResult.selected,
             effectiveFormation: formationResult.effective,
             fallbackReason: formationResult.fallbackReason,
+            layoutMode: layoutResolution.mode,
+            fitValid: layoutResolution.valid,
+            rowCount: layoutResolution.rowCount,
+            columnCount: layoutResolution.columnCount,
+            wholeFormationTranslation: layoutResolution.translation,
+            logicalCanvas,
+            policyDiagnostics: layoutResolution.diagnostics || null,
             mode: String(metadata?.mode || "normal"),
             memberCount: allBoxes.length,
             normalMemberCount: normalBoxes.length,
@@ -617,6 +667,10 @@ export class AvatarLayoutService {
                 allBoxes.map(box => `${box.width}x${box.height}`)
             ).size > 1,
             bounds: Object.freeze({
+                left: bounds.left,
+                top: bounds.top,
+                right: bounds.right,
+                bottom: bounds.bottom,
                 width: bounds.right - bounds.left,
                 height: bounds.bottom - bounds.top
             })

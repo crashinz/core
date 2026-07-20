@@ -428,6 +428,23 @@ $rooms = $roomsStmt->fetchAll();
                 <div class="admin-form-status" aria-live="polite"></div>
               </div>
             </form>
+            <form class="admin-settings" id="admin-relationship-capacity">
+              <?= csrf_input() ?>
+              <section class="admin-settings-group admin-settings-group-wide">
+                <h3>Avatar Relationships</h3>
+                <div class="admin-settings-fields">
+                  <label>Maximum regular avatar links in one relationship
+                    <input name="maximum_regular_avatar_links" type="number" min="2" max="16" step="1" required>
+                  </label>
+                </div>
+                <div class="admin-settings-hint">Controls how many regularly linked avatars can belong to one relationship. Left and right lap links do not count toward this limit because they remain attached to an existing regular avatar link.</div>
+                <div class="admin-settings-hint" id="admin-relationship-capacity-impact" aria-live="polite"></div>
+              </section>
+              <div class="admin-settings-actions">
+                <button class="btn btn-primary" type="submit">Save Relationship Limit</button>
+                <div class="admin-form-status" aria-live="polite"></div>
+              </div>
+            </form>
           </div>
         </section>
 

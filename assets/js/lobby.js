@@ -761,6 +761,7 @@ const adminBlocks = document.getElementById('admin-blocks');
 const adminRoomEjections = document.getElementById('admin-room-ejections');
 const adminCommunityEjections = document.getElementById('admin-community-ejections');
 const adminSettings = document.getElementById('admin-settings');
+const adminRelationshipCapacity = document.getElementById('admin-relationship-capacity');
 const adminDbExport = document.getElementById('admin-db-export');
 const adminUserExportLabel = document.getElementById('admin-user-export-label');
 const adminDbRestore = document.getElementById('admin-db-restore');
@@ -899,6 +900,12 @@ async function loadAdminSettings() {
     if (adminSettings.elements[key].type === 'checkbox') adminSettings.elements[key].checked = value === '1';
     else adminSettings.elements[key].value = value;
   });
+  if (adminRelationshipCapacity && data.relationshipCapacity) {
+    adminRelationshipCapacity.dataset.revision = String(data.relationshipCapacity.revision);
+    adminRelationshipCapacity.elements.maximum_regular_avatar_links.value = String(data.relationshipCapacity.maximumRegularAvatarLinks);
+    const impact = document.getElementById('admin-relationship-capacity-impact');
+    if (impact) impact.textContent = `Current limit: ${data.relationshipCapacity.maximumRegularAvatarLinks}. Allowed range: ${data.relationshipCapacity.minimumRegularAvatarLinks}-${data.relationshipCapacity.maximumConfigurableRegularAvatarLinks}.`;
+  }
 }
 
 async function loadAdminLinkIcons() {
@@ -1118,6 +1125,44 @@ adminSettings?.addEventListener('submit', async e => {
     await loadAdminLogs();
   } catch (err) {
     setAdminFormStatus(form, err.message || 'Settings failed to save.', 'error');
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+adminRelationshipCapacity?.addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  const value = Number.parseInt(form.elements.maximum_regular_avatar_links.value, 10);
+  submit.disabled = true;
+  setAdminFormStatus(form, 'Checking relationship limit...', 'working');
+  try {
+    const response = await fetch(appUrl(`/api/admin_system.php?action=relationship_capacity_impact&value=${encodeURIComponent(value)}`));
+    const impact = await response.json().catch(() => ({}));
+    if (!response.ok || impact.error) throw new Error(impact.error || 'Relationship limit could not be checked.');
+    const affected = Number(impact.relationshipsAboveProposedLimit || 0);
+    const impactEl = document.getElementById('admin-relationship-capacity-impact');
+    if (impact.isLowering && affected > 0) {
+      impactEl.textContent = `${affected} existing relationship${affected === 1 ? '' : 's'} will remain valid above the new limit and cannot accept new regular links until below it.`;
+      if (!confirm(`${impactEl.textContent}\n\nSave the lower limit?`)) {
+        setAdminFormStatus(form, 'No changes saved.');
+        return;
+      }
+    }
+    const data = await adminSystemRequest({
+      action: 'save_relationship_capacity',
+      maximum_regular_avatar_links: value,
+      expected_revision: Number(form.dataset.revision || 0),
+      confirm_above_limit: affected > 0 ? 1 : 0,
+    });
+    form.dataset.revision = String(data.policy.revision);
+    setAdminFormStatus(form, data.idempotent ? 'Relationship limit is unchanged.' : 'Relationship limit saved.', 'ok');
+    await loadAdminSettings();
+    await loadAdminLogs();
+  } catch (err) {
+    if (String(err.message || '').includes('changed')) await loadAdminSettings().catch(() => {});
+    setAdminFormStatus(form, err.message || 'Relationship limit failed to save.', 'error');
   } finally {
     submit.disabled = false;
   }
