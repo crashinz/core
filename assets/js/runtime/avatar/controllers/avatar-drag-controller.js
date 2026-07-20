@@ -232,6 +232,12 @@ export class AvatarDragController {
             dragging:
                 false,
 
+            preparing:
+                false,
+
+            pointerId:
+                null,
+
             relationshipBoundAtStart:
                 false,
 
@@ -252,7 +258,7 @@ export class AvatarDragController {
         state.handlers = {
 
             pointerdown:
-                event => this.#handlePointerDown(element, state, event),
+                event => { void this.#handlePointerDown(element, state, event); },
 
             pointermove:
                 event => this.#handlePointerMove(element, state, event),
@@ -355,20 +361,33 @@ export class AvatarDragController {
      * @param {Object} state
      * @param {PointerEvent} event
      */
-    #handlePointerDown(element, state, event) {
+    async #handlePointerDown(element, state, event) {
 
-        if (event.button !== 0) {
+        if (event.button !== 0 || state.preparing || state.dragging) {
             return;
         }
+
+        event.preventDefault();
+        state.preparing = true;
+        state.pointerId = event.pointerId;
+        element.setPointerCapture?.(event.pointerId);
 
         const participant =
             this.#currentParticipant();
 
-        const operation = this.#coordinator?.beginDragOperation(participant);
+        const operation = await this.#coordinator?.beginDragOperation(participant);
+        if (!state.preparing || state.pointerId !== event.pointerId || !element.isConnected) {
+            element.releasePointerCapture?.(event.pointerId);
+            return;
+        }
         if (!operation?.allowed) {
+            state.preparing = false;
+            state.pointerId = null;
+            element.releasePointerCapture?.(event.pointerId);
             return;
         }
 
+        state.preparing = false;
         state.dragging = true;
         state.operation = operation;
         state.relationshipBoundAtStart = Boolean(
@@ -378,10 +397,6 @@ export class AvatarDragController {
             event.clientX - element.getBoundingClientRect().left;
         state.offsetY =
             event.clientY - element.getBoundingClientRect().top;
-
-        element.setPointerCapture?.(
-            event.pointerId
-        );
 
         element.style.cursor = "grabbing";
 
@@ -417,6 +432,13 @@ export class AvatarDragController {
      * @param {PointerEvent} event
      */
     #handlePointerUp(element, state, event) {
+
+        if (state.preparing && state.pointerId === event.pointerId) {
+            state.preparing = false;
+            state.pointerId = null;
+            element.releasePointerCapture?.(event.pointerId);
+            return;
+        }
 
         if (!state.dragging) {
             return;
@@ -707,6 +729,9 @@ export class AvatarDragController {
      */
     #resetDragState(state) {
 
+        state.preparing = false;
+        state.dragging = false;
+        state.pointerId = null;
         state.relationshipBoundAtStart = false;
         state.operation = null;
 

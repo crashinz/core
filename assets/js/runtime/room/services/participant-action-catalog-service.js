@@ -34,12 +34,12 @@ export class ParticipantActionCatalogService {
     actionsFor(participant) {
         const viewer = this.#context?.getViewer?.() || null;
         const own = Number(viewer?.id || 0) === Number(participant?.id || 0);
-        if (!participant || own) return Object.freeze([]);
+        if (!participant) return Object.freeze([]);
         const visibility = this.#context?.getAvatarVisibility?.(participant) || {};
         const webcam = this.#context?.getWebcamPolicy?.(participant) || {};
         const blocked = Boolean(this.#context?.isBlocked?.(participant?.user_id));
         const webcamAllowed = this.#context?.webcamAllowed?.() !== false;
-        const actions = [
+        const actions = own ? [] : [
             {
                 id: "avatar.current-visibility",
                 label: visibility.exact ? "Show this avatar" : "Hide this avatar until it changes",
@@ -77,6 +77,9 @@ export class ParticipantActionCatalogService {
                 applicable: true
             }
         ];
+        actions.push(...Array.from(
+            this.#context?.getAvatarInteractionActions?.(participant) || []
+        ));
         const unique = new Map();
         actions.forEach(action => {
             if (unique.has(action.id)) this.#duplicateCount += 1;
@@ -90,7 +93,7 @@ export class ParticipantActionCatalogService {
         return Object.freeze({
             owner: "RoomRuntime",
             service: "ParticipantActionCatalogService",
-            actionDefinitionCount: 5,
+            actionDefinitionCount: 7,
             resolutionCount: this.#resolutionCount,
             duplicateCount: this.#duplicateCount
         });

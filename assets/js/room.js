@@ -112,6 +112,8 @@ const voiceListEl = document.getElementById('voice-list');
 const voiceCountLabel = document.getElementById('voice-count-label');
 const ctxMenu = document.getElementById('ctx-menu');
 const ctxInteract = document.getElementById('ctx-interact');
+const ctxLapDance = document.getElementById('ctx-lap-dance');
+const ctxLapBounce = document.getElementById('ctx-lap-bounce');
 const textCtxMenu = document.getElementById('text-ctx-menu');
 const msgActionMenu = document.getElementById('msg-action-menu');
 const tabCtxMenu = document.getElementById('tab-ctx-menu');
@@ -404,6 +406,32 @@ function configureAvatarCoordinator() {
     requestRelationshipRefreshFrame(callback) {
       return requestAnimationFrame(callback);
     },
+    cancelAnimationFrame(handle) {
+      cancelAnimationFrame(handle);
+    },
+    matchMedia(query) {
+      return window.matchMedia(query);
+    },
+    window,
+    mutateRelationship(payload = {}) {
+      return runtimeRequestClient.postJson('/api/avatar_relationships.php', {
+        ...payload,
+        session_id: cfg.sessionId,
+        join_token: cfg.myJoinToken,
+      }, {
+        operation: `lap-animation-${String(payload.action || 'mutation')}`,
+        endpointCategory: 'avatar-relationship-animation',
+      });
+    },
+    onLapAnimationStateChanged() {
+      const participant = participants.get(Number(ctxMenuParticipantId || 0));
+      if (participant && ctxMenu?.classList.contains('visible')) {
+        syncParticipantActionMenu(participant, Number(participant.id) === Number(cfg.myParticipantId));
+      }
+      if (avatarRuntime?.relationshipManagement?.isOpen?.()) {
+        avatarRuntime.relationshipManagement.refresh().catch(warnRuntimeRequest);
+      }
+    },
     positionAvatar,
     renderParticipant,
     renderPeople,
@@ -630,6 +658,9 @@ function configureParticipantActionCatalog() {
     getWebcamPolicy: participant => webcamViewerPolicyFor(participant),
     isBlocked: isUserBlocked,
     webcamAllowed: webcamUseAllowed,
+    getAvatarInteractionActions(participant) {
+      return avatarRuntime?.dances?.participantActions(participant) || [];
+    },
   });
 }
 
@@ -2381,11 +2412,25 @@ function bindModalCloseButtons(buttonIds, closeHandler) {
 }
 
 function positionFloatingMenu(menu, x, y) {
+  const requestedX = Number.isFinite(Number(x)) ? Number(x) : 8;
+  const requestedY = Number.isFinite(Number(y)) ? Number(y) : 8;
+  menu.style.position = 'fixed';
+  menu.style.left = '8px';
+  menu.style.top = '8px';
   const rect = menu.getBoundingClientRect();
-  const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
-  const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  const left = Math.max(8, Math.min(requestedX, window.innerWidth - rect.width - 8));
+  const top = Math.max(8, Math.min(requestedY, window.innerHeight - rect.height - 8));
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
+  const positioned = menu.getBoundingClientRect();
+  const horizontalCorrection = positioned.left < 8
+    ? 8 - positioned.left
+    : Math.min(0, window.innerWidth - 8 - positioned.right);
+  const verticalCorrection = positioned.top < 8
+    ? 8 - positioned.top
+    : Math.min(0, window.innerHeight - 8 - positioned.bottom);
+  if (horizontalCorrection) menu.style.left = `${left + horizontalCorrection}px`;
+  if (verticalCorrection) menu.style.top = `${top + verticalCorrection}px`;
 }
 
 function relationshipCanvasSize() {
@@ -4374,7 +4419,7 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
 
 function syncParticipantActionButton(button, action, visible = true) {
   if (!button) return;
-  button.style.display = visible && action?.applicable !== false ? 'block' : 'none';
+  button.style.display = visible && action && action.applicable !== false ? 'block' : 'none';
   if (!action) return;
   button.textContent = action.label;
   button.disabled = Boolean(action.disabled);
@@ -4391,6 +4436,8 @@ function syncParticipantActionMenu(participant, isOwn = false) {
   syncParticipantActionButton(ctxAvatarUserVisibility, user, !isOwn);
   syncParticipantActionButton(ctxWebcamVisibility, actions.get('webcam.presentation'), !isOwn);
   syncParticipantActionButton(ctxWebcamReceive, actions.get('webcam.receive'), !isOwn);
+  syncParticipantActionButton(ctxLapDance, actions.get('avatar.lap-dance'));
+  syncParticipantActionButton(ctxLapBounce, actions.get('avatar.lap-bounce'));
   syncParticipantActionButton(document.getElementById('ctx-block'), block, !isOwn && !block?.active);
   syncParticipantActionButton(document.getElementById('ctx-unblock'), block, !isOwn && Boolean(block?.active));
 }
@@ -5679,6 +5726,21 @@ ctxInteract?.addEventListener('click', () => {
   if (!me || !target) return;
   avatarRuntime?.coordinator?.requestLinkChoiceForInteraction(me, target);
   document.getElementById('link-choice-link')?.focus();
+});
+
+async function performLapAnimationContextAction(actionId) {
+  const participantId = Number(ctxMenuParticipantId || 0);
+  closeContextMenu();
+  if (participantId <= 0) return;
+  await avatarRuntime?.dances?.performParticipantAction(actionId, participantId);
+}
+
+ctxLapDance?.addEventListener('click', () => {
+  void performLapAnimationContextAction('avatar.lap-dance');
+});
+
+ctxLapBounce?.addEventListener('click', () => {
+  void performLapAnimationContextAction('avatar.lap-bounce');
 });
 
 document.getElementById('ctx-manage-relationship')?.addEventListener('click', () => {

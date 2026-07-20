@@ -128,6 +128,11 @@ try {
         $avatarWidth,
         $avatarHeight
     );
+    avatar_relationship_cancel_active_dances(
+        $pdo,
+        (int)$p['user_id'],
+        'participant-avatar-source-change'
+    );
     $pdo->commit();
 } catch (Throwable $error) {
     if ($pdo->inTransaction()) $pdo->rollBack();

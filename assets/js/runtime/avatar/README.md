@@ -10,6 +10,7 @@ The Avatar Runtime is responsible for:
 - relationship management presentation and mutation lifecycle
 - finite static relationship formations and transition lifecycle
 - finite synchronized relationship dance playback
+- finite Lap Dance and Lap Bounce interaction playback
 - member ordering
 - layout calculation
 - avatar rendering
@@ -44,6 +45,37 @@ The server-owned `AvatarRelationshipCapacityPolicy` is authoritative for the
 configured regular-link count and fixed geometry-safety ceilings. AvatarRuntime
 consumes accepted snapshots and stable rejection messages; it does not infer
 capacity from viewport size or create optimistic membership.
+
+---
+
+# Lap Interaction Animations
+
+The unnumbered Avatar Interaction Animations checkpoint extends
+`AvatarDanceService` with finite Lap Dance and Lap Bounce projection. The
+existing relationship PHP/API owner remains authoritative for authenticated,
+versioned, membership-generation-bound semantic start, switch, stop,
+idempotency, and lifecycle reconciliation.
+
+The Balanced presentation contract is:
+
+- Lap Dance: `+/-6deg`, `2400ms`, sinusoidal, with an envelope derived from
+  actual authoritative rendered width and height;
+- Lap Bounce: preferred `14px`, `1600ms`, upward-only sine-squared, reduced by
+  host center and protected upper-quarter clearance;
+- reduced motion: truthful active state at the exact static baseline;
+- drag: authoritative stop and exact restoration before pointer offsets, with
+  no automatic resume.
+
+Dedicated strategy modules return temporary samples only. `AvatarRenderer`
+owns pixel presentation and exact restoration, `AvatarLayoutService` owns
+static envelope/safety geometry and canvas reconciliation, `AvatarCoordinator`
+owns lifecycle sequencing, and `AvatarDragController` owns pointer sequencing.
+The shared participant-action catalog supplies state-aware actions to context
+and relationship-management surfaces.
+
+Lap animation never owns permanent preferences, per-frame persistence/events,
+Tool Logs, media tracks, peers, transceivers, SDP, ICE, microphone state,
+webcam presentation, hidden-avatar policy, or avatar orientation.
 
 ---
 

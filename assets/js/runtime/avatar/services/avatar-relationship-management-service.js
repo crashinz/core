@@ -483,6 +483,19 @@ export class AvatarRelationshipManagementService {
                 actions.append(button);
             }
         }
+        [
+            [member.actions.lapDance, "lap_dance"],
+            [member.actions.lapBounce, "lap_bounce"]
+        ].forEach(([lapAction, mode]) => {
+            if (!lapAction?.applicable) return;
+            const button = this.#actionButton(
+                lapAction.label,
+                "set_lap_animation",
+                member.participantId
+            );
+            button.dataset.lapAnimationMode = lapAction.stop ? "none" : mode;
+            actions.append(button);
+        });
         row.append(identity, status);
         if (actions.childElementCount) row.append(actions);
         return row;
@@ -589,6 +602,7 @@ export class AvatarRelationshipManagementService {
         const targetParticipantId = Number(button.dataset.targetParticipantId || 0);
         const requestId = String(button.dataset.requestId || "");
         const lapSide = String(button.dataset.lapSide || "");
+        const lapAnimationMode = String(button.dataset.lapAnimationMode || "");
         const payload = { action };
         if (targetParticipantId > 0) payload.target_participant_id = targetParticipantId;
         if (requestId) {
@@ -598,6 +612,24 @@ export class AvatarRelationshipManagementService {
         }
         if (lapSide) payload.lap_side = lapSide;
         if (action === "set_lap_side") payload.operation_id = this.#operationId("lap-side");
+        if (action === "set_lap_animation") {
+            const member = this.#projection?.members?.find(candidate =>
+                candidate.participantId === targetParticipantId
+            );
+            const relationship = this.#runtime.relationships?.relationshipById(
+                this.#projection?.relationshipId
+            );
+            if (!member || !relationship || !lapAnimationMode) return;
+            void this.#runtime.dances?.setLapAnimation({
+                relationship,
+                hostParticipantId: member.lapHostParticipantId,
+                occupantParticipantId: member.participantId,
+                occupantMembershipGeneration: member.membershipGeneration,
+                mode: lapAnimationMode,
+                reason: "relationship-management"
+            }).then(() => this.refresh());
+            return;
+        }
         if (action.startsWith("order-")) {
             this.#reorder(targetParticipantId, action);
             return;
@@ -933,6 +965,7 @@ export class AvatarRelationshipManagementService {
             dissolve: "relationship-dissolved",
             configure: "configuration-updated",
             set_dance_playback: "dance-playback-updated",
+            set_lap_animation: "lap-animation-updated",
             set_lap_side: "lap-side-changed"
         })[action] || "relationship-updated";
     }

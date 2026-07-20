@@ -2336,6 +2336,97 @@ function avatar_relationship_dance_ids(): array {
     return ['synchronized-sway', 'synchronized-bounce'];
 }
 
+function avatar_relationship_lap_animation_modes(): array {
+    return ['lap_dance', 'lap_bounce'];
+}
+
+function avatar_relationship_membership_generation(array $relationship, array $member): string {
+    $relationshipId = (string)($relationship['relationship_public_id'] ?? $relationship['relationship_id'] ?? '');
+    $memberId = (int)($member['id'] ?? 0);
+    $participantId = (int)($member['participant_id'] ?? $member['participantId'] ?? 0);
+    $effectiveAt = (string)($member['membership_effective_at'] ?? $member['effectiveAt'] ?? '');
+    return hash('sha256', "avatar-membership:v1:{$relationshipId}:{$memberId}:{$participantId}:{$effectiveAt}");
+}
+
+function avatar_relationship_lap_animation_states(
+    mixed $states,
+    array $relationship,
+    array $members
+): array {
+    if (!is_array($states)) return [];
+    $relationshipVersion = max(1, (int)($relationship['version'] ?? 1));
+    $membersByParticipantId = [];
+    $lapOccupantsByHost = [];
+    foreach ($members as $member) {
+        if ((string)($member['membership_status'] ?? $member['status'] ?? 'active') !== 'active') continue;
+        $participantId = (int)($member['participant_id'] ?? $member['participantId'] ?? 0);
+        if ($participantId <= 0) continue;
+        $membersByParticipantId[$participantId] = $member;
+        if ((string)($member['relationship_role'] ?? $member['relationshipRole'] ?? 'normal') !== 'lap') continue;
+        $hostParticipantId = (int)($member['lap_host_participant_id'] ?? $member['lapHostParticipantId'] ?? 0);
+        if ($hostParticipantId > 0) $lapOccupantsByHost[$hostParticipantId][] = $member;
+    }
+
+    $normalized = [];
+    $seenHosts = [];
+    foreach (array_values($states) as $state) {
+        if (!is_array($state)) continue;
+        $hostParticipantId = (int)($state['hostParticipantId'] ?? 0);
+        $occupantParticipantId = (int)($state['occupantParticipantId'] ?? 0);
+        $mode = (string)($state['mode'] ?? 'none');
+        $generation = trim((string)($state['generation'] ?? ''));
+        $membershipGeneration = trim((string)($state['occupantMembershipGeneration'] ?? ''));
+        $lapSide = avatar_relationship_normalize_lap_side($state['lapSide'] ?? null);
+        $startedAtMs = (int)($state['startedAtMs'] ?? 0);
+        $boundVersion = (int)($state['relationshipVersion'] ?? 0);
+        $host = $membersByParticipantId[$hostParticipantId] ?? null;
+        $occupant = $membersByParticipantId[$occupantParticipantId] ?? null;
+        $hostOccupants = $lapOccupantsByHost[$hostParticipantId] ?? [];
+        if ($hostParticipantId <= 0 || $occupantParticipantId <= 0 || isset($seenHosts[$hostParticipantId])
+            || !in_array($mode, avatar_relationship_lap_animation_modes(), true)
+            || !preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $generation)
+            || !preg_match('/^[a-f0-9]{64}$/', $membershipGeneration)
+            || !$lapSide || $startedAtMs <= 0 || $boundVersion !== $relationshipVersion
+            || !$host || !$occupant || count($hostOccupants) !== 1
+            || (string)($host['relationship_role'] ?? $host['relationshipRole'] ?? '') !== 'normal'
+            || (string)($occupant['relationship_role'] ?? $occupant['relationshipRole'] ?? '') !== 'lap'
+            || (int)($occupant['lap_host_participant_id'] ?? $occupant['lapHostParticipantId'] ?? 0) !== $hostParticipantId
+            || avatar_relationship_normalize_lap_side($occupant['lap_side'] ?? $occupant['lapSide'] ?? null) !== $lapSide
+            || !hash_equals(avatar_relationship_membership_generation($relationship, $occupant), $membershipGeneration)) {
+            continue;
+        }
+        $seenHosts[$hostParticipantId] = true;
+        $normalized[] = [
+            'schemaVersion' => 1,
+            'relationshipVersion' => $relationshipVersion,
+            'hostParticipantId' => $hostParticipantId,
+            'hostUserId' => (int)($host['user_id'] ?? $host['userId'] ?? 0) ?: null,
+            'occupantParticipantId' => $occupantParticipantId,
+            'occupantUserId' => (int)($occupant['user_id'] ?? $occupant['userId'] ?? 0) ?: null,
+            'occupantMembershipGeneration' => $membershipGeneration,
+            'lapSide' => $lapSide,
+            'mode' => $mode,
+            'generation' => $generation,
+            'startedAtMs' => $startedAtMs,
+        ];
+    }
+    usort($normalized, static fn(array $first, array $second): int =>
+        [$first['hostParticipantId'], $first['occupantParticipantId']]
+        <=> [$second['hostParticipantId'], $second['occupantParticipantId']]
+    );
+    return $normalized;
+}
+
+function avatar_relationship_lap_animation_states_from_row(
+    array $relationship,
+    array $members
+): array {
+    $options = !empty($relationship['options_json'])
+        ? (json_decode((string)$relationship['options_json'], true) ?: [])
+        : [];
+    return avatar_relationship_lap_animation_states($options['lapAnimations'] ?? null, $relationship, $members);
+}
+
 function avatar_relationship_dance_playback(mixed $playback): array {
     if (!is_array($playback)) $playback = [];
     $state = (string)($playback['state'] ?? 'stopped');
@@ -2385,7 +2476,9 @@ function avatar_relationship_cancel_dance_playback_options(
 function avatar_relationship_cancel_active_dances(
     PDO $pdo,
     ?int $userId,
-    string $reason
+    string $reason,
+    bool $cancelGroupDance = true,
+    bool $cancelLapAnimations = true
 ): int {
     $parameters = [];
     $sql = "SELECT DISTINCT ar.id, ar.session_id, ar.relationship_public_id
@@ -2399,6 +2492,10 @@ function avatar_relationship_cancel_active_dances(
     if ($userId !== null) {
         $sql .= ' AND p.user_id = ?';
         $parameters[] = $userId;
+    }
+    $sql .= ' ORDER BY ar.id';
+    if ($pdo->inTransaction() && db_uses_mysql_syntax($pdo)) {
+        $sql .= ' FOR UPDATE';
     }
     $stmt = $pdo->prepare($sql);
     $stmt->execute($parameters);
@@ -2415,8 +2512,19 @@ function avatar_relationship_cancel_active_dances(
             : [];
         $nextVersion = max(1, (int)$relationship['version']) + 1;
         $generation = 'safety-geometry-' . (int)$relationship['id'] . '-' . $nextVersion;
-        $playback = avatar_relationship_cancel_dance_playback_options($storedOptions, $generation);
-        if (!$playback) continue;
+        $playback = $cancelGroupDance
+            ? avatar_relationship_cancel_dance_playback_options($storedOptions, $generation)
+            : null;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $lapAnimations = $cancelLapAnimations
+            ? avatar_relationship_lap_animation_states(
+                $storedOptions['lapAnimations'] ?? null,
+                $relationship,
+                $members
+            )
+            : [];
+        if ($lapAnimations) $storedOptions['lapAnimations'] = [];
+        if (!$playback && !$lapAnimations) continue;
         $pdo->prepare(
             'UPDATE avatar_relationships
                 SET options_json = ?, version = ?, updated_at = CURRENT_TIMESTAMP
@@ -2427,21 +2535,32 @@ function avatar_relationship_cancel_active_dances(
             (int)$relationship['id'],
         ]);
         $eventRelationship = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        $eventDetails = [
+            'operation_id' => $generation,
+            'actor_participant_id' => 0,
+            'lapAnimation' => null,
+            'lapAnimations' => [],
+            'resolution_reason' => $reason,
+        ];
+        if ($cancelGroupDance) $eventDetails['dancePlayback'] = $playback;
         avatar_relationship_emit_lifecycle_event(
             $pdo,
             (int)$relationship['session_id'],
-            'dance-playback-updated',
+            $lapAnimations ? 'lap-animation-updated' : 'dance-playback-updated',
             $eventRelationship,
-            [
-                'operation_id' => $generation,
-                'actor_participant_id' => 0,
-                'dancePlayback' => $playback,
-                'resolution_reason' => $reason,
-            ]
+            $eventDetails
         );
         $cancelled++;
     }
     return $cancelled;
+}
+
+function avatar_relationship_cancel_active_lap_animations(
+    PDO $pdo,
+    int $userId,
+    string $reason
+): int {
+    return avatar_relationship_cancel_active_dances($pdo, $userId, $reason, false, true);
 }
 
 function avatar_relationship_validate_public_options(mixed $options): array {
@@ -3162,7 +3281,7 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
     $relationship = $stmt->fetch();
     if (!$relationship) return null;
     $membersStmt = $pdo->prepare(
-        "SELECT arm.participant_id, arm.member_role, arm.relationship_role, arm.permission_role,
+        "SELECT arm.id, arm.participant_id, arm.member_role, arm.relationship_role, arm.permission_role,
                 arm.membership_status, arm.member_order, arm.membership_effective_at,
                 arm.visible_after_message_id, arm.lap_host_participant_id, arm.lap_side,
                 arm.anchor_json, arm.options_json, p.user_id
@@ -3182,7 +3301,7 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
             }
         }
     }
-    $members = array_map(function(array $row) use ($viewerParticipantId, $viewerIsMember): array {
+    $members = array_map(function(array $row) use ($relationship, $viewerParticipantId, $viewerIsMember): array {
         $isViewer = $viewerParticipantId === null || (int)$row['participant_id'] === $viewerParticipantId;
         return [
         'participantId' => (int)$row['participant_id'],
@@ -3192,6 +3311,7 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         'status' => (string)$row['membership_status'],
         'order' => (int)$row['member_order'],
         'userId' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
+        'membershipGeneration' => avatar_relationship_membership_generation($relationship, $row),
         'effectiveAt' => $isViewer ? ($row['membership_effective_at'] ?? null) : null,
         'visibleAfterMessageId' => $isViewer ? max(0, (int)($row['visible_after_message_id'] ?? 0)) : null,
         'lapHostParticipantId' => $row['lap_host_participant_id'] !== null ? (int)$row['lap_host_participant_id'] : null,
@@ -3251,6 +3371,11 @@ function avatar_relationship_payload(PDO $pdo, int $relationshipDbId, ?int $view
         ),
         'dancePlayback' => avatar_relationship_dance_playback(
             $storedRelationshipOptions['dancePlayback'] ?? null
+        ),
+        'lapAnimations' => avatar_relationship_lap_animation_states(
+            $storedRelationshipOptions['lapAnimations'] ?? null,
+            $relationship,
+            $memberRows
         ),
         'persistence' => ['supported' => true, 'legacyDirectedEdge' => true, 'futureMetadata' => true],
         'reconciliation' => ['supported' => true, 'eventPayload' => 'link'],
@@ -4278,6 +4403,423 @@ function avatar_relationship_set_dance_playback(
             'relationship_version' => $nextVersion,
             'operation_id' => $operationId,
             'dancePlayback' => $playback,
+            'relationship' => $viewerPayload,
+        ];
+    });
+}
+
+function avatar_relationship_set_lap_animation(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $operationId,
+    string $mode,
+    int $hostParticipantId,
+    int $occupantParticipantId,
+    string $occupantMembershipGeneration
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $actorParticipantId,
+        $relationshipPublicId,
+        $expectedVersion,
+        $operationId,
+        $mode,
+        $hostParticipantId,
+        $occupantParticipantId,
+        $occupantMembershipGeneration
+    ): array {
+        if ($relationshipPublicId === '' || !preg_match('/^[A-Za-z0-9:_-]{1,160}$/', $relationshipPublicId)
+            || !preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $operationId)
+            || !in_array($mode, ['none', ...avatar_relationship_lap_animation_modes()], true)
+            || $hostParticipantId <= 0 || $occupantParticipantId <= 0
+            || !preg_match('/^[a-f0-9]{64}$/', $occupantMembershipGeneration)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_INVALID',
+                'Invalid lap animation operation.',
+                'invalid-lap-animation-operation',
+                400
+            );
+        }
+
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship || (string)$relationship['status'] !== 'active') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_CONFLICT',
+                'That relationship is no longer active.',
+                'relationship-unavailable',
+                409
+            );
+        }
+
+        $priorStmt = $pdo->prepare(
+            "SELECT id, payload FROM events
+              WHERE session_id = ? AND type = 'relationship' AND payload LIKE ?
+              ORDER BY id DESC LIMIT 20"
+        );
+        $priorStmt->execute([$sessionId, '%"operation_id":"' . $operationId . '"%']);
+        foreach ($priorStmt->fetchAll() as $prior) {
+            $priorPayload = json_decode((string)$prior['payload'], true) ?: [];
+            if ((string)($priorPayload['operation_id'] ?? '') !== $operationId
+                || (string)($priorPayload['relationship_id'] ?? '') !== $relationshipPublicId
+                || (int)($priorPayload['actor_participant_id'] ?? 0) !== $actorParticipantId
+                || (string)($priorPayload['action'] ?? '') !== 'lap-animation-updated') {
+                continue;
+            }
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'event_id' => (int)$prior['id'],
+                'relationship_id' => $relationshipPublicId,
+                'relationship_version' => (int)($priorPayload['relationship_version'] ?? $expectedVersion),
+                'operation_id' => $operationId,
+                'lapAnimation' => $priorPayload['lapAnimation'] ?? null,
+                'lapAnimations' => is_array($priorPayload['lapAnimations'] ?? null)
+                    ? $priorPayload['lapAnimations']
+                    : [],
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $host = avatar_relationship_member_from_rows($members, $hostParticipantId);
+        $occupant = avatar_relationship_member_from_rows($members, $occupantParticipantId);
+        $hostOccupants = array_values(array_filter($members, static fn(array $member): bool =>
+            (string)($member['relationship_role'] ?? '') === 'lap'
+            && (int)($member['lap_host_participant_id'] ?? 0) === $hostParticipantId
+        ));
+        if (!$host || !$occupant
+            || (string)($host['relationship_role'] ?? '') !== 'normal'
+            || (string)($occupant['relationship_role'] ?? '') !== 'lap'
+            || (int)($occupant['lap_host_participant_id'] ?? 0) !== $hostParticipantId) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_CONFLICT',
+                'That lap relationship changed. Refresh and try again.',
+                'lap-membership-changed',
+                409
+            );
+        }
+        $currentMembershipGeneration = avatar_relationship_membership_generation($relationship, $occupant);
+        if (!hash_equals($currentMembershipGeneration, $occupantMembershipGeneration)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_CONFLICT',
+                'That lap membership changed. Refresh and try again.',
+                'lap-membership-generation-stale',
+                409
+            );
+        }
+        $lapSide = avatar_relationship_normalize_lap_side($occupant['lap_side'] ?? null);
+        if (!$lapSide) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_CONFLICT',
+                'That lap relationship changed. Refresh and try again.',
+                'lap-side-unavailable',
+                409
+            );
+        }
+
+        $storedOptions = !empty($relationship['options_json'])
+            ? json_decode((string)$relationship['options_json'], true)
+            : [];
+        if (!is_array($storedOptions) || json_last_error() !== JSON_ERROR_NONE) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_CONFLICT',
+                'The relationship configuration requires repair.',
+                'malformed-stored-options',
+                409
+            );
+        }
+        $currentStates = avatar_relationship_lap_animation_states(
+            $storedOptions['lapAnimations'] ?? null,
+            $relationship,
+            $members
+        );
+        $currentState = null;
+        foreach ($currentStates as $state) {
+            if ((int)$state['hostParticipantId'] === $hostParticipantId) {
+                $currentState = $state;
+                break;
+            }
+        }
+
+        if ($mode === 'none') {
+            if (!in_array($actorParticipantId, [$hostParticipantId, $occupantParticipantId], true)) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_LAP_ANIMATION_FORBIDDEN',
+                    'You cannot stop this lap animation.',
+                    'lap-animation-stop-permission-denied',
+                    403
+                );
+            }
+            if (!$currentState) {
+                return [
+                    'ok' => true,
+                    'idempotent' => true,
+                    'relationship_id' => $relationshipPublicId,
+                    'relationship_version' => max(1, (int)$relationship['version']),
+                    'operation_id' => $operationId,
+                    'lapAnimation' => null,
+                    'lapAnimations' => $currentStates,
+                    'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+                ];
+            }
+        } else {
+            if ($actorParticipantId !== $occupantParticipantId) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_LAP_ANIMATION_FORBIDDEN',
+                    'Only the current lap occupant can start or switch this animation.',
+                    'lap-animation-start-permission-denied',
+                    403
+                );
+            }
+            if (count($hostOccupants) !== 1) {
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_LAP_ANIMATION_UNAVAILABLE',
+                    'Lap animations require exactly one lap occupant on this host.',
+                    'lap-animation-occupant-count',
+                    409
+                );
+            }
+            $geometry = avatar_relationship_lap_animation_geometry(
+                $pdo,
+                $relationship,
+                $members,
+                $host,
+                $occupant,
+                $mode
+            );
+            if (empty($geometry['ok'])) {
+                $reason = (string)($geometry['reason'] ?? 'geometry-unavailable');
+                $message = $reason === 'occupant-webcam-active'
+                    ? 'Lap animations are unavailable while the occupant is using a webcam.'
+                    : ($reason === 'no-safe-bounce-range'
+                        ? 'Lap Bounce is unavailable because there is no safe upward range.'
+                        : 'That lap animation cannot be represented safely with the current geometry.');
+                return avatar_relationship_operation_error(
+                    'RELATIONSHIP_LAP_ANIMATION_UNAVAILABLE',
+                    $message,
+                    'lap-animation-' . $reason,
+                    409
+                );
+            }
+            if ($currentState
+                && (string)$currentState['mode'] === $mode
+                && (int)$currentState['occupantParticipantId'] === $occupantParticipantId
+                && hash_equals((string)$currentState['occupantMembershipGeneration'], $occupantMembershipGeneration)) {
+                return [
+                    'ok' => true,
+                    'idempotent' => true,
+                    'relationship_id' => $relationshipPublicId,
+                    'relationship_version' => max(1, (int)$relationship['version']),
+                    'operation_id' => $operationId,
+                    'lapAnimation' => $currentState,
+                    'lapAnimations' => $currentStates,
+                    'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+                ];
+            }
+        }
+
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        $nextStates = [];
+        foreach ($currentStates as $state) {
+            if ((int)$state['hostParticipantId'] === $hostParticipantId) continue;
+            $state['relationshipVersion'] = $nextVersion;
+            $nextStates[] = $state;
+        }
+        $nextState = null;
+        if ($mode !== 'none') {
+            $nextState = [
+                'schemaVersion' => 1,
+                'relationshipVersion' => $nextVersion,
+                'hostParticipantId' => $hostParticipantId,
+                'hostUserId' => (int)($host['user_id'] ?? 0) ?: null,
+                'occupantParticipantId' => $occupantParticipantId,
+                'occupantUserId' => (int)($occupant['user_id'] ?? 0) ?: null,
+                'occupantMembershipGeneration' => $occupantMembershipGeneration,
+                'lapSide' => $lapSide,
+                'mode' => $mode,
+                'generation' => $operationId,
+                'startedAtMs' => (int)floor(microtime(true) * 1000),
+            ];
+            $nextStates[] = $nextState;
+        }
+        $storedOptions['lapAnimations'] = $nextStates;
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET options_json = ?, version = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([
+            json_encode($storedOptions, JSON_UNESCAPED_SLASHES),
+            $nextVersion,
+            (int)$relationship['id'],
+        ]);
+        $relationship['version'] = $nextVersion;
+        $normalizedNextStates = avatar_relationship_lap_animation_states(
+            $nextStates,
+            $relationship,
+            $members
+        );
+        $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+        $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            'lap-animation-updated',
+            $eventPayload,
+            [
+                'operation_id' => $operationId,
+                'actor_participant_id' => $actorParticipantId,
+                'lapAnimation' => $nextState,
+                'lapAnimations' => $normalizedNextStates,
+            ]
+        );
+        $eventId = (int)$pdo->lastInsertId();
+        return [
+            'ok' => true,
+            'idempotent' => false,
+            'event_id' => $eventId,
+            'relationship_id' => $relationshipPublicId,
+            'relationship_version' => $nextVersion,
+            'operation_id' => $operationId,
+            'lapAnimation' => $nextState,
+            'lapAnimations' => $normalizedNextStates,
+            'relationship' => $viewerPayload,
+        ];
+    });
+}
+
+function avatar_relationship_stop_lap_animations_for_drag(
+    PDO $pdo,
+    int $sessionId,
+    int $actorParticipantId,
+    string $relationshipPublicId,
+    int $expectedVersion,
+    string $operationId
+): array {
+    return avatar_relationship_transaction($pdo, function() use (
+        $pdo,
+        $sessionId,
+        $actorParticipantId,
+        $relationshipPublicId,
+        $expectedVersion,
+        $operationId
+    ): array {
+        if ($relationshipPublicId === '' || !preg_match('/^[A-Za-z0-9:_-]{1,160}$/', $relationshipPublicId)
+            || !preg_match('/^[A-Za-z0-9:_-]{8,160}$/', $operationId)) {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_INVALID',
+                'Invalid lap animation drag-stop operation.',
+                'invalid-lap-animation-drag-stop',
+                400
+            );
+        }
+        $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
+        if (!$relationship || (string)$relationship['status'] !== 'active') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_CONFLICT',
+                'That relationship is no longer active.',
+                'relationship-unavailable',
+                409
+            );
+        }
+        $priorStmt = $pdo->prepare(
+            "SELECT id, payload FROM events
+              WHERE session_id = ? AND type = 'relationship' AND payload LIKE ?
+              ORDER BY id DESC LIMIT 20"
+        );
+        $priorStmt->execute([$sessionId, '%"operation_id":"' . $operationId . '"%']);
+        foreach ($priorStmt->fetchAll() as $prior) {
+            $priorPayload = json_decode((string)$prior['payload'], true) ?: [];
+            if ((string)($priorPayload['operation_id'] ?? '') !== $operationId
+                || (string)($priorPayload['relationship_id'] ?? '') !== $relationshipPublicId
+                || (int)($priorPayload['actor_participant_id'] ?? 0) !== $actorParticipantId
+                || (string)($priorPayload['action'] ?? '') !== 'lap-animation-updated'
+                || (string)($priorPayload['resolution_reason'] ?? '') !== 'whole-group-drag-start') {
+                continue;
+            }
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'event_id' => (int)$prior['id'],
+                'relationship_id' => $relationshipPublicId,
+                'relationship_version' => (int)($priorPayload['relationship_version'] ?? $expectedVersion),
+                'operation_id' => $operationId,
+                'lapAnimation' => null,
+                'lapAnimations' => [],
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+        if ($versionError = avatar_relationship_version_error($relationship, $expectedVersion)) return $versionError;
+        $members = avatar_relationship_locked_members($pdo, (int)$relationship['id']);
+        $actor = avatar_relationship_member_from_rows($members, $actorParticipantId);
+        if (!$actor || (string)($actor['relationship_role'] ?? '') !== 'normal') {
+            return avatar_relationship_operation_error(
+                'RELATIONSHIP_LAP_ANIMATION_FORBIDDEN',
+                'Only an active regular relationship member can begin whole-group dragging.',
+                'lap-animation-drag-stop-permission-denied',
+                403
+            );
+        }
+        $storedOptions = !empty($relationship['options_json'])
+            ? (json_decode((string)$relationship['options_json'], true) ?: [])
+            : [];
+        $states = avatar_relationship_lap_animation_states(
+            $storedOptions['lapAnimations'] ?? null,
+            $relationship,
+            $members
+        );
+        if (!$states) {
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'relationship_id' => $relationshipPublicId,
+                'relationship_version' => max(1, (int)$relationship['version']),
+                'operation_id' => $operationId,
+                'lapAnimation' => null,
+                'lapAnimations' => [],
+                'relationship' => avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId),
+            ];
+        }
+        $nextVersion = max(1, (int)$relationship['version']) + 1;
+        $storedOptions['lapAnimations'] = [];
+        $pdo->prepare(
+            'UPDATE avatar_relationships
+                SET options_json = ?, version = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?'
+        )->execute([
+            json_encode($storedOptions, JSON_UNESCAPED_SLASHES),
+            $nextVersion,
+            (int)$relationship['id'],
+        ]);
+        $relationship['version'] = $nextVersion;
+        $viewerPayload = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
+        $eventPayload = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
+        avatar_relationship_emit_lifecycle_event(
+            $pdo,
+            $sessionId,
+            'lap-animation-updated',
+            $eventPayload,
+            [
+                'operation_id' => $operationId,
+                'actor_participant_id' => $actorParticipantId,
+                'lapAnimation' => null,
+                'lapAnimations' => [],
+                'resolution_reason' => 'whole-group-drag-start',
+            ]
+        );
+        return [
+            'ok' => true,
+            'idempotent' => false,
+            'event_id' => (int)$pdo->lastInsertId(),
+            'relationship_id' => $relationshipPublicId,
+            'relationship_version' => $nextVersion,
+            'operation_id' => $operationId,
+            'lapAnimation' => null,
+            'lapAnimations' => [],
             'relationship' => $viewerPayload,
         ];
     });

@@ -140,6 +140,10 @@ export class AvatarRenderer {
 
     #relationshipDanceTargets = new Map();
 
+    #lapAnimationTargets = new Map();
+
+    #temporaryMotionTargets = new WeakMap();
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -185,6 +189,7 @@ export class AvatarRenderer {
      */
     destroy() {
 
+        this.clearAllLapAnimations();
         this.clearAllRelationshipDanceOffsets();
 
         this.clearStageLinkIcons({
@@ -682,7 +687,7 @@ export class AvatarRenderer {
         let operation = this.#relationshipDanceTargets.get(id);
         if (operation?.generation !== token) {
             this.clearRelationshipDanceOffset(id);
-            operation = { generation: token, targets: new Map() };
+            operation = { generation: token, targets: new Set() };
             this.#relationshipDanceTargets.set(id, operation);
         }
 
@@ -690,15 +695,17 @@ export class AvatarRenderer {
         this.relationshipTransitionTargets(participants).forEach(target => {
             const element = target.element;
             currentTargets.add(element);
-            if (!operation.targets.has(element)) {
-                operation.targets.set(element, element.style.translate || "");
-            }
-            element.style.translate = `${Number(offset?.x || 0)}px ${Number(offset?.y || 0)}px`;
+            operation.targets.add(element);
+            this.#setTemporaryMotion(element, "relationship", id, {
+                x: Number(offset?.x || 0),
+                y: Number(offset?.y || 0),
+                rotateDegrees: 0
+            });
             element.dataset.relationshipDanceGeneration = token;
         });
-        operation.targets.forEach((previous, element) => {
+        operation.targets.forEach(element => {
             if (currentTargets.has(element)) return;
-            element.style.translate = previous;
+            this.#clearTemporaryMotion(element, "relationship", id);
             delete element.dataset.relationshipDanceGeneration;
             operation.targets.delete(element);
         });
@@ -715,8 +722,8 @@ export class AvatarRenderer {
         const id = String(relationshipId || "");
         const operation = this.#relationshipDanceTargets.get(id);
         if (!operation) return false;
-        operation.targets.forEach((previous, element) => {
-            element.style.translate = previous;
+        operation.targets.forEach(element => {
+            this.#clearTemporaryMotion(element, "relationship", id);
             delete element.dataset.relationshipDanceGeneration;
         });
         operation.targets.clear();
@@ -730,6 +737,91 @@ export class AvatarRenderer {
 
         Array.from(this.#relationshipDanceTargets.keys()).forEach(relationshipId => {
             this.clearRelationshipDanceOffset(relationshipId);
+        });
+
+    }
+
+    /**
+     * Applies one finite Lap Dance/Bounce sample without changing baseline
+     * layout coordinates or avatar orientation scale.
+     */
+    applyLapAnimationFrame({
+        relationshipId,
+        generation,
+        participant,
+        sample = null
+    } = {}) {
+
+        const id = String(relationshipId || "");
+        const token = String(generation || "");
+        const participantId = Number(participant?.id || 0);
+        if (!id || !token || participantId <= 0 || !participant) return false;
+        const key = `${id}:${participantId}`;
+        let operation = this.#lapAnimationTargets.get(key);
+        if (operation?.generation !== token) {
+            this.clearLapAnimation(id, participantId);
+            operation = { generation: token, participantId, targets: new Set() };
+            this.#lapAnimationTargets.set(key, operation);
+        }
+        const currentTargets = new Set();
+        this.relationshipTransitionTargets([participant])
+            .filter(target => target.role !== "webcam")
+            .forEach(target => {
+                const element = target.element;
+                currentTargets.add(element);
+                operation.targets.add(element);
+                this.#setTemporaryMotion(element, "lap", key, {
+                    x: 0,
+                    y: Number(sample?.translateY || 0),
+                    rotateDegrees: target.role === "avatar"
+                        ? Number(sample?.rotateDegrees || 0)
+                        : 0
+                });
+                element.dataset.lapAnimationGeneration = token;
+            });
+        operation.targets.forEach(element => {
+            if (currentTargets.has(element)) return;
+            this.#clearTemporaryMotion(element, "lap", key);
+            delete element.dataset.lapAnimationGeneration;
+            operation.targets.delete(element);
+        });
+        this.#renderCount += 1;
+        return true;
+
+    }
+
+    clearLapAnimation(relationshipId, participantId) {
+
+        const key = `${String(relationshipId || "")}:${Number(participantId || 0)}`;
+        const operation = this.#lapAnimationTargets.get(key);
+        if (!operation) return false;
+        operation.targets.forEach(element => {
+            this.#clearTemporaryMotion(element, "lap", key);
+            delete element.dataset.lapAnimationGeneration;
+        });
+        operation.targets.clear();
+        this.#lapAnimationTargets.delete(key);
+        this.#renderCount += 1;
+        return true;
+
+    }
+
+    clearLapAnimationsForParticipant(participantId) {
+
+        const id = Number(participantId || 0);
+        Array.from(this.#lapAnimationTargets.entries()).forEach(([key, operation]) => {
+            if (Number(operation.participantId) !== id) return;
+            const separator = key.lastIndexOf(":");
+            this.clearLapAnimation(key.slice(0, separator), id);
+        });
+
+    }
+
+    clearAllLapAnimations() {
+
+        Array.from(this.#lapAnimationTargets.entries()).forEach(([key, operation]) => {
+            const separator = key.lastIndexOf(":");
+            this.clearLapAnimation(key.slice(0, separator), operation.participantId);
         });
 
     }
@@ -750,6 +842,7 @@ export class AvatarRenderer {
         if (!participant) return;
 
         this.#renderCount += 1;
+        this.clearLapAnimationsForParticipant(participant.id);
 
         this.cleanupAuraLayer(participant.auraEl, options);
 
@@ -1936,6 +2029,57 @@ export class AvatarRenderer {
 
         return options.appUrl?.(`/assets/images/cs-icons/${clean}.png`) ||
             `/assets/images/cs-icons/${clean}.png`;
+
+    }
+
+    #setTemporaryMotion(element, owner, ownerId, motion) {
+
+        let state = this.#temporaryMotionTargets.get(element);
+        if (!state) {
+            state = {
+                baselineTranslate: element.style.translate || "",
+                baselineRotate: element.style.rotate || "",
+                relationship: new Map(),
+                lap: new Map()
+            };
+            this.#temporaryMotionTargets.set(element, state);
+        }
+        state[owner].set(ownerId, {
+            x: Number(motion?.x || 0),
+            y: Number(motion?.y || 0),
+            rotateDegrees: Number(motion?.rotateDegrees || 0)
+        });
+        this.#renderTemporaryMotion(element, state);
+
+    }
+
+    #clearTemporaryMotion(element, owner, ownerId) {
+
+        const state = this.#temporaryMotionTargets.get(element);
+        if (!state) return;
+        state[owner].delete(ownerId);
+        if (!state.relationship.size && !state.lap.size) {
+            element.style.translate = state.baselineTranslate;
+            element.style.rotate = state.baselineRotate;
+            this.#temporaryMotionTargets.delete(element);
+            return;
+        }
+        this.#renderTemporaryMotion(element, state);
+
+    }
+
+    #renderTemporaryMotion(element, state) {
+
+        const motions = [
+            ...state.relationship.values(),
+            ...state.lap.values()
+        ];
+        const x = motions.reduce((sum, motion) => sum + motion.x, 0);
+        const y = motions.reduce((sum, motion) => sum + motion.y, 0);
+        const rotateDegrees = Array.from(state.lap.values())
+            .reduce((sum, motion) => sum + motion.rotateDegrees, 0);
+        element.style.translate = `${x}px ${y}px`;
+        element.style.rotate = rotateDegrees ? `${rotateDegrees}deg` : state.baselineRotate;
 
     }
 

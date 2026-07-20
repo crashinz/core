@@ -354,6 +354,189 @@ function avatar_relationship_capacity_complete_units(
     return $units;
 }
 
+function avatar_relationship_lap_animation_geometry(
+    PDO $pdo,
+    array $relationship,
+    array $members,
+    array $hostMember,
+    array $occupantMember,
+    string $mode
+): array {
+    if (!in_array($mode, ['lap_dance', 'lap_bounce'], true)) {
+        return ['ok' => false, 'reason' => 'unsupported-mode'];
+    }
+    $hostParticipantId = (int)($hostMember['participant_id'] ?? 0);
+    $occupantParticipantId = (int)($occupantMember['participant_id'] ?? 0);
+    $participantIds = array_values(array_unique(array_filter(array_map(
+        static fn(array $member): int => (int)($member['participant_id'] ?? 0),
+        $members
+    ))));
+    if ($hostParticipantId <= 0 || $occupantParticipantId <= 0 || !$participantIds) {
+        return ['ok' => false, 'reason' => 'participant-geometry-unavailable'];
+    }
+    $placeholders = implode(',', array_fill(0, count($participantIds), '?'));
+    $stmt = $pdo->prepare("SELECT * FROM participants WHERE id IN ({$placeholders})");
+    $stmt->execute($participantIds);
+    $participants = [];
+    foreach ($stmt->fetchAll() as $participant) {
+        $participants[(int)$participant['id']] = $participant;
+    }
+    $hostParticipant = $participants[$hostParticipantId] ?? null;
+    $occupantParticipant = $participants[$occupantParticipantId] ?? null;
+    if (!$hostParticipant || !$occupantParticipant
+        || empty($hostParticipant['last_seen_at']) || empty($occupantParticipant['last_seen_at'])) {
+        return ['ok' => false, 'reason' => 'participant-session-unavailable'];
+    }
+    if (!empty($occupantParticipant['webcam_enabled']) || !empty($occupantParticipant['webcam_path'])) {
+        return ['ok' => false, 'reason' => 'occupant-webcam-active'];
+    }
+
+    $hostDimensions = avatar_relationship_capacity_rendered_dimensions($pdo, $hostParticipant, false);
+    $occupantDimensions = avatar_relationship_capacity_rendered_dimensions($pdo, $occupantParticipant, false);
+    $anchor = avatar_relationship_capacity_anchor($relationship, $occupantMember);
+    $normalized = is_array($anchor['normalizedOffset'] ?? null)
+        ? $anchor['normalizedOffset']
+        : (is_array($anchor['offset'] ?? null) ? $anchor['offset'] : []);
+    $pixels = is_array($anchor['pixelOffset'] ?? null) ? $anchor['pixelOffset'] : [];
+    $xRatio = is_numeric($normalized['x'] ?? null) ? (float)$normalized['x'] : 0.5;
+    $yRatio = is_numeric($normalized['y'] ?? null) ? (float)$normalized['y'] : (65 / 150);
+    $pixelX = is_numeric($pixels['x'] ?? null) ? (float)$pixels['x'] : 0.0;
+    $pixelY = is_numeric($pixels['y'] ?? null) ? (float)$pixels['y'] : 0.0;
+    $lapSide = avatar_relationship_normalize_lap_side($occupantMember['lap_side'] ?? null);
+    if (!$lapSide) return ['ok' => false, 'reason' => 'lap-side-unavailable'];
+    $occupantX = $lapSide === 'bottom-left'
+        ? $hostDimensions['width'] * (1 - $xRatio) - $occupantDimensions['width'] + $pixelX
+        : $hostDimensions['width'] * $xRatio + $pixelX;
+    $occupantY = $hostDimensions['height'] * $yRatio + $pixelY;
+
+    $motion = [];
+    $animatedBox = [
+        'x' => $occupantX,
+        'y' => $occupantY,
+        'width' => (float)$occupantDimensions['width'],
+        'height' => (float)$occupantDimensions['height'],
+    ];
+    if ($mode === 'lap_dance') {
+        $radians = deg2rad(6);
+        $envelopeWidth = (int)ceil(
+            abs($occupantDimensions['width'] * cos($radians))
+            + abs($occupantDimensions['height'] * sin($radians))
+        );
+        $envelopeHeight = (int)ceil(
+            abs($occupantDimensions['width'] * sin($radians))
+            + abs($occupantDimensions['height'] * cos($radians))
+        );
+        $animatedBox = [
+            'x' => $occupantX - (($envelopeWidth - $occupantDimensions['width']) / 2),
+            'y' => $occupantY - (($envelopeHeight - $occupantDimensions['height']) / 2),
+            'width' => (float)$envelopeWidth,
+            'height' => (float)$envelopeHeight,
+        ];
+        $motion = [
+            'amplitudeDegrees' => 6,
+            'durationMs' => 2400,
+            'envelopeWidth' => $envelopeWidth,
+            'envelopeHeight' => $envelopeHeight,
+        ];
+    } else {
+        $centerClearance = $occupantY + ($occupantDimensions['height'] / 2)
+            - ($hostDimensions['height'] / 2);
+        $headClearance = $occupantY - ($hostDimensions['height'] / 4);
+        $effectiveRise = (int)floor(min(14, $centerClearance, $headClearance));
+        if ($effectiveRise <= 0) return ['ok' => false, 'reason' => 'no-safe-bounce-range'];
+        $animatedBox = [
+            'x' => $occupantX,
+            'y' => $occupantY - $effectiveRise,
+            'width' => (float)$occupantDimensions['width'],
+            'height' => (float)$occupantDimensions['height'] + $effectiveRise,
+        ];
+        $motion = [
+            'preferredRisePx' => 14,
+            'effectiveRisePx' => $effectiveRise,
+            'durationMs' => 1600,
+            'protectedHostFraction' => 0.25,
+        ];
+    }
+
+    $unitBoxes = [[
+        'x' => 0.0,
+        'y' => 0.0,
+        'width' => (float)$hostDimensions['width'],
+        'height' => (float)$hostDimensions['height'],
+    ]];
+    foreach ($members as $member) {
+        if ((string)($member['membership_status'] ?? 'active') !== 'active'
+            || (string)($member['relationship_role'] ?? '') !== 'lap'
+            || (int)($member['lap_host_participant_id'] ?? 0) !== $hostParticipantId) {
+            continue;
+        }
+        if ((int)$member['participant_id'] === $occupantParticipantId) {
+            $unitBoxes[] = $animatedBox;
+            continue;
+        }
+        $participant = $participants[(int)$member['participant_id']] ?? null;
+        if (!$participant) return ['ok' => false, 'reason' => 'participant-geometry-unavailable'];
+        $dimensions = avatar_relationship_capacity_rendered_dimensions($pdo, $participant, false);
+        $memberAnchor = avatar_relationship_capacity_anchor($relationship, $member);
+        $memberNormalized = is_array($memberAnchor['normalizedOffset'] ?? null)
+            ? $memberAnchor['normalizedOffset']
+            : (is_array($memberAnchor['offset'] ?? null) ? $memberAnchor['offset'] : []);
+        $memberPixels = is_array($memberAnchor['pixelOffset'] ?? null) ? $memberAnchor['pixelOffset'] : [];
+        $memberXRatio = is_numeric($memberNormalized['x'] ?? null) ? (float)$memberNormalized['x'] : 0.5;
+        $memberYRatio = is_numeric($memberNormalized['y'] ?? null) ? (float)$memberNormalized['y'] : (65 / 150);
+        $memberPixelX = is_numeric($memberPixels['x'] ?? null) ? (float)$memberPixels['x'] : 0.0;
+        $memberPixelY = is_numeric($memberPixels['y'] ?? null) ? (float)$memberPixels['y'] : 0.0;
+        $memberSide = avatar_relationship_normalize_lap_side($member['lap_side'] ?? null);
+        $memberX = $memberSide === 'bottom-left'
+            ? $hostDimensions['width'] * (1 - $memberXRatio) - $dimensions['width'] + $memberPixelX
+            : $hostDimensions['width'] * $memberXRatio + $memberPixelX;
+        $unitBoxes[] = [
+            'x' => $memberX,
+            'y' => $hostDimensions['height'] * $memberYRatio + $memberPixelY,
+            'width' => (float)$dimensions['width'],
+            'height' => (float)$dimensions['height'],
+        ];
+    }
+    $left = min(array_column($unitBoxes, 'x'));
+    $top = min(array_column($unitBoxes, 'y'));
+    $right = max(array_map(static fn(array $box): float => $box['x'] + $box['width'], $unitBoxes));
+    $bottom = max(array_map(static fn(array $box): float => $box['y'] + $box['height'], $unitBoxes));
+    $unitWidth = $right - $left;
+    $unitHeight = $bottom - $top;
+    if ($unitWidth > AVATAR_RELATIONSHIP_COMPLETE_UNIT_MAX_PX
+        || $unitHeight > AVATAR_RELATIONSHIP_COMPLETE_UNIT_MAX_PX) {
+        return ['ok' => false, 'reason' => 'complete-unit-limit', 'width' => $unitWidth, 'height' => $unitHeight];
+    }
+
+    $units = avatar_relationship_capacity_complete_units($pdo, $relationship, $members);
+    foreach ($units as &$unit) {
+        if ((int)$unit['participant_id'] !== $hostParticipantId) continue;
+        $unit['width'] = $unitWidth;
+        $unit['height'] = $unitHeight;
+    }
+    unset($unit);
+    $storedOptions = !empty($relationship['options_json'])
+        ? (json_decode((string)$relationship['options_json'], true) ?: [])
+        : [];
+    $spacing = max(0, min(64, (int)($storedOptions['rowSpacing'] ?? 0)));
+    $extent = avatar_relationship_capacity_packed_extent($units, $spacing);
+    if ($extent['width'] > AVATAR_RELATIONSHIP_HARD_EXTENT_MAX_PX
+        || $extent['height'] > AVATAR_RELATIONSHIP_HARD_EXTENT_MAX_PX) {
+        return ['ok' => false, 'reason' => 'relationship-extent-limit'] + $extent;
+    }
+    return [
+        'ok' => true,
+        'mode' => $mode,
+        'lapSide' => $lapSide,
+        'hostDimensions' => $hostDimensions,
+        'occupantDimensions' => $occupantDimensions,
+        'occupantAnchor' => ['x' => $occupantX, 'y' => $occupantY],
+        'motion' => $motion,
+        'completeUnit' => ['width' => $unitWidth, 'height' => $unitHeight],
+        'relationshipExtent' => $extent,
+    ];
+}
+
 function avatar_relationship_capacity_geometry_projection(
     PDO $pdo,
     array $relationship,

@@ -1322,7 +1322,11 @@ export class AvatarCoordinator {
                         hostParticipantId: Number(member.lapHostParticipantId),
                         lapSide: member.lapSide,
                         dimensions: this.#renderedDimensions(source),
-                        anchor: member.anchor || null
+                        anchor: member.anchor || null,
+                        presentationEnvelope: this.#runtime.dances?.presentationEnvelopeFor(
+                            presentation.relationshipId,
+                            member.participantId
+                        ) || null
                     }
                     : null;
             })
@@ -1489,7 +1493,11 @@ export class AvatarCoordinator {
                         hostParticipantId: member.lapHostParticipantId,
                         lapSide: member.lapSide,
                         dimensions: this.#renderedDimensions(participant),
-                        anchor: member.anchor || null
+                        anchor: member.anchor || null,
+                        presentationEnvelope: this.#runtime.dances?.presentationEnvelopeFor(
+                            presentation.relationshipId,
+                            member.participantId
+                        ) || null
                     } : null;
                 })
                 .filter(Boolean);
@@ -1655,14 +1663,23 @@ export class AvatarCoordinator {
      *
      * @returns {Object}
      */
-    beginDragOperation(participant) {
+    async beginDragOperation(participant) {
 
         if (!participant) {
             return Object.freeze({ allowed: false, reason: "participant-missing" });
         }
 
-        const presentation =
+        let presentation =
             this.#relationships.relationshipPresentationForParticipant(participant.id);
+
+        if (presentation) {
+            const stoppedRelationship = await this.#runtime.dances?.stopLapAnimationsForDrag(participant);
+            if (!stoppedRelationship) {
+                this.#relationshipMovementDiagnostics.rejected += 1;
+                return Object.freeze({ allowed: false, reason: "lap-animation-stop-rejected" });
+            }
+            presentation = this.#relationships.relationshipPresentationForParticipant(participant.id);
+        }
 
         if (presentation) {
             this.#runtime.dances?.suspend(
@@ -2539,7 +2556,11 @@ export class AvatarCoordinator {
                             hostParticipantId: member.lapHostParticipantId,
                             lapSide: member.lapSide,
                             dimensions: this.#renderedDimensions(participant),
-                            anchor: member.anchor || null
+                            anchor: member.anchor || null,
+                            presentationEnvelope: this.#runtime.dances?.presentationEnvelopeFor(
+                                presentation.relationshipId,
+                                member.participantId
+                            ) || null
                         }
                         : null;
                 })

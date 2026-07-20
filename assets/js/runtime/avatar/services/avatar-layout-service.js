@@ -535,12 +535,18 @@ export class AvatarLayoutService {
                     x: offsets.x,
                     y: offsets.y,
                     width: lapWidth,
-                    height: lapHeight
+                    height: lapHeight,
+                    visualBounds: {
+                        x: offsets.x + Number(attachment.presentationEnvelope?.offsetX || 0),
+                        y: offsets.y + Number(attachment.presentationEnvelope?.offsetY || 0),
+                        width: Math.max(1, Number(attachment.presentationEnvelope?.width || lapWidth)),
+                        height: Math.max(1, Number(attachment.presentationEnvelope?.height || lapHeight))
+                    }
                 };
             });
             const unitBounds = this.#relationshipBounds([
                 { x: 0, y: 0, width: memberWidth, height: memberHeight },
-                ...relativeLapBoxes
+                ...relativeLapBoxes.map(box => box.visualBounds)
             ]);
             return {
                 entry,
@@ -585,6 +591,7 @@ export class AvatarLayoutService {
         );
         const normalBoxes = [];
         const lapBoxes = [];
+        const lapVisualBoxes = [];
 
         hostUnits.forEach(unit => {
             const placement = placementByParticipantId.get(Number(unit.entry.participant.id));
@@ -596,15 +603,24 @@ export class AvatarLayoutService {
                 height: unit.height
             };
             normalBoxes.push(hostBox);
-            unit.relativeLapBoxes.forEach(box => lapBoxes.push({
-                ...box,
-                x: placement.x + box.x,
-                y: placement.y + box.y
-            }));
+            unit.relativeLapBoxes.forEach(box => {
+                lapBoxes.push({
+                    ...box,
+                    x: placement.x + box.x,
+                    y: placement.y + box.y
+                });
+                lapVisualBoxes.push({
+                    entry: box.entry,
+                    x: placement.x + box.visualBounds.x,
+                    y: placement.y + box.visualBounds.y,
+                    width: box.visualBounds.width,
+                    height: box.visualBounds.height
+                });
+            });
         });
 
         const allBoxes = [...normalBoxes, ...lapBoxes];
-        const bounds = this.#relationshipBounds(allBoxes);
+        const bounds = this.#relationshipBounds([...normalBoxes, ...lapVisualBoxes]);
         const translation = layoutResolution.valid
             ? Object.freeze({ x: 0, y: 0 })
             : this.#clampTranslation(bounds, width, height);
@@ -837,6 +853,73 @@ export class AvatarLayoutService {
         return Object.freeze({
             x: Number.isFinite(x) && x !== 0 ? x : 0,
             y: Number.isFinite(y) && y !== 0 ? y : 0
+        });
+
+    }
+
+    /**
+     * Resolves one Lap Dance/Bounce static envelope from authoritative rendered
+     * dimensions and the same lap anchor used by relationship layout.
+     */
+    lapAnimationGeometry({
+        mode,
+        hostDimensions,
+        occupantDimensions,
+        lapSide,
+        anchor = null,
+        danceStrategy = null,
+        bounceStrategy = null
+    } = {}) {
+
+        const hostWidth = Math.max(1, Number(hostDimensions?.width || 0));
+        const hostHeight = Math.max(1, Number(hostDimensions?.height || 0));
+        const occupantWidth = Math.max(1, Number(occupantDimensions?.width || 0));
+        const occupantHeight = Math.max(1, Number(occupantDimensions?.height || 0));
+        if (!["bottom-left", "bottom-right"].includes(String(lapSide || ""))) return null;
+        const offsets = this.#anchorPairOffsets({
+            mode: "lap",
+            orientation: lapSide,
+            anchors: {},
+            members: [
+                { role: "initiator", anchor },
+                { role: "target" }
+            ]
+        }, {
+            primaryWidth: hostWidth,
+            primaryHeight: hostHeight,
+            lapWidth: occupantWidth,
+            lapHeight: occupantHeight
+        });
+
+        if (mode === "lap_dance" && danceStrategy?.envelope) {
+            const envelope = danceStrategy.envelope({ width: occupantWidth, height: occupantHeight });
+            return Object.freeze({
+                mode,
+                baseline: Object.freeze({ x: offsets.x, y: offsets.y }),
+                effectiveRisePx: 0,
+                envelope
+            });
+        }
+        if (mode !== "lap_bounce" || !bounceStrategy?.envelope) return null;
+        const centerClearance = offsets.y + occupantHeight / 2 - hostHeight / 2;
+        const headClearance = offsets.y - hostHeight * Number(bounceStrategy.protectedHostFraction || 0.25);
+        const effectiveRisePx = Math.floor(Math.min(
+            Number(bounceStrategy.preferredRisePx || 14),
+            centerClearance,
+            headClearance
+        ));
+        if (effectiveRisePx <= 0) return null;
+        return Object.freeze({
+            mode,
+            baseline: Object.freeze({ x: offsets.x, y: offsets.y }),
+            effectiveRisePx,
+            centerClearance,
+            headClearance,
+            envelope: bounceStrategy.envelope({
+                width: occupantWidth,
+                height: occupantHeight,
+                effectiveRisePx
+            })
         });
 
     }

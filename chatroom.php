@@ -31,7 +31,16 @@ if ($activeEjection) {
 }
 $session = active_session_for_room($pdo, $roomId);
 $participant = participant_for_user($pdo, (int)$session['id'], $user);
-$pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = 0 WHERE id = ?')->execute([(int)$participant['id']]);
+avatar_relationship_transaction($pdo, static function() use ($pdo, $participant, $user): array {
+    $cancelledLapAnimations = avatar_relationship_cancel_active_lap_animations(
+        $pdo,
+        (int)$user['id'],
+        'participant-room-rejoin'
+    );
+    $pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = 0 WHERE id = ?')
+        ->execute([(int)$participant['id']]);
+    return ['cancelled_lap_animations' => $cancelledLapAnimations];
+});
 touch_participant_presence($pdo, $participant, 1);
 runtime_maintenance_for_session($pdo, (int)$session['id']);
 $participant['webcam_path'] = null;
@@ -722,6 +731,8 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="ctx-avatar-user-visibility" type="button">Hide avatars from this user</button>
   <button id="ctx-dm" type="button">Send DM</button>
   <button id="ctx-interact" type="button">Interact</button>
+  <button id="ctx-lap-dance" type="button" aria-pressed="false">Start Lap Dance</button>
+  <button id="ctx-lap-bounce" type="button" aria-pressed="false">Start Lap Bounce</button>
   <button id="ctx-block" class="danger" type="button">Block</button>
   <button id="ctx-unblock" type="button">Unblock</button>
   <button id="ctx-manage-relationship" type="button">Manage Relationship</button>

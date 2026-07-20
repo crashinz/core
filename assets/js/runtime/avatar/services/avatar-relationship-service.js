@@ -133,6 +133,65 @@ function normalizeDancePlayback(playback = {}) {
     });
 }
 
+function normalizeLapAnimations(states = [], relationshipVersion = 0, members = []) {
+    const membersById = new Map(members.map(member => [Number(member.participantId), member]));
+    const occupantsByHost = new Map();
+    members.forEach(member => {
+        if (member.relationshipRole !== "lap") return;
+        const hostId = Number(member.lapHostParticipantId || 0);
+        const occupants = occupantsByHost.get(hostId) || [];
+        occupants.push(member);
+        occupantsByHost.set(hostId, occupants);
+    });
+    const seenHosts = new Set();
+    return Object.freeze(Array.from(states || []).map(state => {
+        const hostParticipantId = Number(state?.hostParticipantId || state?.host_participant_id || 0);
+        const occupantParticipantId = Number(state?.occupantParticipantId || state?.occupant_participant_id || 0);
+        const occupantMembershipGeneration = String(
+            state?.occupantMembershipGeneration || state?.occupant_membership_generation || ""
+        );
+        const boundVersion = Number(state?.relationshipVersion || state?.relationship_version || 0);
+        const mode = ["lap_dance", "lap_bounce"].includes(String(state?.mode || ""))
+            ? String(state.mode)
+            : null;
+        const generation = String(state?.generation || "");
+        const startedAtMs = Number(state?.startedAtMs || state?.started_at_ms || 0);
+        const lapSide = normalizeLapSide(state?.lapSide || state?.lap_side);
+        const host = membersById.get(hostParticipantId);
+        const occupant = membersById.get(occupantParticipantId);
+        const valid = hostParticipantId > 0
+            && occupantParticipantId > 0
+            && !seenHosts.has(hostParticipantId)
+            && mode
+            && generation
+            && Number.isFinite(startedAtMs)
+            && startedAtMs > 0
+            && boundVersion === Number(relationshipVersion)
+            && host?.relationshipRole === "normal"
+            && occupant?.relationshipRole === "lap"
+            && Number(occupant.lapHostParticipantId) === hostParticipantId
+            && occupant.lapSide === lapSide
+            && occupantsByHost.get(hostParticipantId)?.length === 1
+            && occupantMembershipGeneration
+            && occupant.membershipGeneration === occupantMembershipGeneration;
+        if (!valid) return null;
+        seenHosts.add(hostParticipantId);
+        return Object.freeze({
+            schemaVersion: 1,
+            relationshipVersion: boundVersion,
+            hostParticipantId,
+            hostUserId: Number(state?.hostUserId || state?.host_user_id || 0) || null,
+            occupantParticipantId,
+            occupantUserId: Number(state?.occupantUserId || state?.occupant_user_id || 0) || null,
+            occupantMembershipGeneration,
+            lapSide,
+            mode,
+            generation,
+            startedAtMs
+        });
+    }).filter(Boolean));
+}
+
 const RELATIONSHIP_CAPABILITIES = Object.freeze({
 
     normal:
@@ -1188,6 +1247,7 @@ export class AvatarRelationshipService {
             visibleMemberIds: Object.freeze(visibleMemberIds),
             options: selectedOptions,
             dancePlayback: relationship.dancePlayback,
+            lapAnimations: relationship.lapAnimations,
             selectedFormation: formationResolution.selected,
             effectiveFormation: formationResolution.effective,
             formationFallbackReason: formationResolution.fallbackReason,
@@ -1249,11 +1309,18 @@ export class AvatarRelationshipService {
                 const permissionRole = String(member.permissionRole || "member");
                 const isViewer = Number(member.participantId) === viewerParticipantId;
                 const lapSide = normalizeLapSide(member.lapSide);
+                const lapActions = new Map(
+                    Array.from(this.#runtime.dances?.participantActions(participant) || [])
+                        .map(action => [action.id, action])
+                );
+                const lapDanceAction = lapActions.get("avatar.lap-dance") || null;
+                const lapBounceAction = lapActions.get("avatar.lap-bounce") || null;
                 return Object.freeze({
                     participantId: Number(member.participantId),
                     displayName: String(participant?.display_name || "Room member"),
                     relationshipRole,
                     permissionRole,
+                    membershipGeneration: member.membershipGeneration,
                     order: Number(member.order || 0),
                     lapHostParticipantId: Number(member.lapHostParticipantId || 0) || null,
                     lapSide,
@@ -1265,7 +1332,17 @@ export class AvatarRelationshipService {
                         demote: canManage && !isViewer && permissionRole === "manager",
                         remove: canManage && !isViewer && permissionRole !== "creator",
                         reorder: canManage && relationshipRole === "normal",
-                        switchLapSide: isViewer && viewerActive && relationshipRole === "lap"
+                        switchLapSide: isViewer && viewerActive && relationshipRole === "lap",
+                        lapDance: Object.freeze({
+                            applicable: Boolean(lapDanceAction),
+                            stop: Boolean(lapDanceAction?.active),
+                            label: lapDanceAction?.label || "Start Lap Dance"
+                        }),
+                        lapBounce: Object.freeze({
+                            applicable: Boolean(lapBounceAction),
+                            stop: Boolean(lapBounceAction?.active),
+                            label: lapBounceAction?.label || "Start Lap Bounce"
+                        })
                     })
                 });
             });
@@ -1359,6 +1436,11 @@ export class AvatarRelationshipService {
             Object.freeze({ id: "grid", label: "Grid", available: normalMembers.length >= 2 })
         ]);
         const dancePlayback = normalizeDancePlayback(relationship?.dancePlayback);
+        const lapAnimations = normalizeLapAnimations(
+            relationship?.lapAnimations,
+            Number(relationship?.version || 0),
+            relationship?.members || []
+        );
         const danceOptions = Object.freeze(
             Array.from(this.#runtime.dances?.approvedDances || []).map(dance => Object.freeze({
                 id: dance.id,
@@ -1395,6 +1477,7 @@ export class AvatarRelationshipService {
                 formationOptions
             }),
             dancePlayback,
+            lapAnimations,
             danceOptions,
             actions: Object.freeze({
                 manage: viewerActive,
@@ -2768,6 +2851,12 @@ export class AvatarRelationshipService {
                             : index,
                     userId:
                         Number(member?.userId || member?.user_id || 0) || null,
+                    membershipGeneration:
+                        String(
+                            member?.membershipGeneration ||
+                            member?.membership_generation ||
+                            ""
+                        ) || null,
                     effectiveAt:
                         member?.effectiveAt ||
                         member?.membership_effective_at ||
@@ -2906,6 +2995,12 @@ export class AvatarRelationshipService {
             dancePlayback:
                 normalizeDancePlayback(
                     relationship.dancePlayback || relationship.dance_playback || {}
+                ),
+            lapAnimations:
+                normalizeLapAnimations(
+                    relationship.lapAnimations || relationship.lap_animations || [],
+                    Math.max(1, Number(relationship.version || 1)),
+                    members
                 ),
             divergenceStatus:
                 relationship.divergence_status ||

@@ -170,8 +170,18 @@ if ($action === 'webcam_on' || $action === 'webcam_off') {
             'code' => 'WEBCAM_USE_DISABLED',
         ], 403);
     }
-    $pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = ? WHERE id = ?')
-        ->execute([$enabled ? 1 : 0, (int)$participant['id']]);
+    avatar_relationship_transaction($pdo, static function() use ($pdo, $participant, $enabled): array {
+        if ($enabled) {
+            avatar_relationship_cancel_active_dances(
+                $pdo,
+                (int)$participant['user_id'],
+                'participant-webcam-enabled'
+            );
+        }
+        $pdo->prepare('UPDATE participants SET webcam_path = NULL, webcam_enabled = ? WHERE id = ?')
+            ->execute([$enabled ? 1 : 0, (int)$participant['id']]);
+        return ['ok' => true];
+    });
     $payload = [
         'participant_id' => (int)$participant['id'],
         'webcam_path' => null,

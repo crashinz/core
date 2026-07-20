@@ -167,6 +167,32 @@ if ($action === 'set_dance_playback') {
     ));
 }
 
+if ($action === 'set_lap_animation') {
+    avatar_relationship_api_out(avatar_relationship_set_lap_animation(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion,
+        trim((string)($body['operation_id'] ?? '')),
+        (string)($body['mode'] ?? 'none'),
+        (int)($body['host_participant_id'] ?? 0),
+        (int)($body['occupant_participant_id'] ?? 0),
+        trim((string)($body['occupant_membership_generation'] ?? ''))
+    ));
+}
+
+if ($action === 'stop_lap_animations_for_drag') {
+    avatar_relationship_api_out(avatar_relationship_stop_lap_animations_for_drag(
+        $pdo,
+        $sessionId,
+        $participantId,
+        trim((string)($body['relationship_id'] ?? '')),
+        $expectedVersion,
+        trim((string)($body['operation_id'] ?? ''))
+    ));
+}
+
 if ($action === 'set_lap_side') {
     avatar_relationship_api_out(avatar_relationship_set_lap_side(
         $pdo,
