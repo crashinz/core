@@ -34,11 +34,27 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-000033
+Unnumbered Canonical Browser Harness Reliability and Worker Isolation
 
 **Framework Phase**
 
-AvatarAuraService Complete
+Engineering Complete; certified for publication
+
+The active checkpoint stabilizes the shared canonical browser harness without
+changing production behavior. One browser-independent 10-worker/62-scenario
+registry now drives focused and canonical execution through a worker-owned
+resource/session factory, explicit participant-state helpers, declared
+budgets, fail-closed stubbing, parent accounting, derived timeouts,
+process-identity cleanup, and a fast pre-canonical canary. Browser-specific
+launch and media policy is isolated behind adapters; full Firefox
+certification remains deferred and will consume this same foundation.
+
+The corrected complete two-context Chrome worker passes 31/31 scenarios. The
+exact-final gate passes all 14 selected checks, and Chrome passes 62/62
+scenarios across all ten workers with exact 13/13 HTTP accounting, zero defects
+or unexpected observability/download findings, and clean teardown. Production
+and deployment content remain unchanged. Avatar Interaction Animations is next
+and has not begun.
 
 ---
 
