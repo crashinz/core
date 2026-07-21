@@ -7,6 +7,7 @@ const appUrl = path => `${APP_BASE}${path}`;
 const statusEl = document.getElementById('admin-page-status');
 let settings = {};
 let relationshipCapacity = null;
+let danceCapability = null;
 let selectedIssueId = null;
 
 function esc(value) {
@@ -118,6 +119,7 @@ document.getElementById('admin-user-create').addEventListener('submit', async ev
 async function loadSettings() {
   const data = await request('/api/admin_system.php?action=settings'); settings = data.settings || {};
   relationshipCapacity = data.relationshipCapacity || relationshipCapacity;
+  danceCapability = data.danceCapability || danceCapability;
   for (const [name, value] of Object.entries(settings)) {
     for (const form of [document.getElementById('admin-settings-form'), document.getElementById('role-color-form'), document.getElementById('diagnostic-screenshot-form'), document.getElementById('webcam-capability-form')]) {
       const input = form?.elements?.[name]; if (!input) continue;
@@ -130,6 +132,7 @@ async function loadSettings() {
   if (capacityImpact && relationshipCapacity) {
     capacityImpact.textContent = `Current limit: ${relationshipCapacity.maximumRegularAvatarLinks}. Allowed range: ${relationshipCapacity.minimumRegularAvatarLinks}-${relationshipCapacity.maximumConfigurableRegularAvatarLinks}.`;
   }
+  renderDanceCapability();
   applyRoleColors();
 }
 
@@ -168,6 +171,65 @@ relationshipCapacityForm?.addEventListener('submit', async event => {
     if (error?.message?.includes('changed')) await loadSettings().catch(() => {});
     showStatus(error.message, true);
   }
+});
+
+const danceCapabilityForm = document.getElementById('admin-dance-capability-form');
+function renderDanceCapability() {
+  if (!danceCapabilityForm || !danceCapability) return;
+  const definitions = Array.isArray(danceCapability.dances) ? danceCapability.dances : [];
+  for (const input of danceCapabilityForm.querySelectorAll('input[name="dance_capability"]')) {
+    const definition = definitions.find(item => item.id === input.value);
+    input.checked = Boolean(definition?.enabled);
+    input.dataset.defaultEnabled = definition?.defaultEnabled ? 'true' : 'false';
+  }
+  const summary = document.getElementById('admin-dance-capability-summary');
+  if (summary) summary.textContent = `${Number(danceCapability.enabledCount || 0)} of ${Number(danceCapability.totalCount || definitions.length)} enabled`;
+}
+
+function setDanceCapabilityPending(pending) {
+  danceCapabilityForm?.querySelectorAll('input, button').forEach(control => {
+    control.disabled = pending || !IS_ADMIN;
+  });
+}
+
+async function updateDanceCapability(operation, details = {}) {
+  if (!danceCapability) return;
+  setDanceCapabilityPending(true);
+  try {
+    const data = await post('/api/admin_system.php', {
+      action: 'update_dance_capabilities',
+      operation,
+      expected_revision: danceCapability.revision,
+      ...details,
+    });
+    danceCapability = data.policy;
+    settings = data.settings || settings;
+    renderDanceCapability();
+    const stopped = Number(data.stoppedStateCount || 0);
+    showStatus(data.idempotent
+      ? 'Dance settings are unchanged.'
+      : `Dance settings saved${stopped ? `; ${stopped} active dance${stopped === 1 ? '' : 's'} stopped safely` : ''}.`);
+  } catch (error) {
+    await loadSettings().catch(() => {});
+    showStatus(error.message, true);
+  } finally {
+    setDanceCapabilityPending(false);
+  }
+}
+
+if (!IS_ADMIN) setDanceCapabilityPending(true);
+danceCapabilityForm?.querySelectorAll('input[name="dance_capability"]').forEach(input => {
+  input.addEventListener('change', () => updateDanceCapability('set', {
+    dance_id: input.value,
+    enabled: input.checked ? 1 : 0,
+  }));
+});
+document.getElementById('admin-dance-enable-all')?.addEventListener('click', () => {
+  updateDanceCapability('enable_all');
+});
+document.getElementById('admin-dance-disable-all')?.addEventListener('click', () => {
+  if (!confirm('Disable all avatar dances? Active dances will stop and return to their exact baseline. Relationships and lap seats will not change.')) return;
+  updateDanceCapability('disable_all', { confirmed: 1 });
 });
 
 function roleColorBody(action) { const form = document.getElementById('role-color-form'); const body = { action }; for (const element of form.elements) if (element.name) body[element.name] = element.value; return body; }

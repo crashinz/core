@@ -20,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             'avatarSizePolicy' => avatar_size_policy($pdo),
             'webcamCapability' => webcam_capability($pdo),
             'relationshipCapacity' => avatar_relationship_capacity_policy($pdo),
+            'danceCapability' => avatar_dance_capability_policy($pdo),
         ]);
     }
 
@@ -194,6 +195,28 @@ if ($action === 'save_relationship_capacity') {
         $body['maximum_regular_avatar_links'] ?? null,
         $body['expected_revision'] ?? null,
         !empty($body['confirm_above_limit']),
+        (int)$me['id'],
+        'admin'
+    );
+    if (empty($result['ok'])) {
+        $status = max(400, (int)($result['http_status'] ?? 400));
+        unset($result['http_status']);
+        json_out($result, $status);
+    }
+    json_out($result + ['settings' => admin_settings($pdo)]);
+}
+
+if ($action === 'update_dance_capabilities') {
+    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+    $result = avatar_dance_capability_update(
+        $pdo,
+        [
+            'operation' => (string)($body['operation'] ?? ''),
+            'dance_id' => isset($body['dance_id']) ? (string)$body['dance_id'] : null,
+            'enabled' => $body['enabled'] ?? null,
+            'confirmed' => !empty($body['confirmed']),
+        ],
+        $body['expected_revision'] ?? null,
         (int)$me['id'],
         'admin'
     );

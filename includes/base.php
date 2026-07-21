@@ -16,6 +16,7 @@ if (is_file(CHATSPACE_CONFIG)) {
 require_once __DIR__ . '/avatar_size_policy.php';
 require_once __DIR__ . '/avatar_visibility_policy.php';
 require_once __DIR__ . '/avatar_relationship_capacity_policy.php';
+require_once __DIR__ . '/avatar_dance_capability_policy.php';
 require_once __DIR__ . '/webcam_policy.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/runtime_issue_service.php';
@@ -1433,7 +1434,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults());
+    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -4275,6 +4276,14 @@ function avatar_relationship_set_dance_playback(
             );
         }
 
+        $danceCapability = $playbackState === 'playing'
+            ? avatar_dance_capability_lock($pdo)
+            : null;
+        if ($playbackState === 'playing'
+            && !avatar_dance_capability_enabled($danceCapability, (string)$danceId)) {
+            return avatar_dance_capability_start_error($danceCapability, (string)$danceId, false);
+        }
+
         $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);
         if (!$relationship || (string)$relationship['status'] !== 'active') {
             return avatar_relationship_operation_error(
@@ -4443,6 +4452,13 @@ function avatar_relationship_set_lap_animation(
                 'invalid-lap-animation-operation',
                 400
             );
+        }
+
+        $danceCapability = $mode !== 'none'
+            ? avatar_dance_capability_lock($pdo)
+            : null;
+        if ($mode !== 'none' && !avatar_dance_capability_enabled($danceCapability, $mode)) {
+            return avatar_dance_capability_start_error($danceCapability, $mode, true);
         }
 
         $relationship = avatar_relationship_locked_row($pdo, $sessionId, $relationshipPublicId);

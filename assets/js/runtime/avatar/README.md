@@ -48,6 +48,24 @@ capacity from viewport size or create optimistic membership.
 
 ---
 
+# Dance Capability Policy
+
+The unnumbered Dance Capability Controls checkpoint adds one shared
+installation policy for Synchronized Sway, Synchronized Bounce, Lap Dance,
+and Lap Bounce. The server policy owner defines stable metadata, enabled
+values, one stale-write revision, atomic individual/all changes, active-state
+shutdown, room propagation, and bounded Tool Logging. Setup and Admin edit the
+same owner; no schema migration or duplicate client policy exists.
+
+Relationship transactions reject disabled starts authoritatively. Capability
+changes stop only newly disabled finite states, publish versioned relationship
+snapshots, restore exact baselines, preserve membership and unrelated modes,
+and never restart an old generation when re-enabled. `AvatarDanceService`
+projects the policy into participant and management actions while retaining
+its existing scheduler and presentation-cleanup ownership.
+
+---
+
 # Lap Interaction Animations
 
 The unnumbered Avatar Interaction Animations checkpoint extends

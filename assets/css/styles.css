@@ -91,6 +91,17 @@
 .inline-form { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); max-width: none; align-items: end; }
 .settings-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); max-width: none; }
 .shared-form-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.settings-capability-group {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.settings-capability-group legend { padding: 0 6px; font-weight: 900; }
+.settings-capability-list { display: grid; gap: 12px; }
+.settings-capability-summary { color: var(--text-muted); font-weight: 750; }
 .settings-checkbox-row {
   grid-column: 1 / -1;
   display: grid !important;

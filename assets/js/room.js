@@ -1042,6 +1042,20 @@ function configureRoomEventRouter() {
         revision: Number(cfg.avatarSizePolicy.revision || 1),
       });
     },
+    onDanceCapability(payload, event = {}) {
+      const changed = avatarRuntime?.dances?.configureCapabilityPolicy?.(payload, {
+        reason: 'installation-dance-capability-change',
+      }) || false;
+      if (!changed) return;
+      cfg.danceCapability = avatarRuntime.dances.capabilityPolicy;
+      avatarRuntime?.relationshipManagement?.refresh?.({ render: true }).catch(warnRuntimeRequest);
+      recordRuntimeDiagnostic('avatarDance', 'installation-capability-reconciled', {
+        eventId: Number(event.id || 0) || null,
+        revision: Number(cfg.danceCapability.revision || 1),
+        enabledCount: Number(cfg.danceCapability.enabledCount || 0),
+        totalCount: Number(cfg.danceCapability.totalCount || 0),
+      });
+    },
     onParticipantAura(payload) {
       participants.forEach(person => {
         if (Number(person.user_id) !== Number(payload.user_id) && Number(person.id) !== Number(payload.participant_id)) return;
@@ -6993,6 +7007,9 @@ async function bootRoom() {
   }, 'room-bootstrap');
   avatarRuntime?.displayPolicy?.configure(cfg.avatarSizePolicy || {});
   window.ChatSpaceAvatar?.configure?.(avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy || {});
+  avatarRuntime?.dances?.configureCapabilityPolicy?.(cfg.danceCapability || {}, {
+    reason: 'room-bootstrap',
+  });
   cfg.innerTranquillityPlayer = innerTranquillityPlayerCapability();
   importedRoomRuntime?.layout?.render(cfg.importLayout);
   importedRoomRuntime?.music?.renderPlayer(cfg.musicPlaylist);

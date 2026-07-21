@@ -222,6 +222,10 @@ export class RoomEventRouter {
                 this.#context?.onAvatarSizePolicy?.(payload, event);
                 return true;
 
+            case "dance_capability":
+                this.#context?.onDanceCapability?.(payload, event);
+                return true;
+
             case "aura":
                 this.#context?.onParticipantAura?.(payload, event);
                 return true;

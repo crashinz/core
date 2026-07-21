@@ -12,6 +12,50 @@ const APPROVED_LAP_ANIMATIONS = Object.freeze([
     Object.freeze({ id: "lap_bounce", label: "Lap Bounce", durationMs: LapBounce.durationMs })
 ]);
 
+function normalizeCapabilityPolicy(policy = {}) {
+    const projected = new Map(Array.from(policy?.dances || []).map(definition => [
+        String(definition?.id || ""),
+        definition
+    ]));
+    const enabled = policy?.enabled && typeof policy.enabled === "object"
+        ? policy.enabled
+        : {};
+    const definitions = [...APPROVED_DANCES, ...APPROVED_LAP_ANIMATIONS].map((fallback, index) => {
+        const source = projected.get(fallback.id) || {};
+        const sourceEnabled = Object.hasOwn(enabled, fallback.id)
+            ? enabled[fallback.id]
+            : source.enabled;
+        return Object.freeze({
+            ...fallback,
+            label: String(source.label || fallback.label),
+            description: String(source.description || ""),
+            kind: String(source.kind || (fallback.id.startsWith("lap_") ? "lap" : "relationship")),
+            order: Number(source.order || (index + 1) * 10),
+            defaultEnabled: source.defaultEnabled !== false,
+            enabled: sourceEnabled !== false
+        });
+    });
+    const enabledValues = Object.freeze(Object.fromEntries(
+        definitions.map(definition => [definition.id, definition.enabled])
+    ));
+    const enabledCount = definitions.filter(definition => definition.enabled).length;
+    return Object.freeze({
+        settingKey: String(policy?.settingKey || "avatar_dance_capabilities"),
+        revision: Math.max(0, Number(policy?.revision || 0)),
+        categoryId: String(policy?.categoryId || "avatar-interactions"),
+        sectionId: String(policy?.sectionId || "dances"),
+        categoryLabel: String(policy?.categoryLabel || "Avatar Interactions"),
+        sectionLabel: String(policy?.sectionLabel || "Dances"),
+        description: String(policy?.description || "Choose which optional avatar dances members may start in this community."),
+        enabled: enabledValues,
+        dances: Object.freeze(definitions),
+        enabledCount,
+        totalCount: definitions.length,
+        allEnabled: enabledCount === definitions.length,
+        allDisabled: enabledCount === 0
+    });
+}
+
 /**
  * Owns finite synchronized relationship-dance playback and scheduler lifetime.
  */
@@ -26,6 +70,7 @@ export class AvatarDanceService {
     #motionQuery = null;
     #motionQueryListener = null;
     #serial = 0;
+    #capabilityPolicy = normalizeCapabilityPolicy();
     #diagnostics = {
         started: 0,
         stopped: 0,
@@ -59,6 +104,8 @@ export class AvatarDanceService {
 
     configure(context = {}) {
         this.#context = context;
+        const configuredPolicy = context?.getConfig?.()?.danceCapability;
+        if (configuredPolicy) this.configureCapabilityPolicy(configuredPolicy, { reason: "runtime-configure" });
         this.#removeMotionPreferenceListener();
         const matchMedia = context.matchMedia || globalThis.matchMedia;
         this.#motionQuery = typeof matchMedia === "function"
@@ -78,11 +125,54 @@ export class AvatarDanceService {
     }
 
     get approvedDances() {
-        return APPROVED_DANCES;
+        return Object.freeze(this.#capabilityPolicy.dances.filter(definition => definition.kind === "relationship"));
     }
 
     get approvedLapAnimations() {
-        return APPROVED_LAP_ANIMATIONS;
+        return Object.freeze(this.#capabilityPolicy.dances.filter(definition => definition.kind === "lap"));
+    }
+
+    get capabilityPolicy() {
+        return this.#capabilityPolicy;
+    }
+
+    isDanceEnabled(danceId) {
+        return Boolean(this.#capabilityPolicy.enabled[String(danceId || "")]);
+    }
+
+    configureCapabilityPolicy(policy = {}, { reason = "dance-capability-policy" } = {}) {
+        const next = normalizeCapabilityPolicy(policy);
+        if (next.revision < this.#capabilityPolicy.revision) {
+            this.#diagnostics.stale += 1;
+            this.#record("dance-capability-policy-stale", {
+                currentRevision: this.#capabilityPolicy.revision,
+                receivedRevision: next.revision,
+                reason
+            });
+            return false;
+        }
+        const changed = next.revision !== this.#capabilityPolicy.revision
+            || JSON.stringify(next.enabled) !== JSON.stringify(this.#capabilityPolicy.enabled);
+        this.#capabilityPolicy = next;
+        if (!changed) return false;
+        Array.from(this.#active.entries()).forEach(([relationshipId, operation]) => {
+            if (!this.isDanceEnabled(operation.danceId)) {
+                this.stop(relationshipId, { reason: `${reason}-disabled` });
+            }
+        });
+        Array.from(this.#activeLap.entries()).forEach(([key, operation]) => {
+            if (!this.isDanceEnabled(operation.mode)) {
+                this.#stopLapOperation(key, { reason: `${reason}-disabled`, scheduleRefresh: false });
+            }
+        });
+        this.#runtime.coordinator?.scheduleRelationshipRefresh?.({ all: true, reason });
+        this.#record("dance-capability-policy-configured", {
+            revision: next.revision,
+            enabledCount: next.enabledCount,
+            totalCount: next.totalCount,
+            reason
+        });
+        return true;
     }
 
     reconcile(relationship, { reason = "relationship-reconcile" } = {}) {
@@ -104,16 +194,22 @@ export class AvatarDanceService {
         const generation = String(playback.generation || "");
         const startedAtMs = Number(playback.startedAtMs || playback.started_at_ms || 0);
         const strategy = this.#registry.get(danceId);
-        if (!strategy || !generation || !Number.isFinite(startedAtMs) || startedAtMs <= 0) {
+        if (!strategy || !this.isDanceEnabled(danceId)
+            || !generation || !Number.isFinite(startedAtMs) || startedAtMs <= 0) {
             this.#diagnostics.fallback += 1;
             this.#record("relationship-dance-rejected", {
                 relationshipId,
                 generation: generation || null,
                 danceId: danceId || null,
-                reason: "invalid-playback"
+                reason: strategy && !this.isDanceEnabled(danceId)
+                    ? "dance-disabled"
+                    : "invalid-playback"
             });
-            this.stop(relationshipId, { reason: "invalid-playback" });
-            return Object.freeze({ accepted: false, reason: "invalid-playback" });
+            const rejectedReason = strategy && !this.isDanceEnabled(danceId)
+                ? "dance-disabled"
+                : "invalid-playback";
+            this.stop(relationshipId, { reason: rejectedReason });
+            return Object.freeze({ accepted: false, reason: rejectedReason });
         }
 
         const current = this.#active.get(relationshipId);
@@ -176,13 +272,19 @@ export class AvatarDanceService {
             && !participant.webcam_enabled
             && !participant.webcam_path;
         const pending = this.#pendingLap.has(String(relationship.id));
-        const definitions = [
-            { id: "avatar.lap-dance", mode: "lap_dance", label: "Lap Dance" },
-            { id: "avatar.lap-bounce", mode: "lap_bounce", label: "Lap Bounce" }
-        ];
+        const actionIds = Object.freeze({
+            lap_dance: "avatar.lap-dance",
+            lap_bounce: "avatar.lap-bounce"
+        });
+        const definitions = this.approvedLapAnimations.map(definition => ({
+            id: actionIds[definition.id],
+            mode: definition.id,
+            label: definition.label,
+            enabled: definition.enabled
+        }));
         return Object.freeze(definitions.map(definition => {
             const active = state?.mode === definition.mode;
-            const geometry = canStart
+            const geometry = canStart && definition.enabled
                 ? this.#resolveLapGeometry(relationship, state || {
                     hostParticipantId,
                     occupantParticipantId: participantId,
@@ -192,7 +294,7 @@ export class AvatarDanceService {
                 : null;
             const applicable = active
                 ? viewerIsOccupant || viewerIsHost
-                : canStart && Boolean(geometry);
+                : definition.enabled && canStart && Boolean(geometry);
             return applicable ? Object.freeze({
                 id: definition.id,
                 label: `${active ? "Stop" : "Start"} ${definition.label}`,
@@ -239,6 +341,10 @@ export class AvatarDanceService {
         const relationshipId = String(current?.id || "");
         if (!relationshipId || this.#pendingLap.has(relationshipId)
             || !["none", "lap_dance", "lap_bounce"].includes(String(mode || ""))) {
+            return false;
+        }
+        if (mode !== "none" && !this.isDanceEnabled(mode)) {
+            this.#context?.showWarning?.("That dance is disabled for this community.");
             return false;
         }
         const operationId = this.#operationId("lap-animation");
@@ -376,8 +482,9 @@ export class AvatarDanceService {
 
     getDiagnostics() {
         return Object.freeze({
-            approvedDances: APPROVED_DANCES,
-            approvedLapAnimations: APPROVED_LAP_ANIMATIONS,
+            capabilityPolicy: this.#capabilityPolicy,
+            approvedDances: this.approvedDances,
+            approvedLapAnimations: this.approvedLapAnimations,
             registeredDanceIds: Object.freeze(Array.from(this.#registry.keys())),
             activeRelationshipCount: this.#active.size,
             activeLapAnimationCount: this.#activeLap.size,
@@ -418,8 +525,12 @@ export class AvatarDanceService {
             const occupant = this.#runtime.state?.get?.(occupantParticipantId);
             if (!geometry || !occupant || occupant.webcam_enabled || occupant.webcam_path
                 || !["lap_dance", "lap_bounce"].includes(mode)
+                || !this.isDanceEnabled(mode)
                 || !generation || startedAtMs <= 0) {
-                this.#stopLapOperation(key, { reason: "lap-animation-inapplicable", scheduleRefresh: true });
+                this.#stopLapOperation(key, {
+                    reason: this.isDanceEnabled(mode) ? "lap-animation-inapplicable" : "dance-disabled",
+                    scheduleRefresh: true
+                });
                 this.#lapDiagnostics.unavailable += 1;
                 return;
             }

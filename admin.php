@@ -26,6 +26,7 @@ $roleColors = role_color_settings($pdo);
     <button class="active" data-admin-tab="users" type="button">Users</button>
     <button data-admin-tab="settings" type="button">Settings</button>
     <button data-admin-tab="appearance" type="button">Appearance</button>
+    <button data-admin-tab="avatar-interactions" type="button">Avatar Interactions</button>
     <button data-admin-tab="webcam" type="button">Webcam</button>
     <button data-admin-tab="database" type="button">Database</button>
     <button data-admin-tab="link-icons" type="button">Link Icons</button>
@@ -108,6 +109,31 @@ $roleColors = role_color_settings($pdo);
       <label>Unresolved retention days <input name="diagnostic_screenshot_retention_days" type="number" min="0" max="365" value="0"></label>
       <p class="minor">Capture remains disabled until a retention period is selected. Uncensored page pixels are never created.</p>
       <button class="btn btn-primary" type="submit">Save Screenshot Policy</button>
+    </form>
+  </section>
+
+  <section class="shared-panel" data-admin-panel="avatar-interactions">
+    <h2>Avatar Interactions</h2>
+    <form id="admin-dance-capability-form" class="shared-form compact-form">
+      <fieldset class="settings-capability-group">
+        <legend>Dances</legend>
+        <p class="minor">Choose which optional avatar dances members may start in this community.</p>
+        <div class="settings-capability-summary" id="admin-dance-capability-summary" aria-live="polite">4 of 4 enabled</div>
+        <div class="shared-form-actions">
+          <button class="btn" id="admin-dance-enable-all" type="button">Enable All Dances</button>
+          <button class="btn btn-danger" id="admin-dance-disable-all" type="button">Disable All Dances</button>
+        </div>
+        <div class="settings-capability-list">
+          <?php foreach (avatar_dance_capability_registry() as $dance): ?>
+          <label class="settings-checkbox-row" data-dance-capability-row="<?= e($dance['id']) ?>">
+            <strong><?= e($dance['label']) ?></strong>
+            <input type="checkbox" name="dance_capability" value="<?= e($dance['id']) ?>" checked>
+            <span><?= e($dance['description']) ?> Default: Enabled.</span>
+          </label>
+          <?php endforeach; ?>
+        </div>
+        <p class="minor">All dances are enabled by default. Re-enabling a dance never restarts an animation that was stopped.</p>
+      </fieldset>
     </form>
   </section>
 

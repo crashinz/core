@@ -247,6 +247,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
             'setup'
         );
         if (empty($capacityResult['ok'])) throw new RuntimeException((string)$capacityResult['error']);
+        $selectedDanceIds = array_values(array_map('strval', (array)($_POST['dance_enabled'] ?? [])));
+        $danceValues = [];
+        foreach (avatar_dance_capability_ids() as $danceId) {
+            $danceValues[$danceId] = in_array($danceId, $selectedDanceIds, true);
+        }
+        $dancePolicy = avatar_dance_capability_policy($pdo);
+        $danceResult = avatar_dance_capability_update(
+            $pdo,
+            ['operation' => 'replace', 'enabled' => $danceValues, 'confirmed' => true],
+            (int)$dancePolicy['revision'],
+            $adminUserId,
+            'setup'
+        );
+        if (empty($danceResult['ok'])) throw new RuntimeException((string)$danceResult['error']);
         $allowWebcamUse = !empty($_POST['allow_webcam_use']);
         set_app_setting($pdo, 'allow_webcam_use', $allowWebcamUse ? '1' : '0');
         log_tool(
@@ -398,6 +412,27 @@ $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['
               <input name="maximum_regular_avatar_links" type="number" min="2" max="16" step="1" value="8" required>
             </label>
             <p class="minor">Controls how many regularly linked avatars can belong to one relationship. Left and right lap links do not count toward this limit because they remain attached to an existing regular avatar link.</p>
+          </div>
+          <div class="setup-branding-fields" id="setup-dance-capabilities">
+            <h2>Avatar Interactions</h2>
+            <fieldset class="settings-capability-group">
+              <legend>Dances</legend>
+              <p class="minor">Choose which optional avatar dances members may start. All dances are enabled by default.</p>
+              <div class="shared-form-actions">
+                <button class="btn" id="setup-dance-enable-all" type="button">Enable All Dances</button>
+                <button class="btn btn-danger" id="setup-dance-disable-all" type="button">Disable All Dances</button>
+              </div>
+              <div class="settings-capability-list">
+                <?php foreach (avatar_dance_capability_registry() as $dance): ?>
+                <label class="settings-checkbox-row">
+                  <strong><?= e($dance['label']) ?></strong>
+                  <input type="checkbox" name="dance_enabled[]" value="<?= e($dance['id']) ?>" checked>
+                  <span><?= e($dance['description']) ?> Default: Enabled.</span>
+                </label>
+                <?php endforeach; ?>
+              </div>
+              <p class="minor" id="setup-dance-capability-summary" aria-live="polite">4 of 4 enabled</p>
+            </fieldset>
           </div>
           <div class="setup-branding-fields">
             <h2>Webcam</h2>

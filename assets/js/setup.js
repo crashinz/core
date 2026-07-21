@@ -123,6 +123,27 @@ setupCommunityLogo?.addEventListener('change', () => {
   if (setupCommunityLogoName) setupCommunityLogoName.textContent = file ? file.name : 'No file selected';
 });
 
+const setupDanceCapabilities = document.getElementById('setup-dance-capabilities');
+function syncSetupDanceSummary() {
+  const inputs = Array.from(setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]') || []);
+  const enabled = inputs.filter(input => input.checked).length;
+  const summary = document.getElementById('setup-dance-capability-summary');
+  if (summary) summary.textContent = `${enabled} of ${inputs.length} enabled`;
+}
+setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]').forEach(input => {
+  input.addEventListener('change', syncSetupDanceSummary);
+});
+document.getElementById('setup-dance-enable-all')?.addEventListener('click', () => {
+  setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]').forEach(input => { input.checked = true; });
+  syncSetupDanceSummary();
+});
+document.getElementById('setup-dance-disable-all')?.addEventListener('click', () => {
+  if (!confirm('Disable all avatar dances for this installation?')) return;
+  setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]').forEach(input => { input.checked = false; });
+  syncSetupDanceSummary();
+});
+syncSetupDanceSummary();
+
 const setupAdminForm = setupAvatar?.closest('form');
 setupAdminForm?.addEventListener('submit', async event => {
   const file = setupAvatar?.files?.[0];

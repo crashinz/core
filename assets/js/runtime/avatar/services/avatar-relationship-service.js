@@ -1435,7 +1435,17 @@ export class AvatarRelationshipService {
             }),
             Object.freeze({ id: "grid", label: "Grid", available: normalMembers.length >= 2 })
         ]);
-        const dancePlayback = normalizeDancePlayback(relationship?.dancePlayback);
+        const normalizedDancePlayback = normalizeDancePlayback(relationship?.dancePlayback);
+        const dancePlayback = normalizedDancePlayback.state === "playing"
+            && !this.#runtime.dances?.isDanceEnabled?.(normalizedDancePlayback.danceId)
+            ? Object.freeze({
+                ...normalizedDancePlayback,
+                state: "stopped",
+                danceId: null,
+                generation: null,
+                startedAtMs: null
+            })
+            : normalizedDancePlayback;
         const lapAnimations = normalizeLapAnimations(
             relationship?.lapAnimations,
             Number(relationship?.version || 0),
@@ -1446,7 +1456,10 @@ export class AvatarRelationshipService {
                 id: dance.id,
                 label: dance.label,
                 durationMs: dance.durationMs,
-                available: Boolean(relationship && members.length >= 2 && normalMembers.some(member => member.renderable))
+                enabled: dance.enabled !== false,
+                available: Boolean(dance.enabled !== false
+                    && relationship && members.length >= 2
+                    && normalMembers.some(member => member.renderable))
             }))
         );
         return Object.freeze({

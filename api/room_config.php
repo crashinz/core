@@ -383,6 +383,7 @@ $roomConfig = [
     'lastCommunityEventId' => $lastCommunityEventId,
     'avatarPresets' => avatar_presets(),
     'avatarSizePolicy' => avatar_size_policy($pdo),
+    'danceCapability' => avatar_dance_capability_policy($pdo),
     'webcamCapability' => webcam_capability($pdo),
     'webcamViewerPreferences' => webcam_viewer_preferences($pdo, (int)$user['id']),
     'avatarVisibilityPreferences' => avatar_visibility_preferences($pdo, (int)$user['id']),
