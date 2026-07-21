@@ -34,27 +34,26 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Unnumbered Canonical Browser Harness Reliability and Worker Isolation
+Unnumbered Dance Capability Controls
 
 **Framework Phase**
 
-Engineering Complete; certified for publication
+Engineering Complete and published
 
-The active checkpoint stabilizes the shared canonical browser harness without
-changing production behavior. One browser-independent 10-worker/62-scenario
-registry now drives focused and canonical execution through a worker-owned
-resource/session factory, explicit participant-state helpers, declared
-budgets, fail-closed stubbing, parent accounting, derived timeouts,
-process-identity cleanup, and a fast pre-canonical canary. Browser-specific
-launch and media policy is isolated behind adapters; full Firefox
-certification remains deferred and will consume this same foundation.
+The completed checkpoint adds one shared Setup/Admin policy at
+`Avatar Interactions -> Dances` for the four source-proven production modes:
+Synchronized Sway, Synchronized Bounce, Lap Dance, and Lap Bounce. The policy
+is revisioned, atomically updated, server enforced, multiplayer reconciled, and
+bounded in Tool Logs without reopening existing dance formulas or runtime
+ownership.
 
-The corrected complete two-context Chrome worker passes 31/31 scenarios. The
-exact-final gate passes all 14 selected checks, and Chrome passes 62/62
-scenarios across all ten workers with exact 13/13 HTTP accounting, zero defects
-or unexpected observability/download findings, and clean teardown. Production
-and deployment content remain unchanged. Avatar Interaction Animations is next
-and has not begun.
+The exact-final gate passes `14/14`; Chrome passes `71/71` scenarios, `109`
+automated assertions, and `11/11` workers with exact HTTP accounting, zero
+defects or unexpected browser findings, and clean teardown. Commit
+`520b0dd320ed938c902a8627981397f80342bfbb` is published with direct-remote tree
+equality and `0/0` divergence. The next checkpoint is **Setup/Admin Settings
+Organization and Original-Author Compatibility**; Gesture Checkpoint Part 3
+follows it. Neither checkpoint has begun.
 
 ---
 
