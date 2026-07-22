@@ -418,7 +418,7 @@ function avatar_dance_capability_update(
             foreach (avatar_dance_capability_ids() as $danceId) {
                 if ($currentValues[$danceId] !== $nextValues[$danceId]) $changedIds[] = $danceId;
             }
-            log_tool(
+            if ($source !== 'settings-registry') log_tool(
                 $pdo,
                 $actorUserId > 0 ? $actorUserId : null,
                 $source === 'setup' ? 'setup_dance_capability_update' : 'admin_dance_capability_update',

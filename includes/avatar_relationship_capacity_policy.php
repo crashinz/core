@@ -183,7 +183,7 @@ function avatar_relationship_capacity_update(
         set_app_setting($pdo, AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_SETTING, (string)$next);
         set_app_setting($pdo, AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_REVISION_SETTING, (string)$nextRevision);
         $after = avatar_relationship_capacity_policy($pdo);
-        log_tool(
+        if ($source !== 'settings-registry') log_tool(
             $pdo,
             $actorUserId > 0 ? $actorUserId : null,
             $source === 'setup' ? 'setup_relationship_capacity_update' : 'admin_relationship_capacity_update',

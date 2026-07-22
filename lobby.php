@@ -10,7 +10,13 @@ if ($communityEjection) {
 $ejectionNotice = $_SESSION['room_ejection_notice'] ?? null;
 unset($_SESSION['room_ejection_notice']);
 $lobbyError = null;
-cleanup_stale_participants($pdo);
+$canonicalAdminLaunch = (string)($_GET['admin'] ?? '') === '1';
+$staffRoles = ['admin', 'developer'];
+if ($canonicalAdminLaunch && !in_array($user['role'] ?? 'user', $staffRoles, true)) {
+    http_response_code(403);
+    exit('Administrator or developer access is required.');
+}
+if (!$canonicalAdminLaunch) cleanup_stale_participants($pdo);
 $roleColors = role_color_settings($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -68,7 +74,7 @@ $rooms = $roomsStmt->fetchAll();
   <title><?= e(branded_page_title('Lobby', $pdo)) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
 </head>
-<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
+<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="picker-shell">
   <section class="picker-main">
     <div class="topbar">
@@ -86,9 +92,9 @@ $rooms = $roomsStmt->fetchAll();
         <div class="minor lobby-signed-in">Signed in as <strong><?= e($user['display_name']) ?></strong></div>
         <button class="gear-btn lobby-gear" id="lobby-menu-btn" type="button" aria-label="Lobby menu">⚙</button>
       </div>
-      <div id="lobby-menu">
-        <?php if (in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
-        <a href="<?= e(app_url('/admin.php?return=lobby')) ?>"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Admin</a>
+        <div id="lobby-menu">
+          <?php if (in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
+        <button id="admin-open" type="button"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Admin</button>
         <?php endif; ?>
         <a href="<?= e(app_url('/account.php?return=lobby')) ?>"><img src="<?= e(app_url('/assets/images/secure.png')) ?>" alt="">Account</a>
         <form class="menu-form" method="post" action="<?= e(app_url('/logout.php')) ?>">
@@ -232,7 +238,7 @@ $rooms = $roomsStmt->fetchAll();
   </div>
 </div>
 <?php endif; ?>
-<?php if (false): // Dormant upstream-compatible modal markup; shared pages are authoritative in Build 000045. ?>
+<?php if (false): // Dormant account modal markup; account.php is the current account-management surface. ?>
 <div class="modal" id="password-modal">
   <form class="modal-box password-box" id="password-form">
     <?= csrf_input() ?>
@@ -267,6 +273,7 @@ $rooms = $roomsStmt->fetchAll();
     </div>
   </div>
 </div>
+<?php endif; ?>
 <?php if (in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
 <div class="modal" id="admin-modal">
   <div class="modal-box admin-box">
@@ -287,7 +294,7 @@ $rooms = $roomsStmt->fetchAll();
         </button>
         <div class="admin-nav-label">System</div>
         <button class="admin-nav-item" data-admin-section="settings" type="button">
-          <img src="<?= e(app_url('/assets/images/limits.png')) ?>" alt=""> Limits
+          <img src="<?= e(app_url('/assets/images/limits.png')) ?>" alt=""> Settings
         </button>
         <button class="admin-nav-item" data-admin-section="database" type="button">
           <img src="<?= e(app_url('/assets/images/sql-server.png')) ?>" alt=""> Database
@@ -305,8 +312,13 @@ $rooms = $roomsStmt->fetchAll();
           <img src="<?= e(app_url('/assets/images/log-file.png')) ?>" alt=""> Tool Logs
           <span class="admin-nav-count" id="admin-log-count">0</span>
         </button>
+        <button class="admin-nav-item" data-admin-section="errors" type="button">
+          <img src="<?= e(app_url('/assets/images/log-file.png')) ?>" alt=""> Errors
+          <span class="admin-nav-count" id="issue-count" aria-label="0 issues">0</span>
+        </button>
       </nav>
       <div class="admin-main">
+        <div class="admin-form-status" id="admin-canonical-status" role="status" aria-live="polite"></div>
         <section class="admin-section active" id="admin-section-overview">
           <div class="admin-section-title">Operator Overview</div>
           <div class="admin-section-sub">Quick status for accounts, enforcement, platform limits, and backup controls.</div>
@@ -359,89 +371,30 @@ $rooms = $roomsStmt->fetchAll();
         </section>
 
         <section class="admin-section" id="admin-section-settings">
-          <div class="admin-section-title">Limits</div>
-          <div class="admin-section-sub">Tune chat speed, avatar movement, and media upload boundaries.</div>
-          <div class="admin-panel">
-            <form class="admin-settings" id="admin-settings">
+          <div class="admin-section-title">Settings</div>
+          <div class="admin-section-sub">Search and manage installation policy through the shared Setup/Admin registry.</div>
+          <div class="admin-panel settings-registry-shell">
+            <div class="settings-registry-heading">
+              <div><h3>Installation Settings</h3><p class="minor">Persistence remains with each authoritative policy owner.</p></div>
+              <div class="settings-registry-state" id="lobby-admin-settings-compatibility-state" aria-live="polite">Loading settings…</div>
+            </div>
+            <div id="lobby-admin-settings-unlock"></div>
+            <div class="settings-registry-toolbar" role="search">
+              <label>Search settings<input id="lobby-admin-settings-search" type="search" autocomplete="off" placeholder="Label, help, category, alias, or setting ID"></label>
+              <label>Filter<select id="lobby-admin-settings-filter"><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="changed">Changed from default</option><option value="original">Original-author compatibility relevant</option></select></label>
+            </div>
+            <div class="settings-registry-actions">
+              <button class="btn" id="lobby-admin-settings-original-preview" type="button">Review Original-compatible Changes</button>
+              <button class="btn" id="lobby-admin-settings-framework-preview" type="button">Review Framework Defaults</button>
+              <button class="btn btn-danger" id="lobby-admin-settings-reset-optional" type="button">Reset All Optional Settings</button>
+            </div>
+            <div id="lobby-admin-settings-preset-review" class="settings-preset-review" hidden></div>
+            <form class="settings-registry-form" id="lobby-admin-settings-registry-form">
               <?= csrf_input() ?>
-              <div class="admin-settings-grid">
-                <section class="admin-settings-group">
-                  <h3>Chat & Presence</h3>
-                  <div class="admin-settings-fields">
-                    <label>Chat posts per second <input name="chat_posts_per_second" type="number" min="0.2" max="30" step="0.1"></label>
-                    <label>Room chat history posts <input name="room_chat_history_limit" type="number" min="1" max="1000" step="1"></label>
-                    <label>Avatar movements per second <input name="avatar_movements_per_second" type="number" min="1" max="60" step="1"></label>
-                    <label>Idle removal minutes <input name="participant_idle_timeout_minutes" type="number" min="0.5" max="120" step="0.5"></label>
-                  </div>
-                </section>
-                <section class="admin-settings-group">
-                  <h3>Media Limits</h3>
-                  <div class="admin-settings-fields">
-                    <label>Avatar upload max MB <input name="avatar_max_size_mb" type="number" min="0.5" max="50" step="0.5"></label>
-                    <label>Avatar upload max width px <input name="avatar_upload_max_width_px" type="number" min="42" max="4096" step="1"></label>
-                    <label>Avatar upload max height px <input name="avatar_upload_max_height_px" type="number" min="42" max="4096" step="1"></label>
-                    <label>Avatar display max edge px <input name="avatar_display_max_px" type="number" min="42" max="1000" step="1"></label>
-                    <label>Webcam display max width px <input name="webcam_display_max_width_px" type="number" min="42" max="2048" step="1"></label>
-                    <label>Webcam display max height px <input name="webcam_display_max_height_px" type="number" min="42" max="2048" step="1"></label>
-                    <label>Gestures per account <input name="gesture_upload_limit" type="number" min="0" max="1000" step="1"></label>
-                    <label>Room image max size MB <input name="room_image_max_size_mb" type="number" min="1" max="100" step="1"></label>
-                    <label>Room video max size MB <input name="room_video_max_size_mb" type="number" min="5" max="1000" step="5"></label>
-                  </div>
-                  <button class="btn" id="admin-reset-avatar-size-policy" type="button">Reset avatar and webcam size defaults</button>
-                </section>
-                <section class="admin-settings-group admin-settings-group-wide">
-                  <h3>Account Protection</h3>
-                  <div class="admin-settings-fields auth-protection-fields">
-                    <label>Login attempts per account <input name="auth_login_max_attempts" type="number" min="1" max="50" step="1"></label>
-                    <label>Recovery attempts per account <input name="auth_recovery_max_attempts" type="number" min="1" max="50" step="1"></label>
-                    <label>Attempts per IP <input name="auth_ip_max_attempts" type="number" min="5" max="500" step="1"></label>
-                    <label>Attempt window minutes <input name="auth_attempt_window_minutes" type="number" min="1" max="1440" step="1"></label>
-                    <label>Lockout minutes <input name="auth_lockout_minutes" type="number" min="1" max="1440" step="1"></label>
-                  </div>
-                  <div class="admin-settings-hint">Defaults: 5 login attempts, 5 recovery attempts, 30 IP attempts, a 15 minute window, and a 15 minute lockout.</div>
-                </section>
-                <section class="admin-settings-group admin-settings-group-wide">
-                  <h3>GIF Selector</h3>
-                  <div class="admin-settings-fields four">
-                    <label>GIPHY API key <input name="gif_giphy_api_key" type="password" autocomplete="off" placeholder="Optional"></label>
-                    <label>Tenor API key <input name="gif_tenor_api_key" type="password" autocomplete="off" placeholder="Optional"></label>
-                    <label>Klipy API key <input name="gif_klipy_api_key" type="password" autocomplete="off" placeholder="Optional"></label>
-                    <label>Default GIF provider
-                      <select name="gif_default_provider">
-                        <option value="giphy">GIPHY</option>
-                        <option value="klipy">Klipy</option>
-                        <option value="tenor">Tenor</option>
-                      </select>
-                    </label>
-                  </div>
-                </section>
-                <section class="admin-settings-group admin-settings-group-wide">
-                  <h3>Registration</h3>
-                  <div class="admin-settings-fields admin-settings-registration">
-                    <label class="check-label"><input name="age_gate_enabled" type="checkbox" value="1"> Enable registration age gate</label>
-                    <label>Age gate minimum age <input name="age_gate_min_age" type="number" min="1" max="120" step="1"></label>
-                  </div>
-                </section>
-              </div>
-              <div class="admin-settings-actions">
-                <button class="btn btn-primary" type="submit">Save Settings</button>
-                <div class="admin-form-status" aria-live="polite"></div>
-              </div>
-            </form>
-            <form class="admin-settings" id="admin-relationship-capacity">
-              <?= csrf_input() ?>
-              <section class="admin-settings-group admin-settings-group-wide">
-                <h3>Avatar Relationships</h3>
-                <div class="admin-settings-fields">
-                  <label>Maximum regular avatar links in one relationship
-                    <input name="maximum_regular_avatar_links" type="number" min="2" max="16" step="1" required>
-                  </label>
-                </div>
-                <div class="admin-settings-hint">Controls how many regularly linked avatars can belong to one relationship. Left and right lap links do not count toward this limit because they remain attached to an existing regular avatar link.</div>
-                <div class="admin-settings-hint" id="admin-relationship-capacity-impact" aria-live="polite"></div>
-              </section>
-              <div class="admin-settings-actions">
-                <button class="btn btn-primary" type="submit">Save Relationship Limit</button>
+              <div id="lobby-admin-settings-registry" class="settings-registry" aria-live="polite"></div>
+              <div class="settings-registry-sticky-actions">
+                <span id="lobby-admin-settings-dirty-summary">No unsaved changes</span>
+                <button class="btn btn-primary" id="lobby-admin-settings-save" type="submit" disabled>Save Changes</button>
                 <div class="admin-form-status" aria-live="polite"></div>
               </div>
             </form>
@@ -532,12 +485,24 @@ $rooms = $roomsStmt->fetchAll();
             <div class="admin-list admin-log-list" id="admin-tool-logs">Loading...</div>
           </div>
         </section>
+
+        <section class="admin-section" id="admin-section-errors">
+          <div class="admin-section-title">Errors & Diagnostics</div>
+          <div class="admin-section-sub">Review bounded runtime issues, resolution history, and locally censored diagnostic evidence.</div>
+          <div class="admin-panel issue-workspace">
+            <aside>
+              <label>Status <select id="issue-status-filter"><option value="">All</option><option value="new">New</option><option value="confirmed">Confirmed</option><option value="investigating">Investigating</option><option value="fixed-pending-verification">Fixed pending verification</option><option value="resolved">Resolved</option><option value="expected">Expected</option><option value="ignored">Ignored</option><option value="regressed">Regressed</option></select></label>
+              <div id="issue-list" class="issue-list"></div>
+            </aside>
+            <article id="issue-detail" class="issue-detail"><p class="minor">Select an issue.</p></article>
+          </div>
+        </section>
       </div>
     </div>
   </div>
 </div>
 <?php endif; ?>
-<?php endif; ?>
+<script src="<?= e(app_url('/assets/js/settings-registry.js')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/lobby.js')) ?>"></script>
 </body>
 </html>

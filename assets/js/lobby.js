@@ -2,6 +2,7 @@
 
 const APP_BASE = document.body?.dataset.appBase || '';
 const CSRF_TOKEN = document.body?.dataset.csrf || '';
+const CAN_ADMIN_SETTINGS_MUTATE = document.body?.dataset.isAdmin === 'true';
 
 function appUrl(path) {
   if (!path) return APP_BASE || '/';
@@ -760,8 +761,15 @@ const adminToolLogs = document.getElementById('admin-tool-logs');
 const adminBlocks = document.getElementById('admin-blocks');
 const adminRoomEjections = document.getElementById('admin-room-ejections');
 const adminCommunityEjections = document.getElementById('admin-community-ejections');
-const adminSettings = document.getElementById('admin-settings');
-const adminRelationshipCapacity = document.getElementById('admin-relationship-capacity');
+const adminSettings = document.getElementById('lobby-admin-settings-registry-form');
+let adminSettingsRegistry = null;
+let adminSettingsRegistryUI = null;
+let adminSettingsUnlock = null;
+const adminSettingsSyncKey = `chatspace.admin-settings.revision:${document.body.dataset.appBase || '/'}`;
+const adminSettingsChannel = typeof BroadcastChannel === 'function'
+  ? new BroadcastChannel(adminSettingsSyncKey)
+  : null;
+let adminSettingsSyncPending = false;
 const adminDbExport = document.getElementById('admin-db-export');
 const adminUserExportLabel = document.getElementById('admin-user-export-label');
 const adminDbRestore = document.getElementById('admin-db-restore');
@@ -834,7 +842,14 @@ async function adminSystemRequest(body) {
     body: JSON.stringify(payload),
   });
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || data.error) throw new Error(data.error || 'Admin request failed');
+  if (resp.redirected || resp.status === 401 || resp.status === 403) {
+    adminSettingsUnlock?.setAuthorized(false, 'You are no longer authorized to change these settings.');
+  }
+  if (!resp.ok || data.error) {
+    const error = new Error(data.error || 'Admin request failed');
+    error.data = data;
+    throw error;
+  }
   return data;
 }
 
@@ -895,18 +910,75 @@ async function loadAdminUsers() {
 async function loadAdminSettings() {
   if (!adminSettings) return;
   const data = await fetch(appUrl('/api/admin_system.php?action=settings')).then(r => r.json());
-  Object.entries(data.settings || {}).forEach(([key, value]) => {
-    if (!adminSettings.elements[key]) return;
-    if (adminSettings.elements[key].type === 'checkbox') adminSettings.elements[key].checked = value === '1';
-    else adminSettings.elements[key].value = value;
-  });
-  if (adminRelationshipCapacity && data.relationshipCapacity) {
-    adminRelationshipCapacity.dataset.revision = String(data.relationshipCapacity.revision);
-    adminRelationshipCapacity.elements.maximum_regular_avatar_links.value = String(data.relationshipCapacity.maximumRegularAvatarLinks);
-    const impact = document.getElementById('admin-relationship-capacity-impact');
-    if (impact) impact.textContent = `Current limit: ${data.relationshipCapacity.maximumRegularAvatarLinks}. Allowed range: ${data.relationshipCapacity.minimumRegularAvatarLinks}-${data.relationshipCapacity.maximumConfigurableRegularAvatarLinks}.`;
+  if (data.error) throw new Error(data.error);
+  adminSettingsRegistry = data.settingsRegistry;
+  if (!adminSettingsUnlock) {
+    adminSettingsUnlock = new window.SettingsUnlockController({
+      mount: document.getElementById('lobby-admin-settings-unlock'),
+      activityRoot: document.getElementById('admin-section-settings'),
+      authorized: CAN_ADMIN_SETTINGS_MUTATE,
+      onLockChange: locked => {
+        adminSettingsRegistryUI?.setLocked(locked);
+        if (locked && adminSettingsRegistryUI?.registry) adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
+        syncLobbyAdminSettingsMutationLocks();
+      },
+    });
+  }
+  if (!adminSettingsRegistryUI) {
+    adminSettingsRegistryUI = new window.SettingsRegistryUI({
+      container: document.getElementById('lobby-admin-settings-registry'),
+      searchInput: document.getElementById('lobby-admin-settings-search'),
+      filterInput: document.getElementById('lobby-admin-settings-filter'),
+      readOnly: !CAN_ADMIN_SETTINGS_MUTATE,
+      locked: !adminSettingsUnlock.isUnlocked(),
+      onOperation: handleLobbyAdminSettingsOperation,
+      onDraftChange: state => {
+        const summary = document.getElementById('lobby-admin-settings-dirty-summary');
+        const save = document.getElementById('lobby-admin-settings-save');
+        if (summary) summary.textContent = state.changedCount ? `${state.changedCount} unsaved change${state.changedCount === 1 ? '' : 's'}` : 'No unsaved changes';
+        if (save) save.disabled = !adminSettingsUnlock?.isUnlocked() || state.changedCount === 0;
+        renderLobbyAdminSettingsCompatibility();
+      },
+      onEntryChange: (entry, value) => {
+        const rendered = entry.type === 'boolean' ? (value ? 'enabled' : 'disabled') : `changed to ${value}`;
+        adminSettingsUnlock?.announce(`${entry.label} ${rendered}; save to apply.`, 'ok');
+      },
+    });
+  }
+  adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
+  adminSettingsRegistryUI.setLocked(!adminSettingsUnlock.isUnlocked());
+  syncLobbyAdminSettingsMutationLocks();
+  renderLobbyAdminSettingsCompatibility();
+}
+
+async function receiveAdminSettingsRevision(revision) {
+  const incoming = Number(revision || 0);
+  if (!adminSettingsRegistry || incoming <= Number(adminSettingsRegistry.revision || 0) || adminSettingsSyncPending) return;
+  const discardedDraftCount = Object.keys(adminSettingsRegistryUI?.changedValues?.() || {}).length;
+  adminSettingsSyncPending = true;
+  try {
+    await loadAdminSettings();
+    setCanonicalAdminStatus(discardedDraftCount
+      ? `Settings refreshed from another Admin tab; ${discardedDraftCount} unsaved local draft change${discardedDraftCount === 1 ? ' was' : 's were'} cleared to prevent a stale write.`
+      : 'Settings refreshed from another Admin tab.', 'ok');
+  } catch (error) {
+    setCanonicalAdminStatus(error.message || 'Updated settings could not be refreshed.', 'error');
+  } finally {
+    adminSettingsSyncPending = false;
   }
 }
+
+function announceAdminSettingsRevision(revision) {
+  const message = { revision: Number(revision || 0), nonce: `${Date.now()}-${Math.random()}` };
+  adminSettingsChannel?.postMessage(message);
+  try { localStorage.setItem(adminSettingsSyncKey, JSON.stringify(message)); } catch (_) {}
+}
+
+adminSettingsChannel?.addEventListener('message', event => receiveAdminSettingsRevision(event.data?.revision));
+window.addEventListener('storage', event => {
+  if (event.key !== adminSettingsSyncKey || !event.newValue) return;
+  try { receiveAdminSettingsRevision(JSON.parse(event.newValue).revision); } catch (_) {}
+});
 
 async function loadAdminLinkIcons() {
   if (!adminLinkIcons) return;
@@ -1039,6 +1111,120 @@ async function loadAdminRoomEjections() {
   });
 }
 
+function setCanonicalAdminStatus(message, type = '') {
+  const status = document.getElementById('admin-canonical-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.className = `admin-form-status ${type}`.trim();
+}
+
+async function adminIssueRequest(path, options = {}) {
+  const response = await fetch(appUrl(path), { credentials: 'same-origin', ...options });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) throw new Error(data.error || 'Runtime issue request failed.');
+  return data;
+}
+
+function adminIssuePost(body) {
+  return adminIssueRequest('/api/runtime_issues.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+    body: JSON.stringify({ ...body, _csrf: CSRF_TOKEN }),
+  });
+}
+
+async function loadAdminIssues() {
+  const filterInput = document.getElementById('issue-status-filter');
+  const list = document.getElementById('issue-list');
+  const badge = document.getElementById('issue-count');
+  if (!filterInput || !list || !badge) return;
+  const filter = filterInput.value;
+  const data = await adminIssueRequest(`/api/runtime_issues.php?action=list${filter ? `&status=${encodeURIComponent(filter)}` : ''}`);
+  const countData = filter ? await adminIssueRequest('/api/runtime_issues.php?action=list') : data;
+  list.textContent = '';
+  const issueCount = (countData.issues || []).length;
+  badge.textContent = String(issueCount);
+  badge.setAttribute('aria-label', `${issueCount} issue${issueCount === 1 ? '' : 's'}`);
+  for (const issue of data.issues || []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'issue-list-item';
+    button.innerHTML = `<strong>${esc(issue.title)}</strong><span>${esc(issue.component)} · ${esc(issue.status)}</span><small>${issue.occurrenceCount} occurrence${issue.occurrenceCount === 1 ? '' : 's'}</small>`;
+    button.addEventListener('click', () => loadAdminIssueDetail(issue.id));
+    list.appendChild(button);
+  }
+  if (!list.children.length) list.innerHTML = '<p class="minor">No matching issues.</p>';
+}
+
+async function loadAdminIssueDetail(issueId) {
+  const data = await adminIssueRequest(`/api/runtime_issues.php?action=detail&issue_id=${encodeURIComponent(issueId)}`);
+  const issue = data.issue;
+  const detail = document.getElementById('issue-detail');
+  if (!detail) return;
+  detail.innerHTML = `
+    <header><div><span class="issue-severity severity-${esc(issue.severity)}">${esc(issue.severity)}</span><h2>${esc(issue.title)}</h2></div><code>${esc(issue.fingerprint)}</code></header>
+    <dl><dt>Owner</dt><dd>${esc(issue.component)}</dd><dt>Code</dt><dd>${esc(issue.errorCode)}</dd><dt>Status</dt><dd>${esc(issue.status)}</dd><dt>Seen</dt><dd>${esc(issue.firstSeenAt)} to ${esc(issue.lastSeenAt)}</dd></dl>
+    <form id="issue-status-form" class="shared-form compact-form">
+      <label>Status <select name="status">${['new','confirmed','investigating','fixed-pending-verification','resolved','expected','ignored','regressed'].map(value => `<option value="${value}"${value === issue.status ? ' selected' : ''}>${value.replaceAll('-', ' ')}</option>`).join('')}</select></label>
+      <label>Reason <input name="reason" maxlength="512"></label>
+      <label>Verification reference <input name="verification_reference" maxlength="191"></label>
+      <button class="btn btn-primary" type="submit">Update Status</button>
+    </form>
+    <div class="shared-form-actions"><button class="btn" id="issue-bundle-preview" type="button">Preview Support Bundle</button><button class="btn" id="issue-bundle-export" type="button">Export Support Bundle</button></div>
+    <h3>Occurrences</h3><div id="issue-occurrences"></div>
+    <h3>Resolution History</h3><div id="issue-history"></div>
+    <h3>Censored Screenshots</h3><div id="issue-screenshots" class="issue-screenshots"></div>
+    <pre id="issue-bundle" hidden></pre>`;
+  const occurrences = detail.querySelector('#issue-occurrences');
+  for (const occurrence of data.occurrences || []) {
+    const panel = document.createElement('details');
+    panel.innerHTML = `<summary>${esc(occurrence.createdAt)} · occurrence ${occurrence.id}</summary><pre></pre>`;
+    panel.querySelector('pre').textContent = JSON.stringify(occurrence.evidence, null, 2);
+    occurrences.appendChild(panel);
+  }
+  detail.querySelector('#issue-history').innerHTML = (data.history || []).map(row => `<div class="issue-history-row"><strong>${esc(row.fromStatus || 'created')} → ${esc(row.toStatus)}</strong><span>${esc(row.actorName)} · ${esc(row.createdAt)}</span><p>${esc(row.reason || row.verificationReference || '')}</p></div>`).join('') || '<p class="minor">No status changes.</p>';
+  const screenshots = detail.querySelector('#issue-screenshots');
+  for (const screenshot of data.screenshots || []) {
+    const figure = document.createElement('figure');
+    figure.innerHTML = `<img src="${esc(appUrl(`/api/runtime_issues.php?action=screenshot&id=${encodeURIComponent(screenshot.publicId)}`))}" alt="Locally censored diagnostic schematic"><figcaption>${screenshot.width}×${screenshot.height} · ${screenshot.byteSize} bytes</figcaption><button class="btn btn-danger" type="button">Delete</button>`;
+    figure.querySelector('button').addEventListener('click', async () => {
+      await adminIssuePost({ action: 'delete_screenshot', id: screenshot.publicId });
+      await loadAdminIssueDetail(issueId);
+    });
+    screenshots.appendChild(figure);
+  }
+  if (!screenshots.children.length) screenshots.innerHTML = '<p class="minor">No screenshots.</p>';
+  detail.querySelector('#issue-status-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      await adminIssuePost({ action: 'update_status', issue_id: issueId, status: form.elements.status.value, reason: form.elements.reason.value, verification_reference: form.elements.verification_reference.value });
+      await Promise.all([loadAdminIssues(), loadAdminIssueDetail(issueId)]);
+      setCanonicalAdminStatus('Issue status updated.', 'ok');
+    } catch (error) {
+      setCanonicalAdminStatus(error.message, 'error');
+    }
+  });
+  const getBundle = () => adminIssueRequest(`/api/runtime_issues.php?action=bundle&issue_id=${encodeURIComponent(issueId)}`);
+  detail.querySelector('#issue-bundle-preview').addEventListener('click', async () => {
+    const bundle = (await getBundle()).bundle;
+    const pre = detail.querySelector('#issue-bundle');
+    pre.hidden = false;
+    pre.textContent = JSON.stringify(bundle, null, 2);
+  });
+  detail.querySelector('#issue-bundle-export').addEventListener('click', async () => {
+    const bundle = (await getBundle()).bundle;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `chatspace-issue-${issueId}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+document.getElementById('issue-status-filter')?.addEventListener('change', loadAdminIssues);
+
 async function loadAdminDashboard() {
   await Promise.all([
     loadAdminUsers(),
@@ -1048,19 +1234,36 @@ async function loadAdminDashboard() {
     loadAdminRoomEjections(),
     loadAdminCommunityEjections(),
     loadAdminLinkIcons(),
+    loadAdminIssues(),
   ]);
 }
 
-document.getElementById('admin-open')?.addEventListener('click', async () => {
+async function openCanonicalAdmin() {
   lobbyMenu?.classList.remove('visible');
   adminModal.classList.add('open');
   showAdminSection('overview');
   await loadAdminDashboard();
-});
+}
+
+document.getElementById('admin-open')?.addEventListener('click', openCanonicalAdmin);
 
 document.getElementById('admin-close')?.addEventListener('click', () => {
+  adminSettingsUnlock?.relock('Settings changes locked because the Admin interface closed.', 'closure');
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('admin') === '1' && params.get('return') === 'room') {
+    window.close();
+    window.setTimeout(() => {
+      setCanonicalAdminStatus('Close this Admin tab to return to the still-running room. No rejoin is required.', 'ok');
+    }, 200);
+    return;
+  }
   adminModal.classList.remove('open');
+  if (params.get('admin') === '1') history.replaceState({}, '', appUrl('/lobby.php'));
 });
+
+if (new URLSearchParams(window.location.search).get('admin') === '1') {
+  openCanonicalAdmin().catch(error => setCanonicalAdminStatus(error.message, 'error'));
+}
 
 document.getElementById('admin-create')?.addEventListener('submit', async e => {
   e.preventDefault();
@@ -1087,101 +1290,218 @@ document.getElementById('admin-create')?.addEventListener('submit', async e => {
   }
 });
 
-adminSettings?.addEventListener('submit', async e => {
-  e.preventDefault();
-  const form = e.currentTarget;
-  const submit = form.querySelector('button[type="submit"]');
-  submit.disabled = true;
-  setAdminFormStatus(form, 'Saving settings...', 'working');
-  try {
-    await adminSystemRequest({
-      action: 'save_settings',
-      chat_posts_per_second: form.elements.chat_posts_per_second.value,
-      room_chat_history_limit: form.elements.room_chat_history_limit.value,
-      avatar_movements_per_second: form.elements.avatar_movements_per_second.value,
-      avatar_max_size_mb: form.elements.avatar_max_size_mb.value,
-      avatar_upload_max_width_px: form.elements.avatar_upload_max_width_px.value,
-      avatar_upload_max_height_px: form.elements.avatar_upload_max_height_px.value,
-      avatar_display_max_px: form.elements.avatar_display_max_px.value,
-      webcam_display_max_width_px: form.elements.webcam_display_max_width_px.value,
-      webcam_display_max_height_px: form.elements.webcam_display_max_height_px.value,
-      gesture_upload_limit: form.elements.gesture_upload_limit.value,
-      room_image_max_size_mb: form.elements.room_image_max_size_mb.value,
-      room_video_max_size_mb: form.elements.room_video_max_size_mb.value,
-      participant_idle_timeout_minutes: form.elements.participant_idle_timeout_minutes.value,
-      auth_login_max_attempts: form.elements.auth_login_max_attempts.value,
-      auth_recovery_max_attempts: form.elements.auth_recovery_max_attempts.value,
-      auth_ip_max_attempts: form.elements.auth_ip_max_attempts.value,
-      auth_attempt_window_minutes: form.elements.auth_attempt_window_minutes.value,
-      auth_lockout_minutes: form.elements.auth_lockout_minutes.value,
-      gif_giphy_api_key: form.elements.gif_giphy_api_key.value,
-      gif_tenor_api_key: form.elements.gif_tenor_api_key.value,
-      gif_klipy_api_key: form.elements.gif_klipy_api_key.value,
-      gif_default_provider: form.elements.gif_default_provider.value,
-      age_gate_enabled: form.elements.age_gate_enabled.checked ? 1 : 0,
-      age_gate_min_age: form.elements.age_gate_min_age.value,
-    });
-    setAdminFormStatus(form, 'Settings saved.', 'ok');
-    await loadAdminLogs();
-  } catch (err) {
-    setAdminFormStatus(form, err.message || 'Settings failed to save.', 'error');
-  } finally {
-    submit.disabled = false;
-  }
-});
+function lobbyAdminCompatibilityLabel(state) {
+  return ({ 'original-compatible': 'Original-author compatible', 'framework-default': 'Framework default', custom: 'Custom' })[state] || 'Custom';
+}
 
-adminRelationshipCapacity?.addEventListener('submit', async e => {
-  e.preventDefault();
-  const form = e.currentTarget;
-  const submit = form.querySelector('button[type="submit"]');
-  const value = Number.parseInt(form.elements.maximum_regular_avatar_links.value, 10);
-  submit.disabled = true;
-  setAdminFormStatus(form, 'Checking relationship limit...', 'working');
-  try {
-    const response = await fetch(appUrl(`/api/admin_system.php?action=relationship_capacity_impact&value=${encodeURIComponent(value)}`));
+function renderLobbyAdminSettingsCompatibility() {
+  const target = document.getElementById('lobby-admin-settings-compatibility-state');
+  if (!target || !adminSettingsRegistryUI) return;
+  const state = adminSettingsRegistryUI.compatibilityState();
+  const changed = Number(adminSettingsRegistry?.summaries?.changedFromDefaultCount || 0);
+  target.textContent = `${lobbyAdminCompatibilityLabel(state)} · ${changed} saved setting${changed === 1 ? '' : 's'} changed from default`;
+}
+
+function syncLobbyAdminSettingsMutationLocks() {
+  const unlocked = Boolean(adminSettingsUnlock?.isUnlocked());
+  const resetOptional = document.getElementById('lobby-admin-settings-reset-optional');
+  if (resetOptional) resetOptional.disabled = !unlocked;
+  const save = document.getElementById('lobby-admin-settings-save');
+  const changed = Object.keys(adminSettingsRegistryUI?.changedValues?.() || {}).length;
+  if (save) save.disabled = !unlocked || changed === 0;
+  document.querySelectorAll('#lobby-admin-settings-preset-review [data-settings-mutation]').forEach(control => {
+    control.disabled = !unlocked;
+  });
+}
+
+function lobbyAdminSettingsFailureMessage(error, fallback) {
+  if (error?.data?.code === 'SETTINGS_REGISTRY_STALE') return 'Settings changed elsewhere. Refresh and try again.';
+  if (error?.data?.code === 'SETTINGS_REGISTRY_AUTHORIZATION_REQUIRED' || /Admin(?:istrator)? required|authorization/i.test(error?.message || '')) {
+    adminSettingsUnlock?.setAuthorized(false, 'You are no longer authorized to change these settings.');
+    return 'You are no longer authorized to change these settings.';
+  }
+  return error?.message || fallback;
+}
+
+function lobbyAdminSettingsSuccessMessage(result, operation, details) {
+  if (result.idempotent || Number(result.changedSettingCount || 0) === 0) return 'No settings needed to be changed.';
+  if (operation === 'apply_preset') return details.preset === 'original-compatible'
+    ? 'Original-author compatible settings applied.'
+    : 'Framework default settings applied.';
+  if (operation === 'reset_all_optional') return 'All optional settings reset to defaults.';
+  if (operation === 'reset_category') {
+    const label = adminSettingsRegistry?.categories?.find(category => category.id === details.category_id)?.label || 'Category';
+    return `${label} reset to defaults.`;
+  }
+  if (operation === 'reset_subsection') {
+    const entry = adminSettingsRegistryUI?.entries?.find(item => item.categoryId === details.category_id && item.subsectionId === details.subsection_id);
+    return `${entry?.subsectionLabel || 'Subsection'} reset to defaults.`;
+  }
+  if (operation === 'reset_setting') {
+    const entry = adminSettingsRegistryUI?.entryMap?.get(details.setting_id);
+    return `${entry?.label || 'Setting'} reset to defaults.`;
+  }
+  const ids = result.changedSettingIds || [];
+  const danceIds = ids.filter(id => id.startsWith('avatar_dance.'));
+  if (danceIds.length > 1 && danceIds.length === ids.length) {
+    const enabled = Object.values(details.values || {}).some(Boolean);
+    return `All dances ${enabled ? 'enabled' : 'disabled'}.`;
+  }
+  if (ids.length === 1) {
+    const entry = adminSettingsRegistryUI?.entryMap?.get(ids[0]);
+    const value = details.values?.[ids[0]];
+    if (entry && typeof value === 'boolean') return `${entry.label} ${value ? 'enabled' : 'disabled'}.`;
+    if (entry) return `${entry.label} changed.`;
+  }
+  return `${Number(result.changedSettingCount || ids.length)} settings changed.`;
+}
+
+async function mutateLobbyAdminSettings(operation, details = {}) {
+  if (!adminSettingsRegistry) return null;
+  if (!adminSettingsUnlock?.requireUnlocked()) return null;
+  if (!CAN_ADMIN_SETTINGS_MUTATE) throw new Error('Administrator access is required to change settings.');
+  details = { ...details };
+  if (['reset_subsection', 'reset_category', 'reset_all_optional', 'apply_preset'].includes(operation)) details.confirmed = 1;
+  if (operation === 'set_many') details.dance_disable_all_confirmed = 1;
+  const capacityId = 'avatar_relationship_max_regular_links';
+  let capacityTarget;
+  let capacityImpactMessage = '';
+  if (Object.prototype.hasOwnProperty.call(details.values || {}, capacityId)) capacityTarget = Number(details.values[capacityId]);
+  if (operation === 'reset_setting' && details.setting_id === capacityId) capacityTarget = Number(adminSettingsRegistryUI?.entryMap?.get(capacityId)?.defaultValue);
+  if (operation === 'reset_subsection' && details.category_id === 'avatar-interactions' && details.subsection_id === 'relationships') capacityTarget = Number(adminSettingsRegistryUI?.entryMap?.get(capacityId)?.defaultValue);
+  if (operation === 'reset_category' && details.category_id === 'avatar-interactions') capacityTarget = Number(adminSettingsRegistryUI?.entryMap?.get(capacityId)?.defaultValue);
+  if (Number.isFinite(capacityTarget) && !details.capacity_confirmed) {
+    const response = await fetch(appUrl(`/api/admin_system.php?action=relationship_capacity_impact&value=${encodeURIComponent(capacityTarget)}`));
     const impact = await response.json().catch(() => ({}));
     if (!response.ok || impact.error) throw new Error(impact.error || 'Relationship limit could not be checked.');
     const affected = Number(impact.relationshipsAboveProposedLimit || 0);
-    const impactEl = document.getElementById('admin-relationship-capacity-impact');
     if (impact.isLowering && affected > 0) {
-      impactEl.textContent = `${affected} existing relationship${affected === 1 ? '' : 's'} will remain valid above the new limit and cannot accept new regular links until below it.`;
-      if (!confirm(`${impactEl.textContent}\n\nSave the lower limit?`)) {
-        setAdminFormStatus(form, 'No changes saved.');
-        return;
-      }
+      details = { ...details, capacity_confirmed: 1 };
+      capacityImpactMessage = `${affected} existing relationship${affected === 1 ? '' : 's'} will remain valid above the new limit and cannot accept new regular links until below it.`;
+      adminSettingsUnlock.announce(capacityImpactMessage, 'ok');
     }
-    const data = await adminSystemRequest({
-      action: 'save_relationship_capacity',
-      maximum_regular_avatar_links: value,
-      expected_revision: Number(form.dataset.revision || 0),
-      confirm_above_limit: affected > 0 ? 1 : 0,
-    });
-    form.dataset.revision = String(data.policy.revision);
-    setAdminFormStatus(form, data.idempotent ? 'Relationship limit is unchanged.' : 'Relationship limit saved.', 'ok');
-    await loadAdminSettings();
-    await loadAdminLogs();
-  } catch (err) {
-    if (String(err.message || '').includes('changed')) await loadAdminSettings().catch(() => {});
-    setAdminFormStatus(form, err.message || 'Relationship limit failed to save.', 'error');
-  } finally {
-    submit.disabled = false;
+  }
+  const result = await adminSystemRequest({
+    action: 'update_settings_registry',
+    operation,
+    expected_revision: adminSettingsRegistry.revision,
+    ...details,
+  });
+  adminSettingsRegistry = result.registry || result.settingsRegistry || adminSettingsRegistry;
+  adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
+  renderLobbyAdminSettingsCompatibility();
+  announceAdminSettingsRevision(adminSettingsRegistry.revision);
+  const stopped = Number(result.stoppedActiveCapabilityCount || 0);
+  let message = lobbyAdminSettingsSuccessMessage(result, operation, details);
+  if (stopped) message = `${message.replace(/\.$/, '')}; ${stopped} active optional state${stopped === 1 ? '' : 's'} stopped safely.`;
+  if (capacityImpactMessage) message = `${message} ${capacityImpactMessage}`;
+  setAdminFormStatus(adminSettings, message, 'ok');
+  adminSettingsUnlock.announce(message, 'ok');
+  await loadAdminLogs();
+  return result;
+}
+
+async function handleLobbyAdminSettingsOperation(operation, details) {
+  if (!adminSettingsUnlock?.requireUnlocked()) return;
+  try {
+    if (operation === 'set_many') return await mutateLobbyAdminSettings('set_many', details);
+    if (operation === 'set_many_confirmed') {
+      return await mutateLobbyAdminSettings('set_many', { ...details, dance_disable_all_confirmed: 1 });
+    }
+    if (operation === 'reset_setting') return await mutateLobbyAdminSettings('reset_setting', details);
+    if (operation === 'reset_subsection') return await mutateLobbyAdminSettings('reset_subsection', { ...details, confirmed: 1 });
+    if (operation === 'reset_category') return await mutateLobbyAdminSettings('reset_category', { ...details, confirmed: 1 });
+  } catch (error) {
+    await loadAdminSettings().catch(() => {});
+    const message = lobbyAdminSettingsFailureMessage(error, 'Settings operation failed.');
+    setAdminFormStatus(adminSettings, message, 'error');
+    adminSettingsUnlock?.announce(message, 'error');
+  }
+}
+
+adminSettings?.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!adminSettingsUnlock?.requireUnlocked()) return;
+  const values = adminSettingsRegistryUI?.changedValues() || {};
+  if (!Object.keys(values).length) return;
+  const submit = document.getElementById('lobby-admin-settings-save');
+  if (submit) submit.disabled = true;
+  setAdminFormStatus(adminSettings, 'Saving settings...', 'working');
+  try {
+    await mutateLobbyAdminSettings('set_many', { values });
+  } catch (error) {
+    await loadAdminSettings().catch(() => {});
+    const message = lobbyAdminSettingsFailureMessage(error, 'Settings failed to save.');
+    setAdminFormStatus(adminSettings, message, 'error');
+    adminSettingsUnlock?.announce(message, 'error');
   }
 });
 
-document.getElementById('admin-reset-avatar-size-policy')?.addEventListener('click', async () => {
-  if (!adminSettings) return;
-  const button = document.getElementById('admin-reset-avatar-size-policy');
-  button.disabled = true;
-  setAdminFormStatus(adminSettings, 'Resetting avatar and webcam sizes...', 'working');
+function showLobbyAdminPresetReview(preset) {
+  const review = document.getElementById('lobby-admin-settings-preset-review');
+  const changes = adminSettingsRegistryUI?.presetChanges(preset) || [];
+  if (!review) return;
+  review.textContent = '';
+  review.hidden = false;
+  const heading = document.createElement('h4');
+  heading.textContent = preset === 'original-compatible' ? 'Original-compatible review' : 'Framework-default review';
+  review.appendChild(heading);
+  const list = document.createElement('ul');
+  if (!changes.length) {
+    const item = document.createElement('li');
+    item.textContent = 'No setting changes are required.';
+    list.appendChild(item);
+  } else {
+    for (const change of changes) {
+      const item = document.createElement('li');
+      const format = (entry, value) => entry.type === 'boolean' ? (value ? 'Enabled' : 'Disabled') : String(value);
+      item.textContent = `${change.entry.label}: ${format(change.entry, change.from)} → ${format(change.entry, change.to)}`;
+      list.appendChild(item);
+    }
+  }
+  review.appendChild(list);
+  for (const difference of adminSettingsRegistry?.compatibility?.unavoidableDifferences || []) {
+    const note = document.createElement('p');
+    note.className = 'minor';
+    note.textContent = difference;
+    review.appendChild(note);
+  }
+  if (!changes.length || !CAN_ADMIN_SETTINGS_MUTATE) return;
+  const apply = document.createElement('button');
+  apply.type = 'button';
+  apply.className = 'btn btn-primary';
+  apply.dataset.settingsMutation = 'preset';
+  apply.disabled = !adminSettingsUnlock?.isUnlocked();
+  apply.textContent = preset === 'original-compatible' ? 'Apply Original-compatible Preset' : 'Restore Framework Defaults';
+  apply.addEventListener('click', async () => {
+    apply.disabled = true;
+    try {
+      if (!adminSettingsUnlock?.requireUnlocked()) return;
+      await mutateLobbyAdminSettings('apply_preset', { preset, confirmed: 1 });
+      review.hidden = true;
+    } catch (error) {
+      await loadAdminSettings().catch(() => {});
+      const message = lobbyAdminSettingsFailureMessage(error, 'Preset could not be applied.');
+      setAdminFormStatus(adminSettings, message, 'error');
+      adminSettingsUnlock?.announce(message, 'error');
+    } finally {
+      apply.disabled = false;
+    }
+  });
+  review.appendChild(apply);
+}
+
+document.getElementById('lobby-admin-settings-original-preview')?.addEventListener('click', () => showLobbyAdminPresetReview('original-compatible'));
+document.getElementById('lobby-admin-settings-framework-preview')?.addEventListener('click', () => showLobbyAdminPresetReview('framework-default'));
+document.getElementById('lobby-admin-settings-reset-optional')?.addEventListener('click', async () => {
+  if (!CAN_ADMIN_SETTINGS_MUTATE || !adminSettingsUnlock?.requireUnlocked()) return;
   try {
-    await adminSystemRequest({ action: 'reset_avatar_size_policy' });
-    await loadAdminSettings();
-    await loadAdminLogs();
-    setAdminFormStatus(adminSettings, 'Avatar and webcam size defaults restored.', 'ok');
-  } catch (err) {
-    setAdminFormStatus(adminSettings, err.message || 'Size defaults could not be reset.', 'error');
-  } finally {
-    button.disabled = false;
+    await mutateLobbyAdminSettings('reset_all_optional', { confirmed: 1 });
+  } catch (error) {
+    await loadAdminSettings().catch(() => {});
+    const message = lobbyAdminSettingsFailureMessage(error, 'Optional settings could not be reset.');
+    setAdminFormStatus(adminSettings, message, 'error');
+    adminSettingsUnlock?.announce(message, 'error');
   }
 });
 

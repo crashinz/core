@@ -116,33 +116,103 @@ setupAvatar?.addEventListener('change', () => {
   if (setupAvatarName) setupAvatarName.textContent = file ? file.name : 'No file selected';
 });
 
-const setupCommunityLogo = document.getElementById('setup-community-logo');
-const setupCommunityLogoName = document.getElementById('setup-community-logo-name');
-setupCommunityLogo?.addEventListener('change', () => {
-  const file = setupCommunityLogo.files && setupCommunityLogo.files[0];
-  if (setupCommunityLogoName) setupCommunityLogoName.textContent = file ? file.name : 'No file selected';
-});
-
-const setupDanceCapabilities = document.getElementById('setup-dance-capabilities');
-function syncSetupDanceSummary() {
-  const inputs = Array.from(setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]') || []);
-  const enabled = inputs.filter(input => input.checked).length;
-  const summary = document.getElementById('setup-dance-capability-summary');
-  if (summary) summary.textContent = `${enabled} of ${inputs.length} enabled`;
+const setupSettingsData = document.getElementById('setup-settings-registry-data');
+const setupSettingsContainer = document.getElementById('setup-settings-registry');
+if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
+  const registry = JSON.parse(setupSettingsData.textContent || '{}');
+  const hiddenValues = document.getElementById('setup-settings-registry-values');
+  const compatibilityState = document.getElementById('setup-settings-compatibility-state');
+  const setupMutationControls = [
+    document.getElementById('setup-settings-original'),
+    document.getElementById('setup-settings-framework'),
+    document.getElementById('setup-settings-reset-optional'),
+  ].filter(Boolean);
+  const stateLabel = state => ({ 'original-compatible': 'Original-author compatible', 'framework-default': 'Framework default', custom: 'Custom' })[state] || 'Custom';
+  let setupSettingsUI;
+  const setupSettingsUnlock = new window.SettingsUnlockController({
+    mount: document.getElementById('setup-settings-unlock'),
+    activityRoot: setupSettingsContainer.closest('.settings-registry-setup'),
+    authorized: true,
+    onLockChange: locked => {
+      setupSettingsUI?.setLocked(locked);
+      for (const control of setupMutationControls) control.disabled = locked;
+      if (locked && setupSettingsUI?.registry) setupSettingsUI.setRegistry(registry);
+    },
+  });
+  const updateHidden = state => {
+    if (hiddenValues) hiddenValues.value = JSON.stringify(state.values);
+    if (compatibilityState) compatibilityState.textContent = stateLabel(state.compatibilityState);
+  };
+  const idsForScope = details => registry.visibleEntries
+    .filter(entry => (!details.category_id || entry.categoryId === details.category_id)
+      && (!details.subsection_id || entry.subsectionId === details.subsection_id)
+      && entry.safeToReset)
+    .map(entry => entry.id);
+  const valuesDiffer = values => Object.entries(values || {}).some(([id, value]) => JSON.stringify(setupSettingsUI?.draft?.get(id)) !== JSON.stringify(value));
+  const applyDraftValues = (values, message) => {
+    if (!setupSettingsUnlock.requireUnlocked()) return false;
+    if (!valuesDiffer(values)) {
+      setupSettingsUnlock.announce('No settings needed to be changed.', 'ok');
+      return false;
+    }
+    setupSettingsUI.setDraftValues(values);
+    setupSettingsUnlock.announce(message, 'ok');
+    return true;
+  };
+  setupSettingsUI = new window.SettingsRegistryUI({
+    container: setupSettingsContainer,
+    searchInput: document.getElementById('setup-settings-search'),
+    filterInput: document.getElementById('setup-settings-filter'),
+    registry,
+    locked: true,
+    onDraftChange: updateHidden,
+    onEntryChange: (entry, value) => {
+      const rendered = entry.type === 'boolean' ? (value ? 'enabled' : 'disabled') : `changed to ${value}`;
+      setupSettingsUnlock.announce(`${entry.label} ${rendered}.`, 'ok');
+    },
+    onOperation: async (operation, details, ui) => {
+      if (!setupSettingsUnlock.requireUnlocked()) return;
+      if (operation === 'set_many' || operation === 'set_many_confirmed') {
+        const enabling = Object.values(details.values || {}).some(Boolean);
+        return applyDraftValues(details.values, `All dances ${enabling ? 'enabled' : 'disabled'}.`);
+      }
+      if (operation === 'reset_setting') {
+        const entry = ui.entryMap.get(details.setting_id);
+        const values = entry ? { [entry.id]: entry.defaultValue } : {};
+        return applyDraftValues(values, `${entry?.label || 'Setting'} reset to defaults.`);
+      }
+      if (operation === 'reset_subsection') {
+        const ids = idsForScope(details);
+        const values = Object.fromEntries(ids.map(id => [id, ui.entryMap.get(id)?.defaultValue]));
+        const label = ui.entryMap.get(ids[0])?.subsectionLabel || 'Subsection';
+        return applyDraftValues(values, `${label} reset to defaults.`);
+      }
+      if (operation === 'reset_category') {
+        const ids = idsForScope(details);
+        const values = Object.fromEntries(ids.map(id => [id, ui.entryMap.get(id)?.defaultValue]));
+        const label = registry.categories.find(category => category.id === details.category_id)?.label || 'Category';
+        return applyDraftValues(values, `${label} reset to defaults.`);
+      }
+    },
+  });
+  const applySetupPreset = preset => {
+    if (!setupSettingsUnlock.requireUnlocked()) return;
+    const changes = setupSettingsUI.presetChanges(preset);
+    const message = preset === 'original-compatible'
+      ? 'Original-author compatible settings applied.'
+      : 'Framework default settings applied.';
+    applyDraftValues(Object.fromEntries(changes.map(change => [change.entry.id, change.to])), message);
+  };
+  document.getElementById('setup-settings-original')?.addEventListener('click', () => applySetupPreset('original-compatible'));
+  document.getElementById('setup-settings-framework')?.addEventListener('click', () => applySetupPreset('framework-default'));
+  document.getElementById('setup-settings-reset-optional')?.addEventListener('click', () => {
+    const values = Object.fromEntries(registry.visibleEntries.filter(entry => entry.optional && entry.safeToReset).map(entry => [entry.id, entry.defaultValue]));
+    applyDraftValues(values, 'All optional settings reset to defaults.');
+  });
+  setupSettingsUI.setLocked(true);
+  for (const control of setupMutationControls) control.disabled = true;
+  updateHidden(setupSettingsUI.getState());
 }
-setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]').forEach(input => {
-  input.addEventListener('change', syncSetupDanceSummary);
-});
-document.getElementById('setup-dance-enable-all')?.addEventListener('click', () => {
-  setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]').forEach(input => { input.checked = true; });
-  syncSetupDanceSummary();
-});
-document.getElementById('setup-dance-disable-all')?.addEventListener('click', () => {
-  if (!confirm('Disable all avatar dances for this installation?')) return;
-  setupDanceCapabilities?.querySelectorAll('input[name="dance_enabled[]"]').forEach(input => { input.checked = false; });
-  syncSetupDanceSummary();
-});
-syncSetupDanceSummary();
 
 const setupAdminForm = setupAvatar?.closest('form');
 setupAdminForm?.addEventListener('submit', async event => {

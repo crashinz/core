@@ -5,9 +5,13 @@ $me = require_staff();
 $pdo = db();
 
 function admin_settings(PDO $pdo): array {
+    $secretKeys = [];
+    foreach (settings_registry_definitions() as $definition) {
+        if (!empty($definition['secret']) && $definition['settingKey'] !== null) $secretKeys[(string)$definition['settingKey']] = true;
+    }
     $rows = $pdo->query('SELECT setting_key, value FROM app_settings ORDER BY setting_key ASC')->fetchAll();
     $settings = [];
-    foreach ($rows as $row) $settings[$row['setting_key']] = $row['value'];
+    foreach ($rows as $row) $settings[$row['setting_key']] = isset($secretKeys[$row['setting_key']]) ? '' : $row['value'];
     return $settings;
 }
 
@@ -17,11 +21,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if ($action === 'settings') {
         json_out([
             'settings' => admin_settings($pdo),
+            'settingsRegistry' => settings_registry_snapshot($pdo, 'admin'),
             'avatarSizePolicy' => avatar_size_policy($pdo),
             'webcamCapability' => webcam_capability($pdo),
             'relationshipCapacity' => avatar_relationship_capacity_policy($pdo),
             'danceCapability' => avatar_dance_capability_policy($pdo),
         ]);
+    }
+
+    if ($action === 'settings_registry') {
+        json_out(['settingsRegistry' => settings_registry_snapshot($pdo, 'admin')]);
     }
 
     if ($action === 'relationship_capacity_impact') {
@@ -124,97 +133,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     json_out(['error' => 'Unknown action'], 400);
 }
 
-function broadcast_role_colors(PDO $pdo): void {
-    $colors = role_color_settings($pdo);
-    foreach ($pdo->query('SELECT id FROM room_sessions')->fetchAll() as $session) {
-        emit_event($pdo, (int)$session['id'], 'role_colors_update', $colors);
-    }
-}
-
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'Unsupported method'], 405);
 security_require_recent_authentication_or_json();
 
 $body = input_json();
 $action = (string)($body['action'] ?? '');
 
-if ($action === 'save_role_colors' || $action === 'reset_role_colors') {
+if ($action === 'update_settings_registry') {
     if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
-    $result = role_color_validate_settings($body, $action === 'reset_role_colors');
-    if (empty($result['ok'])) {
-        $status = (int)($result['http_status'] ?? 400);
-        unset($result['http_status']);
-        json_out($result, $status);
-    }
-    set_app_setting($pdo, 'role_colors_mode', $result['mode']);
-    foreach ($result['palette'] as $role => $colors) {
-        set_app_setting($pdo, "role_color_{$role}_bg", $colors['background']);
-        set_app_setting($pdo, "role_color_{$role}_text", $colors['text']);
-    }
-    broadcast_role_colors($pdo);
-    log_tool($pdo, (int)$me['id'], 'admin_role_colors_update', null, null, $action === 'reset_role_colors' ? 'Reset username role colors' : 'Updated username role colors');
-    json_out(['ok' => true, 'roleColors' => role_color_settings($pdo), 'settings' => admin_settings($pdo)]);
-}
-
-if ($action === 'save_diagnostic_screenshots') {
-    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
-    $enabled = !empty($body['diagnostic_screenshots_enabled']);
-    $retention = (int)($body['diagnostic_screenshot_retention_days'] ?? 0);
-    if ($enabled && ($retention < 1 || $retention > 365)) json_out(['error' => 'Enabled screenshots require a retention period from 1 to 365 days.'], 400);
-    if (!$enabled && ($retention < 0 || $retention > 365)) json_out(['error' => 'Retention must be from 0 to 365 days.'], 400);
-    set_app_setting($pdo, 'diagnostic_screenshots_enabled', $enabled ? '1' : '0');
-    set_app_setting($pdo, 'diagnostic_screenshot_retention_days', (string)$retention);
-    log_tool($pdo, (int)$me['id'], 'admin_diagnostic_screenshot_settings', null, null, $enabled ? "Enabled censored screenshots with {$retention}-day retention" : 'Disabled censored screenshots');
-    json_out(['ok' => true, 'settings' => admin_settings($pdo)]);
-}
-
-if ($action === 'save_webcam_capability') {
-    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
-    $allow = !empty($body['allow_webcam_use']);
-    $result = webcam_capability_update($pdo, $allow);
-    log_tool(
-        $pdo,
-        (int)$me['id'],
-        'admin_webcam_capability_update',
-        null,
-        null,
-        $allow ? 'Enabled installation webcam use' : 'Disabled installation webcam use'
-    );
-    json_out([
-        'ok' => true,
-        'idempotent' => !empty($result['idempotent']),
-        'webcamCapability' => $result['capability'],
-        'stoppedParticipantCount' => (int)$result['stoppedParticipantCount'],
-        'settings' => admin_settings($pdo),
-    ]);
-}
-
-if ($action === 'save_relationship_capacity') {
-    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
-    $result = avatar_relationship_capacity_update(
-        $pdo,
-        $body['maximum_regular_avatar_links'] ?? null,
-        $body['expected_revision'] ?? null,
-        !empty($body['confirm_above_limit']),
-        (int)$me['id'],
-        'admin'
-    );
-    if (empty($result['ok'])) {
-        $status = max(400, (int)($result['http_status'] ?? 400));
-        unset($result['http_status']);
-        json_out($result, $status);
-    }
-    json_out($result + ['settings' => admin_settings($pdo)]);
-}
-
-if ($action === 'update_dance_capabilities') {
-    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
-    $result = avatar_dance_capability_update(
+    $result = settings_registry_update(
         $pdo,
         [
             'operation' => (string)($body['operation'] ?? ''),
-            'dance_id' => isset($body['dance_id']) ? (string)$body['dance_id'] : null,
-            'enabled' => $body['enabled'] ?? null,
+            'values' => is_array($body['values'] ?? null) ? $body['values'] : [],
+            'setting_id' => isset($body['setting_id']) ? (string)$body['setting_id'] : null,
+            'category_id' => isset($body['category_id']) ? (string)$body['category_id'] : null,
+            'subsection_id' => isset($body['subsection_id']) ? (string)$body['subsection_id'] : null,
+            'preset' => isset($body['preset']) ? (string)$body['preset'] : null,
             'confirmed' => !empty($body['confirmed']),
+            'capacity_confirmed' => !empty($body['capacity_confirmed']),
+            'dance_disable_all_confirmed' => !empty($body['dance_disable_all_confirmed']),
         ],
         $body['expected_revision'] ?? null,
         (int)$me['id'],
@@ -225,81 +163,27 @@ if ($action === 'update_dance_capabilities') {
         unset($result['http_status']);
         json_out($result, $status);
     }
-    json_out($result + ['settings' => admin_settings($pdo)]);
-}
-
-if ($action === 'save_settings') {
-    $policyValidation = avatar_size_policy_validate_settings($body);
-    if (empty($policyValidation['ok'])) {
-        $status = (int)($policyValidation['http_status'] ?? 400);
-        unset($policyValidation['http_status']);
-        json_out($policyValidation, $status);
-    }
-    $allowed = [
-        'chat_posts_per_second' => [0.2, 30],
-        'room_chat_history_limit' => [1, 1000],
-        'avatar_movements_per_second' => [1, 60],
-        'avatar_max_size_mb' => [0.5, 50],
-        'gesture_upload_limit' => [0, 1000],
-        'room_image_max_size_mb' => [1, 100],
-        'room_video_max_size_mb' => [5, 1000],
-        'participant_idle_timeout_minutes' => [0.5, 120],
-        'auth_login_max_attempts' => [1, 50],
-        'auth_recovery_max_attempts' => [1, 50],
-        'auth_ip_max_attempts' => [5, 500],
-        'auth_attempt_window_minutes' => [1, 1440],
-        'auth_lockout_minutes' => [1, 1440],
-        'age_gate_min_age' => [1, 120],
-    ];
-    foreach ($allowed as $key => [$min, $max]) {
-        $value = (float)($body[$key] ?? app_setting($pdo, $key, (string)$min));
-        $value = max($min, min($max, $value));
-        set_app_setting($pdo, $key, (string)$value);
-    }
-    $giphyKey = trim((string)($body['gif_giphy_api_key'] ?? ''));
-    $tenorKey = trim((string)($body['gif_tenor_api_key'] ?? ''));
-    $klipyKey = trim((string)($body['gif_klipy_api_key'] ?? ''));
-    $provider = (string)($body['gif_default_provider'] ?? 'giphy');
-    if (!in_array($provider, ['giphy', 'klipy', 'tenor'], true)) $provider = 'giphy';
-    set_app_setting($pdo, 'gif_giphy_api_key', $giphyKey);
-    set_app_setting($pdo, 'gif_tenor_api_key', $tenorKey);
-    set_app_setting($pdo, 'gif_klipy_api_key', $klipyKey);
-    set_app_setting($pdo, 'gif_default_provider', $provider);
-    set_app_setting($pdo, 'age_gate_enabled', !empty($body['age_gate_enabled']) ? '1' : '0');
-    $sizePolicyResult = avatar_size_policy_update($pdo, $body);
-    if (empty($sizePolicyResult['ok'])) {
-        $status = (int)($sizePolicyResult['http_status'] ?? 400);
-        unset($sizePolicyResult['http_status']);
-        json_out($sizePolicyResult, $status);
-    }
-    log_tool($pdo, (int)$me['id'], 'admin_settings_update', null, null, 'Updated community settings');
-    json_out([
-        'ok' => true,
+    json_out($result + [
         'settings' => admin_settings($pdo),
-        'avatarSizePolicy' => $sizePolicyResult['policy'],
+        'avatarSizePolicy' => avatar_size_policy($pdo),
+        'webcamCapability' => webcam_capability($pdo),
+        'relationshipCapacity' => avatar_relationship_capacity_policy($pdo),
+        'danceCapability' => avatar_dance_capability_policy($pdo),
     ]);
 }
 
-if ($action === 'reset_avatar_size_policy') {
-    $result = avatar_size_policy_update($pdo, [], true);
-    if (empty($result['ok'])) {
-        $status = (int)($result['http_status'] ?? 400);
-        unset($result['http_status']);
-        json_out($result, $status);
-    }
-    log_tool(
-        $pdo,
-        (int)$me['id'],
-        'admin_avatar_size_policy_reset',
-        null,
-        null,
-        'Reset avatar and webcam size policy defaults'
-    );
+$legacySettingsActions = [
+    'save_role_colors', 'reset_role_colors', 'save_diagnostic_screenshots',
+    'save_webcam_capability', 'save_relationship_capacity', 'update_dance_capabilities',
+    'save_settings', 'reset_avatar_size_policy',
+];
+if (in_array($action, $legacySettingsActions, true)) {
     json_out([
-        'ok' => true,
-        'settings' => admin_settings($pdo),
-        'avatarSizePolicy' => $result['policy'],
-    ]);
+        'ok' => false,
+        'code' => 'SETTINGS_REGISTRY_REQUIRED',
+        'error' => 'This settings client is outdated. Refresh Admin and retry through the shared settings registry.',
+        'settingsRegistry' => settings_registry_snapshot($pdo, 'admin'),
+    ], 409);
 }
 
 if ($action === 'remove_block') {

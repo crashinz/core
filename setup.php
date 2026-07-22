@@ -221,56 +221,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
         if (!chatspace_configured()) throw new RuntimeException('Database setup is not complete.');
         if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Display name and a valid email are required.');
         if (strlen($password) < 8 || $password !== $confirm) throw new RuntimeException('Use matching passwords of at least 8 characters.');
-        $communityName = trim((string)($_POST['community_name'] ?? ''));
+        $registryValues = json_decode((string)($_POST['settings_registry_values'] ?? ''), true);
+        if (!is_array($registryValues)) {
+            $registryValues = [];
+            foreach (settings_registry_snapshot(db(), 'setup')['visibleEntries'] as $entry) {
+                if (!in_array($entry['type'], ['asset', 'fixed', 'secret'], true)) $registryValues[$entry['id']] = $entry['currentValue'];
+            }
+        }
+        $communityName = trim((string)($registryValues['community_name'] ?? ''));
         if ((function_exists('mb_strlen') ? mb_strlen($communityName, 'UTF-8') : strlen($communityName)) > 80) {
             throw new RuntimeException('Community name must be 80 characters or less.');
         }
-        $capacityValidation = avatar_relationship_capacity_validate_setting(
-            $_POST['maximum_regular_avatar_links'] ?? AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_DEFAULT
-        );
-        if (empty($capacityValidation['ok'])) throw new RuntimeException((string)$capacityValidation['error']);
         $communityLogo = setup_brand_logo_upload();
         $avatar = setup_avatar_upload();
         $pdo = db();
-        $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path) VALUES (?,?,?,?,?)');
-        $stmt->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name, 'admin', $avatar]);
-        $adminUserId = (int)$pdo->lastInsertId();
-        set_app_setting($pdo, 'community_name', $communityName);
-        if ($communityLogo !== '') set_app_setting($pdo, 'community_logo_path', $communityLogo);
-        $capacityPolicy = avatar_relationship_capacity_policy($pdo);
-        $capacityResult = avatar_relationship_capacity_update(
-            $pdo,
-            (int)$capacityValidation['value'],
-            (int)$capacityPolicy['revision'],
-            true,
-            $adminUserId,
-            'setup'
-        );
-        if (empty($capacityResult['ok'])) throw new RuntimeException((string)$capacityResult['error']);
-        $selectedDanceIds = array_values(array_map('strval', (array)($_POST['dance_enabled'] ?? [])));
-        $danceValues = [];
-        foreach (avatar_dance_capability_ids() as $danceId) {
-            $danceValues[$danceId] = in_array($danceId, $selectedDanceIds, true);
+        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
+        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        try {
+            $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path) VALUES (?,?,?,?,?)');
+            $stmt->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name, 'admin', $avatar]);
+            $adminUserId = (int)$pdo->lastInsertId();
+            $registryValues['community_name'] = $communityName;
+            if ($communityLogo !== '') $registryValues['community_logo_path'] = $communityLogo;
+            $registryResult = settings_registry_update(
+                $pdo,
+                ['operation' => 'set_many', 'values' => $registryValues, 'confirmed' => true],
+                $_POST['settings_registry_revision'] ?? null,
+                $adminUserId,
+                'setup'
+            );
+            if (empty($registryResult['ok'])) throw new RuntimeException((string)($registryResult['error'] ?? 'Setup settings could not be saved.'));
+            $pdo->commit();
+        } catch (Throwable $transactionError) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $transactionError;
         }
-        $dancePolicy = avatar_dance_capability_policy($pdo);
-        $danceResult = avatar_dance_capability_update(
-            $pdo,
-            ['operation' => 'replace', 'enabled' => $danceValues, 'confirmed' => true],
-            (int)$dancePolicy['revision'],
-            $adminUserId,
-            'setup'
-        );
-        if (empty($danceResult['ok'])) throw new RuntimeException((string)$danceResult['error']);
-        $allowWebcamUse = !empty($_POST['allow_webcam_use']);
-        set_app_setting($pdo, 'allow_webcam_use', $allowWebcamUse ? '1' : '0');
-        log_tool(
-            $pdo,
-            $adminUserId,
-            'setup_webcam_capability',
-            null,
-            null,
-            $allowWebcamUse ? 'Enabled installation webcam use' : 'Disabled installation webcam use'
-        );
         authenticate_user($adminUserId);
         redirect_to('/setup.php?done=1');
     } catch (Throwable $e) {
@@ -297,6 +282,7 @@ if (($_GET['done'] ?? '') === '1') $step = 'done';
 $restoredSetup = ($_GET['restored'] ?? '') === '1';
 $requirements = setup_requirements();
 $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['ok']);
+$setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_registry_snapshot(db(), 'setup') : null;
 ?>
 <!doctype html>
 <html lang="en">
@@ -394,53 +380,25 @@ $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['
             <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
             <label>Confirm password<input name="confirm_password" type="password" minlength="8" required autocomplete="new-password"></label>
           </div>
-          <div class="setup-branding-fields">
-            <h2>Community Branding</h2>
-            <p class="minor">Optional. Add a community name and logo for this installation.</p>
-            <label>Community name<input name="community_name" maxlength="80" placeholder="Your Community"></label>
-            <label>Community logo
-              <span class="file-picker">
-                <input id="setup-community-logo" type="file" name="community_logo" accept="image/jpeg,image/png,image/gif,image/webp">
-                <span class="file-picker-btn">Choose Logo</span>
-                <span class="file-picker-name" id="setup-community-logo-name">No file selected</span>
-              </span>
-            </label>
-          </div>
-          <div class="setup-branding-fields">
-            <h2>Avatar Relationships</h2>
-            <label>Maximum regular avatar links in one relationship
-              <input name="maximum_regular_avatar_links" type="number" min="2" max="16" step="1" value="8" required>
-            </label>
-            <p class="minor">Controls how many regularly linked avatars can belong to one relationship. Left and right lap links do not count toward this limit because they remain attached to an existing regular avatar link.</p>
-          </div>
-          <div class="setup-branding-fields" id="setup-dance-capabilities">
-            <h2>Avatar Interactions</h2>
-            <fieldset class="settings-capability-group">
-              <legend>Dances</legend>
-              <p class="minor">Choose which optional avatar dances members may start. All dances are enabled by default.</p>
-              <div class="shared-form-actions">
-                <button class="btn" id="setup-dance-enable-all" type="button">Enable All Dances</button>
-                <button class="btn btn-danger" id="setup-dance-disable-all" type="button">Disable All Dances</button>
-              </div>
-              <div class="settings-capability-list">
-                <?php foreach (avatar_dance_capability_registry() as $dance): ?>
-                <label class="settings-checkbox-row">
-                  <strong><?= e($dance['label']) ?></strong>
-                  <input type="checkbox" name="dance_enabled[]" value="<?= e($dance['id']) ?>" checked>
-                  <span><?= e($dance['description']) ?> Default: Enabled.</span>
-                </label>
-                <?php endforeach; ?>
-              </div>
-              <p class="minor" id="setup-dance-capability-summary" aria-live="polite">4 of 4 enabled</p>
-            </fieldset>
-          </div>
-          <div class="setup-branding-fields">
-            <h2>Webcam</h2>
-            <label class="settings-checkbox-row">
-              <strong>Allow webcam use</strong>
-              <input name="allow_webcam_use" type="checkbox" value="1" checked>
-              <span>Allow participants to share webcam video. Voice remains available independently.</span>
-            </label>
+          <input id="setup-settings-registry-values" type="hidden" name="settings_registry_values" value="">
+          <input type="hidden" name="settings_registry_revision" value="<?= e((string)($setupSettingsRegistry['revision'] ?? 1)) ?>">
+          <script id="setup-settings-registry-data" type="application/json"><?= json_encode($setupSettingsRegistry, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
+          <div class="setup-branding-fields settings-registry-setup">
+            <div class="settings-registry-heading">
+              <div><h2>Installation Settings</h2><p class="minor">Setup and Admin use the same setting IDs, categories, defaults, validation, and authoritative owners.</p></div>
+              <div class="settings-registry-state" id="setup-settings-compatibility-state" aria-live="polite">Framework default</div>
+            </div>
+            <div id="setup-settings-unlock"></div>
+            <div class="settings-registry-toolbar" role="search">
+              <label>Search settings<input id="setup-settings-search" type="search" autocomplete="off" placeholder="Label, help, category, alias, or setting ID"></label>
+              <label>Filter<select id="setup-settings-filter"><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="changed">Changed from default</option><option value="original">Original-author compatibility relevant</option></select></label>
+            </div>
+            <div class="shared-form-actions">
+              <button class="btn" id="setup-settings-original" type="button">Use Original-compatible Values</button>
+              <button class="btn" id="setup-settings-framework" type="button">Use Framework Defaults</button>
+              <button class="btn btn-danger" id="setup-settings-reset-optional" type="button">Reset All Optional Settings</button>
+            </div>
+            <div id="setup-settings-registry" class="settings-registry"></div>
           </div>
           <button class="btn btn-primary setup-submit" type="submit">Create Admin User</button>
         </form>
@@ -474,6 +432,7 @@ $requiredMissing = array_filter($requirements, fn($r) => $r['required'] && !$r['
   </section>
 </main>
 <script src="<?= e(app_url('/assets/js/avatar-processing.js')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/setup.js')) ?>"></script>
 </body>
 </html>
