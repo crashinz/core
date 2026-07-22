@@ -34,26 +34,22 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Unnumbered Dance Capability Controls
+Gesture Checkpoint Part 3
 
 **Framework Phase**
 
-Engineering Complete and published
+Engineering Complete
 
-The completed checkpoint adds one shared Setup/Admin policy at
-`Avatar Interactions -> Dances` for the four source-proven production modes:
-Synchronized Sway, Synchronized Bounce, Lap Dance, and Lap Bounce. The policy
-is revisioned, atomically updated, server enforced, multiplayer reconciled, and
-bounded in Tool Logs without reopening existing dance formulas or runtime
-ownership.
+The completed checkpoint adds canonical gesture text presentation, three
+persisted Chat Options preferences, separate Server and Personal picker
+catalogs, bounded search/pagination, stable-ID organization and hiding, and a
+read-only Admin Gestures foundation. Ordinary registry-backed settings use one
+deliberate shared unlock with no redundant grouped confirmation; independent
+high-risk protections remain intact.
 
-The exact-final gate passes `14/14`; Chrome passes `71/71` scenarios, `109`
-automated assertions, and `11/11` workers with exact HTTP accounting, zero
-defects or unexpected browser findings, and clean teardown. Commit
-`520b0dd320ed938c902a8627981397f80342bfbb` is published with direct-remote tree
-equality and `0/0` divergence. The next checkpoint is **Setup/Admin Settings
-Organization and Original-Author Compatibility**; Gesture Checkpoint Part 3
-follows it. Neither checkpoint has begun.
+Exact-final r4 passes every selected quality check and all `78/78` Chrome
+scenarios across `12/12` workers with clean teardown. Gesture Checkpoint Part
+4 is next; Parts 4 and 5 have not begun.
 
 ---
 

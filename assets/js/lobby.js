@@ -765,6 +765,13 @@ const adminSettings = document.getElementById('lobby-admin-settings-registry-for
 let adminSettingsRegistry = null;
 let adminSettingsRegistryUI = null;
 let adminSettingsUnlock = null;
+const adminGestureCatalog = document.getElementById('admin-gesture-catalog');
+const adminGesturePager = document.getElementById('admin-gesture-pager');
+const adminGestureStatus = document.getElementById('admin-gesture-status');
+const adminGestureSearch = document.getElementById('admin-gesture-search');
+const adminGestureSort = document.getElementById('admin-gesture-sort');
+const adminGestureState = { page: 1, pages: 1, total: 0, loading: false, request: 0 };
+let adminGestureSearchTimer = 0;
 const adminSettingsSyncKey = `chatspace.admin-settings.revision:${document.body.dataset.appBase || '/'}`;
 const adminSettingsChannel = typeof BroadcastChannel === 'function'
   ? new BroadcastChannel(adminSettingsSyncKey)
@@ -810,6 +817,7 @@ function showAdminSection(id) {
   document.querySelectorAll('.admin-nav-item[data-admin-section]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.adminSection === id);
   });
+  if (id === 'gestures') loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture catalog could not be loaded.', 'error'));
 }
 
 document.addEventListener('click', e => {
@@ -949,6 +957,135 @@ async function loadAdminSettings() {
   adminSettingsRegistryUI.setLocked(!adminSettingsUnlock.isUnlocked());
   syncLobbyAdminSettingsMutationLocks();
   renderLobbyAdminSettingsCompatibility();
+  renderAdminGestureFeatureSummary();
+  if (document.getElementById('admin-section-gestures')?.classList.contains('active')) {
+    loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture catalog could not be loaded.', 'error'));
+  }
+}
+
+function adminGestureFeatureEntries() {
+  return (adminSettingsRegistry?.entries || []).filter(entry => String(entry.id || '').startsWith('gesture_part3_'));
+}
+
+function adminGestureCatalogEnabled() {
+  return Boolean(adminGestureFeatureEntries().find(entry => entry.id === 'gesture_part3_admin_catalog')?.currentValue);
+}
+
+function renderAdminGestureFeatureSummary() {
+  const target = document.getElementById('admin-gesture-feature-summary');
+  const entries = adminGestureFeatureEntries();
+  if (target) {
+    const enabled = Number(adminSettingsRegistry?.summaries?.gesturePart3EnabledCount ?? entries.filter(entry => entry.currentValue === true).length);
+    const total = Number(adminSettingsRegistry?.summaries?.gesturePart3TotalCount ?? entries.length);
+    target.textContent = entries.length
+      ? `${enabled} of ${total} Part 3 presentation features enabled through the shared registry.`
+      : 'Shared Part 3 settings are unavailable.';
+  }
+  const enabled = adminGestureCatalogEnabled();
+  if (adminGestureSearch) adminGestureSearch.disabled = !enabled;
+  if (adminGestureSort) adminGestureSort.disabled = !enabled;
+  if (!enabled && adminGestureCatalog) {
+    adminGestureCatalog.replaceChildren();
+    adminGesturePager?.replaceChildren();
+    setAdminCount(document.getElementById('admin-gesture-count'), 0);
+    setAdminGestureStatus('The read-only Admin gesture catalog is disabled through shared Settings.', 'ok');
+  }
+}
+
+function setAdminGestureStatus(message, type = '') {
+  if (!adminGestureStatus) return;
+  adminGestureStatus.textContent = message || '';
+  adminGestureStatus.className = `minor ${type}`.trim();
+}
+
+function adminGestureCell(role, text, className = '') {
+  const cell = document.createElement('div');
+  cell.setAttribute('role', role);
+  if (className) cell.className = className;
+  cell.textContent = String(text ?? '');
+  return cell;
+}
+
+function renderAdminGestureCatalog(data) {
+  if (!adminGestureCatalog || !adminGesturePager) return;
+  adminGestureCatalog.replaceChildren();
+  const header = document.createElement('div');
+  header.className = 'admin-gesture-row admin-gesture-header';
+  header.setAttribute('role', 'row');
+  header.append(
+    adminGestureCell('columnheader', 'File name'),
+    adminGestureCell('columnheader', 'Name'),
+    adminGestureCell('columnheader', 'Gesture text'),
+    adminGestureCell('columnheader', 'Last uploaded')
+  );
+  adminGestureCatalog.appendChild(header);
+  (data.items || []).forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'admin-gesture-row';
+    row.setAttribute('role', 'row');
+    row.append(
+      adminGestureCell('cell', item.catalog_filename, 'admin-gesture-filename'),
+      adminGestureCell('cell', item.name),
+      adminGestureCell('cell', item.text || '(Gesture)'),
+      adminGestureCell('cell', adminCreatedOn(item.last_uploaded_at), 'admin-gesture-uploaded')
+    );
+    adminGestureCatalog.appendChild(row);
+  });
+  if (!(data.items || []).length) {
+    const empty = adminGestureCell('row', 'No Server Gestures match this search.', 'admin-gesture-empty');
+    adminGestureCatalog.appendChild(empty);
+  }
+
+  adminGesturePager.replaceChildren();
+  const previous = document.createElement('button');
+  previous.type = 'button';
+  previous.className = 'btn';
+  previous.textContent = 'Previous';
+  previous.disabled = adminGestureState.page <= 1;
+  previous.addEventListener('click', () => {
+    adminGestureState.page = Math.max(1, adminGestureState.page - 1);
+    loadAdminGestures().catch(error => setAdminGestureStatus(error.message, 'error'));
+  });
+  const label = document.createElement('span');
+  label.textContent = `Page ${adminGestureState.page} of ${adminGestureState.pages}`;
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'btn';
+  next.textContent = 'Next';
+  next.disabled = adminGestureState.page >= adminGestureState.pages;
+  next.addEventListener('click', () => {
+    adminGestureState.page = Math.min(adminGestureState.pages, adminGestureState.page + 1);
+    loadAdminGestures().catch(error => setAdminGestureStatus(error.message, 'error'));
+  });
+  adminGesturePager.append(previous, label, next);
+}
+
+async function loadAdminGestures() {
+  if (!adminGestureCatalog || !adminSettingsRegistry) return;
+  renderAdminGestureFeatureSummary();
+  if (!adminGestureCatalogEnabled()) return;
+  const request = ++adminGestureState.request;
+  adminGestureState.loading = true;
+  setAdminGestureStatus('Loading read-only Server Gesture catalog...', 'working');
+  try {
+    const params = new URLSearchParams({
+      q: adminGestureSearch?.value || '',
+      page: String(adminGestureState.page),
+      sort: adminGestureSort?.value || 'last_uploaded',
+    });
+    const response = await fetch(appUrl(`/api/admin_gestures.php?${params.toString()}`), { headers: { Accept: 'application/json' } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) throw new Error(data.error || 'Gesture catalog request failed.');
+    if (request !== adminGestureState.request) return;
+    adminGestureState.page = Math.max(1, Number(data.page || 1));
+    adminGestureState.pages = Math.max(1, Number(data.pages || 1));
+    adminGestureState.total = Math.max(0, Number(data.total || 0));
+    setAdminCount(document.getElementById('admin-gesture-count'), adminGestureState.total);
+    renderAdminGestureCatalog(data);
+    setAdminGestureStatus(`${adminGestureState.total} Server Gesture${adminGestureState.total === 1 ? '' : 's'}; 50 rows per page.`, 'ok');
+  } finally {
+    if (request === adminGestureState.request) adminGestureState.loading = false;
+  }
 }
 
 async function receiveAdminSettingsRevision(revision) {
@@ -1247,6 +1384,28 @@ async function openCanonicalAdmin() {
 
 document.getElementById('admin-open')?.addEventListener('click', openCanonicalAdmin);
 
+document.getElementById('admin-gesture-open-settings')?.addEventListener('click', () => {
+  showAdminSection('settings');
+  const search = document.getElementById('lobby-admin-settings-search');
+  if (!search) return;
+  search.value = 'gesture';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  search.focus();
+});
+
+adminGestureSearch?.addEventListener('input', () => {
+  window.clearTimeout(adminGestureSearchTimer);
+  adminGestureSearchTimer = window.setTimeout(() => {
+    adminGestureState.page = 1;
+    loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture search failed.', 'error'));
+  }, 180);
+});
+
+adminGestureSort?.addEventListener('change', () => {
+  adminGestureState.page = 1;
+  loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture sort failed.', 'error'));
+});
+
 document.getElementById('admin-close')?.addEventListener('click', () => {
   adminSettingsUnlock?.relock('Settings changes locked because the Admin interface closed.', 'closure');
   const params = new URLSearchParams(window.location.search);
@@ -1347,6 +1506,11 @@ function lobbyAdminSettingsSuccessMessage(result, operation, details) {
     const enabled = Object.values(details.values || {}).some(Boolean);
     return `All dances ${enabled ? 'enabled' : 'disabled'}.`;
   }
+  const gestureIds = ids.filter(id => id.startsWith('gesture_part3_'));
+  if (gestureIds.length > 1 && gestureIds.length === ids.length) {
+    const enabled = Object.values(details.values || {}).some(Boolean);
+    return `All Part 3 gesture features ${enabled ? 'enabled' : 'disabled'}.`;
+  }
   if (ids.length === 1) {
     const entry = adminSettingsRegistryUI?.entryMap?.get(ids[0]);
     const value = details.values?.[ids[0]];
@@ -1362,7 +1526,6 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
   if (!CAN_ADMIN_SETTINGS_MUTATE) throw new Error('Administrator access is required to change settings.');
   details = { ...details };
   if (['reset_subsection', 'reset_category', 'reset_all_optional', 'apply_preset'].includes(operation)) details.confirmed = 1;
-  if (operation === 'set_many') details.dance_disable_all_confirmed = 1;
   const capacityId = 'avatar_relationship_max_regular_links';
   let capacityTarget;
   let capacityImpactMessage = '';
@@ -1390,6 +1553,7 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
   adminSettingsRegistry = result.registry || result.settingsRegistry || adminSettingsRegistry;
   adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
   renderLobbyAdminSettingsCompatibility();
+  renderAdminGestureFeatureSummary();
   announceAdminSettingsRevision(adminSettingsRegistry.revision);
   const stopped = Number(result.stoppedActiveCapabilityCount || 0);
   let message = lobbyAdminSettingsSuccessMessage(result, operation, details);
@@ -1405,9 +1569,6 @@ async function handleLobbyAdminSettingsOperation(operation, details) {
   if (!adminSettingsUnlock?.requireUnlocked()) return;
   try {
     if (operation === 'set_many') return await mutateLobbyAdminSettings('set_many', details);
-    if (operation === 'set_many_confirmed') {
-      return await mutateLobbyAdminSettings('set_many', { ...details, dance_disable_all_confirmed: 1 });
-    }
     if (operation === 'reset_setting') return await mutateLobbyAdminSettings('reset_setting', details);
     if (operation === 'reset_subsection') return await mutateLobbyAdminSettings('reset_subsection', { ...details, confirmed: 1 });
     if (operation === 'reset_category') return await mutateLobbyAdminSettings('reset_category', { ...details, confirmed: 1 });

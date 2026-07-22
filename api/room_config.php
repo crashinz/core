@@ -372,6 +372,10 @@ $roomConfig = [
             'writeStrategy' => 'group-membership-authoritative-with-legacy-pair-projection',
         ],
     ],
+    'gesturePart3' => [
+        'features' => gesture_part3_feature_flags($pdo),
+        'preferences' => gesture_catalog_preferences_payload($pdo, (int)$user['id']),
+    ],
     'messages' => $messages,
     'communityMessages' => $communityMessages,
     'linkMessages' => $linkMessages,

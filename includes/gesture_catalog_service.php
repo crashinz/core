@@ -16,6 +16,19 @@ final class GestureCatalogException extends RuntimeException
 function gesture_catalog_setting_defaults(): array
 {
     return [
+        'gesture_part3_enhanced_picker' => '1',
+        'gesture_part3_gifs_tab' => '1',
+        'gesture_part3_server_tab' => '1',
+        'gesture_part3_personal_tab' => '1',
+        'gesture_part3_emojis_tab' => '1',
+        'gesture_part3_search' => '1',
+        'gesture_part3_sorting' => '1',
+        'gesture_part3_pagination' => '1',
+        'gesture_part3_custom_order' => '1',
+        'gesture_part3_hide_unhide' => '1',
+        'gesture_part3_context_menus' => '1',
+        'gesture_part3_message_hide_unhide' => '1',
+        'gesture_part3_admin_catalog' => '1',
         'gesture_mutation_rate_limit' => '120',
         'gesture_mutation_ip_rate_limit' => '600',
         'gesture_download_cooldown_seconds' => '30',
@@ -24,6 +37,16 @@ function gesture_catalog_setting_defaults(): array
         'gesture_download_active_timeout_seconds' => '300',
         'gesture_download_history_days' => '90',
     ];
+}
+
+function gesture_part3_feature_flags(PDO $pdo): array
+{
+    $flags = [];
+    foreach (array_keys(gesture_catalog_setting_defaults()) as $key) {
+        if (!str_starts_with($key, 'gesture_part3_')) continue;
+        $flags[substr($key, strlen('gesture_part3_'))] = app_setting($pdo, $key, '1') === '1';
+    }
+    return $flags;
 }
 
 function gesture_catalog_columns(PDO $pdo, string $table): array
@@ -210,6 +233,27 @@ function gesture_catalog_create_tables(PDO $pdo): void
     foreach ($statements as $statement) $pdo->exec($statement);
 }
 
+function gesture_catalog_add_preference_columns(PDO $pdo): void
+{
+    $columns = gesture_catalog_columns($pdo, 'gesture_preferences');
+    $definitions = db_driver($pdo) === 'mysql'
+        ? [
+            'show_animations' => 'TINYINT(1) NOT NULL DEFAULT 1',
+            'show_text' => 'TINYINT(1) NOT NULL DEFAULT 1',
+            'play_sounds' => 'TINYINT(1) NOT NULL DEFAULT 1',
+        ]
+        : [
+            'show_animations' => 'INTEGER NOT NULL DEFAULT 1',
+            'show_text' => 'INTEGER NOT NULL DEFAULT 1',
+            'play_sounds' => 'INTEGER NOT NULL DEFAULT 1',
+        ];
+    foreach ($definitions as $column => $definition) {
+        if (!in_array($column, $columns, true)) {
+            $pdo->exec("ALTER TABLE gesture_preferences ADD COLUMN {$column} {$definition}");
+        }
+    }
+}
+
 function gesture_catalog_index(PDO $pdo, string $table, string $name, string $columns, bool $unique = false): void
 {
     if (db_driver($pdo) === 'mysql') {
@@ -251,6 +295,12 @@ function gesture_catalog_clean_text(string $value, int $limit, string $fallback 
     $value = trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
     if ($value === '') $value = $fallback;
     return function_exists('mb_substr') ? mb_substr($value, 0, $limit, 'UTF-8') : substr($value, 0, $limit);
+}
+
+function gesture_presentation_canonical_text(array $gesture): string
+{
+    $text = trim((string)($gesture['text'] ?? $gesture['gesture_text'] ?? ''));
+    return $text === '' ? '(Gesture)' : '(Gesture) ' . $text;
 }
 
 function gesture_catalog_backfill(PDO $pdo): void
@@ -323,6 +373,7 @@ function gesture_catalog_install_schema(PDO $pdo): void
 {
     gesture_catalog_add_columns($pdo);
     gesture_catalog_create_tables($pdo);
+    gesture_catalog_add_preference_columns($pdo);
     gesture_catalog_backfill($pdo);
     gesture_catalog_index($pdo, 'gestures', 'idx_gestures_owner_catalog_active', 'owner_user_id, catalog_filename_key, active_catalog_key', true);
     gesture_catalog_index($pdo, 'gestures', 'idx_gestures_server_catalog', 'is_public, deleted_at, content_updated_at, id');
@@ -435,16 +486,100 @@ function gesture_catalog_preferences(PDO $pdo, int $userId, bool $lock = false):
             'user_id' => $userId,
             'server_sort' => 'last_uploaded',
             'personal_sort' => 'last_uploaded',
+            'show_animations' => 1,
+            'show_text' => 1,
+            'play_sounds' => 1,
             'preference_version' => 0,
             'server_order_version' => 0,
             'personal_order_version' => 0,
             'hidden_version' => 0,
         ];
     }
-    foreach (['preference_version', 'server_order_version', 'personal_order_version', 'hidden_version'] as $column) {
+    foreach (['show_animations', 'show_text', 'play_sounds', 'preference_version', 'server_order_version', 'personal_order_version', 'hidden_version'] as $column) {
         $row[$column] = (int)$row[$column];
     }
     return $row;
+}
+
+function gesture_catalog_hidden_ids(PDO $pdo, int $userId): array
+{
+    $stmt = $pdo->prepare('SELECT gesture_public_id FROM gesture_hidden WHERE user_id = ? ORDER BY gesture_public_id ASC LIMIT 5001');
+    $stmt->execute([$userId]);
+    $ids = array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    if (count($ids) > 5000) throw new GestureCatalogException('Hidden gesture preferences exceed the bounded limit.', 503, 'HIDDEN_QUERY_LIMIT');
+    return $ids;
+}
+
+function gesture_catalog_preferences_payload(PDO $pdo, int $userId, ?array $preferences = null): array
+{
+    $preferences ??= gesture_catalog_preferences($pdo, $userId);
+    return [
+        'server_sort' => (string)$preferences['server_sort'],
+        'personal_sort' => (string)$preferences['personal_sort'],
+        'show_animations' => !empty($preferences['show_animations']),
+        'show_text' => !empty($preferences['show_text']),
+        'play_sounds' => !empty($preferences['play_sounds']),
+        'preference_version' => (int)$preferences['preference_version'],
+        'server_order_version' => (int)$preferences['server_order_version'],
+        'personal_order_version' => (int)$preferences['personal_order_version'],
+        'hidden_version' => (int)$preferences['hidden_version'],
+        'hidden_ids' => gesture_catalog_hidden_ids($pdo, $userId),
+    ];
+}
+
+function gesture_catalog_boolean(mixed $value, string $label): bool
+{
+    if (is_bool($value)) return $value;
+    if ($value === 1 || $value === 0 || $value === '1' || $value === '0') return (bool)$value;
+    throw new GestureCatalogException($label . ' must be enabled or disabled.', 400, 'PREFERENCE_VALUE_INVALID');
+}
+
+function gesture_catalog_set_presentation_preferences(
+    PDO $pdo,
+    int $userId,
+    array $values,
+    int $expectedVersion,
+    string $requestKey
+): array {
+    $normalized = [
+        'show_animations' => gesture_catalog_boolean($values['show_animations'] ?? null, 'Show gesture animations'),
+        'show_text' => gesture_catalog_boolean($values['show_text'] ?? null, 'Show gesture text'),
+        'play_sounds' => gesture_catalog_boolean($values['play_sounds'] ?? null, 'Play gesture sounds'),
+    ];
+    return gesture_catalog_idempotent(
+        $pdo,
+        $userId,
+        'set-presentation-preferences',
+        $requestKey,
+        compact('normalized', 'expectedVersion'),
+        function () use ($pdo, $userId, $normalized, $expectedVersion): array {
+            gesture_catalog_lock_user($pdo, $userId);
+            $preferences = gesture_catalog_preferences($pdo, $userId, true);
+            gesture_catalog_require_version(
+                (int)$preferences['preference_version'],
+                $expectedVersion,
+                'PREFERENCE_VERSION_CONFLICT',
+                gesture_catalog_preferences_payload($pdo, $userId, $preferences)
+            );
+            $nextVersion = $expectedVersion + 1;
+            $values = [
+                $normalized['show_animations'] ? 1 : 0,
+                $normalized['show_text'] ? 1 : 0,
+                $normalized['play_sounds'] ? 1 : 0,
+                $nextVersion,
+            ];
+            if ((int)$preferences['preference_version'] === 0) {
+                $pdo->prepare(
+                    'INSERT INTO gesture_preferences (user_id, show_animations, show_text, play_sounds, preference_version) VALUES (?,?,?,?,?)'
+                )->execute([$userId, ...$values]);
+            } else {
+                $pdo->prepare(
+                    'UPDATE gesture_preferences SET show_animations = ?, show_text = ?, play_sounds = ?, preference_version = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
+                )->execute([...$values, $userId]);
+            }
+            return ['ok' => true, 'preferences' => gesture_catalog_preferences_payload($pdo, $userId)];
+        }
+    );
 }
 
 function gesture_catalog_require_version(int $actual, int $expected, string $code, array $projection): void
@@ -471,7 +606,7 @@ function gesture_catalog_set_sort(PDO $pdo, int $userId, string $scope, string $
             $pdo->prepare("UPDATE gesture_preferences SET {$column} = ?, preference_version = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?")
                 ->execute([$sort, $nextVersion, $userId]);
         }
-        return ['ok' => true, 'preferences' => gesture_catalog_preferences($pdo, $userId)];
+        return ['ok' => true, 'preferences' => gesture_catalog_preferences_payload($pdo, $userId)];
     });
 }
 
@@ -572,11 +707,77 @@ function gesture_catalog_move_to_page(array $order, string $movingId, int $page,
     return $without;
 }
 
+function gesture_catalog_move(
+    PDO $pdo,
+    int $userId,
+    string $scope,
+    string $publicId,
+    string $operation,
+    mixed $target,
+    int $expectedVersion,
+    string $requestKey,
+    string $search = ''
+): array {
+    $scope = gesture_catalog_scope($scope);
+    if (trim($search) !== '') throw new GestureCatalogException('Clear the search to rearrange gestures.', 409, 'SEARCH_ACTIVE');
+    $catalog = gesture_catalog_query($pdo, $userId, $scope, ['sort' => 'custom', 'page' => 1]);
+    $order = array_values(array_map('strval', $catalog['ordered_ids'] ?? []));
+    if ($operation === 'move_before') {
+        $order = gesture_catalog_move_before($order, $publicId, $target === null || $target === '' ? null : (string)$target);
+    } elseif ($operation === 'move_top') {
+        $order = array_values(array_filter($order, static fn(string $id): bool => $id !== $publicId));
+        array_unshift($order, $publicId);
+    } elseif ($operation === 'move_page') {
+        $page = filter_var($target, FILTER_VALIDATE_INT);
+        $pages = max(1, (int)ceil(count($order) / 20));
+        if ($page === false || (int)$page < 1 || (int)$page > $pages) {
+            throw new GestureCatalogException('Choose an available destination page.', 400, 'MOVE_PAGE_INVALID', ['pages' => $pages]);
+        }
+        $order = gesture_catalog_move_to_page($order, $publicId, (int)$page, 20);
+    } else {
+        throw new GestureCatalogException('Gesture move action is invalid.', 400, 'MOVE_ACTION_INVALID');
+    }
+    return gesture_catalog_set_order($pdo, $userId, $scope, $order, $expectedVersion, $requestKey, '');
+}
+
+function gesture_catalog_reset_position(
+    PDO $pdo,
+    int $userId,
+    string $scope,
+    string $publicId,
+    int $expectedVersion,
+    string $requestKey,
+    string $search = ''
+): array {
+    $scope = gesture_catalog_scope($scope);
+    if (trim($search) !== '') throw new GestureCatalogException('Clear the search to rearrange gestures.', 409, 'SEARCH_ACTIVE');
+    return gesture_catalog_idempotent($pdo, $userId, 'reset-position-' . $scope, $requestKey, compact('scope', 'publicId', 'expectedVersion'), function () use ($pdo, $userId, $scope, $publicId, $expectedVersion): array {
+        gesture_catalog_lock_user($pdo, $userId);
+        if (!in_array($publicId, gesture_catalog_eligible_ids($pdo, $userId, $scope, false), true)) {
+            throw new GestureCatalogException('Gesture is not in the visible catalog.', 409, 'ORDER_MEMBER_MISSING');
+        }
+        $preferences = gesture_catalog_preferences($pdo, $userId, true);
+        $versionColumn = $scope . '_order_version';
+        gesture_catalog_require_version((int)$preferences[$versionColumn], $expectedVersion, 'ORDER_VERSION_CONFLICT', gesture_catalog_preferences_payload($pdo, $userId, $preferences));
+        $pdo->prepare('DELETE FROM gesture_custom_order WHERE user_id = ? AND catalog_scope = ? AND gesture_public_id = ?')
+            ->execute([$userId, $scope, $publicId]);
+        $nextVersion = $expectedVersion + 1;
+        if ((int)$preferences['preference_version'] === 0) {
+            $pdo->prepare("INSERT INTO gesture_preferences (user_id, {$scope}_sort, {$versionColumn}) VALUES (?,'custom',?)")
+                ->execute([$userId, $nextVersion]);
+        } else {
+            $pdo->prepare("UPDATE gesture_preferences SET {$scope}_sort = 'custom', {$versionColumn} = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?")
+                ->execute([$nextVersion, $userId]);
+        }
+        return ['ok' => true, 'scope' => $scope, 'gesture_public_id' => $publicId, 'version' => $nextVersion];
+    });
+}
+
 function gesture_catalog_hide(PDO $pdo, int $userId, string $publicId, bool $hidden, int $expectedVersion, string $requestKey): array
 {
     return gesture_catalog_idempotent($pdo, $userId, $hidden ? 'hide' : 'unhide', $requestKey, compact('publicId', 'hidden', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $hidden, $expectedVersion): array {
         gesture_catalog_lock_user($pdo, $userId);
-        $stmt = $pdo->prepare('SELECT public_id FROM gestures WHERE public_id = ? AND is_public = 1 AND owner_user_id <> ? AND deleted_at IS NULL LIMIT 1');
+        $stmt = $pdo->prepare('SELECT public_id FROM gestures WHERE public_id = ? AND owner_user_id <> ? AND deleted_at IS NULL LIMIT 1');
         $stmt->execute([$publicId, $userId]);
         if (!$stmt->fetch()) throw new GestureCatalogException('Server Gesture not found.', 404, 'GESTURE_NOT_FOUND');
         $preferences = gesture_catalog_preferences($pdo, $userId, true);
@@ -600,6 +801,37 @@ function gesture_catalog_hide(PDO $pdo, int $userId, string $publicId, bool $hid
             $pdo->prepare('UPDATE gesture_preferences SET hidden_version = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')->execute([$nextVersion, $userId]);
         }
         return ['ok' => true, 'gesture_public_id' => $publicId, 'hidden' => $hidden, 'version' => $nextVersion];
+    });
+}
+
+function gesture_catalog_unhide_many(
+    PDO $pdo,
+    int $userId,
+    array $publicIds,
+    int $expectedVersion,
+    string $requestKey
+): array {
+    $publicIds = array_values(array_unique(array_filter(array_map('strval', $publicIds), static fn(string $id): bool => $id !== '')));
+    if (count($publicIds) > 5000) throw new GestureCatalogException('Too many hidden gestures were selected.', 400, 'HIDDEN_SELECTION_LIMIT');
+    return gesture_catalog_idempotent($pdo, $userId, 'unhide-many', $requestKey, compact('publicIds', 'expectedVersion'), function () use ($pdo, $userId, $publicIds, $expectedVersion): array {
+        gesture_catalog_lock_user($pdo, $userId);
+        $preferences = gesture_catalog_preferences($pdo, $userId, true);
+        gesture_catalog_require_version((int)$preferences['hidden_version'], $expectedVersion, 'HIDDEN_VERSION_CONFLICT', gesture_catalog_preferences_payload($pdo, $userId, $preferences));
+        $current = gesture_catalog_hidden_ids($pdo, $userId);
+        $targets = $publicIds ?: $current;
+        if (array_diff($targets, $current)) throw new GestureCatalogException('Hidden gesture selection changed. Refresh and try again.', 409, 'HIDDEN_MEMBERSHIP_CONFLICT');
+        if ($targets) {
+            $placeholders = implode(',', array_fill(0, count($targets), '?'));
+            $pdo->prepare("DELETE FROM gesture_hidden WHERE user_id = ? AND gesture_public_id IN ({$placeholders})")
+                ->execute([$userId, ...$targets]);
+        }
+        $nextVersion = $expectedVersion + 1;
+        if ((int)$preferences['preference_version'] === 0) {
+            $pdo->prepare('INSERT INTO gesture_preferences (user_id, hidden_version) VALUES (?,?)')->execute([$userId, $nextVersion]);
+        } else {
+            $pdo->prepare('UPDATE gesture_preferences SET hidden_version = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')->execute([$nextVersion, $userId]);
+        }
+        return ['ok' => true, 'unhidden_ids' => $targets, 'version' => $nextVersion];
     });
 }
 
@@ -665,9 +897,9 @@ function gesture_catalog_query(PDO $pdo, int $userId, string $scope, array $opti
     }
     if ($query !== '') {
         $columns = ['g.catalog_filename', 'g.title', 'g.gesture_text'];
-        if ($admin) array_push($columns, 'g.original_filename', 'g.creator_credit', 'uploader.display_name');
-        $where .= ' AND (' . implode(' OR ', array_map(static fn(string $column): string => "LOWER({$column}) LIKE ?", $columns)) . ')';
-        $needle = '%' . (function_exists('mb_strtolower') ? mb_strtolower($query, 'UTF-8') : strtolower($query)) . '%';
+        $where .= ' AND (' . implode(' OR ', array_map(static fn(string $column): string => "LOWER({$column}) LIKE ? ESCAPE '!'", $columns)) . ')';
+        $lowered = function_exists('mb_strtolower') ? mb_strtolower($query, 'UTF-8') : strtolower($query);
+        $needle = '%' . strtr($lowered, ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
         foreach ($columns as $_) $params[] = $needle;
     }
     $stmt = $pdo->prepare(
@@ -707,6 +939,8 @@ function gesture_catalog_query(PDO $pdo, int $userId, string $scope, array $opti
         return $result !== 0 ? $result : ((int)$right['id'] <=> (int)$left['id']);
     });
     $total = count($rows);
+    $pages = max(1, (int)ceil($total / $perPage));
+    $page = min($page, $pages);
     $offset = ($page - 1) * $perPage;
     $items = array_map(static fn(array $row): array => gesture_catalog_row_payload($row, $userId, $admin), array_slice($rows, $offset, $perPage));
     return [
@@ -715,11 +949,14 @@ function gesture_catalog_query(PDO $pdo, int $userId, string $scope, array $opti
         'page' => $page,
         'per_page' => $perPage,
         'total' => $total,
-        'pages' => max(1, (int)ceil($total / $perPage)),
+        'pages' => $pages,
         'has_more' => $offset + $perPage < $total,
         'query' => $query,
         'sort' => $sort,
-        'preferences' => $preferences,
+        'preferences' => gesture_catalog_preferences_payload($pdo, $userId, $preferences),
+        'ordered_ids' => !$admin && $query === ''
+            ? array_values(array_map(static fn(array $row): string => (string)$row['public_id'], $rows))
+            : [],
         'reorder_allowed' => $query === '' && !$admin,
     ];
 }

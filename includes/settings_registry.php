@@ -207,6 +207,40 @@ function settings_registry_definitions(): array {
         ]);
     }
 
+    $gesturePart3Features = [
+        ['gesture_part3_enhanced_picker', 'Enhanced gesture picker', 'Use the Part 3 catalog picker presentation instead of the earlier combined gesture list.', 10],
+        ['gesture_part3_gifs_tab', 'GIFs tab', 'Show the existing GIF search as a dedicated picker tab.', 20],
+        ['gesture_part3_server_tab', 'Server Gestures tab', 'Show public gestures from other accounts in a dedicated picker tab.', 30],
+        ['gesture_part3_personal_tab', 'Personal Gestures tab', 'Show the signed-in account’s public and private gestures in a dedicated picker tab.', 40],
+        ['gesture_part3_emojis_tab', 'Emojis tab', 'Show the existing emoji picker as a dedicated tab.', 50],
+        ['gesture_part3_search', 'Gesture catalog search', 'Allow separate bounded server-side search in Server and Personal Gestures.', 60],
+        ['gesture_part3_sorting', 'Gesture catalog sorting', 'Allow Last uploaded, File name A–Z, and persistent Custom order sorting.', 70],
+        ['gesture_part3_pagination', 'Gesture catalog pagination presentation', 'Show accessible 20-item page navigation for user gesture catalogs.', 80],
+        ['gesture_part3_custom_order', 'Gesture custom ordering', 'Allow persistent stable-ID insertion ordering and move actions.', 90],
+        ['gesture_part3_hide_unhide', 'Server Gesture hide and show', 'Allow each account to hide Server Gestures from its own catalog presentation.', 100],
+        ['gesture_part3_context_menus', 'Gesture action menus', 'Replace native image actions with accessible ChatSpace gesture actions.', 110],
+        ['gesture_part3_message_hide_unhide', 'Gesture-message hide and show', 'Allow a viewer to hide or show the stable gesture used by a visible message.', 120],
+        ['gesture_part3_admin_catalog', 'Admin read-only gesture catalog', 'Show the bounded text-only Server Gesture catalog in the canonical Admin menu.', 130],
+    ];
+    foreach ($gesturePart3Features as [$id, $label, $description, $order]) {
+        $definitions[] = settings_registry_entry([
+            'id' => $id, 'settingKey' => $id, 'owner' => 'gesture_part3_presentation_policy',
+            'categoryId' => 'chat-messaging', 'subsectionId' => 'gesture-part3',
+            'subsectionLabel' => 'Gesture Presentation & Catalog', 'label' => $label,
+            'description' => $description,
+            'helpText' => 'This is a Part 3 presentation capability, not the Part 5 server-authoritative Allow gestures boundary.',
+            'aliases' => ['gesture picker', 'gesture presentation', 'gesture catalog'],
+            'type' => 'boolean', 'defaultValue' => true, 'order' => $order,
+            'controlClass' => 'optional', 'optional' => true,
+            'setupVisible' => true, 'adminVisible' => true,
+            'originalRelevant' => true, 'originalValueAvailable' => true,
+            'originalValue' => false, 'disablingMovesTowardOriginal' => true,
+            'differsFromOriginalByDefault' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'all-optional', 'preset'],
+            'bulkGroup' => 'gesture-part-3',
+        ]);
+    }
+
     $definitions = array_merge($definitions, [
         settings_registry_entry([
             'id' => 'allow_webcam_use', 'settingKey' => 'allow_webcam_use',
@@ -420,6 +454,8 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
     $enabledOptional = count(array_filter($optional, static fn(array $entry): bool => $entry['enabled'] === true));
     $danceEntries = array_values(array_filter($visibleEntries, static fn(array $entry): bool => $entry['bulkGroup'] === 'dances'));
     $enabledDances = count(array_filter($danceEntries, static fn(array $entry): bool => $entry['enabled'] === true));
+    $gesturePart3Entries = array_values(array_filter($visibleEntries, static fn(array $entry): bool => $entry['bulkGroup'] === 'gesture-part-3'));
+    $enabledGesturePart3 = count(array_filter($gesturePart3Entries, static fn(array $entry): bool => $entry['enabled'] === true));
 
     return [
         'schemaId' => 'chatspace.settings-registry',
@@ -436,6 +472,8 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
             'enabledOptionalCount' => $enabledOptional,
             'danceEnabledCount' => $enabledDances,
             'danceTotalCount' => count($danceEntries),
+            'gesturePart3EnabledCount' => $enabledGesturePart3,
+            'gesturePart3TotalCount' => count($gesturePart3Entries),
             'compatibilityState' => $compatibilityState,
         ],
         'compatibility' => [
@@ -532,13 +570,6 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
     $operation = (string)($request['operation'] ?? '');
     $broad = in_array($operation, ['reset_subsection', 'reset_category', 'reset_all_optional', 'apply_preset'], true);
     if ($broad && empty($request['confirmed'])) return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_CONFIRMATION_REQUIRED', 'error' => 'Review and confirm this broad settings operation.', 'http_status' => 409];
-    if ($operation === 'set_many' && $source !== 'setup' && empty($request['dance_disable_all_confirmed'])) {
-        $provided = (array)($request['values'] ?? []);
-        $danceIds = array_map(static fn(array $dance): string => 'avatar_dance.' . $dance['id'], avatar_dance_capability_registry());
-        $disablesAllDances = !array_diff($danceIds, array_keys($provided));
-        foreach ($danceIds as $danceId) $disablesAllDances = $disablesAllDances && empty($provided[$danceId]);
-        if ($disablesAllDances) return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_CONFIRMATION_REQUIRED', 'error' => 'Confirm Disable All Dances before continuing.', 'http_status' => 409];
-    }
 
     $ownsTransaction = !$pdo->inTransaction();
     try {
@@ -640,7 +671,7 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             $danceValues = avatar_dance_capability_normalize_values(avatar_dance_capability_policy($pdo)['enabled']);
             foreach ($target as $id => $value) if (str_starts_with($id, 'avatar_dance.')) $danceValues[substr($id, strlen('avatar_dance.'))] = (bool)$value;
             $dancePolicy = avatar_dance_capability_policy($pdo);
-            $danceResult = avatar_dance_capability_update($pdo, ['operation' => 'replace', 'enabled' => $danceValues, 'confirmed' => true], $dancePolicy['revision'], $actorUserId, 'settings-registry');
+            $danceResult = avatar_dance_capability_update($pdo, ['operation' => 'replace', 'enabled' => $danceValues], $dancePolicy['revision'], $actorUserId, 'settings-registry');
             if (empty($danceResult['ok'])) throw new RuntimeException((string)($danceResult['error'] ?? 'Dance policy update failed.'));
             $stopped += (int)($danceResult['stoppedStateCount'] ?? 0);
         }

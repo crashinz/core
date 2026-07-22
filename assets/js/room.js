@@ -56,6 +56,9 @@ let runtimeDiagnostics = null;
 let runtimeVerificationControls = null;
 let runtimeRequestClient = null;
 let runtimeIssueCaptureService = null;
+let gesturePresentation = null;
+let gestureCatalogController = null;
+let GestureCatalogControllerClass = null;
 const runtimeRequestAbortController = new AbortController();
 function stopRoomForDocumentExit(reason) {
   roomExitInProgress = true;
@@ -200,7 +203,13 @@ const reportProblemScreenshot = document.getElementById('report-problem-screensh
 const reportProblemStatus = document.getElementById('report-problem-status');
 const chatOptionsModal = document.getElementById('chat-options-modal');
 const webcamOptionsReset = document.getElementById('webcam-options-reset');
+const gestureShowAnimations = document.getElementById('gesture-show-animations');
+const gestureShowText = document.getElementById('gesture-show-text');
+const gesturePlaySounds = document.getElementById('gesture-play-sounds');
+const gestureOptionsReset = document.getElementById('gesture-options-reset');
+const gestureOptionsStatus = document.getElementById('gesture-options-status');
 let webcamPreferencesPending = false;
+let gesturePreferencesPending = false;
 let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastLatencyMs = null;
@@ -265,7 +274,7 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
@@ -278,6 +287,8 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/core/runtime-diagnostics.js')),
     import(appUrl('/assets/js/core/runtime-request-client.js')),
     import(appUrl('/assets/js/core/runtime-issue-capture-service.js')),
+    import(appUrl('/assets/js/runtime/gesture/gesture-presentation-service.js')),
+    import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js')),
   ]);
 
   if (!runtimeDiagnosticsInstallation) {
@@ -326,6 +337,14 @@ async function initializeAvatarRuntime() {
       runtimeIssueCaptureService?.captureRequestFailure(error)?.catch(() => {});
     },
   });
+
+  gesturePresentation = new GesturePresentationService({
+    onChange(change) {
+      if (!cfg) return;
+      applyGesturePresentationChange(change);
+    },
+  });
+  GestureCatalogControllerClass = GestureCatalogController;
 
   chatRuntimeCore = new Core();
   chatRuntimeCore.registerService('runtime-diagnostics', runtimeDiagnostics);
@@ -686,6 +705,8 @@ function configureChatMessageRenderer() {
     displayNameFor,
     messageVisible,
     gestureFromMessage,
+    gesturePresentation,
+    showGestureAgain: showGestureFromMessage,
     openMessageActionMenu,
     openParticipantActionMenu: openAvatarContextMenu,
     applyReaction,
@@ -3080,7 +3101,7 @@ function messageSpeechText(msg) {
   if (msg.message_type === 'voice_note') return 'sent a voice note';
   if (msg.message_type === 'file') return msg.original_name ? `sent ${msg.original_name}` : 'sent a file';
   if (msg.message_type === 'gif') return 'sent a GIF';
-  if (msg.message_type === 'gesture') return gestureFromMessage(msg)?.text || msg.original_name || 'sent a gesture';
+  if (msg.message_type === 'gesture') return gesturePresentation?.canonicalText(gestureFromMessage(msg)) || '(Gesture)';
   return msg.content;
 }
 
@@ -3641,36 +3662,46 @@ function clearAvatarSpeech(participantId, person) {
   p.speechAudio = null;
   clearInterval(p.speechGifLoopTimer);
   p.speechGifLoopTimer = null;
+  p.speechMessage = null;
   avatarRuntime?.renderer?.clearSpeechBubble(p, {
     window,
   });
 }
 
-function showAvatarSpeech(participantId, msg) {
+function showAvatarSpeech(participantId, msg, options = {}) {
   const p = participants.get(participantId);
   if (!p) return;
   if (isUserBlocked(p.user_id)) return;
   const isGif = msg?.message_type === 'gif';
   const isGesture = msg?.message_type === 'gesture';
-  const text = (isGif || isGesture) ? '' : messageSpeechText(msg || {});
   const gesture = gestureFromMessage(msg);
+  const gestureModel = isGesture
+    ? gesturePresentation?.messageModel(gesture) || { showAnimation: true, showText: true, playSound: true, canonicalText: '(Gesture)' }
+    : null;
+  const showImage = isGif || (isGesture && gestureModel.showAnimation);
+  const text = isGesture
+    ? (gestureModel.individuallyHidden
+      ? `${gestureModel.hiddenText}${gestureModel.showText ? ` ${gestureModel.canonicalText}` : ''}`
+      : (gestureModel.showText ? gestureModel.canonicalText : (gestureModel.hiddenText || '(Gesture hidden)')))
+    : (isGif ? '' : messageSpeechText(msg || {}));
   const token = participants.nextSpeechToken(participantId);
+  p.speechMessage = msg;
   avatarRuntime?.renderer?.ensureSpeechBubble(p, {
     stage: participantStage(p),
     document,
   });
   participants.clearSpeechTimer(participantId);
   avatarRuntime?.renderer?.prepareSpeechBubble(p, {
-    gif: isGif || isGesture,
+    gif: showImage,
     gesture: isGesture,
   });
   let timerStarted = false;
   const scheduleHide = () => {
     if (timerStarted || !participants.hasSpeechToken(participantId, token)) return;
     timerStarted = true;
-    if (isGesture && gesture && gesture.audio_path && !gesture.audio_is_silent) {
+    if (isGesture && gesture && gestureModel.playSound && !options.suppressGestureSound && gesture.audio_path && !gesture.audio_is_silent) {
       const audio = new Audio(mediaUrl(gesture.audio_path));
-      gifLoopDurationMs(gesture.gif_path).then(duration => {
+      if (showImage) gifLoopDurationMs(gesture.gif_path).then(duration => {
         if (!participants.hasSpeechToken(participantId, token) || !p.speechEl?.classList.contains('chat-bubble-gesture')) return;
         const img = p.speechEl.querySelector('img');
         if (!img || !Number.isFinite(duration) || duration < 250) return;
@@ -3704,7 +3735,7 @@ function showAvatarSpeech(participantId, msg) {
       });
     } else if (isGif || isGesture) {
       participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), 3200));
-      gifLoopDurationMs(isGesture ? gesture?.gif_path : msg.content).then(duration => {
+      if (showImage) gifLoopDurationMs(isGesture ? gesture?.gif_path : msg.content).then(duration => {
         if (participants.hasSpeechToken(participantId, token) && p.speechEl?.classList.contains('chat-bubble-gif')) {
           participants.setSpeechTimer(participantId, setTimeout(() => clearAvatarSpeech(participantId, p), duration));
         }
@@ -3723,13 +3754,13 @@ function showAvatarSpeech(participantId, msg) {
       scheduleHide();
     });
   };
-  if (isGif || isGesture) {
+  if (showImage) {
     const img = avatarRuntime?.renderer?.renderSpeechImage(p, {
       document,
       src: mediaUrl(isGesture ? gesture?.gif_path : msg.content),
-      alt: isGesture ? (gesture?.text || gesture?.name || 'Gesture') : (msg.original_name || 'GIF'),
+      alt: isGesture ? gestureModel.canonicalText : (msg.original_name || 'GIF'),
       gesture: isGesture,
-      caption: gesture?.text || gesture?.name || msg.original_name || '',
+      caption: isGesture && gestureModel.showText ? gestureModel.canonicalText : '',
       onclick: isGesture ? () => {
         if (p.speechAudio) p.speechAudio.__chatspacePlaybackInterruption = 'speech-gesture-dismiss';
         p.speechAudio?.pause?.();
@@ -4510,6 +4541,19 @@ function openMessageActionMenu(x, y, msg) {
   msgActionTargetChat = activeChat;
   const mine = Number(msg.participant_id) === cfg.myParticipantId;
   const editable = mine && (msg.message_type || 'text') === 'text';
+  const gesture = gestureFromMessage(msg);
+  const gesturePublicId = gesturePresentation?.publicId?.(gesture) || '';
+  const gestureVisibilityAction = document.getElementById('msg-gesture-visibility-action');
+  const gestureVisibilityAllowed = cfg.gesturePart3?.features?.message_hide_unhide !== false
+    && gesturePublicId !== ''
+    && Number(gesture?.owner_user_id || 0) !== Number(cfg.myUserId);
+  if (gestureVisibilityAction) {
+    gestureVisibilityAction.hidden = !gestureVisibilityAllowed;
+    gestureVisibilityAction.style.display = gestureVisibilityAllowed ? 'block' : 'none';
+    gestureVisibilityAction.textContent = gesturePresentation?.isHidden?.(gesturePublicId)
+      ? 'Show this gesture for me'
+      : 'Hide this gesture for me';
+  }
   document.getElementById('msg-reply-action').style.display = activeChat.startsWith('game:') ? 'none' : 'block';
   document.getElementById('msg-edit-action').style.display = editable ? 'block' : 'none';
   document.getElementById('msg-delete-action').style.display = mine ? 'block' : 'none';
@@ -4556,6 +4600,11 @@ function openEmojiPicker() {
   const btn = document.getElementById('emoji-btn');
   const r = btn.getBoundingClientRect();
   mediaPicker.hidden = false;
+  const activeButton = mediaPicker.querySelector(`[data-media-tab="${activeMediaTab}"]`);
+  if (!activeButton || activeButton.hidden) {
+    const firstAvailable = mediaPicker.querySelector('[data-media-tab]:not([hidden])');
+    if (firstAvailable) setMediaTab(firstAvailable.dataset.mediaTab || 'gifs');
+  }
   const er = mediaPicker.getBoundingClientRect();
   mediaPicker.style.left = `${Math.max(8, Math.min(r.right - er.width, window.innerWidth - er.width - 8))}px`;
   mediaPicker.style.top = `${Math.max(8, r.top - er.height - 8)}px`;
@@ -4738,9 +4787,198 @@ function syncChatOptions() {
     input.disabled = webcamPreferencesPending;
   });
   if (webcamOptionsReset) webcamOptionsReset.disabled = webcamPreferencesPending;
+  const gesturePreferences = gesturePresentation?.preferences?.() || {
+    showAnimations: true,
+    showText: true,
+    playSounds: true,
+  };
+  if (gestureShowAnimations) {
+    if (!gesturePreferencesPending) gestureShowAnimations.checked = gesturePreferences.showAnimations;
+    gestureShowAnimations.disabled = gesturePreferencesPending;
+  }
+  if (gestureShowText) {
+    if (!gesturePreferencesPending) gestureShowText.checked = gesturePreferences.showText;
+    gestureShowText.disabled = gesturePreferencesPending;
+  }
+  if (gesturePlaySounds) {
+    if (!gesturePreferencesPending) gesturePlaySounds.checked = gesturePreferences.playSounds;
+    gesturePlaySounds.disabled = gesturePreferencesPending;
+  }
+  if (gestureOptionsReset) gestureOptionsReset.disabled = gesturePreferencesPending;
   const capabilityNotice = document.getElementById('webcam-capability-notice');
   if (capabilityNotice) capabilityNotice.hidden = webcamUseAllowed();
   renderHiddenAvatarOptions();
+}
+
+function gestureRequestKey(prefix) {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${random}`.slice(0, 96);
+}
+
+function stopCurrentGestureSounds(reason = 'gesture-preference-disabled') {
+  if (activeGestureAudio?.audio) {
+    activeGestureAudio.audio.__chatspacePlaybackInterruption = reason;
+    activeGestureAudio.audio.pause();
+    activeGestureAudio.btn?.classList.remove('playing');
+    activeGestureAudio.btn?.style?.setProperty('--progress', '0deg');
+    activeGestureAudio = null;
+  }
+  participants.forEach(person => {
+    if (!person.speechAudio) return;
+    person.speechAudio.__chatspacePlaybackInterruption = reason;
+    person.speechAudio.pause?.();
+    person.speechAudio = null;
+  });
+}
+
+function rerenderVisibleGesturePresentations() {
+  if (!cfg) return;
+  const previousTop = messagesEl?.scrollTop || 0;
+  const pinned = messagesEl
+    ? messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 24
+    : true;
+  const active = document.activeElement;
+  const focusId = active?.id || '';
+  renderActiveChat();
+  if (messagesEl && !pinned) messagesEl.scrollTop = previousTop;
+  if (focusId) document.getElementById(focusId)?.focus?.({ preventScroll: true });
+  participants.forEach(person => {
+    if (person.speechMessage?.message_type === 'gesture' && person.speechEl?.isConnected) {
+      showAvatarSpeech(Number(person.id), person.speechMessage, { suppressGestureSound: true });
+    }
+  });
+}
+
+function applyGesturePresentationChange(change = {}) {
+  if (change.previous?.playSounds && change.current?.playSounds === false) {
+    stopCurrentGestureSounds();
+  }
+  rerenderVisibleGesturePresentations();
+  syncChatOptions();
+}
+
+async function saveGesturePreferences(values, successMessage) {
+  if (gesturePreferencesPending) return;
+  if (gestureShowAnimations) gestureShowAnimations.checked = Boolean(values.showAnimations);
+  if (gestureShowText) gestureShowText.checked = Boolean(values.showText);
+  if (gesturePlaySounds) gesturePlaySounds.checked = Boolean(values.playSounds);
+  gesturePreferencesPending = true;
+  if (gestureOptionsStatus) gestureOptionsStatus.textContent = 'Saving gesture options…';
+  syncChatOptions();
+  try {
+    const current = gesturePresentation?.preferences?.() || { version: 0 };
+    const result = await apiPost('/api/gestures.php', {
+      session_id: cfg.sessionId,
+      join_token: cfg.myJoinToken,
+      action: 'set_presentation_preferences',
+      values: {
+        show_animations: Boolean(values.showAnimations),
+        show_text: Boolean(values.showText),
+        play_sounds: Boolean(values.playSounds),
+      },
+      expected_version: Number(current.version || 0),
+      request_key: gestureRequestKey('gesture-preferences'),
+    });
+    gesturePresentation?.applyServerProjection(result.preferences || {}, 'chat-options-save');
+    if (gestureOptionsStatus) gestureOptionsStatus.textContent = successMessage || 'Gesture options saved.';
+  } catch (error) {
+    try {
+      const qs = new URLSearchParams({ session_id: cfg.sessionId, join_token: cfg.myJoinToken, catalog: 'preferences' });
+      const current = await runtimeRequestClient.getJson(`/api/gestures.php?${qs}`, {
+        operation: 'refresh-gesture-preferences',
+        endpointCategory: 'gestures',
+      });
+      gesturePresentation?.applyServerProjection(current.preferences || {}, 'preference-conflict-refresh');
+    } catch {}
+    if (gestureOptionsStatus) gestureOptionsStatus.textContent = error.message || 'Gesture options could not be saved.';
+  } finally {
+    gesturePreferencesPending = false;
+    syncChatOptions();
+  }
+}
+
+async function setGestureHidden(publicId, hidden, reason = 'gesture-message-action') {
+  const current = gesturePresentation?.preferences?.();
+  if (!current || !publicId) throw new Error('A stable gesture identity is required.');
+  const result = await apiPost('/api/gestures.php', {
+    session_id: cfg.sessionId,
+    join_token: cfg.myJoinToken,
+    action: hidden ? 'hide' : 'unhide',
+    public_id: publicId,
+    expected_version: Number(current.hiddenVersion || 0),
+    request_key: gestureRequestKey(hidden ? 'hide-gesture' : 'show-gesture'),
+  });
+  gesturePresentation?.applyHiddenMutation(publicId, hidden, result.version, reason);
+  return result;
+}
+
+async function showGestureFromMessage(publicId) {
+  try {
+    await setGestureHidden(publicId, false, 'gesture-message-show-again');
+  } catch (error) {
+    showWarning(error.message || 'This gesture could not be shown again.');
+  }
+}
+
+function initializeGestureCatalog() {
+  if (!GestureCatalogControllerClass || gestureCatalogController) return gestureCatalogController;
+  gestureCatalogController = new GestureCatalogControllerClass({
+    root: mediaPicker,
+    features: cfg.gesturePart3?.features || {},
+    queryIdentity: { session_id: cfg.sessionId, join_token: cfg.myJoinToken },
+    mediaUrl,
+    getJson: (url, operation) => runtimeRequestClient.getJson(url, {
+      operation,
+      endpointCategory: 'gestures',
+    }),
+    mutate: body => apiPost('/api/gestures.php', {
+      session_id: cfg.sessionId,
+      join_token: cfg.myJoinToken,
+      ...body,
+    }),
+    requestKey: gestureRequestKey,
+    getPreferences: () => gesturePresentation?.preferences?.() || {},
+    onPreferences: (projection, reason) => gesturePresentation?.applyServerProjection(projection, reason),
+    onOrderVersion: (scope, version) => gesturePresentation?.applyOrderVersion(scope, version),
+    onHiddenMutation: (publicId, hidden, version) => gesturePresentation?.applyHiddenMutation(publicId, hidden, version, 'hidden-catalog-bulk'),
+    onHide: setGestureHidden,
+    onSend: sendGesture,
+    onUpload: () => gestureFileInput?.click(),
+    onDelete: openDeleteGestureModal,
+    onTogglePublic: toggleGesturePublic,
+    onAudio: toggleGestureAudio,
+    catalogs: {
+      server: {
+        search: document.getElementById('server-gesture-search'),
+        sort: document.getElementById('server-gesture-sort'),
+        grid: document.getElementById('server-gesture-grid'),
+        pager: document.getElementById('server-gesture-pager'),
+        guidance: document.getElementById('server-gesture-reorder-guidance'),
+        status: document.getElementById('server-gesture-status'),
+      },
+      personal: {
+        search: document.getElementById('personal-gesture-search'),
+        sort: document.getElementById('personal-gesture-sort'),
+        grid: document.getElementById('personal-gesture-grid'),
+        pager: document.getElementById('personal-gesture-pager'),
+        guidance: document.getElementById('personal-gesture-reorder-guidance'),
+        status: document.getElementById('personal-gesture-status'),
+      },
+    },
+    actionMenu: document.getElementById('gesture-action-menu'),
+    hiddenSection: document.getElementById('hidden-gesture-section'),
+    hiddenSearch: document.getElementById('hidden-gesture-search'),
+    hiddenList: document.getElementById('hidden-gesture-list'),
+    hiddenCount: document.getElementById('hidden-gesture-count'),
+    hiddenStatus: document.getElementById('hidden-gesture-status'),
+    showSelected: document.getElementById('hidden-gesture-show-selected'),
+    showAll: document.getElementById('hidden-gesture-show-all'),
+    hiddenConfirm: document.getElementById('hidden-gesture-confirm'),
+    hiddenConfirmYes: document.getElementById('hidden-gesture-confirm-yes'),
+    hiddenConfirmNo: document.getElementById('hidden-gesture-confirm-no'),
+  });
+  gestureCatalogController.initialize();
+  return gestureCatalogController;
 }
 
 async function saveWebcamViewerPreferences({ showWebcams, receiveWebcams, resetOverrides = false }) {
@@ -4826,6 +5064,18 @@ document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
     event.currentTarget.checked = true;
     event.currentTarget.dispatchEvent(new Event('change', { bubbles: true }));
   });
+});
+[gestureShowAnimations, gestureShowText, gesturePlaySounds].forEach(input => {
+  input?.addEventListener('change', () => {
+    saveGesturePreferences({
+      showAnimations: Boolean(gestureShowAnimations?.checked),
+      showText: Boolean(gestureShowText?.checked),
+      playSounds: Boolean(gesturePlaySounds?.checked),
+    }, 'Gesture options saved.');
+  });
+});
+gestureOptionsReset?.addEventListener('click', () => {
+  saveGesturePreferences({ showAnimations: true, showText: true, playSounds: true }, 'Gesture options reset to defaults.');
 });
 document.querySelectorAll('input[name="webcam-visibility-mode"]').forEach(input => {
   input.addEventListener('change', event => {
@@ -4971,18 +5221,23 @@ function renderEmojiGrid() {
 }
 
 function setMediaTab(tab) {
-  if (mediaSearchInput && activeMediaTab !== 'emojis') {
+  if (mediaSearchInput && ['gifs', 'gestures'].includes(activeMediaTab)) {
     mediaSearchValues[activeMediaTab] = mediaSearchInput.value;
   }
   activeMediaTab = tab;
-  mediaPicker?.classList.remove('media-tab-gifs', 'media-tab-gestures', 'media-tab-emojis');
+  mediaPicker?.classList.remove('media-tab-gifs', 'media-tab-gestures', 'media-tab-server-gestures', 'media-tab-personal-gestures', 'media-tab-emojis');
   mediaPicker?.classList.add(`media-tab-${tab}`);
-  mediaPicker?.querySelectorAll('[data-media-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.mediaTab === tab));
+  mediaPicker?.querySelectorAll('[data-media-tab]').forEach(btn => {
+    const selected = btn.dataset.mediaTab === tab;
+    btn.classList.toggle('active', selected);
+    btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+    btn.tabIndex = selected ? 0 : -1;
+  });
   mediaPicker?.querySelectorAll('.media-panel').forEach(panel => panel.classList.toggle('active', panel.id === `media-panel-${tab}`));
   if (mediaSearchInput) {
     mediaSearchInput.placeholder = tab === 'gifs' ? 'Search GIFs' : (tab === 'gestures' ? 'Search gesture text' : 'Search emojis');
-    mediaSearchInput.value = tab === 'emojis' ? '' : (mediaSearchValues[tab] || '');
-    mediaSearchInput.style.display = tab === 'emojis' ? 'none' : '';
+    mediaSearchInput.value = ['gifs', 'gestures'].includes(tab) ? (mediaSearchValues[tab] || '') : '';
+    mediaSearchInput.closest('.media-search-row').hidden = !['gifs', 'gestures'].includes(tab);
   }
   if (tab === 'gifs' && gifResults && !cfg?.gifPicker?.enabled) {
     gifResults.innerHTML = '<div class="minor">GIFs are not configured.</div>';
@@ -4993,11 +5248,23 @@ function setMediaTab(tab) {
       loadGestures();
     }
   }
+  if (tab === 'server-gestures') gestureCatalogController?.activate('server');
+  if (tab === 'personal-gestures') gestureCatalogController?.activate('personal');
   if (tab === 'emojis') renderEmojiGrid();
 }
 
 mediaPicker?.querySelectorAll('[data-media-tab]').forEach(btn => {
   btn.addEventListener('click', () => setMediaTab(btn.dataset.mediaTab || 'gifs'));
+  btn.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...mediaPicker.querySelectorAll('[data-media-tab]:not([hidden])')];
+    const current = tabs.indexOf(event.currentTarget);
+    const index = event.key === 'Home' ? 0
+      : (event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length);
+    event.preventDefault();
+    tabs[index]?.focus();
+    tabs[index]?.click();
+  });
 });
 
 async function searchGifs(query) {
@@ -5099,7 +5366,7 @@ function gestureTileSelector(id) {
 }
 
 function updateGestureUploadTileState() {
-  const uploadTile = gestureGrid?.querySelector('.gesture-upload-tile');
+  const uploadTile = document.querySelector('#personal-gesture-grid .gesture-upload-tile, #gesture-grid .gesture-upload-tile');
   if (!uploadTile) return;
   const limitReached = gestureOwnedCount >= gestureOwnedLimit;
   uploadTile.disabled = limitReached;
@@ -5227,7 +5494,11 @@ async function uploadGesture(file) {
     xhr.send(formData);
   });
   if (bar) bar.style.width = '100%';
-  await loadGestures();
+  if (gestureCatalogController && cfg.gesturePart3?.features?.enhanced_picker !== false) {
+    await gestureCatalogController.refresh('personal');
+  } else {
+    await loadGestures();
+  }
 }
 
 gestureFileInput?.addEventListener('change', () => {
@@ -5250,12 +5521,17 @@ gestureNext?.addEventListener('click', () => {
 });
 
 async function toggleGesturePublic(gesture, isPublic) {
-  const tile = gestureGrid?.querySelector(gestureTileSelector(gesture.id));
+  const tile = document.querySelector(`[data-gesture-public-id="${CSS.escape(String(gesture.public_id || ''))}"]`) || gestureGrid?.querySelector(gestureTileSelector(gesture.id));
   const toggle = tile?.querySelector('.gesture-global');
   if (toggle) toggle.disabled = true;
   try {
     const data = await apiPost('/api/gestures.php', { session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'toggle_public', gesture_id: gesture.id, is_public: isPublic });
-    replaceGestureTile(data.gesture || { ...gesture, is_public: isPublic });
+    if (gestureCatalogController && cfg.gesturePart3?.features?.enhanced_picker !== false) {
+      await gestureCatalogController.refresh('personal');
+      await gestureCatalogController.refresh('server');
+    } else {
+      replaceGestureTile(data.gesture || { ...gesture, is_public: isPublic });
+    }
   } catch (err) {
     if (toggle) toggle.disabled = false;
     alert(err.message || err);
@@ -5280,12 +5556,17 @@ function closeDeleteGestureModal() {
 async function deleteGesture(gesture) {
   try {
     await apiPost('/api/gestures.php', { session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'delete', gesture_id: gesture.id });
+    document.querySelector(`[data-gesture-public-id="${CSS.escape(String(gesture.public_id || ''))}"]`)?.remove();
     gestureGrid?.querySelector(gestureTileSelector(gesture.id))?.remove();
     if (gesture.mine) {
       gestureOwnedCount = Math.max(0, gestureOwnedCount - 1);
       updateGestureUploadTileState();
     }
     ensureGestureEmptyState();
+    if (gestureCatalogController && cfg.gesturePart3?.features?.enhanced_picker !== false) {
+      await gestureCatalogController.refresh('personal');
+      await gestureCatalogController.refresh('server');
+    }
   } catch (err) {
     alert(err.message || err);
   }
@@ -5306,6 +5587,10 @@ gestureDeleteConfirm?.addEventListener('click', async () => {
 
 function toggleGestureAudio(gesture, btn) {
   if (!gesture.audio_path) return;
+  if (gesturePresentation?.preferences?.().playSounds === false) {
+    if (gestureTray) gestureTray.textContent = 'Gesture sounds are turned off in Chat Options.';
+    return;
+  }
   if (activeGestureAudio?.btn === btn) {
     activeGestureAudio.audio.__chatspacePlaybackInterruption = 'gesture-toggle-off';
     activeGestureAudio.audio.pause();
@@ -5360,6 +5645,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (!document.getElementById('gesture-action-menu')?.hidden) return;
     const restoreAvatarFocus = ctxMenu.classList.contains('visible');
     closeFloatingShells(['game', ...(restoreAvatarFocus ? ['context'] : [])]);
     if (restoreAvatarFocus) closeContextMenu({ restoreFocus: true });
@@ -5500,6 +5786,21 @@ document.getElementById('msg-reply-action')?.addEventListener('click', () => {
   closeMessageActionMenu();
   if (!msg) return;
   startReplyDraft(msg, chatKey);
+});
+
+document.getElementById('msg-gesture-visibility-action')?.addEventListener('click', async () => {
+  const chatKey = msgActionTargetChat || activeChatKey();
+  const msg = currentActiveMessage(msgActionTargetId, chatKey);
+  const gesture = gestureFromMessage(msg);
+  const publicId = gesturePresentation?.publicId?.(gesture) || '';
+  const hidden = publicId ? gesturePresentation?.isHidden?.(publicId) : false;
+  closeMessageActionMenu();
+  if (!publicId) return;
+  try {
+    await setGestureHidden(publicId, !hidden, 'gesture-message-context-action');
+  } catch (error) {
+    showWarning(error.message || 'Gesture visibility could not be changed.');
+  }
 });
 
 document.getElementById('msg-edit-action')?.addEventListener('click', async () => {
@@ -7001,6 +7302,11 @@ async function bootRoom() {
     'room-bootstrap'
   );
   cfg = roomConfig;
+  gesturePresentation?.applyServerProjection(
+    cfg.gesturePart3?.preferences || {},
+    'room-bootstrap'
+  );
+  initializeGestureCatalog();
   voiceRuntime?.viewerPolicy?.applyServerProjection({
     capability: cfg.webcamCapability,
     preferences: cfg.webcamViewerPreferences,

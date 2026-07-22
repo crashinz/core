@@ -512,6 +512,12 @@ export class ChatMessageRenderer {
 
         });
 
+        row.querySelector("[data-gesture-show-again]")?.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            context.showGestureAgain?.(event.currentTarget.dataset.gestureShowAgain, message);
+        });
+
         messagesElement.appendChild(row);
 
         return row;
@@ -578,16 +584,12 @@ export class ChatMessageRenderer {
                 context.gestureFromMessage(message);
 
             if (!gesture) {
-                return context.esc(message.original_name || "Gesture");
+                return context.esc("(Gesture)");
             }
-
-            const gif =
-                context.esc(context.mediaUrl(gesture.gif_path || gesture.gif_url || ""));
-
-            const text =
-                context.esc(gesture.text || gesture.name || message.original_name || "Gesture");
-
-            return `<div class="chat-gesture"><a class="chat-attachment-image chat-gif chat-gesture-gif" href="${gif}" target="_blank" rel="noopener"><img src="${gif}" alt="${text}"></a><div class="chat-gesture-text">${text}</div></div>`;
+            return context.gesturePresentation?.renderMessageHtml(gesture, {
+                escapeHtml: context.esc,
+                mediaUrl: context.mediaUrl,
+            }) || context.esc("(Gesture)");
 
         }
 

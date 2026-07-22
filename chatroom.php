@@ -762,6 +762,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     <button type="button" data-msg-reaction="✅">✅</button>
   </div>
   <button id="msg-reply-action" type="button">Reply</button>
+  <button id="msg-gesture-visibility-action" type="button" hidden>Hide this gesture for me</button>
   <button id="msg-edit-action" type="button">Edit</button>
   <button id="msg-delete-action" class="danger" type="button">Delete</button>
 </div>
@@ -804,6 +805,25 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       </fieldset>
       <p class="settings-choice-description" id="chat-display-description"></p>
     </div>
+    <section class="gesture-chat-options" aria-labelledby="gesture-chat-options-title">
+      <div class="settings-choice-name" id="gesture-chat-options-title">Gestures</div>
+      <label class="gesture-preference-row">
+        <input id="gesture-show-animations" type="checkbox">
+        <span><strong>Show gesture animations</strong><small>Show the current gesture animation in messages and avatar speech.</small></span>
+      </label>
+      <label class="gesture-preference-row">
+        <input id="gesture-show-text" type="checkbox">
+        <span><strong>Show gesture text</strong><small>Show canonical text in the format (Gesture) Gesture Text.</small></span>
+      </label>
+      <label class="gesture-preference-row">
+        <input id="gesture-play-sounds" type="checkbox">
+        <span><strong>Play gesture sounds</strong><small>Allow the current supported gesture-sound path to begin playback.</small></span>
+      </label>
+      <div class="gesture-preference-actions">
+        <button class="btn" id="gesture-options-reset" type="button">Reset gesture options</button>
+        <span class="minor" id="gesture-options-status" role="status" aria-live="polite"></span>
+      </div>
+    </section>
     <div class="settings-choice-row">
       <span class="settings-choice-name" id="webcam-visibility-label">Webcam display</span>
       <fieldset class="segmented-radio segmented-radio-wide" aria-labelledby="webcam-visibility-label">
@@ -875,10 +895,12 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   </form>
 </div>
 <div id="media-picker" hidden>
-  <div class="media-picker-tabs">
-    <button class="active" type="button" data-media-tab="gifs">GIFs</button>
-    <button type="button" data-media-tab="gestures">Gestures</button>
-    <button type="button" data-media-tab="emojis">Emojis</button>
+  <div class="media-picker-tabs" role="tablist" aria-label="Media picker">
+    <button class="active" id="media-tab-gifs" role="tab" aria-selected="true" aria-controls="media-panel-gifs" type="button" data-media-tab="gifs">GIFs</button>
+    <button id="media-tab-server-gestures" role="tab" aria-selected="false" aria-controls="media-panel-server-gestures" type="button" data-media-tab="server-gestures">Server Gestures</button>
+    <button id="media-tab-personal-gestures" role="tab" aria-selected="false" aria-controls="media-panel-personal-gestures" type="button" data-media-tab="personal-gestures">Personal Gestures</button>
+    <button id="media-tab-emojis" role="tab" aria-selected="false" aria-controls="media-panel-emojis" type="button" data-media-tab="emojis">Emojis</button>
+    <button id="media-tab-gestures" role="tab" aria-selected="false" aria-controls="media-panel-gestures" type="button" data-media-tab="gestures" hidden>Gestures</button>
   </div>
   <div class="media-search-row">
     <input id="media-search-input" type="search" placeholder="Search GIFs" autocomplete="off">
@@ -888,8 +910,36 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       <div class="minor">Search for a GIF.</div>
     </div>
   </div>
-  <div class="media-panel" id="media-panel-gestures">
+  <div class="media-panel gesture-catalog-panel" id="media-panel-server-gestures" role="tabpanel" aria-labelledby="media-tab-server-gestures">
+    <div class="gesture-catalog-toolbar">
+      <label>Search Server Gestures<input id="server-gesture-search" type="search" maxlength="120" autocomplete="off"></label>
+      <label>Sort<select id="server-gesture-sort"><option value="last_uploaded">Last uploaded</option><option value="file_name">File name A–Z</option><option value="custom">Custom order</option></select></label>
+    </div>
+    <div class="gesture-reorder-guidance minor" id="server-gesture-reorder-guidance" hidden>Clear the search to rearrange gestures.</div>
+    <div class="gesture-grid" id="server-gesture-grid"></div>
+    <div class="gesture-pager" id="server-gesture-pager" aria-label="Server Gesture pages"></div>
+    <div class="gesture-tray" id="server-gesture-status" role="status" aria-live="polite"></div>
+    <details class="hidden-gesture-section" id="hidden-gesture-section">
+      <summary>Hidden Gestures <span id="hidden-gesture-count">0</span></summary>
+      <div class="gesture-catalog-toolbar"><label>Search Hidden Gestures<input id="hidden-gesture-search" type="search" maxlength="120" autocomplete="off"></label></div>
+      <div class="hidden-gesture-actions"><button class="btn" id="hidden-gesture-show-selected" type="button">Show selected again</button><button class="btn btn-danger" id="hidden-gesture-show-all" type="button">Show all hidden gestures again</button></div>
+      <div class="hidden-gesture-confirm" id="hidden-gesture-confirm" hidden><span>Show every hidden gesture again?</span><button class="btn btn-primary" id="hidden-gesture-confirm-yes" type="button">Show all</button><button class="btn" id="hidden-gesture-confirm-no" type="button">Cancel</button></div>
+      <div class="hidden-gesture-list" id="hidden-gesture-list"></div>
+      <div class="minor" id="hidden-gesture-status" role="status" aria-live="polite"></div>
+    </details>
+  </div>
+  <div class="media-panel gesture-catalog-panel" id="media-panel-personal-gestures" role="tabpanel" aria-labelledby="media-tab-personal-gestures">
+    <div class="gesture-catalog-toolbar">
+      <label>Search Personal Gestures<input id="personal-gesture-search" type="search" maxlength="120" autocomplete="off"></label>
+      <label>Sort<select id="personal-gesture-sort"><option value="last_uploaded">Last uploaded</option><option value="file_name">File name A–Z</option><option value="custom">Custom order</option></select></label>
+    </div>
+    <div class="gesture-reorder-guidance minor" id="personal-gesture-reorder-guidance" hidden>Clear the search to rearrange gestures.</div>
     <input class="hidden-file-input" id="gesture-file-input" type="file" accept=".agst,application/zip">
+    <div class="gesture-grid" id="personal-gesture-grid"></div>
+    <div class="gesture-pager" id="personal-gesture-pager" aria-label="Personal Gesture pages"></div>
+    <div class="gesture-tray" id="personal-gesture-status" role="status" aria-live="polite"></div>
+  </div>
+  <div class="media-panel" id="media-panel-gestures" role="tabpanel" aria-labelledby="media-tab-gestures">
     <div class="gesture-grid" id="gesture-grid"></div>
     <div class="gesture-pager">
       <button class="btn" id="gesture-prev" type="button">Previous</button>
@@ -901,6 +951,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <div class="media-panel" id="media-panel-emojis">
     <div class="emoji-grid" id="emoji-grid"></div>
   </div>
+  <div class="gesture-action-menu" id="gesture-action-menu" role="menu" hidden></div>
 </div>
 <input type="file" id="avatar-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
 <div class="modal" id="locate-modal">

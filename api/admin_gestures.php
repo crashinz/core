@@ -8,11 +8,22 @@ $pdo = db();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
     try {
-        json_out(gesture_catalog_query($pdo, (int)$me['id'], 'server', [
+        $catalog = gesture_catalog_query($pdo, (int)$me['id'], 'server', [
             'q' => $_GET['q'] ?? '',
             'page' => $_GET['page'] ?? 1,
             'sort' => $_GET['sort'] ?? 'last_uploaded',
-        ], true));
+        ], true);
+        $catalog['items'] = array_map(static function (array $item): array {
+            return [
+                'public_id' => (string)$item['public_id'],
+                'catalog_filename' => (string)$item['catalog_filename'],
+                'name' => (string)$item['title'],
+                'text' => (string)$item['text'],
+                'last_uploaded_at' => $item['published_at'] ?: ($item['content_updated_at'] ?: $item['original_uploaded_at']),
+            ];
+        }, $catalog['items']);
+        unset($catalog['preferences'], $catalog['ordered_ids'], $catalog['reorder_allowed']);
+        json_out($catalog);
     } catch (GestureCatalogException $error) {
         json_out(gesture_catalog_exception_payload($error), $error->httpStatus);
     }

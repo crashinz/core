@@ -536,7 +536,12 @@
           const actions = element('div', 'shared-form-actions');
           if (sectionEntries.some(entry => entry.bulkGroup === 'dances')) {
             actions.appendChild(this.operationButton('Enable All Dances', 'set_many', { values: Object.fromEntries(sectionEntries.map(entry => [entry.id, true])) }, 'btn'));
-            actions.appendChild(this.operationButton('Disable All Dances', 'set_many_confirmed', { values: Object.fromEntries(sectionEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
+            actions.appendChild(this.operationButton('Disable All Dances', 'set_many', { values: Object.fromEntries(sectionEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
+          }
+          if (sectionEntries.some(entry => entry.bulkGroup === 'gesture-part-3')) {
+            const gestureEntries = sectionEntries.filter(entry => entry.bulkGroup === 'gesture-part-3');
+            actions.appendChild(this.operationButton('Enable All Gesture Features', 'set_many', { values: Object.fromEntries(gestureEntries.map(entry => [entry.id, true])) }, 'btn'));
+            actions.appendChild(this.operationButton('Disable All Gesture Features', 'set_many', { values: Object.fromEntries(gestureEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
           }
           if (sectionEntries.some(entry => entry.safeToReset)) actions.appendChild(this.operationButton('Reset Subsection', 'reset_subsection', { category_id: category.id, subsection_id: subsectionId }, 'btn'));
           header.appendChild(actions);

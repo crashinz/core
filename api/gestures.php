@@ -49,6 +49,13 @@ function clean_gesture_text(string $text, string $fallback): string {
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $catalog = (string)($_GET['catalog'] ?? '');
+    if ($catalog === 'preferences') {
+        try {
+            json_out(['ok' => true, 'preferences' => gesture_catalog_preferences_payload($pdo, $userId)]);
+        } catch (GestureCatalogException $error) {
+            json_out(gesture_catalog_exception_payload($error), $error->httpStatus);
+        }
+    }
     if (in_array($catalog, ['server', 'personal', 'hidden'], true)) {
         try {
             $result = gesture_catalog_query($pdo, $userId, $catalog, [
@@ -109,14 +116,56 @@ if (str_contains($contentType, 'application/json')) {
     $action = (string)($body['action'] ?? '');
     gesture_mutation_rate_guard($pdo, $userId, $action ?: 'unknown');
     try {
+        if ($action === 'set_presentation_preferences') {
+            json_out(gesture_catalog_set_presentation_preferences(
+                $pdo,
+                $userId,
+                (array)($body['values'] ?? []),
+                (int)($body['expected_version'] ?? -1),
+                gesture_request_key($body, 'presentation', true)
+            ));
+        }
         if ($action === 'set_sort') {
             json_out(gesture_catalog_set_sort($pdo, $userId, (string)($body['catalog'] ?? ''), (string)($body['sort'] ?? ''), (int)($body['expected_version'] ?? -1), gesture_request_key($body, 'sort', true)));
         }
         if ($action === 'set_order') {
             json_out(gesture_catalog_set_order($pdo, $userId, (string)($body['catalog'] ?? ''), (array)($body['ordered_ids'] ?? []), (int)($body['expected_version'] ?? -1), gesture_request_key($body, 'order', true), (string)($body['search'] ?? '')));
         }
+        if (in_array($action, ['move_before', 'move_top', 'move_page'], true)) {
+            json_out(gesture_catalog_move(
+                $pdo,
+                $userId,
+                (string)($body['catalog'] ?? ''),
+                (string)($body['public_id'] ?? ''),
+                $action,
+                $action === 'move_before' ? ($body['before_id'] ?? null) : ($body['page'] ?? null),
+                (int)($body['expected_version'] ?? -1),
+                gesture_request_key($body, $action, true),
+                (string)($body['search'] ?? '')
+            ));
+        }
+        if ($action === 'reset_position') {
+            json_out(gesture_catalog_reset_position(
+                $pdo,
+                $userId,
+                (string)($body['catalog'] ?? ''),
+                (string)($body['public_id'] ?? ''),
+                (int)($body['expected_version'] ?? -1),
+                gesture_request_key($body, 'reset-position', true),
+                (string)($body['search'] ?? '')
+            ));
+        }
         if ($action === 'hide' || $action === 'unhide') {
             json_out(gesture_catalog_hide($pdo, $userId, (string)($body['public_id'] ?? ''), $action === 'hide', (int)($body['expected_version'] ?? -1), gesture_request_key($body, $action, true)));
+        }
+        if ($action === 'unhide_many') {
+            json_out(gesture_catalog_unhide_many(
+                $pdo,
+                $userId,
+                (array)($body['public_ids'] ?? []),
+                (int)($body['expected_version'] ?? -1),
+                gesture_request_key($body, 'unhide-many', true)
+            ));
         }
 
         $gestureId = (int)($body['gesture_id'] ?? 0);

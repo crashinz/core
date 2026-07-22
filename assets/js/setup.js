@@ -172,9 +172,13 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
     },
     onOperation: async (operation, details, ui) => {
       if (!setupSettingsUnlock.requireUnlocked()) return;
-      if (operation === 'set_many' || operation === 'set_many_confirmed') {
+      if (operation === 'set_many') {
         const enabling = Object.values(details.values || {}).some(Boolean);
-        return applyDraftValues(details.values, `All dances ${enabling ? 'enabled' : 'disabled'}.`);
+        const ids = Object.keys(details.values || {});
+        const label = ids.length && ids.every(id => id.startsWith('gesture_part3_'))
+          ? 'Part 3 gesture features'
+          : 'dances';
+        return applyDraftValues(details.values, `All ${label} ${enabling ? 'enabled' : 'disabled'}.`);
       }
       if (operation === 'reset_setting') {
         const entry = ui.entryMap.get(details.setting_id);
