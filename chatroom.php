@@ -930,6 +930,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   </div>
   <div class="media-panel gesture-catalog-panel" id="media-panel-personal-gestures" role="tabpanel" aria-labelledby="media-tab-personal-gestures">
     <div class="gesture-catalog-toolbar">
+      <button class="btn btn-primary" id="personal-gesture-create" type="button">Create Gesture</button>
       <label>Search Personal Gestures<input id="personal-gesture-search" type="search" maxlength="120" autocomplete="off"></label>
       <label>Sort<select id="personal-gesture-sort"><option value="last_uploaded">Last uploaded</option><option value="file_name">File name A–Z</option><option value="custom">Custom order</option></select></label>
     </div>

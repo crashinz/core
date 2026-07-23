@@ -376,6 +376,11 @@ $roomConfig = [
         'features' => gesture_part3_feature_flags($pdo),
         'preferences' => gesture_catalog_preferences_payload($pdo, (int)$user['id']),
     ],
+    'gesturePart4' => [
+        'features' => gesture_part4_feature_flags($pdo),
+        'packageSchema' => GESTURE_PACKAGE_SCHEMA,
+        'packageVersion' => GESTURE_PACKAGE_VERSION,
+    ],
     'messages' => $messages,
     'communityMessages' => $communityMessages,
     'linkMessages' => $linkMessages,

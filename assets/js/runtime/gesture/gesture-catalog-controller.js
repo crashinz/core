@@ -42,6 +42,10 @@ export class GestureCatalogController {
         return this.#options.features || {};
     }
 
+    part4Features() {
+        return this.#options.part4Features || {};
+    }
+
     initialize() {
         for (const scope of ["server", "personal"]) {
             const refs = this.#refs(scope);
@@ -152,7 +156,7 @@ export class GestureCatalogController {
         const state = this.#states.get(scope);
         const refs = this.#refs(scope);
         refs.grid.textContent = "";
-        if (scope === "personal") refs.grid.appendChild(this.#uploadTile(state));
+        if (scope === "personal") refs.grid.appendChild(this.#createTile(state));
         for (const gesture of state.items) refs.grid.appendChild(this.#gestureTile(scope, gesture));
         if (!state.items.length) refs.grid.appendChild(element("div", "gesture-empty", "No gestures found."));
         if (refs.sort) refs.sort.value = state.sort;
@@ -161,21 +165,22 @@ export class GestureCatalogController {
         this.#announce(scope, `${state.total} ${scope === "server" ? "Server" : "Personal"} Gesture${state.total === 1 ? "" : "s"}; page ${state.page} of ${state.pages}.`);
     }
 
-    #uploadTile(state) {
+    #createTile(state) {
         const button = element("button", "gesture-upload-tile");
         button.type = "button";
         const limitReached = Number(state.ownedCount || 0) >= Number(state.ownedLimit ?? 50);
-        button.disabled = limitReached;
-        button.title = limitReached ? "Remove some gestures to make room." : "Upload .agst";
+        const editorDisabled = this.part4Features().editor === false;
+        button.disabled = limitReached || editorDisabled;
+        button.title = limitReached ? "Remove some gestures to make room." : (editorDisabled ? "Gesture Maker is disabled through shared Settings." : "Create Gesture");
         const progress = element("div", "gesture-upload-progress");
         progress.appendChild(document.createElement("i"));
         button.append(
             element("span", "", "+"),
-            element("small", "", "Upload .agst"),
+            element("small", "", "Create Gesture"),
             element("em", "", `${Number(state.ownedCount || 0)}/${Number(state.ownedLimit ?? 50)}`),
             progress
         );
-        button.addEventListener("click", () => this.#options.onUpload?.(button));
+        button.addEventListener("click", () => this.#options.onCreate?.(button));
         return button;
     }
 
@@ -386,6 +391,12 @@ export class GestureCatalogController {
         const searchActive = this.#states.get(scope).query !== "";
         if (scope === "server" && this.features().hide_unhide !== false) {
             action("Hide Server Gesture", () => this.#hideGesture(gesture), false);
+        }
+        if (scope === "personal" && gesture.mine) {
+            action("Edit Gesture", () => this.#options.onEdit?.(gesture), this.part4Features().editor === false);
+        }
+        if ((scope === "personal" && gesture.mine || scope === "server") && this.part4Features().user_package_download !== false) {
+            action("Download Gesture Package", () => this.#options.onDownload?.(gesture));
         }
         action("Move to Top", () => this.#move(scope, gesture.public_id, "move_top"), searchActive || this.features().custom_order === false);
         action("Move to Page…", () => this.#openMovePage(scope, gesture), searchActive || this.features().custom_order === false, true);

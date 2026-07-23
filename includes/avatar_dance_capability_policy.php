@@ -350,15 +350,6 @@ function avatar_dance_capability_update(
             'http_status' => 400,
         ];
     }
-    if (($request['operation'] ?? '') === 'disable_all' && empty($request['confirmed'])) {
-        return [
-            'ok' => false,
-            'code' => 'DANCE_CAPABILITY_CONFIRMATION_REQUIRED',
-            'error' => 'Confirm Disable All Dances before continuing.',
-            'http_status' => 409,
-        ];
-    }
-
     $ownsTransaction = !$pdo->inTransaction();
     $changed = false;
     $shutdown = ['stoppedStateCount' => 0, 'affectedRelationshipCount' => 0, 'sessionIds' => []];

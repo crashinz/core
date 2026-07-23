@@ -177,7 +177,7 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
         const ids = Object.keys(details.values || {});
         const label = ids.length && ids.every(id => id.startsWith('gesture_part3_'))
           ? 'Part 3 gesture features'
-          : 'dances';
+          : (ids.length && ids.every(id => id.startsWith('gesture_part4_')) ? 'Part 4 Gesture Maker and package features' : 'dances');
         return applyDraftValues(details.values, `All ${label} ${enabling ? 'enabled' : 'disabled'}.`);
       }
       if (operation === 'reset_setting') {

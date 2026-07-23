@@ -29,6 +29,14 @@ function gesture_catalog_setting_defaults(): array
         'gesture_part3_context_menus' => '1',
         'gesture_part3_message_hide_unhide' => '1',
         'gesture_part3_admin_catalog' => '1',
+        'gesture_part4_editor' => '1',
+        'gesture_part4_user_package_import' => '1',
+        'gesture_part4_user_package_download' => '1',
+        'gesture_part4_animation_media' => '1',
+        'gesture_part4_audio_media' => '1',
+        'gesture_part4_legacy_agst' => '1',
+        'gesture_part4_admin_package_inspection' => '1',
+        'gesture_part4_admin_media_replacement' => '1',
         'gesture_mutation_rate_limit' => '120',
         'gesture_mutation_ip_rate_limit' => '600',
         'gesture_download_cooldown_seconds' => '30',
@@ -45,6 +53,16 @@ function gesture_part3_feature_flags(PDO $pdo): array
     foreach (array_keys(gesture_catalog_setting_defaults()) as $key) {
         if (!str_starts_with($key, 'gesture_part3_')) continue;
         $flags[substr($key, strlen('gesture_part3_'))] = app_setting($pdo, $key, '1') === '1';
+    }
+    return $flags;
+}
+
+function gesture_part4_feature_flags(PDO $pdo): array
+{
+    $flags = [];
+    foreach (array_keys(gesture_catalog_setting_defaults()) as $key) {
+        if (!str_starts_with($key, 'gesture_part4_')) continue;
+        $flags[substr($key, strlen('gesture_part4_'))] = app_setting($pdo, $key, '1') === '1';
     }
     return $flags;
 }
@@ -381,6 +399,7 @@ function gesture_catalog_install_schema(PDO $pdo): void
     gesture_catalog_index($pdo, 'gesture_hidden', 'idx_gesture_hidden_lookup', 'gesture_public_id, user_id');
     gesture_catalog_index($pdo, 'gesture_downloads', 'idx_gesture_download_user_status', 'user_id, status, completed_at');
     gesture_catalog_index($pdo, 'gesture_downloads', 'idx_gesture_download_status_time', 'status, started_at');
+    if (function_exists('gesture_package_install_schema')) gesture_package_install_schema($pdo);
 }
 
 function gesture_catalog_transaction(PDO $pdo, callable $callback): mixed
@@ -422,6 +441,7 @@ function gesture_catalog_idempotent(
     }
     $hash = hash('sha256', json_encode(gesture_catalog_canonicalize($payload), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     return gesture_catalog_transaction($pdo, function () use ($pdo, $userId, $operation, $requestKey, $hash, $callback): array {
+        gesture_catalog_lock_user($pdo, $userId);
         $reserve = $pdo->prepare(db_driver($pdo) === 'mysql'
             ? 'INSERT IGNORE INTO gesture_operation_requests (user_id, operation, request_key, request_hash, response_json) VALUES (?,?,?,?,NULL)'
             : 'INSERT OR IGNORE INTO gesture_operation_requests (user_id, operation, request_key, request_hash, response_json) VALUES (?,?,?,?,NULL)');
@@ -838,6 +858,15 @@ function gesture_catalog_unhide_many(
 function gesture_catalog_row_payload(array $row, int $viewerUserId, bool $admin = false): array
 {
     $mine = (int)$row['owner_user_id'] === $viewerUserId;
+    $animationUrl = function_exists('gesture_package_media_url')
+        ? gesture_package_media_url($row, 'animation', 'catalog')
+        : media_url((string)$row['gif_path']);
+    $posterUrl = function_exists('gesture_package_media_url')
+        ? gesture_package_media_url($row, 'poster', 'catalog')
+        : null;
+    $audioUrl = !empty($row['audio_path'])
+        ? (function_exists('gesture_package_media_url') ? gesture_package_media_url($row, 'audio', 'catalog') : media_url((string)$row['audio_path']))
+        : null;
     $payload = [
         'id' => (int)$row['id'],
         'public_id' => (string)$row['public_id'],
@@ -847,15 +876,21 @@ function gesture_catalog_row_payload(array $row, int $viewerUserId, bool $admin 
         'text' => (string)$row['gesture_text'],
         'creator_credit' => (string)($row['creator_credit'] ?: ''),
         'uploaded_by' => (string)($row['uploader_display_name'] ?? ''),
-        'gif_path' => (string)$row['gif_path'],
-        'gif_url' => media_url((string)$row['gif_path']),
-        'audio_path' => $row['audio_path'] ?? null,
-        'audio_url' => !empty($row['audio_path']) ? media_url((string)$row['audio_path']) : null,
+        'gif_path' => $animationUrl,
+        'gif_url' => $animationUrl,
+        'poster_path' => $posterUrl,
+        'poster_url' => $posterUrl,
+        'audio_path' => $audioUrl,
+        'audio_url' => $audioUrl,
         'audio_is_silent' => !empty($row['audio_is_silent']),
         'is_public' => !empty($row['is_public']),
         'mine' => $mine,
         'owner_user_id' => (int)$row['owner_user_id'],
         'version' => max(1, (int)($row['version'] ?? 1)),
+        'package_generation' => max(1, (int)($row['package_generation'] ?? 1)),
+        'package_version' => max(0, (int)($row['package_version'] ?? 0)),
+        'package_status' => (string)($row['package_status'] ?? 'legacy-unverified'),
+        'content_sha256' => (string)($row['content_sha256'] ?? ''),
         'created_at' => $row['created_at'] ?? null,
         'original_uploaded_at' => $row['original_uploaded_at'] ?? $row['created_at'] ?? null,
         'content_updated_at' => $row['content_updated_at'] ?? $row['updated_at'] ?? null,
@@ -990,12 +1025,18 @@ function gesture_catalog_toggle_public(PDO $pdo, int $userId, string $publicId, 
     return gesture_catalog_idempotent($pdo, $userId, 'toggle-public', $requestKey, compact('publicId', 'isPublic', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $isPublic, $expectedVersion): array {
         $row = gesture_catalog_lock_row($pdo, $publicId, $userId);
         gesture_catalog_require_version((int)$row['version'], $expectedVersion, 'GESTURE_VERSION_CONFLICT', gesture_catalog_row_payload($row, $userId));
+        if ($isPublic && !in_array((string)($row['package_status'] ?? 'legacy-unverified'), ['valid', 'legacy-unverified'], true)) {
+            throw new GestureCatalogException('Gesture package must be valid before publication.', 409, 'PACKAGE_VALIDATION_REQUIRED');
+        }
         $firstPublication = $isPublic && empty($row['published_at']);
         $publishedAt = $firstPublication ? gmdate('Y-m-d H:i:s') : ($row['published_at'] ?: null);
         $pdo->prepare(
             'UPDATE gestures SET is_public = ?, published_at = ?, '
             . 'visibility_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE id = ?'
         )->execute([$isPublic ? 1 : 0, $publishedAt, (int)$row['id']]);
+        if (!$isPublic && function_exists('gesture_package_rotate_media_token')) {
+            gesture_package_rotate_media_token($pdo, (int)$row['id'], max(1, (int)($row['package_generation'] ?? 1)));
+        }
         $updated = gesture_catalog_lock_row($pdo, $publicId, $userId);
         return ['ok' => true, 'gesture' => gesture_catalog_row_payload($updated, $userId)];
     });
@@ -1046,7 +1087,13 @@ function gesture_catalog_admin_update(PDO $pdo, array $actor, string $publicId, 
             . 'updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE id = ?'
         )->execute([$catalog, gesture_catalog_filename_key($catalog), $title, $title, $text, $creator, $contentUpdatedAt, (int)$row['id']]);
         $new = ['catalog_filename' => $catalog, 'title' => $title, 'text' => $text, 'creator_credit' => $creator];
-        log_tool($pdo, $actorId, 'gesture_admin_metadata_update', (int)$row['owner_user_id'], null, json_encode(['gesture_public_id' => $publicId, 'old' => $old, 'new' => $new], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        $changedFields = array_values(array_filter(array_keys($new), static fn(string $field): bool => (string)$old[$field] !== (string)$new[$field]));
+        log_tool($pdo, $actorId, 'gesture_admin_metadata_update', (int)$row['owner_user_id'], null, json_encode([
+            'gesture_public_id' => $publicId,
+            'changed_fields' => $changedFields,
+            'version_from' => (int)$row['version'],
+            'version_to' => (int)$row['version'] + 1,
+        ], JSON_UNESCAPED_SLASHES));
         $updated = gesture_catalog_lock_row($pdo, $publicId);
         return ['ok' => true, 'content_changed' => $contentChanged, 'gesture' => gesture_catalog_row_payload($updated, $actorId, true)];
     });
@@ -1054,7 +1101,7 @@ function gesture_catalog_admin_update(PDO $pdo, array $actor, string $publicId, 
 
 function gesture_catalog_delete(PDO $pdo, int $userId, string $publicId, int $expectedVersion, string $requestKey): array
 {
-    return gesture_catalog_idempotent($pdo, $userId, 'delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $expectedVersion): array {
+    $result = gesture_catalog_idempotent($pdo, $userId, 'delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $expectedVersion): array {
         $row = gesture_catalog_lock_row($pdo, $publicId, $userId);
         gesture_catalog_require_version((int)$row['version'], $expectedVersion, 'GESTURE_VERSION_CONFLICT', gesture_catalog_row_payload($row, $userId));
         $pdo->prepare("UPDATE gestures SET deleted_at = CURRENT_TIMESTAMP, is_public = 0, active_catalog_key = NULL, visibility_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE id = ?")
@@ -1064,6 +1111,8 @@ function gesture_catalog_delete(PDO $pdo, int $userId, string $publicId, int $ex
         $pdo->prepare('DELETE FROM gesture_downloads WHERE gesture_public_id = ?')->execute([$publicId]);
         return ['ok' => true, 'gesture_public_id' => $publicId];
     });
+    if (function_exists('gesture_package_cleanup_deleted')) gesture_package_cleanup_deleted($pdo, $publicId);
+    return $result;
 }
 
 function gesture_catalog_download_policy(PDO $pdo): array

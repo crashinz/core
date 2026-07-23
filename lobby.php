@@ -407,10 +407,10 @@ $rooms = $roomsStmt->fetchAll();
 
         <section class="admin-section" id="admin-section-gestures">
           <div class="admin-section-title">Gestures</div>
-          <div class="admin-section-sub">Manage Part 3 presentation controls through the shared registry and inspect the read-only Server Gesture catalog.</div>
+          <div class="admin-section-sub">Manage shared gesture controls, safe metadata, validated packages, media, and provenance for Server Gestures.</div>
           <div class="admin-panel admin-gesture-settings-link">
             <div>
-              <h3>Part 3 capability and presentation controls</h3>
+              <h3>Part 3 and Part 4 capability controls</h3>
               <p class="minor" id="admin-gesture-feature-summary">Loading shared settings…</p>
             </div>
             <button class="btn" id="admin-gesture-open-settings" type="button">Open shared gesture settings</button>
@@ -420,7 +420,7 @@ $rooms = $roomsStmt->fetchAll();
               <label>Search Server Gestures<input id="admin-gesture-search" type="search" maxlength="120" autocomplete="off"></label>
               <label>Sort<select id="admin-gesture-sort"><option value="last_uploaded">Last uploaded</option><option value="file_name">File name A–Z</option></select></label>
             </div>
-            <div class="admin-gesture-catalog" id="admin-gesture-catalog" role="table" aria-label="Read-only Server Gesture catalog"></div>
+            <div class="admin-gesture-catalog" id="admin-gesture-catalog" role="table" aria-label="Server Gesture metadata and package catalog"></div>
             <div class="gesture-pager" id="admin-gesture-pager" aria-label="Admin gesture catalog pages"></div>
             <div class="minor" id="admin-gesture-status" role="status" aria-live="polite"></div>
           </div>

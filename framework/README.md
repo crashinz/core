@@ -34,22 +34,26 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Gesture Checkpoint Part 3
+Gesture Checkpoint Part 4
 
 **Framework Phase**
 
-Engineering Complete
+Engineering Complete; Gesture Checkpoint Part 5 is next
 
-The completed checkpoint adds canonical gesture text presentation, three
-persisted Chat Options preferences, separate Server and Personal picker
-catalogs, bounded search/pagination, stable-ID organization and hiding, and a
-read-only Admin Gestures foundation. Ordinary registry-backed settings use one
-deliberate shared unlock with no redundant grouped confirmation; independent
-high-risk protections remain intact.
+Parts 1-4 are Engineering Complete. Part 4 adds a room-preserving Gesture Maker
+and editor, canonical versioned AGST packages, bounded GIF/MP3 validation,
+protected media and package delivery, server-owned provenance, Personal
+publish/unpublish/delete lifecycle, Admin package inspection, and shared
+optional-feature controls. Ordinary registry-backed changes still require one
+deliberate shared unlock and no redundant second confirmation; mandatory
+archive, authorization, privacy, concurrency, and validation safeguards remain
+non-optional.
 
-Exact-final r4 passes every selected quality check and all `78/78` Chrome
-scenarios across `12/12` workers with clean teardown. Gesture Checkpoint Part
-4 is next; Parts 4 and 5 have not begun.
+Focused Part 4 browser and SQLite/MariaDB lifecycle/concurrency certification
+are green. Exact-final r3 passed all selected quality-gate owners and all
+`87/87` Chrome scenarios across `13/13` workers with clean cleanup and zero
+unexpected observability findings. Part 5, Send Gesture/P2P transfer, Build
+000048, and hosted deployment have not begun.
 
 ---
 

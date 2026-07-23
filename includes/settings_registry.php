@@ -241,6 +241,35 @@ function settings_registry_definitions(): array {
         ]);
     }
 
+    $gesturePart4Features = [
+        ['gesture_part4_editor', 'Gesture Maker and Editor', 'Allow account owners to create and edit validated Personal Gestures through the dedicated room-preserving editor.', 10],
+        ['gesture_part4_user_package_import', 'User AGST package import', 'Allow validated AGST packages to be used as a source in the Gesture Maker and legacy picker adapter.', 20],
+        ['gesture_part4_user_package_download', 'User gesture-package download', 'Allow protected package export for owners and policy-authorized Server Gestures.', 30],
+        ['gesture_part4_animation_media', 'Gesture animation media', 'Allow validated GIF animation media in new or edited gesture packages.', 40],
+        ['gesture_part4_audio_media', 'Gesture audio media', 'Allow validated MP3 sound media with explicit playback and Part 3 preference suppression.', 50],
+        ['gesture_part4_legacy_agst', 'Legacy AGST compatibility', 'Allow source-backed toc.json and meta.json packages to be validated and normalized by the canonical package owner.', 60],
+        ['gesture_part4_admin_package_inspection', 'Admin gesture-package inspection', 'Allow authorized Admin users to inspect bounded package, provenance, and media-role summaries.', 70],
+        ['gesture_part4_admin_media_replacement', 'Admin gesture media replacement', 'Allow authorized Admin users to open the shared editor for validated Server Gesture replacement.', 80],
+    ];
+    foreach ($gesturePart4Features as [$id, $label, $description, $order]) {
+        $definitions[] = settings_registry_entry([
+            'id' => $id, 'settingKey' => $id, 'owner' => 'gesture_part4_package_policy',
+            'categoryId' => 'chat-messaging', 'subsectionId' => 'gesture-part4',
+            'subsectionLabel' => 'Gesture Maker, Packages & Media', 'label' => $label,
+            'description' => $description,
+            'helpText' => 'This optional Part 4 capability never disables mandatory archive safety, authorization, privacy, validation, atomicity, or the future Part 5 master Allow gestures boundary.',
+            'aliases' => ['gesture maker', 'gesture editor', 'AGST', 'gesture package', 'gesture media'],
+            'type' => 'boolean', 'defaultValue' => true, 'order' => $order,
+            'controlClass' => 'optional', 'optional' => true,
+            'setupVisible' => true, 'adminVisible' => true,
+            'originalRelevant' => true, 'originalValueAvailable' => true,
+            'originalValue' => false, 'disablingMovesTowardOriginal' => true,
+            'differsFromOriginalByDefault' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'all-optional', 'preset'],
+            'bulkGroup' => 'gesture-part-4',
+        ]);
+    }
+
     $definitions = array_merge($definitions, [
         settings_registry_entry([
             'id' => 'allow_webcam_use', 'settingKey' => 'allow_webcam_use',
@@ -456,6 +485,8 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
     $enabledDances = count(array_filter($danceEntries, static fn(array $entry): bool => $entry['enabled'] === true));
     $gesturePart3Entries = array_values(array_filter($visibleEntries, static fn(array $entry): bool => $entry['bulkGroup'] === 'gesture-part-3'));
     $enabledGesturePart3 = count(array_filter($gesturePart3Entries, static fn(array $entry): bool => $entry['enabled'] === true));
+    $gesturePart4Entries = array_values(array_filter($visibleEntries, static fn(array $entry): bool => $entry['bulkGroup'] === 'gesture-part-4'));
+    $enabledGesturePart4 = count(array_filter($gesturePart4Entries, static fn(array $entry): bool => $entry['enabled'] === true));
 
     return [
         'schemaId' => 'chatspace.settings-registry',
@@ -474,6 +505,8 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
             'danceTotalCount' => count($danceEntries),
             'gesturePart3EnabledCount' => $enabledGesturePart3,
             'gesturePart3TotalCount' => count($gesturePart3Entries),
+            'gesturePart4EnabledCount' => $enabledGesturePart4,
+            'gesturePart4TotalCount' => count($gesturePart4Entries),
             'compatibilityState' => $compatibilityState,
         ],
         'compatibility' => [

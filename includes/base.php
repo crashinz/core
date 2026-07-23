@@ -22,6 +22,7 @@ require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/settings_registry.php';
 require_once __DIR__ . '/runtime_issue_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
+require_once __DIR__ . '/gesture_package_service.php';
 require_once __DIR__ . '/media_signal_service.php';
 
 function app_base_path(): string {
@@ -1612,16 +1613,30 @@ function branded_page_title(string $page, ?PDO $pdo = null): string {
 }
 
 function gesture_snapshot(array $gesture): array {
+    $animation = function_exists('gesture_package_media_url')
+        ? gesture_package_media_url($gesture, 'animation', 'message')
+        : $gesture['gif_path'];
+    $poster = function_exists('gesture_package_media_url')
+        ? gesture_package_media_url($gesture, 'poster', 'message')
+        : null;
+    $audio = !empty($gesture['audio_path'])
+        ? (function_exists('gesture_package_media_url') ? gesture_package_media_url($gesture, 'audio', 'message') : $gesture['audio_path'])
+        : null;
     return [
         'id' => (int)$gesture['id'],
         'public_id' => $gesture['public_id'],
         'name' => $gesture['name'],
         'text' => $gesture['gesture_text'],
-        'gif_path' => $gesture['gif_path'],
-        'audio_path' => $gesture['audio_path'] ?? null,
+        'gif_path' => $animation,
+        'poster_path' => $poster,
+        'audio_path' => $audio,
         'audio_is_silent' => !empty($gesture['audio_is_silent']),
         'is_public' => !empty($gesture['is_public']),
         'owner_user_id' => (int)$gesture['owner_user_id'],
+        'package_generation' => max(1, (int)($gesture['package_generation'] ?? 1)),
+        'package_version' => max(0, (int)($gesture['package_version'] ?? 0)),
+        'package_status' => (string)($gesture['package_status'] ?? 'legacy-unverified'),
+        'content_sha256' => (string)($gesture['content_sha256'] ?? ''),
     ];
 }
 

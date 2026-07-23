@@ -543,6 +543,11 @@
             actions.appendChild(this.operationButton('Enable All Gesture Features', 'set_many', { values: Object.fromEntries(gestureEntries.map(entry => [entry.id, true])) }, 'btn'));
             actions.appendChild(this.operationButton('Disable All Gesture Features', 'set_many', { values: Object.fromEntries(gestureEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
           }
+          if (sectionEntries.some(entry => entry.bulkGroup === 'gesture-part-4')) {
+            const packageEntries = sectionEntries.filter(entry => entry.bulkGroup === 'gesture-part-4');
+            actions.appendChild(this.operationButton('Enable All Gesture Maker and Package Features', 'set_many', { values: Object.fromEntries(packageEntries.map(entry => [entry.id, true])) }, 'btn'));
+            actions.appendChild(this.operationButton('Disable All Gesture Maker and Package Features', 'set_many', { values: Object.fromEntries(packageEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
+          }
           if (sectionEntries.some(entry => entry.safeToReset)) actions.appendChild(this.operationButton('Reset Subsection', 'reset_subsection', { category_id: category.id, subsection_id: subsectionId }, 'btn'));
           header.appendChild(actions);
           section.appendChild(header);

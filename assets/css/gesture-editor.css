@@ -1,0 +1,38 @@
+.gesture-editor-body { min-height:100vh; margin:0; background:radial-gradient(circle at top,#253451 0,#121824 48%,#0b0f17 100%); color:#edf2ff; font-family:Inter,Segoe UI,sans-serif; }
+.gesture-editor-shell { width:min(1120px,calc(100% - 24px)); margin:18px auto; background:#151d2b; border:1px solid #3b4962; border-radius:16px; box-shadow:0 22px 70px #0008; overflow:hidden; }
+.gesture-editor-header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:20px 24px; border-bottom:1px solid #344158; background:#1b2638; }
+.gesture-editor-header h1 { margin:0 0 4px; font-size:clamp(1.35rem,3vw,2rem); }
+.gesture-editor-header p { margin:0; color:#b9c5d9; }
+.gesture-editor-close { border:0; border-radius:9px; width:42px; height:42px; color:#fff; background:#2b3950; font-size:1.5rem; cursor:pointer; }
+.gesture-editor-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr); gap:20px; padding:22px; }
+.gesture-editor-panel { min-width:0; border:1px solid #344158; background:#111925; border-radius:12px; padding:18px; }
+.gesture-editor-fields { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.gesture-editor-field { display:grid; gap:6px; min-width:0; }
+.gesture-editor-field-wide { grid-column:1/-1; }
+.gesture-editor-field span,.gesture-editor-field legend { font-weight:700; }
+.gesture-editor-field small { color:#aab8cf; }
+.gesture-editor-field input,.gesture-editor-field textarea { box-sizing:border-box; width:100%; border:1px solid #53627b; border-radius:8px; background:#0c1320; color:#fff; padding:10px 11px; font:inherit; }
+.gesture-editor-field textarea { min-height:86px; resize:vertical; }
+.gesture-editor-media { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:18px; }
+.gesture-editor-media label { display:grid; gap:5px; border:1px solid #35435a; border-radius:9px; padding:12px; background:#182235; }
+.gesture-editor-media input[type=file] { max-width:100%; }
+.gesture-editor-removals { display:flex; flex-wrap:wrap; gap:16px; margin-top:14px; }
+.gesture-editor-validation { margin:0 22px 18px; border:1px solid #ef6575; background:#431c26; border-radius:10px; padding:12px 16px; }
+.gesture-editor-validation:focus { outline:3px solid #ffb4bd; outline-offset:2px; }
+.gesture-editor-validation ul { margin:8px 0 0; }
+.gesture-editor-preview { min-height:250px; display:grid; place-items:center; overflow:hidden; border:1px dashed #60708c; border-radius:12px; background:#090e17; color:#9cabc2; text-align:center; padding:12px; }
+.gesture-editor-preview img { display:block; max-width:100%; max-height:360px; object-fit:contain; }
+.gesture-editor-preview-text { margin:12px 0 4px; font-weight:750; overflow-wrap:anywhere; }
+.gesture-editor-preview-explanation { min-height:1.4em; color:#b9c5d9; }
+.gesture-editor-package-summary { display:grid; gap:4px; margin-top:16px; padding:12px; border-radius:9px; background:#0c1320; color:#c4cfe0; overflow-wrap:anywhere; }
+.gesture-editor-attribution { margin:18px 0 0; padding:13px; border-left:4px solid #8c79ff; background:#211d39; color:#e8e4ff; line-height:1.45; }
+.gesture-editor-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:0 22px 22px; }
+.gesture-editor-actions button { border:1px solid #667796; border-radius:9px; padding:10px 15px; color:#fff; background:#273650; font:inherit; font-weight:700; cursor:pointer; }
+.gesture-editor-actions .primary { background:#5d4de0; border-color:#8b7fff; }
+.gesture-editor-actions button:disabled { opacity:.55; cursor:not-allowed; }
+.gesture-editor-status { flex:1 1 260px; min-height:1.4em; color:#c2cee1; }
+.gesture-editor-status.ok { color:#86e4ab; }
+.gesture-editor-status.error { color:#ff9caa; }
+.gesture-editor-status.working { color:#ffd27d; }
+.gesture-editor-body :focus-visible { outline:3px solid #a99cff; outline-offset:2px; }
+@media (max-width:780px) { .gesture-editor-shell{width:min(100% - 10px,1120px);margin:5px auto;border-radius:10px}.gesture-editor-grid{grid-template-columns:1fr;padding:12px}.gesture-editor-fields,.gesture-editor-media{grid-template-columns:1fr}.gesture-editor-field-wide{grid-column:auto}.gesture-editor-header{padding:16px}.gesture-editor-actions{padding:0 12px 16px}.gesture-editor-validation{margin:0 12px 14px} }

@@ -4866,8 +4866,8 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 }
 .admin-gesture-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(130px, .85fr) minmax(220px, 1.5fr) minmax(132px, .72fr);
-  min-width: 720px;
+  grid-template-columns: minmax(150px, 1fr) minmax(130px, .9fr) minmax(210px, 1.35fr) minmax(170px, 1.05fr) minmax(190px, 1.15fr) minmax(145px, .8fr);
+  min-width: 1080px;
   border-bottom: 1px solid rgba(255,255,255,.065);
 }
 .admin-gesture-row:last-child { border-bottom: 0; }
@@ -4891,6 +4891,14 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 }
 .admin-gesture-filename { font-family: Consolas, monospace; }
 .admin-gesture-uploaded { white-space: nowrap; }
+.admin-gesture-editor-cell { display: grid; gap: 5px; }
+.admin-gesture-editor-cell input,
+.admin-gesture-editor-cell textarea { width: 100%; min-width: 0; }
+.admin-gesture-editor-cell textarea { min-height: 66px; resize: vertical; }
+.admin-gesture-editor-cell small,
+.admin-gesture-package span { display: block; color: var(--muted); font-size: 11px; }
+.admin-gesture-package { display: grid; gap: 5px; }
+.admin-gesture-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
 .admin-gesture-empty {
   min-width: 0;
   padding: 18px;
@@ -4973,6 +4981,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   box-shadow: 0 12px 34px rgba(0,0,0,.55);
 }
 .gesture-action-menu[hidden] { display: none; }
+#gesture-delete-modal { z-index: 10030; }
 .gesture-action-menu > button {
   min-height: 34px;
   padding: 7px 10px;

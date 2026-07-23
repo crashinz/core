@@ -13,15 +13,30 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
             'page' => $_GET['page'] ?? 1,
             'sort' => $_GET['sort'] ?? 'last_uploaded',
         ], true);
-        $catalog['items'] = array_map(static function (array $item): array {
+        $catalog['items'] = array_map(static function (array $item) use ($pdo): array {
+            $package = gesture_package_public_summary($pdo, $item, true);
             return [
                 'public_id' => (string)$item['public_id'],
+                'original_filename' => (string)$item['original_filename'],
                 'catalog_filename' => (string)$item['catalog_filename'],
                 'name' => (string)$item['title'],
+                'title' => (string)$item['title'],
                 'text' => (string)$item['text'],
+                'creator_credit' => (string)$item['creator_credit'],
+                'uploaded_by' => (string)$item['uploaded_by'],
+                'version' => (int)$item['version'],
+                'package_generation' => (int)$item['package_generation'],
+                'package_version' => (int)$item['package_version'],
+                'package_status' => (string)$item['package_status'],
+                'legacy_metadata' => !empty($item['legacy_metadata']),
+                'animation_url' => (string)($item['gif_url'] ?? ''),
+                'poster_url' => $item['poster_url'] ?? null,
+                'audio_url' => $item['audio_url'] ?? null,
+                'package' => $package,
                 'last_uploaded_at' => $item['published_at'] ?: ($item['content_updated_at'] ?: $item['original_uploaded_at']),
             ];
         }, $catalog['items']);
+        $catalog['features'] = gesture_part4_feature_flags($pdo);
         unset($catalog['preferences'], $catalog['ordered_ids'], $catalog['reorder_allowed']);
         json_out($catalog);
     } catch (GestureCatalogException $error) {

@@ -58,6 +58,7 @@ let runtimeRequestClient = null;
 let runtimeIssueCaptureService = null;
 let gesturePresentation = null;
 let gestureCatalogController = null;
+let gestureCatalogBroadcastChannel = null;
 let GestureCatalogControllerClass = null;
 const runtimeRequestAbortController = new AbortController();
 function stopRoomForDocumentExit(reason) {
@@ -66,6 +67,8 @@ function stopRoomForDocumentExit(reason) {
   if (chatRuntimeCore?.state === 'started') chatRuntimeCore.stop();
   runtimeRequestAbortController.abort(reason);
   runtimeIssueCaptureService?.destroy();
+  gestureCatalogBroadcastChannel?.close();
+  gestureCatalogBroadcastChannel = null;
   avatarRuntime?.coordinator?.cancelPendingLinkChoice(reason);
 }
 window.addEventListener('pagehide', () => stopRoomForDocumentExit('page-hide'), { once: true });
@@ -4925,6 +4928,7 @@ function initializeGestureCatalog() {
   gestureCatalogController = new GestureCatalogControllerClass({
     root: mediaPicker,
     features: cfg.gesturePart3?.features || {},
+    part4Features: cfg.gesturePart4?.features || {},
     queryIdentity: { session_id: cfg.sessionId, join_token: cfg.myJoinToken },
     mediaUrl,
     getJson: (url, operation) => runtimeRequestClient.getJson(url, {
@@ -4943,7 +4947,9 @@ function initializeGestureCatalog() {
     onHiddenMutation: (publicId, hidden, version) => gesturePresentation?.applyHiddenMutation(publicId, hidden, version, 'hidden-catalog-bulk'),
     onHide: setGestureHidden,
     onSend: sendGesture,
-    onUpload: () => gestureFileInput?.click(),
+    onCreate: () => openGestureEditor(),
+    onEdit: gesture => openGestureEditor(gesture),
+    onDownload: downloadGesturePackage,
     onDelete: openDeleteGestureModal,
     onTogglePublic: toggleGesturePublic,
     onAudio: toggleGestureAudio,
@@ -4978,8 +4984,53 @@ function initializeGestureCatalog() {
     hiddenConfirmNo: document.getElementById('hidden-gesture-confirm-no'),
   });
   gestureCatalogController.initialize();
+  if (!gestureCatalogBroadcastChannel && 'BroadcastChannel' in window) {
+    gestureCatalogBroadcastChannel = new BroadcastChannel('chatspace-gesture-catalog');
+    gestureCatalogBroadcastChannel.addEventListener('message', event => {
+      if (event.data?.type !== 'gesture-saved') return;
+      gestureCatalogController?.refresh('personal');
+      gestureCatalogController?.refresh('server');
+    });
+  }
   return gestureCatalogController;
 }
+
+function openGestureEditor(gesture = null) {
+  if (cfg.gesturePart4?.features?.editor === false) {
+    showWarning('Gesture Maker is disabled through shared Settings.');
+    return;
+  }
+  const publicId = String(gesture?.public_id || '');
+  const path = publicId ? `/gesture_editor.php?id=${encodeURIComponent(publicId)}` : '/gesture_editor.php';
+  const editor = window.open(appUrl(path), publicId ? `chatspace-gesture-editor-${publicId}` : 'chatspace-gesture-maker', 'popup,width=1080,height=820,resizable=yes,scrollbars=yes');
+  if (!editor) {
+    showWarning('Allow this site to open the Gesture Maker, then try again.');
+    return;
+  }
+  editor.focus();
+}
+
+function downloadGesturePackage(gesture) {
+  if (cfg.gesturePart4?.features?.user_package_download === false) {
+    showWarning('Gesture package downloads are disabled through shared Settings.');
+    return;
+  }
+  const publicId = String(gesture?.public_id || '');
+  if (!publicId) return;
+  const anchor = document.createElement('a');
+  anchor.href = appUrl(`/api/gesture_packages.php?action=download&id=${encodeURIComponent(publicId)}&request_id=${encodeURIComponent(gestureRequestKey('gesture-package-download'))}`);
+  anchor.download = `${String(gesture.catalog_filename || gesture.name || 'gesture').replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'gesture'}.agst`;
+  anchor.hidden = true;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+window.addEventListener('message', event => {
+  if (event.origin !== window.location.origin || event.data?.type !== 'chatspace-gesture-saved') return;
+  gestureCatalogController?.refresh('personal');
+  gestureCatalogController?.refresh('server');
+});
 
 async function saveWebcamViewerPreferences({ showWebcams, receiveWebcams, resetOverrides = false }) {
   if (webcamPreferencesPending) return;
@@ -5370,7 +5421,7 @@ function updateGestureUploadTileState() {
   if (!uploadTile) return;
   const limitReached = gestureOwnedCount >= gestureOwnedLimit;
   uploadTile.disabled = limitReached;
-  uploadTile.title = limitReached ? 'Remove some gestures to make room.' : 'Upload .agst';
+  uploadTile.title = limitReached ? 'Remove some gestures to make room.' : 'Create Gesture';
   uploadTile.querySelector('em')?.replaceChildren(document.createTextNode(`${gestureOwnedCount}/${gestureOwnedLimit}`));
 }
 
@@ -5442,11 +5493,11 @@ function renderGestureGrid(gestures) {
   uploadTile.type = 'button';
   const limitReached = gestureOwnedCount >= gestureOwnedLimit;
   uploadTile.disabled = limitReached;
-  uploadTile.title = limitReached ? 'Remove some gestures to make room.' : 'Upload .agst';
-  uploadTile.innerHTML = `<span>+</span><small>Upload .agst</small><em>${gestureOwnedCount}/${gestureOwnedLimit}</em><div class="gesture-upload-progress"><i></i></div>`;
+  uploadTile.title = limitReached ? 'Remove some gestures to make room.' : 'Create Gesture';
+  uploadTile.innerHTML = `<span>+</span><small>Create Gesture</small><em>${gestureOwnedCount}/${gestureOwnedLimit}</em><div class="gesture-upload-progress"><i></i></div>`;
   uploadTile.addEventListener('click', () => {
     if (limitReached) return;
-    gestureFileInput?.click();
+    openGestureEditor();
   });
   gestureGrid.appendChild(uploadTile);
 
@@ -5507,6 +5558,8 @@ gestureFileInput?.addEventListener('change', () => {
   if (!file) return;
   uploadGesture(file).catch(err => alert(err.message || err));
 });
+
+document.getElementById('personal-gesture-create')?.addEventListener('click', () => openGestureEditor());
 
 gesturePrev?.addEventListener('click', () => {
   if (gesturePage <= 1) return;
@@ -5640,7 +5693,7 @@ document.addEventListener('click', e => {
   if (!roomMenu.contains(e.target) && !e.target.closest('#room-menu-btn')) closeRoomMenu();
   if (roomActionMenu && !roomActionMenu.contains(e.target) && !e.target.closest('#room-action-btn')) closeRoomActionMenu();
   if (gameStartMenu && !gameStartMenu.contains(e.target) && !e.target.closest('#game-start-btn')) closeGameStartMenu();
-  if (mediaPicker && !mediaPicker.contains(e.target) && !e.target.closest('#emoji-btn')) closeMediaPicker();
+  if (mediaPicker && !mediaPicker.contains(e.target) && !e.target.closest('#emoji-btn') && !e.target.closest('#gesture-delete-modal')) closeMediaPicker();
   if (!attachMenu.contains(e.target) && !e.target.closest('#attach-btn')) closeAttachMenu();
 });
 document.addEventListener('keydown', e => {
