@@ -310,6 +310,7 @@
       const card = input.closest('[data-setting-id]');
       card?.classList.toggle('is-dirty', this.isDirty(entry));
       this.updateSummaries();
+      this.applyDependencyStates();
       this.applySearchAndFilter();
       this.onDraftChange(this.getState());
       this.onEntryChange(entry, this.draft.get(entry.id), this.getState());
@@ -410,6 +411,24 @@
       }
     }
 
+    applyDependencyStates() {
+      for (const entry of this.entries) {
+        const dependencies = Array.isArray(entry.dependencies) ? entry.dependencies : [];
+        const unmet = dependencies.filter(id => this.draft.get(id) === false);
+        const card = Array.from(this.container.querySelectorAll('[data-setting-id]'))
+          .find(node => node.dataset.settingId === entry.id);
+        if (!card) continue;
+        card.classList.toggle('is-dependency-inactive', unmet.length > 0);
+        const badge = card.querySelector('[data-settings-dependency-badge]');
+        if (badge) {
+          badge.hidden = unmet.length === 0;
+          badge.textContent = unmet.length
+            ? `Inactive while ${unmet.map(id => this.entryMap.get(id)?.label || id).join(', ')} is disabled`
+            : '';
+        }
+      }
+    }
+
     operationButton(label, operation, details, className = 'btn') {
       const button = element('button', className, label);
       button.type = 'button';
@@ -434,6 +453,12 @@
       badges.appendChild(element('span', `settings-badge settings-badge-${safeId(entry.controlClass)}`, entry.controlClass === 'optional' ? 'Optional' : (entry.controlClass === 'mandatory-fixed' ? 'Mandatory' : 'Configurable')));
       if (entry.changedFromDefault) badges.appendChild(element('span', 'settings-badge settings-badge-changed', 'Changed'));
       if (entry.originalRelevant) badges.appendChild(element('span', 'settings-badge settings-badge-original', 'Original relevant'));
+      if ((entry.dependencies || []).length) {
+        const dependency = element('span', 'settings-badge settings-badge-dependency', '');
+        dependency.dataset.settingsDependencyBadge = 'true';
+        dependency.hidden = true;
+        badges.appendChild(dependency);
+      }
       heading.appendChild(badges);
       card.appendChild(heading);
       card.appendChild(element('p', 'settings-entry-description', entry.description));
@@ -465,6 +490,7 @@
         }
       }
       this.updateSummaries();
+      this.applyDependencyStates();
       this.applySearchAndFilter();
       this.onDraftChange(this.getState());
     }
@@ -543,6 +569,11 @@
             actions.appendChild(this.operationButton('Enable All Gesture Features', 'set_many', { values: Object.fromEntries(gestureEntries.map(entry => [entry.id, true])) }, 'btn'));
             actions.appendChild(this.operationButton('Disable All Gesture Features', 'set_many', { values: Object.fromEntries(gestureEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
           }
+          if (sectionEntries.some(entry => entry.bulkGroup === 'gesture-capability')) {
+            const capabilityEntries = sectionEntries.filter(entry => entry.bulkGroup === 'gesture-capability');
+            actions.appendChild(this.operationButton('Enable All Gesture Capabilities', 'set_many', { values: Object.fromEntries(capabilityEntries.map(entry => [entry.id, true])) }, 'btn'));
+            actions.appendChild(this.operationButton('Disable All Gesture Capabilities', 'set_many', { values: Object.fromEntries(capabilityEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
+          }
           if (sectionEntries.some(entry => entry.bulkGroup === 'gesture-part-4')) {
             const packageEntries = sectionEntries.filter(entry => entry.bulkGroup === 'gesture-part-4');
             actions.appendChild(this.operationButton('Enable All Gesture Maker and Package Features', 'set_many', { values: Object.fromEntries(packageEntries.map(entry => [entry.id, true])) }, 'btn'));
@@ -558,6 +589,7 @@
         }
         this.container.appendChild(details);
       }
+      this.applyDependencyStates();
       this.applySearchAndFilter();
     }
 

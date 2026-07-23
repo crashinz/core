@@ -78,8 +78,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $ownedStmt->execute([$userId]);
     $ownedCount = (int)$ownedStmt->fetchColumn();
     $ownedLimit = max(0, (int)app_setting($pdo, 'gesture_upload_limit', '50'));
-    $params = [$userId];
-    $where = 'deleted_at IS NULL AND (owner_user_id = ? OR is_public = 1)';
+    $capability = gesture_capability_policy($pdo);
+    if (empty($capability['effective']['allow_gestures'])) {
+        json_out(
+            gesture_catalog_exception_payload(new GestureCatalogException(
+                'Allow gestures is disabled through shared Settings.',
+                403,
+                'GESTURES_DISABLED'
+            )),
+            403
+        );
+    }
+    $catalogPredicates = [];
+    $params = [];
+    if (!empty($capability['effective']['allow_personal_gestures'])) {
+        $catalogPredicates[] = 'owner_user_id = ?';
+        $params[] = $userId;
+    }
+    if (!empty($capability['effective']['allow_server_gestures'])) {
+        $catalogPredicates[] = '(is_public = 1 AND owner_user_id <> ?)';
+        $params[] = $userId;
+    }
+    $where = 'deleted_at IS NULL AND (' . ($catalogPredicates ? implode(' OR ', $catalogPredicates) : '1 = 0') . ')';
     if ($q !== '') {
         $where .= ' AND (LOWER(name) LIKE ? OR LOWER(gesture_text) LIKE ?)';
         $needle = '%' . strtolower($q) . '%';
@@ -97,7 +117,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             LIMIT $perPage OFFSET $offset";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([...$params, $userId]);
-    $items = array_map(fn(array $row): array => gesture_row_payload($row, $userId), $stmt->fetchAll());
+    $part4 = gesture_part4_feature_flags($pdo);
+    $items = array_map(
+        fn(array $row): array => gesture_capability_project_catalog_payload(
+            $pdo,
+            gesture_row_payload($row, $userId),
+            false,
+            $capability,
+            $part4
+        ),
+        $stmt->fetchAll()
+    );
     json_out([
         'gestures' => $items,
         'page' => $page,
@@ -123,6 +153,16 @@ if (str_contains($contentType, 'application/json')) {
                 (array)($body['values'] ?? []),
                 (int)($body['expected_version'] ?? -1),
                 gesture_request_key($body, 'presentation', true)
+            ));
+        }
+        if ($action === 'hide_sender_media' || $action === 'show_sender_media') {
+            json_out(gesture_catalog_set_sender_media_hidden(
+                $pdo,
+                $userId,
+                (int)($body['target_user_id'] ?? 0),
+                $action === 'hide_sender_media',
+                (int)($body['expected_version'] ?? -1),
+                gesture_request_key($body, 'sender-media-visibility', true)
             ));
         }
         if ($action === 'set_sort') {

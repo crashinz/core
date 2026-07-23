@@ -140,7 +140,7 @@ function file_reply_preview_text(array $message): string {
     if ($type === 'gif') return 'sent a GIF';
     if ($type === 'gesture') {
         $gesture = message_gesture((string)($message['content'] ?? ''));
-        return trim((string)($gesture['text'] ?? $gesture['name'] ?? $message['original_name'] ?? 'sent a gesture'));
+        return gesture_presentation_canonical_text(is_array($gesture) ? $gesture : []);
     }
     if ($type === 'file') return trim((string)($message['original_name'] ?? 'sent a file'));
     if ($type === 'voice_note') return 'sent a voice note';

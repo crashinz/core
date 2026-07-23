@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/base.php';
 $actor = require_user();
 $pdo = db();
 $features = gesture_part4_feature_flags($pdo);
+$capabilities = gesture_capability_policy($pdo);
 $method = $_SERVER['REQUEST_METHOD'] ?? '';
 
 function gesture_package_api_bool(mixed $value): bool
@@ -20,15 +21,34 @@ function gesture_package_api_feature(array $features, string $key, string $messa
 
 function gesture_package_api_download(PDO $pdo, array $actor, string $publicId): never
 {
-    $record = gesture_package_download_record($pdo, $actor, $publicId);
-    if ($record['admin']) security_require_recent_authentication_or_json();
-    security_authorize_outside_content_or_json($pdo, $actor, 'gesture_package_download', ['source' => $record['admin'] ? 'admin' : 'gesture-catalog']);
-    $reservation = null;
+    if (($actor['role'] ?? '') === 'admin') security_require_recent_authentication_or_json();
     $requestId = trim((string)($_GET['request_id'] ?? ''));
-    if (!$record['owner'] && !$record['admin']) {
-        if (!preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $requestId)) $requestId = 'gesture-download-' . bin2hex(random_bytes(12));
-        $reservation = gesture_catalog_begin_download($pdo, (int)$actor['id'], $publicId, $requestId);
-    }
+    [$record, $reservation, $requestId] = gesture_catalog_transaction(
+        $pdo,
+        function () use ($pdo, $actor, $publicId, $requestId): array {
+            gesture_capability_lock($pdo);
+            $record = gesture_package_download_record($pdo, $actor, $publicId);
+            security_authorize_outside_content_or_json(
+                $pdo,
+                $actor,
+                'gesture_package_download',
+                ['source' => $record['admin'] ? 'admin' : 'gesture-catalog']
+            );
+            $reservation = null;
+            if (!$record['owner'] && !$record['admin']) {
+                if (!preg_match('/^[A-Za-z0-9._:-]{8,64}$/', $requestId)) {
+                    $requestId = 'gesture-download-' . bin2hex(random_bytes(12));
+                }
+                $reservation = gesture_catalog_begin_download(
+                    $pdo,
+                    (int)$actor['id'],
+                    $publicId,
+                    $requestId
+                );
+            }
+            return [$record, $reservation, $requestId];
+        }
+    );
     $temporary = null;
     try {
         $path = gesture_package_download_path($record);
@@ -63,7 +83,12 @@ try {
     if ($method === 'GET') {
         $action = (string)($_GET['action'] ?? 'preferences');
         if ($action === 'preferences') {
-            json_out(['ok' => true, 'features' => $features, 'preferences' => gesture_catalog_preferences_payload($pdo, (int)$actor['id'])]);
+            json_out([
+                'ok' => true,
+                'features' => $features,
+                'capabilities' => $capabilities,
+                'preferences' => gesture_catalog_preferences_payload($pdo, (int)$actor['id']),
+            ]);
         }
         $publicId = trim((string)($_GET['id'] ?? ''));
         if (!preg_match('/^[A-Za-z0-9-]{8,64}$/', $publicId)) throw new GestureCatalogException('Gesture identity is invalid.', 400, 'GESTURE_ID_INVALID');
@@ -71,7 +96,7 @@ try {
         if ($action === 'detail') {
             gesture_package_api_feature($features, $admin ? 'admin_package_inspection' : 'editor', 'Gesture package inspection is disabled.');
             if ($admin) security_require_recent_authentication_or_json();
-            json_out(['ok' => true, 'features' => $features] + gesture_package_editor_detail($pdo, $actor, $publicId, $admin));
+            json_out(['ok' => true, 'features' => $features, 'capabilities' => $capabilities] + gesture_package_editor_detail($pdo, $actor, $publicId, $admin));
         }
         if ($action === 'download') {
             $downloadFeature = ($actor['role'] ?? '') === 'admin' ? 'admin_package_inspection' : 'user_package_download';

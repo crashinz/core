@@ -16,6 +16,8 @@ export class GestureCatalogController {
     #searchTimers;
     #drag;
     #suppressClick;
+    #managementPage;
+    #managementPages;
 
     constructor(options) {
         this.#options = options;
@@ -36,6 +38,8 @@ export class GestureCatalogController {
         this.#searchTimers = new Map();
         this.#drag = null;
         this.#suppressClick = new WeakSet();
+        this.#managementPage = 1;
+        this.#managementPages = 1;
     }
 
     features() {
@@ -44,6 +48,19 @@ export class GestureCatalogController {
 
     part4Features() {
         return this.#options.part4Features || {};
+    }
+
+    capabilities() {
+        return this.#options.capabilities || {};
+    }
+
+    applyCapabilities(capabilities = {}) {
+        this.#options.capabilities = capabilities;
+        this.#applyFeatureVisibility();
+        for (const scope of ["server", "personal"]) {
+            const state = this.#states.get(scope);
+            if (state?.loaded) void this.load(scope);
+        }
     }
 
     initialize() {
@@ -69,18 +86,21 @@ export class GestureCatalogController {
             this.closeActionMenu(true);
         });
         this.#bindHiddenActions();
+        this.#bindManagementActions();
         this.#applyFeatureVisibility();
     }
 
     #applyFeatureVisibility() {
         const features = this.features();
         const enhanced = features.enhanced_picker !== false;
+        const capabilities = this.capabilities();
+        const master = capabilities.allowGestures !== false;
         const mapping = {
             gifs: features.gifs_tab !== false,
-            "server-gestures": enhanced && features.server_tab !== false,
-            "personal-gestures": enhanced && features.personal_tab !== false,
+            "server-gestures": master && capabilities.allowServerGestures !== false && enhanced && features.server_tab !== false,
+            "personal-gestures": master && capabilities.allowPersonalGestures !== false && enhanced && features.personal_tab !== false,
             emojis: features.emojis_tab !== false,
-            gestures: !enhanced,
+            gestures: master && !enhanced,
         };
         for (const [tab, visible] of Object.entries(mapping)) {
             const button = this.#options.root?.querySelector(`[data-media-tab="${tab}"]`);
@@ -105,7 +125,112 @@ export class GestureCatalogController {
     }
 
     async refresh(scope = this.#activeScope) {
-        if (scope && this.#states.has(scope)) await this.load(scope);
+        if (scope && this.#states.has(scope)) {
+            const state = this.#states.get(scope);
+            if (scope === this.#activeScope) await this.load(scope);
+            else state.loaded = false;
+        }
+        if (scope === "personal" && this.#options.management?.modal?.classList.contains("open")) {
+            await this.#loadManagement();
+        }
+    }
+
+    async openManagement() {
+        const management = this.#options.management;
+        if (!management?.modal) return;
+        management.modal.classList.add("open");
+        this.#managementPage = 1;
+        await this.#loadManagement();
+        management.create?.focus();
+    }
+
+    #bindManagementActions() {
+        const management = this.#options.management;
+        if (!management?.modal) return;
+        management.close?.addEventListener("click", () => this.#closeManagement());
+        management.modal.addEventListener("pointerdown", event => {
+            if (event.target === management.modal) this.#closeManagement();
+        });
+        management.create?.addEventListener("click", () => this.#options.onCreate?.(management.create));
+        management.pager?.addEventListener("click", event => {
+            const page = Number(event.target?.closest?.("button[data-page]")?.dataset.page || 0);
+            if (!page || page === this.#managementPage || page > this.#managementPages) return;
+            this.#managementPage = page;
+            void this.#loadManagement();
+        });
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && management.modal.classList.contains("open")) {
+                event.stopPropagation();
+                this.#closeManagement();
+            }
+        });
+    }
+
+    #closeManagement() {
+        const management = this.#options.management;
+        management?.modal?.classList.remove("open");
+        management?.launch?.focus();
+    }
+
+    async #loadManagement() {
+        const management = this.#options.management;
+        if (!management?.list) return;
+        management.list.replaceChildren(element("div", "gif-loading", "Loading My Gestures…"));
+        if (management.status) management.status.textContent = "Loading My Gestures…";
+        const query = new URLSearchParams({
+            ...this.#options.queryIdentity,
+            catalog: "personal",
+            page: String(this.#managementPage),
+            q: "",
+            sort: "last_uploaded",
+        });
+        try {
+            const data = await this.#options.getJson(`/api/gestures.php?${query}`, "load-personal-gesture-management");
+            const items = (Array.isArray(data.items) ? data.items : []).filter(gesture => gesture.mine === true);
+            this.#managementPage = Math.max(1, Number(data.page || 1));
+            this.#managementPages = Math.max(1, Number(data.pages || 1));
+            management.list.textContent = "";
+            for (const gesture of items) {
+                const row = element("article", "gesture-management-row");
+                row.dataset.gesturePublicId = String(gesture.public_id || "");
+                const image = document.createElement("img");
+                image.src = this.#options.mediaUrl(gesture.gif_path || gesture.gif_url || "");
+                image.alt = "";
+                const description = element("span", "gesture-management-description");
+                description.append(
+                    element("strong", "", gesture.title || gesture.text || "Personal Gesture"),
+                    element("small", "", gesture.text || "")
+                );
+                const edit = element("button", "btn", "Edit");
+                edit.type = "button";
+                edit.disabled = this.part4Features().editor === false
+                    || this.capabilities().allowUserGestureMutation === false;
+                edit.addEventListener("click", () => this.#options.onEdit?.(gesture));
+                row.append(image, description, edit);
+                management.list.appendChild(row);
+            }
+            if (!items.length) management.list.appendChild(element("div", "gesture-empty", "You have no Personal Gestures yet."));
+            if (management.pager) {
+                management.pager.textContent = "";
+                const previous = element("button", "btn", "Previous");
+                previous.type = "button";
+                previous.dataset.page = String(this.#managementPage - 1);
+                previous.disabled = this.#managementPage <= 1;
+                const label = element("span", "", `Page ${this.#managementPage} of ${this.#managementPages}`);
+                const next = element("button", "btn", "Next");
+                next.type = "button";
+                next.dataset.page = String(this.#managementPage + 1);
+                next.disabled = this.#managementPage >= this.#managementPages;
+                management.pager.append(previous, label, next);
+            }
+            if (management.status) {
+                const total = Number(data.total || 0);
+                management.status.textContent = `${total} Personal Gesture${total === 1 ? "" : "s"}.`;
+            }
+        } catch (error) {
+            management.list.replaceChildren(element("div", "gesture-empty", error.message || "My Gestures could not load."));
+            if (management.status) management.status.textContent = error.message || "My Gestures could not load.";
+        }
     }
 
     #refs(scope) {
@@ -129,6 +254,23 @@ export class GestureCatalogController {
         const state = this.#states.get(scope);
         const refs = this.#refs(scope);
         if (!state || !refs?.grid) return;
+        const capabilities = this.capabilities();
+        const allowed = capabilities.allowGestures !== false
+            && (scope === "personal"
+                ? capabilities.allowPersonalGestures !== false
+                : capabilities.allowServerGestures !== false);
+        if (!allowed) {
+            state.items = [];
+            state.total = 0;
+            state.loaded = true;
+            refs.grid.replaceChildren(element(
+                "div",
+                "minor",
+                `${scope === "personal" ? "Personal" : "Server"} Gestures are disabled through shared Settings.`
+            ));
+            this.#announce(scope, `${scope === "personal" ? "Personal" : "Server"} Gestures are disabled.`);
+            return;
+        }
         refs.grid.replaceChildren(element("div", "gif-loading", "Loading gestures…"));
         try {
             const data = await this.#options.getJson(`/api/gestures.php?${this.#query(scope)}`, `load-${scope}-gestures`);
@@ -170,8 +312,11 @@ export class GestureCatalogController {
         button.type = "button";
         const limitReached = Number(state.ownedCount || 0) >= Number(state.ownedLimit ?? 50);
         const editorDisabled = this.part4Features().editor === false;
-        button.disabled = limitReached || editorDisabled;
-        button.title = limitReached ? "Remove some gestures to make room." : (editorDisabled ? "Gesture Maker is disabled through shared Settings." : "Create Gesture");
+        const mutationDisabled = this.capabilities().allowUserGestureMutation === false;
+        button.disabled = limitReached || editorDisabled || mutationDisabled;
+        button.title = limitReached
+            ? "Remove some gestures to make room."
+            : (editorDisabled || mutationDisabled ? "Gesture creation is disabled through shared Settings." : "Create Gesture");
         const progress = element("div", "gesture-upload-progress");
         progress.appendChild(document.createElement("i"));
         button.append(
@@ -190,6 +335,11 @@ export class GestureCatalogController {
         tile.dataset.gestureScope = scope;
         const play = element("button", "gesture-play");
         play.type = "button";
+        const scopeAllowed = this.capabilities().allowGestures !== false
+            && (scope === "personal"
+                ? this.capabilities().allowPersonalGestures !== false
+                : this.capabilities().allowServerGestures !== false);
+        play.disabled = !scopeAllowed;
         play.setAttribute("aria-label", `Send ${gesture.text || gesture.title || "gesture"}`);
         const image = document.createElement("img");
         image.src = this.#options.mediaUrl(gesture.gif_path || gesture.gif_url || "");
@@ -210,10 +360,12 @@ export class GestureCatalogController {
         if (scope === "personal") {
             const owner = element("button", "gesture-star", "★");
             owner.type = "button";
+            owner.disabled = this.capabilities().allowUserGestureMutation === false;
             owner.title = "Delete my gesture";
             owner.addEventListener("click", () => this.#options.onDelete?.(gesture));
             const visibility = element("button", "gesture-global", "🌐");
             visibility.type = "button";
+            visibility.disabled = this.capabilities().allowUserGestureMutation === false;
             visibility.title = gesture.is_public ? "Make Personal" : "Make public";
             visibility.addEventListener("click", () => this.#options.onTogglePublic?.(gesture, !gesture.is_public));
             tile.append(owner, visibility);
@@ -389,18 +541,23 @@ export class GestureCatalogController {
             menu.appendChild(button);
         };
         const searchActive = this.#states.get(scope).query !== "";
+        const scopeDisabled = this.capabilities().allowGestures === false
+            || (scope === "personal"
+                ? this.capabilities().allowPersonalGestures === false
+                : this.capabilities().allowServerGestures === false);
+        const mutationDisabled = this.capabilities().allowUserGestureMutation === false;
         if (scope === "server" && this.features().hide_unhide !== false) {
-            action("Hide Server Gesture", () => this.#hideGesture(gesture), false);
+            action("Hide Server Gesture", () => this.#hideGesture(gesture), scopeDisabled);
         }
         if (scope === "personal" && gesture.mine) {
-            action("Edit Gesture", () => this.#options.onEdit?.(gesture), this.part4Features().editor === false);
+            action("Edit Gesture", () => this.#options.onEdit?.(gesture), this.part4Features().editor === false || mutationDisabled);
         }
         if ((scope === "personal" && gesture.mine || scope === "server") && this.part4Features().user_package_download !== false) {
-            action("Download Gesture Package", () => this.#options.onDownload?.(gesture));
+            action("Download Gesture Package", () => this.#options.onDownload?.(gesture), scopeDisabled);
         }
-        action("Move to Top", () => this.#move(scope, gesture.public_id, "move_top"), searchActive || this.features().custom_order === false);
-        action("Move to Page…", () => this.#openMovePage(scope, gesture), searchActive || this.features().custom_order === false, true);
-        action("Reset Custom Position", () => this.#move(scope, gesture.public_id, "reset_position"), searchActive || this.features().custom_order === false);
+        action("Move to Top", () => this.#move(scope, gesture.public_id, "move_top"), scopeDisabled || searchActive || this.features().custom_order === false);
+        action("Move to Page…", () => this.#openMovePage(scope, gesture), scopeDisabled || searchActive || this.features().custom_order === false, true);
+        action("Reset Custom Position", () => this.#move(scope, gesture.public_id, "reset_position"), scopeDisabled || searchActive || this.features().custom_order === false);
         menu.hidden = false;
         menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - 230))}px`;
         menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8))}px`;

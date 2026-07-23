@@ -967,7 +967,10 @@ async function loadAdminSettings() {
 }
 
 function adminGestureFeatureEntries() {
-  return (adminSettingsRegistry?.entries || []).filter(entry => /^gesture_part[34]_/.test(String(entry.id || '')));
+  return (adminSettingsRegistry?.entries || []).filter(entry => (
+    /^gesture_part[34]_/.test(String(entry.id || ''))
+    || String(entry.bulkGroup || '') === 'gesture-capability'
+  ));
 }
 
 function adminGestureCatalogEnabled() {
@@ -980,12 +983,15 @@ function renderAdminGestureFeatureSummary() {
   if (target) {
     const part3 = entries.filter(entry => String(entry.id).startsWith('gesture_part3_'));
     const part4 = entries.filter(entry => String(entry.id).startsWith('gesture_part4_'));
+    const capabilities = entries.filter(entry => String(entry.bulkGroup || '') === 'gesture-capability');
     const enabled3 = Number(adminSettingsRegistry?.summaries?.gesturePart3EnabledCount ?? part3.filter(entry => entry.currentValue === true).length);
     const total3 = Number(adminSettingsRegistry?.summaries?.gesturePart3TotalCount ?? part3.length);
     const enabled4 = Number(adminSettingsRegistry?.summaries?.gesturePart4EnabledCount ?? part4.filter(entry => entry.currentValue === true).length);
     const total4 = Number(adminSettingsRegistry?.summaries?.gesturePart4TotalCount ?? part4.length);
+    const enabledCapabilities = Number(adminSettingsRegistry?.summaries?.gestureCapabilityEffectiveCount ?? capabilities.filter(entry => entry.effectiveValue === true).length);
+    const totalCapabilities = Number(adminSettingsRegistry?.summaries?.gestureCapabilityTotalCount ?? capabilities.length);
     target.textContent = entries.length
-      ? `${enabled3} of ${total3} Part 3 presentation features and ${enabled4} of ${total4} Part 4 package/editor features enabled through the shared registry.`
+      ? `${enabledCapabilities} of ${totalCapabilities} gesture capabilities effective, ${enabled3} of ${total3} Part 3 presentation features enabled, and ${enabled4} of ${total4} Part 4 package/editor features enabled through the shared registry.`
       : 'Shared gesture settings are unavailable.';
   }
   const enabled = adminGestureCatalogEnabled();
@@ -1628,6 +1634,17 @@ function lobbyAdminSettingsSuccessMessage(result, operation, details) {
   if (packageIds.length > 1 && packageIds.length === ids.length) {
     const enabled = Object.values(details.values || {}).some(Boolean);
     return `All Part 4 Gesture Maker and package features ${enabled ? 'enabled' : 'disabled'}.`;
+  }
+  const capabilityIds = ids.filter(id => [
+    'allow_gestures',
+    'allow_server_gestures',
+    'allow_personal_gestures',
+    'allow_user_gesture_mutation',
+    'allow_gesture_audio_delivery',
+  ].includes(id));
+  if (capabilityIds.length > 1 && capabilityIds.length === ids.length) {
+    const enabled = Object.values(details.values || {}).some(Boolean);
+    return `All gesture capabilities ${enabled ? 'enabled' : 'disabled'}.`;
   }
   if (ids.length === 1) {
     const entry = adminSettingsRegistryUI?.entryMap?.get(ids[0]);

@@ -207,6 +207,38 @@ function settings_registry_definitions(): array {
         ]);
     }
 
+    foreach (gesture_capability_registry() as $capability) {
+        $id = (string)$capability['id'];
+        $master = $id === 'allow_gestures';
+        $definitions[] = settings_registry_entry([
+            'id' => $id,
+            'settingKey' => $id,
+            'owner' => 'gesture_capability_policy',
+            'categoryId' => 'chat-messaging',
+            'subsectionId' => 'gesture-capabilities',
+            'subsectionLabel' => 'Gesture Capabilities',
+            'label' => (string)$capability['label'],
+            'description' => (string)$capability['description'],
+            'helpText' => $master
+                ? 'This is the server-authoritative parent gate. Turning it off preserves subordinate stored values and historical canonical text.'
+                : 'Effective only while Allow gestures is enabled. The stored value is preserved when the parent is off.',
+            'aliases' => ['gesture capability', 'gesture permission', $master ? 'master gestures' : 'gesture subordinate'],
+            'type' => 'boolean',
+            'defaultValue' => true,
+            'order' => (int)$capability['order'],
+            'controlClass' => 'optional',
+            'optional' => true,
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'originalRelevant' => true,
+            'originalValueAvailable' => true,
+            'originalValue' => true,
+            'dependencies' => $master ? [] : ['allow_gestures'],
+            'bulkOperations' => ['setting', 'subsection', 'category', 'all-optional', 'preset'],
+            'bulkGroup' => 'gesture-capability',
+        ]);
+    }
+
     $gesturePart3Features = [
         ['gesture_part3_enhanced_picker', 'Enhanced gesture picker', 'Use the Part 3 catalog picker presentation instead of the earlier combined gesture list.', 10],
         ['gesture_part3_gifs_tab', 'GIFs tab', 'Show the existing GIF search as a dedicated picker tab.', 20],
@@ -413,6 +445,9 @@ function settings_registry_current_value(PDO $pdo, array $definition, array $con
         return (int)$context['size'][$publicKey];
     }
     if ($id === 'allow_webcam_use') return !empty($context['webcam']['allowWebcamUse']);
+    if ($definition['owner'] === 'gesture_capability_policy') {
+        return !empty($context['gestureCapabilities']['stored'][$id]);
+    }
     if ($id === 'role_colors_mode') return (string)$context['roleColors']['mode'];
     if (str_starts_with($id, 'role_color_')) {
         if (!preg_match('/^role_color_(admin|developer|guide|owner|user)_(bg|text)$/', $id, $match)) return '';
@@ -443,6 +478,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         'size' => avatar_size_policy($pdo),
         'webcam' => webcam_capability($pdo),
         'roleColors' => role_color_settings($pdo),
+        'gestureCapabilities' => gesture_capability_policy($pdo),
     ];
     $entries = [];
     foreach (settings_registry_definitions() as $definition) {
@@ -467,6 +503,20 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         $entry['visibleOnSurface'] = $visible;
         $entries[] = $entry;
     }
+    $currentValues = [];
+    foreach ($entries as $entry) $currentValues[(string)$entry['id']] = $entry['currentValue'];
+    foreach ($entries as &$entry) {
+        $unmet = array_values(array_filter(
+            (array)$entry['dependencies'],
+            static fn(string $dependency): bool => array_key_exists($dependency, $currentValues)
+                && $currentValues[$dependency] === false
+        ));
+        $entry['unmetDependencies'] = $unmet;
+        $entry['effectiveValue'] = $entry['type'] === 'boolean' && $unmet
+            ? false
+            : $entry['currentValue'];
+    }
+    unset($entry);
     usort($entries, static function (array $a, array $b): int {
         $categoryOrder = array_column(settings_registry_categories(), 'order', 'id');
         return [$categoryOrder[$a['categoryId']] ?? 999, $a['subsectionId'], (int)$a['order'], $a['id']]
@@ -487,6 +537,9 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
     $enabledGesturePart3 = count(array_filter($gesturePart3Entries, static fn(array $entry): bool => $entry['enabled'] === true));
     $gesturePart4Entries = array_values(array_filter($visibleEntries, static fn(array $entry): bool => $entry['bulkGroup'] === 'gesture-part-4'));
     $enabledGesturePart4 = count(array_filter($gesturePart4Entries, static fn(array $entry): bool => $entry['enabled'] === true));
+    $gestureCapabilityEntries = array_values(array_filter($visibleEntries, static fn(array $entry): bool => $entry['bulkGroup'] === 'gesture-capability'));
+    $enabledGestureCapabilities = count(array_filter($gestureCapabilityEntries, static fn(array $entry): bool => $entry['enabled'] === true));
+    $effectiveGestureCapabilities = count(array_filter($gestureCapabilityEntries, static fn(array $entry): bool => $entry['effectiveValue'] === true));
 
     return [
         'schemaId' => 'chatspace.settings-registry',
@@ -507,6 +560,9 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
             'gesturePart3TotalCount' => count($gesturePart3Entries),
             'gesturePart4EnabledCount' => $enabledGesturePart4,
             'gesturePart4TotalCount' => count($gesturePart4Entries),
+            'gestureCapabilityEnabledCount' => $enabledGestureCapabilities,
+            'gestureCapabilityEffectiveCount' => $effectiveGestureCapabilities,
+            'gestureCapabilityTotalCount' => count($gestureCapabilityEntries),
             'compatibilityState' => $compatibilityState,
         ],
         'compatibility' => [
@@ -699,6 +755,19 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
 
         $stopped = 0;
         $changedMap = array_fill_keys($changedIds, true);
+        $gestureCapabilityChanged = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool => gesture_capability_definition($id) !== null
+        ));
+        $gestureCapabilityProjection = null;
+        if ($gestureCapabilityChanged) {
+            $capabilityValues = gesture_capability_policy($pdo)['stored'];
+            foreach ($target as $id => $value) {
+                if (gesture_capability_definition($id) !== null) $capabilityValues[$id] = (bool)$value;
+            }
+            $gestureCapabilityResult = gesture_capability_update_locked($pdo, $capabilityValues);
+            $gestureCapabilityProjection = $gestureCapabilityResult['capability'];
+        }
         $danceChanged = array_filter($changedIds, static fn(string $id): bool => str_starts_with($id, 'avatar_dance.'));
         if ($danceChanged) {
             $danceValues = avatar_dance_capability_normalize_values(avatar_dance_capability_policy($pdo)['enabled']);
@@ -743,6 +812,7 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             array_keys(avatar_size_policy_setting_map()),
             ['avatar_relationship_max_regular_links', 'allow_webcam_use', 'role_colors_mode'],
             array_keys(role_color_setting_defaults()),
+            array_map(static fn(array $capability): string => (string)$capability['id'], gesture_capability_registry()),
             array_map(static fn(array $dance): string => 'avatar_dance.' . $dance['id'], avatar_dance_capability_registry())
         ), true);
         foreach ($changedIds as $id) {
@@ -774,6 +844,9 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             . '; stopped ' . $stopped . ' active optional state(s).';
         log_tool($pdo, $actorUserId > 0 ? $actorUserId : null, $source === 'setup' ? 'setup_settings_registry_update' : 'admin_settings_registry_update', null, null, $detail);
         if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        if ($gestureCapabilityChanged) {
+            gesture_capability_emit($pdo, gesture_capability_policy($pdo));
+        }
         return [
             'ok' => true, 'idempotent' => false, 'revision' => $nextRevision,
             'changedSettingCount' => count($changedIds), 'changedSettingIds' => $changedIds,

@@ -262,6 +262,32 @@ export class ChatMediaSendService {
         const config =
             context.getConfig();
 
+        const capabilities =
+            config.gestureCapabilities || {};
+
+        const personal =
+            Number(gesture.owner_user_id || 0) === Number(config.myUserId || 0);
+        const requestKey =
+            typeof context.requestKey === "function"
+                ? context.requestKey("gesture-message")
+                : `gesture-message-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+
+        if (capabilities.allowGestures === false ||
+            (personal && capabilities.allowPersonalGestures === false) ||
+            (!personal && capabilities.allowServerGestures === false)) {
+
+            this.#reportError(
+                new Error(
+                    capabilities.allowGestures === false
+                        ? "Gestures are disabled through shared Settings."
+                        : `${personal ? "Personal" : "Server"} Gestures are disabled through shared Settings.`
+                )
+            );
+
+            return null;
+
+        }
+
         const payload =
             this.#runtime.reply.appendReplyPayload({
 
@@ -277,41 +303,48 @@ export class ChatMediaSendService {
                 gesture_id:
                     gesture.id,
 
+                request_key:
+                    requestKey,
+
                 channel:
-                    "room"
+                    context.channelForApi(activeChat)
 
             }, activeChat);
 
-        try {
+        if (String(activeChat || "").startsWith("game:")) {
 
-            const message =
-                await context.apiPost(
-                    "/api/messages.php",
-                    payload
-                );
+            try {
 
-            this.#runtime.reply.clearDraft();
+                const message =
+                    await context.apiPost(
+                        "/api/game_chat.php",
+                        {
+                            session_id: config.sessionId,
+                            join_token: config.myJoinToken,
+                            lobby_code: String(activeChat).slice(5),
+                            action: "gesture",
+                            gesture_id: gesture.id,
+                            request_key: payload.request_key
+                        }
+                    );
 
-            context.switchChat?.(
-                "room"
-            );
+                this.#runtime.reply.clearDraft();
+                this.#routeSentMessage(message, {});
+                return message;
 
-            context.renderMessage(
-                message,
-                true
-            );
+            } catch (error) {
 
-            return message;
+                this.#reportError(error);
+                return null;
 
-        } catch (error) {
-
-            this.#reportError(
-                error
-            );
-
-            return null;
+            }
 
         }
+
+        const targets =
+            this.#applyChatTargetsToPayload(payload);
+
+        return this.#sendMessagePayload(payload, targets);
 
     }
 

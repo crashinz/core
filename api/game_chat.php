@@ -27,7 +27,7 @@ $playerIds = array_filter([(int)($game['user1_id'] ?? 0), (int)($game['user2_id'
 if (!in_array((int)$participant['id'], $playerIds, true)) json_out(['error' => 'Join the game to use game chat'], 403);
 
 $messagePayload = function(array $row) use ($pdo, $participant): array {
-    return avatar_visibility_project_payload($pdo, (int)$participant['user_id'], [
+    $payload = [
         'id' => (int)$row['id'],
         'channel' => 'game',
         'lobby_code' => $row['lobby_code'],
@@ -43,7 +43,16 @@ $messagePayload = function(array $row) use ($pdo, $participant): array {
         'mime_type' => $row['mime_type'] ?? null,
         'original_name' => $row['original_name'] ?? null,
         'sent_at' => $row['sent_at'],
-    ]);
+    ];
+    if (($payload['message_type'] ?? 'text') === 'gesture') {
+        $payload['gesture'] = message_gesture((string)$payload['content']);
+        $payload = gesture_capability_project_message_payload(
+            $pdo,
+            (int)$participant['user_id'],
+            $payload
+        );
+    }
+    return avatar_visibility_project_payload($pdo, (int)$participant['user_id'], $payload);
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -73,6 +82,21 @@ if ($action === 'typing') {
         'active' => !empty($source['active']),
     ]);
     json_out(['ok' => true]);
+}
+
+if ($action === 'gesture') {
+    $message = create_message($pdo, 'game', 'gesture', [
+        'lobby_code' => $lobby,
+        'participant' => $participant,
+        'author_context' => $authorContext,
+        'gesture_id' => (int)($source['gesture_id'] ?? 0),
+        'request_key' => (string)($source['request_key'] ?? ''),
+    ]);
+    json_out(gesture_capability_project_message_payload(
+        $pdo,
+        (int)$participant['user_id'],
+        $message
+    ));
 }
 
 $content = trim((string)($source['content'] ?? ''));

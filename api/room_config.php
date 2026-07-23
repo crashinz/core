@@ -46,7 +46,14 @@ function community_reactions_for(PDO $pdo, array $messageIds): array {
     return $map;
 }
 
-function community_message_payload(array $m, string $channel, array $reactionsMap, ?int $partnerUserId = null): array {
+function community_message_payload(
+    PDO $pdo,
+    int $viewerUserId,
+    array $m,
+    string $channel,
+    array $reactionsMap,
+    ?int $partnerUserId = null
+): array {
     $row = [
         'id' => (int)$m['id'],
         'channel' => $channel,
@@ -77,7 +84,7 @@ function community_message_payload(array $m, string $channel, array $reactionsMa
         $row['partner_user_id'] = $partnerUserId;
         $row['target_user_id'] = $partnerUserId;
     }
-    return $row;
+    return gesture_capability_project_message_payload($pdo, $viewerUserId, $row);
 }
 
 $stmt = $pdo->prepare('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ?');
@@ -154,7 +161,7 @@ if ($messageIds) {
         ];
     }
 }
-$messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMap): array {
+$messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMap, $pdo, $user): array {
     $row = [
         'id' => (int)$m['id'],
         'participant_id' => $m['participant_id'] ? (int)$m['participant_id'] : null,
@@ -183,7 +190,7 @@ $messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMa
     if ($canModerateMessages) {
         $row['original_content'] = $m['original_content'] ?? null;
     }
-    return $row;
+    return gesture_capability_project_message_payload($pdo, (int)$user['id'], $row);
 }, $rawMessages);
 
 $stmt = $pdo->query(
@@ -198,7 +205,16 @@ $stmt = $pdo->query(
 );
 $rawCommunityMessages = $stmt->fetchAll();
 $communityReactions = community_reactions_for($pdo, array_map(fn(array $m): int => (int)$m['id'], $rawCommunityMessages));
-$communityMessages = array_map(fn(array $m): array => community_message_payload($m, 'community', $communityReactions), $rawCommunityMessages);
+$communityMessages = array_map(
+    fn(array $m): array => community_message_payload(
+        $pdo,
+        (int)$user['id'],
+        $m,
+        'community',
+        $communityReactions
+    ),
+    $rawCommunityMessages
+);
 
 $linkMessages = [];
 $relationshipChat = null;
@@ -258,7 +274,16 @@ if ($linkHistory['access']) {
     $access = $linkHistory['access'];
     $rawLinkMessages = $linkHistory['messages'];
     $linkReactions = community_reactions_for($pdo, array_map(fn(array $m): int => (int)$m['id'], $rawLinkMessages));
-    $linkMessages = array_map(fn(array $m): array => community_message_payload($m, 'link', $linkReactions), $rawLinkMessages);
+    $linkMessages = array_map(
+        fn(array $m): array => community_message_payload(
+            $pdo,
+            (int)$user['id'],
+            $m,
+            'link',
+            $linkReactions
+        ),
+        $rawLinkMessages
+    );
     $relationshipChat = [
         'relationshipId' => $access['relationship_id'],
         'relationshipVersion' => $access['relationship_version'],
@@ -295,12 +320,19 @@ $stmt = $pdo->prepare(
 $stmt->execute([$dmLeft, $dmRight, (int)$user['id']]);
 $rawDmMessages = $stmt->fetchAll();
 $dmReactions = community_reactions_for($pdo, array_map(fn(array $m): int => (int)$m['id'], $rawDmMessages));
-$dmMessages = array_map(function(array $m) use ($user, $dmReactions): array {
+$dmMessages = array_map(function(array $m) use ($user, $dmReactions, $pdo): array {
     $ids = explode(':', (string)$m['link_key']);
     $a = (int)($ids[1] ?? 0);
     $b = (int)($ids[2] ?? 0);
     $partnerId = $a === (int)$user['id'] ? $b : $a;
-    return community_message_payload($m, 'dm', $dmReactions, $partnerId);
+    return community_message_payload(
+        $pdo,
+        (int)$user['id'],
+        $m,
+        'dm',
+        $dmReactions,
+        $partnerId
+    );
 }, $rawDmMessages);
 
 $dmPartnerIds = array_values(array_unique(array_filter(array_map(fn(array $m): int => (int)$m['partner_user_id'], $dmMessages))));
@@ -381,6 +413,7 @@ $roomConfig = [
         'packageSchema' => GESTURE_PACKAGE_SCHEMA,
         'packageVersion' => GESTURE_PACKAGE_VERSION,
     ],
+    'gestureCapabilities' => gesture_capability_policy($pdo),
     'messages' => $messages,
     'communityMessages' => $communityMessages,
     'linkMessages' => $linkMessages,

@@ -2,6 +2,62 @@
 require_once __DIR__ . '/base.php';
 
 function create_message(PDO $pdo, string $channel, string $type, array $payload): array {
+    if ($type !== 'gesture') return create_message_record($pdo, $channel, $type, $payload);
+    $participant = $payload['participant'] ?? [];
+    $actorUserId = (int)($payload['user_id'] ?? $participant['user_id'] ?? 0);
+    $gestureId = (int)($payload['gesture_id'] ?? 0);
+    if ($actorUserId < 1 || $gestureId < 1) {
+        throw new GestureCatalogException('Gesture required.', 400, 'GESTURE_REQUIRED');
+    }
+    $requestKey = trim((string)($payload['request_key'] ?? ''));
+    $route = [];
+    foreach (['session_id', 'link_key', 'dm_key', 'target_user_id', 'lobby_code'] as $key) {
+        if (array_key_exists($key, $payload) && $payload[$key] !== null && $payload[$key] !== '') {
+            $route[$key] = $payload[$key];
+        }
+    }
+    return gesture_catalog_idempotent(
+        $pdo,
+        $actorUserId,
+        'part5-message-' . $channel,
+        $requestKey,
+        [
+            'channel' => $channel,
+            'gesture_id' => $gestureId,
+            'route' => $route,
+            'reply_to' => $payload['reply_to'] ?? null,
+        ],
+        function () use ($pdo, $channel, $payload, $actorUserId, $gestureId): array {
+        $capability = gesture_capability_lock($pdo);
+        $sql = 'SELECT * FROM gestures WHERE id = ? AND deleted_at IS NULL LIMIT 1';
+        if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$gestureId]);
+        $gesture = $stmt->fetch();
+        if (!$gesture || (
+            (int)$gesture['owner_user_id'] !== $actorUserId
+            && empty($gesture['is_public'])
+        )) {
+            throw new GestureCatalogException('Gesture unavailable.', 404, 'GESTURE_UNAVAILABLE');
+        }
+        gesture_capability_require_scope(
+            $capability,
+            gesture_capability_scope_for_gesture($gesture, $actorUserId)
+        );
+        $snapshot = gesture_snapshot($gesture, $actorUserId);
+        $payload['content'] = json_encode(
+            $snapshot,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+        );
+        $payload['gesture'] = $snapshot;
+        $payload['mime_type'] = 'application/x-chatspace-gesture';
+        $payload['original_name'] = gesture_presentation_canonical_text($snapshot);
+        return create_message_record($pdo, $channel, 'gesture', $payload);
+        }
+    );
+}
+
+function create_message_record(PDO $pdo, string $channel, string $type, array $payload): array {
     $participant = $payload['participant'] ?? [];
     $authorContext = $payload['author_context'] ?? [];
     $participantId = (int)($payload['participant_id'] ?? $participant['id'] ?? 0);

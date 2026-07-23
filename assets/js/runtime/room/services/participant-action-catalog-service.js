@@ -39,6 +39,9 @@ export class ParticipantActionCatalogService {
         const webcam = this.#context?.getWebcamPolicy?.(participant) || {};
         const blocked = Boolean(this.#context?.isBlocked?.(participant?.user_id));
         const webcamAllowed = this.#context?.webcamAllowed?.() !== false;
+        const gestureMediaHidden = Boolean(
+            this.#context?.getGestureMediaVisibility?.(participant)?.hidden
+        );
         const actions = own ? [] : [
             {
                 id: "avatar.current-visibility",
@@ -51,6 +54,15 @@ export class ParticipantActionCatalogService {
                 id: "avatar.user-visibility",
                 label: visibility.user ? "Show avatars from this user" : "Hide avatars from this user",
                 active: Boolean(visibility.user),
+                disabled: false,
+                applicable: true
+            },
+            {
+                id: "gesture.sender-media-visibility",
+                label: gestureMediaHidden
+                    ? "Show gesture media from this user"
+                    : "Hide gesture media from this user",
+                active: gestureMediaHidden,
                 disabled: false,
                 applicable: true
             },
@@ -93,7 +105,7 @@ export class ParticipantActionCatalogService {
         return Object.freeze({
             owner: "RoomRuntime",
             service: "ParticipantActionCatalogService",
-            actionDefinitionCount: 7,
+            actionDefinitionCount: 8,
             resolutionCount: this.#resolutionCount,
             duplicateCount: this.#duplicateCount
         });

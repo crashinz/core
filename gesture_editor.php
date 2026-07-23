@@ -19,6 +19,15 @@ if (!$admin && empty($features['editor'])) {
     http_response_code(403);
     exit('Gesture Maker and Editor are disabled.');
 }
+if (!$admin) {
+    try {
+        $capability = gesture_catalog_require_user_mutation($pdo);
+        gesture_capability_require_scope($capability, 'personal');
+    } catch (GestureCatalogException $error) {
+        http_response_code($error->httpStatus);
+        exit(e($error->getMessage()));
+    }
+}
 ?>
 <!doctype html>
 <html lang="en">

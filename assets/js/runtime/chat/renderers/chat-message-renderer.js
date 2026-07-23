@@ -589,7 +589,7 @@ export class ChatMessageRenderer {
             return context.gesturePresentation?.renderMessageHtml(gesture, {
                 escapeHtml: context.esc,
                 mediaUrl: context.mediaUrl,
-            }) || context.esc("(Gesture)");
+            }, message) || context.esc("(Gesture)");
 
         }
 

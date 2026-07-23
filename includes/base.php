@@ -19,6 +19,7 @@ require_once __DIR__ . '/avatar_relationship_capacity_policy.php';
 require_once __DIR__ . '/avatar_dance_capability_policy.php';
 require_once __DIR__ . '/webcam_policy.php';
 require_once __DIR__ . '/role_color_policy.php';
+require_once __DIR__ . '/gesture_capability_policy.php';
 require_once __DIR__ . '/settings_registry.php';
 require_once __DIR__ . '/runtime_issue_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
@@ -174,7 +175,7 @@ function mysqlize_schema(string $schema): string {
         'profile_visibility' => 'VARCHAR(24)',
         'role' => 'VARCHAR(32)',
         'avatar_path' => 'VARCHAR(512)',
-        'avatar_url' => 'VARCHAR(512)',
+        'avatar_url' => 'VARCHAR(1024)',
         'avatar_identity' => 'VARCHAR(64)',
         'preference_key' => 'VARCHAR(191)',
         'avatar_orientation' => 'VARCHAR(32)',
@@ -949,7 +950,7 @@ function migrate(PDO $pdo): void {
             'user_id INTEGER DEFAULT NULL',
             'display_name VARCHAR(191) DEFAULT NULL',
             'avatar_path VARCHAR(512) DEFAULT NULL',
-            'avatar_url VARCHAR(512) DEFAULT NULL',
+            'avatar_url VARCHAR(1024) DEFAULT NULL',
             'url_preview_json LONGTEXT DEFAULT NULL',
             'reply_to_json LONGTEXT DEFAULT NULL',
         ] as $definition) {
@@ -958,6 +959,11 @@ function migrate(PDO $pdo): void {
             } catch (Throwable $e) {
                 // Existing installs already have this column.
             }
+        }
+        foreach (['messages', 'community_messages'] as $messageTable) {
+            $pdo->exec(
+                "ALTER TABLE {$messageTable} MODIFY COLUMN avatar_url VARCHAR(1024) DEFAULT NULL"
+            );
         }
     } else {
         $pdo->exec($schema);
@@ -1436,7 +1442,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_catalog_setting_defaults(), settings_registry_setting_defaults());
+    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), settings_registry_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -1612,27 +1618,20 @@ function branded_page_title(string $page, ?PDO $pdo = null): string {
     return $prefix . $page . ' - ChatSpace CE';
 }
 
-function gesture_snapshot(array $gesture): array {
-    $animation = function_exists('gesture_package_media_url')
-        ? gesture_package_media_url($gesture, 'animation', 'message')
-        : $gesture['gif_path'];
-    $poster = function_exists('gesture_package_media_url')
-        ? gesture_package_media_url($gesture, 'poster', 'message')
-        : null;
-    $audio = !empty($gesture['audio_path'])
-        ? (function_exists('gesture_package_media_url') ? gesture_package_media_url($gesture, 'audio', 'message') : $gesture['audio_path'])
-        : null;
+function gesture_snapshot(array $gesture, ?int $senderUserId = null): array {
+    $senderUserId ??= (int)($gesture['owner_user_id'] ?? 0);
     return [
         'id' => (int)$gesture['id'],
         'public_id' => $gesture['public_id'],
         'name' => $gesture['name'],
         'text' => $gesture['gesture_text'],
-        'gif_path' => $animation,
-        'poster_path' => $poster,
-        'audio_path' => $audio,
+        'gif_path' => null,
+        'poster_path' => null,
+        'audio_path' => null,
         'audio_is_silent' => !empty($gesture['audio_is_silent']),
         'is_public' => !empty($gesture['is_public']),
         'owner_user_id' => (int)$gesture['owner_user_id'],
+        'scope' => (int)$gesture['owner_user_id'] === $senderUserId ? 'personal' : 'server',
         'package_generation' => max(1, (int)($gesture['package_generation'] ?? 1)),
         'package_version' => max(0, (int)($gesture['package_version'] ?? 0)),
         'package_status' => (string)($gesture['package_status'] ?? 'legacy-unverified'),
@@ -7101,9 +7100,9 @@ function avatar_relationship_repair(PDO $pdo, array $options = []): array {
                 foreach ($edges as $edge) {
                     $relationship = avatar_relationship_sync_legacy($pdo, $sid, (int)$edge['participant_id'], (int)$edge['target_participant_id'], (string)$edge['normalized_mode']);
                     if ($relationship) $createdOrSynced++;
-                }
             }
-        } else {
+        }
+    } else {
             $removed = count(array_values(array_unique($deleteIds))) + count(array_values(array_unique($orphanedMemberIds)));
             foreach ($validEdgesBySession as $edges) $createdOrSynced += count($edges);
         }

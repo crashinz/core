@@ -729,6 +729,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="ctx-webcam-receive" type="button">Stop receiving this webcam</button>
   <button id="ctx-avatar-visibility" type="button">Hide this avatar until it changes</button>
   <button id="ctx-avatar-user-visibility" type="button">Hide avatars from this user</button>
+  <button id="ctx-gesture-sender-visibility" type="button">Hide gesture media from this user</button>
   <button id="ctx-dm" type="button">Send DM</button>
   <button id="ctx-interact" type="button">Interact</button>
   <button id="ctx-lap-dance" type="button" aria-pressed="false">Start Lap Dance</button>
@@ -930,7 +931,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   </div>
   <div class="media-panel gesture-catalog-panel" id="media-panel-personal-gestures" role="tabpanel" aria-labelledby="media-tab-personal-gestures">
     <div class="gesture-catalog-toolbar">
-      <button class="btn btn-primary" id="personal-gesture-create" type="button">Create Gesture</button>
+      <button class="btn btn-primary" id="personal-gesture-create" type="button">Create / Edit Gestures</button>
       <label>Search Personal Gestures<input id="personal-gesture-search" type="search" maxlength="120" autocomplete="off"></label>
       <label>Sort<select id="personal-gesture-sort"><option value="last_uploaded">Last uploaded</option><option value="file_name">File name A–Z</option><option value="custom">Custom order</option></select></label>
     </div>
@@ -953,6 +954,19 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     <div class="emoji-grid" id="emoji-grid"></div>
   </div>
   <div class="gesture-action-menu" id="gesture-action-menu" role="menu" hidden></div>
+</div>
+<div class="modal" id="gesture-management-modal" role="dialog" aria-modal="true" aria-labelledby="gesture-management-title">
+  <div class="modal-box gesture-management-box">
+    <div class="modal-head">
+      <strong id="gesture-management-title">My Gestures</strong>
+      <button class="window-close" id="gesture-management-close" type="button" aria-label="Close gesture management">×</button>
+    </div>
+    <p class="minor">Create a private Personal Gesture or edit one you own. The active room remains open.</p>
+    <button class="btn btn-primary" id="gesture-management-create" type="button">Create New Gesture</button>
+    <div class="gesture-management-list" id="gesture-management-list" aria-label="My Gestures"></div>
+    <div class="gesture-pager" id="gesture-management-pager" aria-label="My Gestures pages"></div>
+    <div class="gesture-tray" id="gesture-management-status" role="status" aria-live="polite"></div>
+  </div>
 </div>
 <input type="file" id="avatar-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
 <div class="modal" id="locate-modal">

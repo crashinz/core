@@ -4952,6 +4952,44 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   color: var(--text);
 }
 .gesture-catalog-panel .gesture-grid { height: calc(100% - 139px); }
+#gesture-management-modal { z-index: 10010; }
+.gesture-management-box { width: min(720px, 100%); }
+.gesture-management-box > .btn-primary { margin-bottom: 12px; }
+.gesture-management-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(430px, 52vh);
+  overflow: auto;
+}
+.gesture-management-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+}
+.gesture-management-row img {
+  width: 58px;
+  height: 58px;
+  border-radius: 7px;
+  object-fit: contain;
+  background: rgba(0,0,0,.28);
+}
+.gesture-management-description {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.gesture-management-description strong,
+.gesture-management-description small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gesture-management-description small { color: var(--muted); }
 .gesture-reorder-guidance { margin: -2px 0 7px; color: #ffd479; }
 .gesture-actions {
   position: absolute;
@@ -5370,6 +5408,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
   background: rgba(255,255,255,.035);
 }
 .settings-entry.is-dirty { border-color: #76a9ff; box-shadow: 0 0 0 1px rgba(118,169,255,.25); }
+.settings-entry.is-dependency-inactive { border-style: dashed; background: rgba(42,52,73,.46); }
 .settings-entry-mandatory-fixed { border-color: rgba(242,197,91,.34); }
 .settings-entry-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .settings-entry-label { font-weight: 700; }
@@ -5389,6 +5428,7 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .settings-badge-mandatory-fixed { background: rgba(196,148,45,.25); color: #ffe3a0; }
 .settings-badge-changed { background: rgba(86,134,220,.28); color: #d5e4ff; }
 .settings-badge-original { background: rgba(147,101,205,.26); color: #ead7ff; }
+.settings-badge-dependency { background: rgba(196,148,45,.25); color: #ffe3a0; }
 .settings-entry-control { display: flex; align-items: center; gap: 8px; margin-top: auto; }
 .settings-entry-control > :is(input:not([type="checkbox"]),select) { min-width: 0; width: 100%; }
 .settings-entry-control input[type="checkbox"] { width: 22px; height: 22px; }

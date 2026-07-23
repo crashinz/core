@@ -170,6 +170,7 @@ const ctxWebcamVisibility = document.getElementById('ctx-webcam-visibility');
 const ctxWebcamReceive = document.getElementById('ctx-webcam-receive');
 const ctxAvatarVisibility = document.getElementById('ctx-avatar-visibility');
 const ctxAvatarUserVisibility = document.getElementById('ctx-avatar-user-visibility');
+const ctxGestureSenderVisibility = document.getElementById('ctx-gesture-sender-visibility');
 const ctxAuras = document.getElementById('ctx-auras');
 const ctxOrientationWrap = document.getElementById('ctx-orientation-wrap');
 const ctxOrientation = document.getElementById('ctx-orientation');
@@ -677,6 +678,9 @@ function configureParticipantActionCatalog() {
   roomRuntime?.participantActions?.configure({
     getViewer: () => participants.get(Number(cfg?.myParticipantId)) || null,
     getAvatarVisibility: participant => avatarVisibilityFor(participant),
+    getGestureMediaVisibility: participant => ({
+      hidden: gesturePresentation?.isSenderHidden?.(participant?.user_id) === true,
+    }),
     getWebcamPolicy: participant => webcamViewerPolicyFor(participant),
     isBlocked: isUserBlocked,
     webcamAllowed: webcamUseAllowed,
@@ -840,6 +844,7 @@ function configureChatComposer() {
     getConfig: () => cfg,
     activeRelationshipRequest,
     activeDmUserId,
+    requestKey: gestureRequestKey,
     addMessageToChannel,
     renderMessage,
     showDmFlight,
@@ -943,6 +948,9 @@ function configureRoomEventRouter() {
           'installation-webcam-capability-disabled',
         ).catch(warnRuntimeRequest);
       }
+    },
+    onGestureCapability(payload) {
+      applyGestureCapabilityProjection(payload, 'room-event');
     },
     onParticipantAvatar(payload, event = {}) {
       const person = participants.get(payload.participant_id);
@@ -1488,6 +1496,12 @@ function configureChatPoll() {
     handleProjection(data) {
       const projection = data?.avatar_visibility_preferences;
       if (projection) avatarRuntime?.visibility?.applyServerProjection(projection, 'room-poll');
+      if (data?.gesture_preferences) {
+        gesturePresentation?.applyServerProjection(data.gesture_preferences, 'room-poll');
+      }
+      if (data?.gesture_capabilities) {
+        applyGestureCapabilityProjection(data.gesture_capabilities, 'room-poll');
+      }
     },
     warnError(error, retry = {}) {
       recordRuntimeDiagnostic('requests', 'room-poll-retry-scheduled', {
@@ -3679,7 +3693,7 @@ function showAvatarSpeech(participantId, msg, options = {}) {
   const isGesture = msg?.message_type === 'gesture';
   const gesture = gestureFromMessage(msg);
   const gestureModel = isGesture
-    ? gesturePresentation?.messageModel(gesture) || { showAnimation: true, showText: true, playSound: true, canonicalText: '(Gesture)' }
+    ? gesturePresentation?.messageModel(gesture, msg) || { showAnimation: true, showText: true, playSound: true, canonicalText: '(Gesture)' }
     : null;
   const showImage = isGif || (isGesture && gestureModel.showAnimation);
   const text = isGesture
@@ -4482,6 +4496,11 @@ function syncParticipantActionMenu(participant, isOwn = false) {
   const block = actions.get('user.block');
   syncParticipantActionButton(ctxAvatarVisibility, exact, !isOwn);
   syncParticipantActionButton(ctxAvatarUserVisibility, user, !isOwn);
+  syncParticipantActionButton(
+    ctxGestureSenderVisibility,
+    actions.get('gesture.sender-media-visibility'),
+    !isOwn
+  );
   syncParticipantActionButton(ctxWebcamVisibility, actions.get('webcam.presentation'), !isOwn);
   syncParticipantActionButton(ctxWebcamReceive, actions.get('webcam.receive'), !isOwn);
   syncParticipantActionButton(ctxLapDance, actions.get('avatar.lap-dance'));
@@ -4834,6 +4853,16 @@ function stopCurrentGestureSounds(reason = 'gesture-preference-disabled') {
   });
 }
 
+function stopGestureSoundsFromSender(userId, reason = 'gesture-sender-media-hidden') {
+  const targetUserId = Number(userId);
+  participants.forEach(person => {
+    if (Number(person.user_id) !== targetUserId || !person.speechAudio) return;
+    person.speechAudio.__chatspacePlaybackInterruption = reason;
+    person.speechAudio.pause?.();
+    person.speechAudio = null;
+  });
+}
+
 function rerenderVisibleGesturePresentations() {
   if (!cfg) return;
   const previousTop = messagesEl?.scrollTop || 0;
@@ -4856,8 +4885,35 @@ function applyGesturePresentationChange(change = {}) {
   if (change.previous?.playSounds && change.current?.playSounds === false) {
     stopCurrentGestureSounds();
   }
+  if (
+    (change.previousCapabilities?.allowGestures !== false && change.currentCapabilities?.allowGestures === false)
+    || (
+      change.previousCapabilities?.allowGestureAudioDelivery !== false
+      && change.currentCapabilities?.allowGestureAudioDelivery === false
+    )
+  ) {
+    stopCurrentGestureSounds('gesture-capability-disabled');
+  }
+  const previousSenders = new Set(change.previous?.hiddenSenderUserIds || []);
+  for (const userId of change.current?.hiddenSenderUserIds || []) {
+    if (!previousSenders.has(userId)) stopGestureSoundsFromSender(userId);
+  }
   rerenderVisibleGesturePresentations();
   syncChatOptions();
+}
+
+function applyGestureCapabilityProjection(projection = {}, reason = 'gesture-capability') {
+  if (!cfg) return null;
+  gesturePresentation?.applyCapabilityProjection({
+    ...projection,
+    viewerUserId: Number(cfg.myUserId || 0),
+  }, reason);
+  cfg.gestureCapabilities = {
+    ...projection,
+    ...(gesturePresentation?.capabilities?.() || {}),
+  };
+  gestureCatalogController?.applyCapabilities?.(cfg.gestureCapabilities);
+  return cfg.gestureCapabilities;
 }
 
 async function saveGesturePreferences(values, successMessage) {
@@ -4915,6 +4971,27 @@ async function setGestureHidden(publicId, hidden, reason = 'gesture-message-acti
   return result;
 }
 
+async function setGestureSenderMediaHidden(targetUserId, hidden) {
+  const current = gesturePresentation?.preferences?.();
+  if (!current || !Number.isInteger(Number(targetUserId)) || Number(targetUserId) < 1) {
+    throw new Error('A stable sender identity is required.');
+  }
+  const result = await apiPost('/api/gestures.php', {
+    session_id: cfg.sessionId,
+    join_token: cfg.myJoinToken,
+    action: hidden ? 'hide_sender_media' : 'show_sender_media',
+    target_user_id: Number(targetUserId),
+    expected_version: Number(current.senderVisibilityVersion || 0),
+    request_key: gestureRequestKey(hidden ? 'hide-gesture-sender' : 'show-gesture-sender'),
+  });
+  gesturePresentation?.applySenderVisibilityMutation(
+    Number(targetUserId),
+    hidden,
+    Number(result.version || 0),
+    'participant-action'
+  );
+}
+
 async function showGestureFromMessage(publicId) {
   try {
     await setGestureHidden(publicId, false, 'gesture-message-show-again');
@@ -4929,6 +5006,7 @@ function initializeGestureCatalog() {
     root: mediaPicker,
     features: cfg.gesturePart3?.features || {},
     part4Features: cfg.gesturePart4?.features || {},
+    capabilities: cfg.gestureCapabilities || {},
     queryIdentity: { session_id: cfg.sessionId, join_token: cfg.myJoinToken },
     mediaUrl,
     getJson: (url, operation) => runtimeRequestClient.getJson(url, {
@@ -4953,6 +5031,15 @@ function initializeGestureCatalog() {
     onDelete: openDeleteGestureModal,
     onTogglePublic: toggleGesturePublic,
     onAudio: toggleGestureAudio,
+    management: {
+      launch: document.getElementById('personal-gesture-create'),
+      modal: document.getElementById('gesture-management-modal'),
+      close: document.getElementById('gesture-management-close'),
+      create: document.getElementById('gesture-management-create'),
+      list: document.getElementById('gesture-management-list'),
+      pager: document.getElementById('gesture-management-pager'),
+      status: document.getElementById('gesture-management-status'),
+    },
     catalogs: {
       server: {
         search: document.getElementById('server-gesture-search'),
@@ -5559,7 +5646,9 @@ gestureFileInput?.addEventListener('change', () => {
   uploadGesture(file).catch(err => alert(err.message || err));
 });
 
-document.getElementById('personal-gesture-create')?.addEventListener('click', () => openGestureEditor());
+document.getElementById('personal-gesture-create')?.addEventListener('click', () => {
+  void gestureCatalogController?.openManagement();
+});
 
 gesturePrev?.addEventListener('click', () => {
   if (gesturePage <= 1) return;
@@ -5640,6 +5729,10 @@ gestureDeleteConfirm?.addEventListener('click', async () => {
 
 function toggleGestureAudio(gesture, btn) {
   if (!gesture.audio_path) return;
+  if (cfg.gestureCapabilities?.allowGestureAudioDelivery === false) {
+    if (gestureTray) gestureTray.textContent = 'Gesture audio is disabled through shared Settings.';
+    return;
+  }
   if (gesturePresentation?.preferences?.().playSounds === false) {
     if (gestureTray) gestureTray.textContent = 'Gesture sounds are turned off in Chat Options.';
     return;
@@ -5693,7 +5786,13 @@ document.addEventListener('click', e => {
   if (!roomMenu.contains(e.target) && !e.target.closest('#room-menu-btn')) closeRoomMenu();
   if (roomActionMenu && !roomActionMenu.contains(e.target) && !e.target.closest('#room-action-btn')) closeRoomActionMenu();
   if (gameStartMenu && !gameStartMenu.contains(e.target) && !e.target.closest('#game-start-btn')) closeGameStartMenu();
-  if (mediaPicker && !mediaPicker.contains(e.target) && !e.target.closest('#emoji-btn') && !e.target.closest('#gesture-delete-modal')) closeMediaPicker();
+  if (
+    mediaPicker
+    && !mediaPicker.contains(e.target)
+    && !e.target.closest('#emoji-btn')
+    && !e.target.closest('#gesture-management-modal')
+    && !e.target.closest('#gesture-delete-modal')
+  ) closeMediaPicker();
   if (!attachMenu.contains(e.target) && !e.target.closest('#attach-btn')) closeAttachMenu();
 });
 document.addEventListener('keydown', e => {
@@ -6162,6 +6261,17 @@ async function setAvatarVisibilityFromMenu(scope) {
 
 ctxAvatarVisibility?.addEventListener('click', () => setAvatarVisibilityFromMenu('avatar'));
 ctxAvatarUserVisibility?.addEventListener('click', () => setAvatarVisibilityFromMenu('user'));
+ctxGestureSenderVisibility?.addEventListener('click', async () => {
+  const person = participants.get(Number(ctxMenuParticipantId));
+  closeContextMenu();
+  if (!person || Number(person.id) === Number(cfg.myParticipantId)) return;
+  const hidden = gesturePresentation?.isSenderHidden?.(person.user_id) === true;
+  try {
+    await setGestureSenderMediaHidden(Number(person.user_id), !hidden);
+  } catch (error) {
+    showWarning(error?.message || 'Gesture media visibility could not be changed.');
+  }
+});
 
 document.getElementById('ctx-tools')?.addEventListener('click', e => {
   e.stopPropagation();
@@ -7355,6 +7465,7 @@ async function bootRoom() {
     'room-bootstrap'
   );
   cfg = roomConfig;
+  applyGestureCapabilityProjection(cfg.gestureCapabilities || {}, 'room-bootstrap');
   gesturePresentation?.applyServerProjection(
     cfg.gesturePart3?.preferences || {},
     'room-bootstrap'

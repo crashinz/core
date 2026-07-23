@@ -533,7 +533,9 @@ function gesture_package_file_descriptor(?array $file, string $label, int $maxBy
 
 function gesture_package_generation(PDO $pdo, int $gestureId, int $generation): ?array
 {
-    $stmt = $pdo->prepare('SELECT * FROM gesture_package_generations WHERE gesture_id = ? AND generation = ? LIMIT 1');
+    $sql = 'SELECT * FROM gesture_package_generations WHERE gesture_id = ? AND generation = ? LIMIT 1';
+    if ($pdo->inTransaction() && db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
     $stmt->execute([$gestureId, $generation]);
     return $stmt->fetch() ?: null;
 }
@@ -634,6 +636,7 @@ function gesture_package_enforce_feature_policy(PDO $pdo, array $prepared, array
     $animationUploaded = gesture_package_upload_present($files, 'animation');
     $posterUploaded = gesture_package_upload_present($files, 'poster');
     $audioUploaded = gesture_package_upload_present($files, 'audio');
+    if (!$admin) gesture_catalog_require_user_mutation($pdo);
     if (!$admin && empty($features['editor'])) {
         throw new GestureCatalogException('Gesture Maker and editing are disabled through shared Settings.', 403, 'GESTURE_PART4_FEATURE_DISABLED');
     }
@@ -795,12 +798,16 @@ function gesture_package_create(PDO $pdo, array $actor, array $fields, array $fi
 {
     $actorId = (int)($actor['id'] ?? 0);
     if ($actorId < 1) throw new GestureCatalogException('Authentication is required.', 401, 'AUTHENTICATION_REQUIRED');
+    $capability = gesture_catalog_require_user_mutation($pdo);
+    gesture_capability_require_scope($capability, 'personal');
     $prepared = gesture_package_prepare($files, $fields);
     gesture_package_enforce_feature_policy($pdo, $prepared, $files, true, false);
     $promoted = [];
     try {
         return gesture_catalog_idempotent($pdo, $actorId, 'part4-create', $requestKey, ['fingerprint' => $prepared['request_fingerprint']], function () use ($pdo, $actor, $actorId, $prepared, &$promoted): array {
             gesture_catalog_lock_user($pdo, $actorId);
+            $capability = gesture_catalog_require_user_mutation($pdo, true);
+            gesture_capability_require_scope($capability, 'personal');
             $limit = max(1, (int)app_setting($pdo, 'gesture_upload_limit', '50'));
             $count = $pdo->prepare('SELECT COUNT(*) FROM gestures WHERE owner_user_id = ? AND deleted_at IS NULL');
             $count->execute([$actorId]);
@@ -827,7 +834,14 @@ function gesture_package_create(PDO $pdo, array $actor, array $fields, array $fi
             gesture_package_insert_generation($pdo, $gestureId, $generation, $actorId, $token, $prepared, $bundle);
             log_tool($pdo, $actorId, 'gesture_part4_create', $actorId, null, json_encode(['gesture_public_id' => $publicId, 'generation' => $generation, 'package_version' => GESTURE_PACKAGE_VERSION, 'content_sha256' => $bundle['content_sha256']], JSON_UNESCAPED_SLASHES));
             $row = gesture_catalog_lock_row($pdo, $publicId, $actorId);
-            return ['ok' => true, 'gesture' => gesture_catalog_row_payload($row, $actorId), 'package' => gesture_package_public_summary($pdo, $row, false)];
+            return [
+                'ok' => true,
+                'gesture' => gesture_capability_project_catalog_payload(
+                    $pdo,
+                    gesture_catalog_row_payload($row, $actorId)
+                ),
+                'package' => gesture_package_public_summary($pdo, $row, false),
+            ];
         });
     } catch (Throwable $error) {
         gesture_package_cleanup_promoted($promoted);
@@ -839,6 +853,10 @@ function gesture_package_edit(PDO $pdo, array $actor, string $publicId, array $f
 {
     $actorId = (int)($actor['id'] ?? 0);
     if ($actorId < 1) throw new GestureCatalogException('Authentication is required.', 401, 'AUTHENTICATION_REQUIRED');
+    if (!$admin) {
+        $capability = gesture_catalog_require_user_mutation($pdo);
+        gesture_capability_require_scope($capability, 'personal');
+    }
     $probe = gesture_catalog_lock_row($pdo, $publicId, $admin ? null : $actorId);
     if ($admin && ($actor['role'] ?? '') !== 'admin') throw new GestureCatalogException('Administrator authorization is required.', 403, 'ADMIN_REQUIRED');
     if ($admin && empty($probe['is_public'])) throw new GestureCatalogException('Admin package editing is limited to Server Gestures.', 409, 'SERVER_GESTURE_REQUIRED');
@@ -850,6 +868,10 @@ function gesture_package_edit(PDO $pdo, array $actor, string $publicId, array $f
     $promoted = [];
     try {
         return gesture_catalog_idempotent($pdo, $actorId, $admin ? 'part4-admin-edit' : 'part4-owner-edit', $requestKey, ['public_id' => $publicId, 'expected_version' => $expectedVersion, 'fingerprint' => $prepared['request_fingerprint']], function () use ($pdo, $actor, $actorId, $admin, $publicId, $expectedVersion, $prepared, &$promoted): array {
+            if (!$admin) {
+                $capability = gesture_catalog_require_user_mutation($pdo, true);
+                gesture_capability_require_scope($capability, 'personal');
+            }
             $row = gesture_catalog_lock_row($pdo, $publicId, $admin ? null : $actorId);
             if ($admin && (empty($row['is_public']) || ($actor['role'] ?? '') !== 'admin')) throw new GestureCatalogException('Admin package editing is not authorized.', 403, 'ADMIN_EDIT_NOT_AUTHORIZED');
             gesture_catalog_require_version((int)$row['version'], $expectedVersion, 'GESTURE_VERSION_CONFLICT', gesture_catalog_row_payload($row, $actorId, $admin));
@@ -871,7 +893,15 @@ function gesture_package_edit(PDO $pdo, array $actor, string $publicId, array $f
             gesture_package_insert_generation($pdo, (int)$row['id'], $generation, $actorId, $token, $prepared, $bundle);
             log_tool($pdo, $actorId, $admin ? 'gesture_part4_admin_edit' : 'gesture_part4_owner_edit', (int)$row['owner_user_id'], null, json_encode(['gesture_public_id' => $publicId, 'generation' => $generation, 'package_version' => GESTURE_PACKAGE_VERSION, 'content_sha256' => $bundle['content_sha256']], JSON_UNESCAPED_SLASHES));
             $updated = gesture_catalog_lock_row($pdo, $publicId, $admin ? null : $actorId);
-            return ['ok' => true, 'gesture' => gesture_catalog_row_payload($updated, $actorId, $admin), 'package' => gesture_package_public_summary($pdo, $updated, $admin)];
+            return [
+                'ok' => true,
+                'gesture' => gesture_capability_project_catalog_payload(
+                    $pdo,
+                    gesture_catalog_row_payload($updated, $actorId, $admin),
+                    $admin
+                ),
+                'package' => gesture_package_public_summary($pdo, $updated, $admin),
+            ];
         });
     } catch (Throwable $error) {
         gesture_package_cleanup_promoted($promoted);
@@ -914,12 +944,22 @@ function gesture_package_editor_detail(PDO $pdo, array $actor, string $publicId,
     if (($admin && empty($features['admin_package_inspection'])) || (!$admin && empty($features['editor']))) {
         throw new GestureCatalogException('Gesture package inspection is disabled through shared Settings.', 403, 'GESTURE_PART4_FEATURE_DISABLED');
     }
+    if (!$admin) {
+        $capability = gesture_catalog_require_user_mutation($pdo);
+        gesture_capability_require_scope($capability, 'personal');
+    }
     $row = gesture_catalog_lock_row($pdo, $publicId, $admin ? null : $actorId);
     if ($admin && (($actor['role'] ?? '') !== 'admin' || empty($row['is_public']))) throw new GestureCatalogException('Admin package inspection is not authorized.', 403, 'ADMIN_INSPECTION_NOT_AUTHORIZED');
     $uploader = $pdo->prepare('SELECT display_name FROM users WHERE id = ? LIMIT 1');
     $uploader->execute([(int)($row['uploaded_by_user_id'] ?: $row['owner_user_id'])]);
     $row['uploader_display_name'] = (string)($uploader->fetchColumn() ?: '');
-    $payload = gesture_catalog_row_payload($row, $actorId, $admin);
+    $payload = gesture_capability_project_catalog_payload(
+        $pdo,
+        gesture_catalog_row_payload($row, $actorId, $admin),
+        $admin,
+        null,
+        $features
+    );
     return ['gesture' => $payload, 'package' => gesture_package_public_summary($pdo, $row, $admin), 'preferences' => gesture_catalog_preferences_payload($pdo, $actorId)];
 }
 
@@ -929,7 +969,18 @@ function gesture_package_media_url(array $row, string $role, string $purpose = '
     if ((string)($row['package_status'] ?? 'legacy-unverified') === 'legacy-unverified') {
         if ($role === 'poster') return null;
         $legacyPath = (string)($row[$role === 'animation' ? 'gif_path' : 'audio_path'] ?? '');
-        return $legacyPath === '' ? null : media_url($legacyPath);
+        if ($legacyPath === '') return null;
+        if (
+            !empty($row['public_id'])
+            && (int)($row['package_generation'] ?? 0) > 0
+            && !empty($row['media_access_token'])
+        ) {
+            $publicId = rawurlencode((string)$row['public_id']);
+            $generation = max(1, (int)$row['package_generation']);
+            $token = rawurlencode((string)$row['media_access_token']);
+            return app_url("/api/gesture_media.php?id={$publicId}&generation={$generation}&role={$role}&purpose=" . rawurlencode($purpose) . "&token={$token}");
+        }
+        return media_url($legacyPath);
     }
     if ($role === 'audio' && empty($row['audio_path'])) return null;
     if ($role === 'poster' && empty($row['package_has_poster'])) return null;
@@ -941,7 +992,12 @@ function gesture_package_media_url(array $row, string $role, string $purpose = '
 
 function gesture_package_media_record(PDO $pdo, string $publicId, int $generation): array
 {
-    $stmt = $pdo->prepare('SELECT g.*, pg.* , g.id AS gesture_id, pg.id AS package_generation_id FROM gestures g JOIN gesture_package_generations pg ON pg.gesture_id = g.id AND pg.generation = ? WHERE g.public_id = ? LIMIT 1');
+    $sql = 'SELECT g.*, pg.* , g.id AS gesture_id, pg.id AS package_generation_id '
+        . 'FROM gestures g JOIN gesture_package_generations pg '
+        . 'ON pg.gesture_id = g.id AND pg.generation = ? '
+        . 'WHERE g.public_id = ? LIMIT 1';
+    if ($pdo->inTransaction() && db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $stmt = $pdo->prepare($sql);
     $stmt->execute([$generation, $publicId]);
     $row = $stmt->fetch();
     if (!$row || !empty($row['deleted_at'])) throw new GestureCatalogException('Gesture media is unavailable.', 404, 'GESTURE_MEDIA_UNAVAILABLE');
@@ -955,7 +1011,40 @@ function gesture_package_authorize_media(PDO $pdo, array $actor, array $record, 
     $owner = $actorId === (int)$record['owner_user_id'];
     $public = !empty($record['is_public']);
     $capability = $token !== '' && hash_equals((string)$record['media_access_token'], $token);
+    if ($purpose === 'admin' && (string)($actor['role'] ?? '') !== 'admin') {
+        throw new GestureCatalogException(
+            'Administrator media maintenance is not authorized.',
+            403,
+            'ADMIN_MEDIA_NOT_AUTHORIZED'
+        );
+    }
     if (!$capability || (!$staff && !$owner && !$public)) throw new GestureCatalogException('Gesture media access is not authorized.', 403, 'GESTURE_MEDIA_NOT_AUTHORIZED');
+    $adminMaintenance = (string)($actor['role'] ?? '') === 'admin' && $purpose === 'admin';
+    if (!$adminMaintenance) {
+        $policy = gesture_capability_policy($pdo);
+        gesture_capability_require_scope(
+            $policy,
+            gesture_capability_scope_for_gesture($record, $actorId)
+        );
+        $features = gesture_part4_feature_flags($pdo);
+        if (in_array($role, ['animation', 'poster'], true) && empty($features['animation_media'])) {
+            throw new GestureCatalogException(
+                'Gesture animation media is disabled through shared Settings.',
+                403,
+                'GESTURE_PART4_FEATURE_DISABLED'
+            );
+        }
+        if ($role === 'audio') {
+            gesture_capability_require($policy, 'allow_gesture_audio_delivery');
+            if (empty($features['audio_media'])) {
+                throw new GestureCatalogException(
+                    'Gesture audio media is disabled through shared Settings.',
+                    403,
+                    'GESTURE_PART4_FEATURE_DISABLED'
+                );
+            }
+        }
+    }
     if ($purpose === 'message') {
         $preferences = gesture_catalog_preferences_payload($pdo, $actorId);
         if ($role === 'animation' && empty($preferences['show_animations'])) throw new GestureCatalogException('Gesture animation delivery is disabled for this account.', 404, 'ANIMATION_DELIVERY_DISABLED');
@@ -973,10 +1062,21 @@ function gesture_package_download_record(PDO $pdo, array $actor, string $publicI
     if (($admin && empty($features['admin_package_inspection'])) || (!$admin && empty($features['user_package_download']))) {
         throw new GestureCatalogException('Gesture package download is disabled through shared Settings.', 403, 'GESTURE_PART4_FEATURE_DISABLED');
     }
+    $policy = null;
+    if (!$admin) {
+        $policy = gesture_capability_policy($pdo);
+        gesture_capability_require_scope(
+            $policy,
+            gesture_capability_scope_for_gesture($row, $actorId)
+        );
+    }
     $publicPolicy = !empty($features['user_package_download']);
     if (!$owner && !$admin && (empty($row['is_public']) || !$publicPolicy)) throw new GestureCatalogException('Gesture package download is not authorized.', 403, 'DOWNLOAD_NOT_AUTHORIZED');
     $generation = gesture_package_generation($pdo, (int)$row['id'], max(1, (int)$row['package_generation']));
     if (!$generation) throw new GestureCatalogException('Gesture package is unavailable.', 404, 'PACKAGE_UNAVAILABLE');
+    if (!$admin && !empty($generation['audio_storage_name'])) {
+        gesture_capability_require($policy, 'allow_gesture_audio_delivery');
+    }
     return ['gesture' => $row, 'generation' => $generation, 'owner' => $owner, 'admin' => $admin];
 }
 

@@ -19,6 +19,10 @@ function dm_target_from_key(string $key, int $currentUserId): int {
     return $a === $currentUserId ? $b : $a;
 }
 
+function gesture_message_exception_payload(GestureCatalogException $error): array {
+    return gesture_catalog_exception_payload($error) + ['code' => $error->errorCode];
+}
+
 function community_message_accessible(PDO $pdo, array $message, string $channel, int $sessionId, array $participant): bool {
     if (($message['scope'] ?? '') !== $channel) return false;
     if ($channel === 'community') return true;
@@ -328,6 +332,8 @@ $messageType = $action === 'gif' ? 'gif' : ($action === 'gesture' ? 'gesture' : 
 $mimeType = $messageType === 'gif' ? 'image/gif' : ($messageType === 'gesture' ? 'application/x-chatspace-gesture' : null);
 $originalName = null;
 $snapshot = null;
+$gestureId = 0;
+$gestureRequestKey = '';
 if ($messageType === 'gif') {
     $content = trim((string)($body['gif_url'] ?? ''));
     $originalName = trim((string)($body['title'] ?? 'GIF'));
@@ -340,14 +346,10 @@ if ($messageType === 'gif') {
     }
 } elseif ($messageType === 'gesture') {
     $gestureId = (int)($body['gesture_id'] ?? 0);
+    $gestureRequestKey = trim((string)($body['request_key'] ?? ''));
     if (!$gestureId) json_out(['error' => 'Gesture required'], 400);
-    $stmt = $pdo->prepare('SELECT * FROM gestures WHERE id = ? AND deleted_at IS NULL AND (owner_user_id = ? OR is_public = 1) LIMIT 1');
-    $stmt->execute([$gestureId, (int)$participant['user_id']]);
-    $gesture = $stmt->fetch();
-    if (!$gesture) json_out(['error' => 'Gesture unavailable'], 404);
-    $snapshot = gesture_snapshot($gesture);
-    $content = json_encode($snapshot, JSON_UNESCAPED_SLASHES);
-    $originalName = $snapshot['text'] ?: $snapshot['name'];
+    $content = '{}';
+    $originalName = 'Gesture';
 } else {
     $content = trim((string)($body['content'] ?? ''));
 }
@@ -371,55 +373,70 @@ if (((int)$roomRecent->fetchColumn() + (int)$communityRecent->fetchColumn()) >= 
 if ($channel === 'link') {
     $targetId = (int)($body['target_participant_id'] ?? 0);
     $requestedIdentity = trim((string)($body['conversation_id'] ?? $body['relationship_id'] ?? ''));
-    $result = avatar_relationship_transaction($pdo, function() use (
-        $pdo,
-        $sessionId,
-        $participant,
-        $requestedIdentity,
-        $targetId,
-        $body,
-        $messageType,
-        $content,
-        $urlPreview,
-        $urlPreviewJson,
-        $snapshot,
-        $mimeType,
-        $originalName,
-        $authorContext
-    ): array {
-        $access = avatar_relationship_chat_access(
+    try {
+        $result = avatar_relationship_transaction($pdo, function() use (
             $pdo,
             $sessionId,
-            (int)$participant['id'],
+            $participant,
             $requestedIdentity,
             $targetId,
-            true
-        );
-        if (!$access) return ['error' => 'Relationship conversation unavailable', 'http_status' => 403];
-        $replyTo = reply_snapshot($pdo, $body, 'link', $sessionId, $participant);
-        $replyToJson = $replyTo
-            ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-            : null;
-        $message = create_message($pdo, 'link', $messageType, [
-            'session_id' => $sessionId,
-            'participant' => $participant,
-            'author_context' => $authorContext,
-            'content' => $content,
-            'url_preview' => $urlPreview,
-            'url_preview_json' => $urlPreviewJson,
-            'reply_to' => $replyTo,
-            'reply_to_json' => $replyToJson,
-            'gesture' => $messageType === 'gesture' ? $snapshot : null,
-            'mime_type' => $mimeType,
-            'original_name' => $originalName,
-            'link_key' => $access['conversation_id'],
-            'relationship_id' => $access['relationship_id'],
-            'relationship_version' => $access['relationship_version'],
-        ]);
-        return $message;
-    });
+            $body,
+            $messageType,
+            $content,
+            $urlPreview,
+            $urlPreviewJson,
+            $snapshot,
+            $mimeType,
+            $originalName,
+            $authorContext,
+            $gestureId,
+            $gestureRequestKey
+        ): array {
+            $access = avatar_relationship_chat_access(
+                $pdo,
+                $sessionId,
+                (int)$participant['id'],
+                $requestedIdentity,
+                $targetId,
+                true
+            );
+            if (!$access) return ['error' => 'Relationship conversation unavailable', 'http_status' => 403];
+            $replyTo = reply_snapshot($pdo, $body, 'link', $sessionId, $participant);
+            $replyToJson = $replyTo
+                ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                : null;
+            $message = create_message($pdo, 'link', $messageType, [
+                'session_id' => $sessionId,
+                'participant' => $participant,
+                'author_context' => $authorContext,
+                'content' => $content,
+                'url_preview' => $urlPreview,
+                'url_preview_json' => $urlPreviewJson,
+                'reply_to' => $replyTo,
+                'reply_to_json' => $replyToJson,
+                'gesture' => $messageType === 'gesture' ? $snapshot : null,
+                'gesture_id' => $messageType === 'gesture' ? $gestureId : null,
+                'request_key' => $messageType === 'gesture' ? $gestureRequestKey : null,
+                'mime_type' => $mimeType,
+                'original_name' => $originalName,
+                'link_key' => $access['conversation_id'],
+                'relationship_id' => $access['relationship_id'],
+                'relationship_version' => $access['relationship_version'],
+            ]);
+            return $message;
+        });
+    } catch (GestureCatalogException $error) {
+        json_out(gesture_message_exception_payload($error), $error->httpStatus);
+    }
     $status = (int)($result['http_status'] ?? 200);
     unset($result['http_status']);
+    if (($result['message_type'] ?? '') === 'gesture') {
+        $result = gesture_capability_project_message_payload(
+            $pdo,
+            (int)$participant['user_id'],
+            $result
+        );
+    }
     json_out($result, $status);
 } elseif ($channel === 'dm') {
     $targetUserId = (int)($body['target_user_id'] ?? 0);
@@ -442,20 +459,33 @@ if ($channel === 'link') {
 $replyTo = reply_snapshot($pdo, $body, $channel, $sessionId, $participant);
 $replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
 
-$msg = create_message($pdo, $channel, $messageType, [
-    'session_id' => $sessionId,
-    'participant' => $participant,
-    'author_context' => $authorContext,
-    'content' => $content,
-    'url_preview' => $urlPreview,
-    'url_preview_json' => $urlPreviewJson,
-    'reply_to' => $replyTo,
-    'reply_to_json' => $replyToJson,
-    'gesture' => $messageType === 'gesture' ? $snapshot : null,
-    'mime_type' => $mimeType,
-    'original_name' => $originalName,
-    'link_key' => $linkKey ?? null,
-    'dm_key' => $dmKey ?? null,
-    'target_user_id' => $targetUserId ?? null,
-]);
+try {
+    $msg = create_message($pdo, $channel, $messageType, [
+        'session_id' => $sessionId,
+        'participant' => $participant,
+        'author_context' => $authorContext,
+        'content' => $content,
+        'url_preview' => $urlPreview,
+        'url_preview_json' => $urlPreviewJson,
+        'reply_to' => $replyTo,
+        'reply_to_json' => $replyToJson,
+        'gesture' => $messageType === 'gesture' ? $snapshot : null,
+        'gesture_id' => $messageType === 'gesture' ? $gestureId : null,
+        'request_key' => $messageType === 'gesture' ? $gestureRequestKey : null,
+        'mime_type' => $mimeType,
+        'original_name' => $originalName,
+        'link_key' => $linkKey ?? null,
+        'dm_key' => $dmKey ?? null,
+        'target_user_id' => $targetUserId ?? null,
+    ]);
+} catch (GestureCatalogException $error) {
+    json_out(gesture_message_exception_payload($error), $error->httpStatus);
+}
+if ($messageType === 'gesture') {
+    $msg = gesture_capability_project_message_payload(
+        $pdo,
+        (int)$participant['user_id'],
+        $msg
+    );
+}
 json_out($msg);

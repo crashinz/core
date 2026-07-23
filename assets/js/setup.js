@@ -177,7 +177,15 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
         const ids = Object.keys(details.values || {});
         const label = ids.length && ids.every(id => id.startsWith('gesture_part3_'))
           ? 'Part 3 gesture features'
-          : (ids.length && ids.every(id => id.startsWith('gesture_part4_')) ? 'Part 4 Gesture Maker and package features' : 'dances');
+          : (ids.length && ids.every(id => id.startsWith('gesture_part4_'))
+            ? 'Part 4 Gesture Maker and package features'
+            : (ids.length && ids.every(id => [
+              'allow_gestures',
+              'allow_server_gestures',
+              'allow_personal_gestures',
+              'allow_user_gesture_mutation',
+              'allow_gesture_audio_delivery',
+            ].includes(id)) ? 'gesture capabilities' : 'dances'));
         return applyDraftValues(details.values, `All ${label} ${enabling ? 'enabled' : 'disabled'}.`);
       }
       if (operation === 'reset_setting') {

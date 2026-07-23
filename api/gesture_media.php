@@ -18,6 +18,13 @@ if (!preg_match('/^[A-Za-z0-9-]{8,64}$/', $publicId) || $generation < 1 || !in_a
 
 try {
     $pdo = db();
+    if ($purpose === 'admin') security_require_recent_authentication_or_json();
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) {
+        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
+        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+    }
+    gesture_capability_lock($pdo);
     $record = gesture_package_media_record($pdo, $publicId, $generation);
     gesture_package_authorize_media($pdo, $actor, $record, $token, $role, $purpose);
     $storageName = (string)($record[$role . '_storage_name'] ?? '');
@@ -32,6 +39,7 @@ try {
     if (!in_array($mime, $allowed[$role], true)) throw new GestureCatalogException('Gesture media type is unavailable.', 404, 'GESTURE_MEDIA_TYPE_INVALID');
     $size = filesize($path);
     if ($size === false || $size < 1 || $size > GESTURE_PACKAGE_MAX_ENTRY) throw new GestureCatalogException('Gesture media is unavailable.', 404, 'GESTURE_MEDIA_UNAVAILABLE');
+    if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
 
     $start = 0;
     $end = $size - 1;
@@ -81,7 +89,9 @@ try {
     }
     exit;
 } catch (GestureCatalogException $error) {
+    if (isset($ownsTransaction, $pdo) && $ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
     json_out(gesture_catalog_exception_payload($error), $error->httpStatus);
 } catch (Throwable) {
+    if (isset($ownsTransaction, $pdo) && $ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
     json_out(['error' => 'Gesture media could not be delivered.', 'error_code' => 'GESTURE_MEDIA_DELIVERY_FAILED'], 500);
 }

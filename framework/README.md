@@ -34,26 +34,27 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Gesture Checkpoint Part 4
+Gesture Checkpoint Part 5
 
 **Framework Phase**
 
-Engineering Complete; Gesture Checkpoint Part 5 is next
+Engineering Complete; Build 000048 is next
 
-Parts 1-4 are Engineering Complete. Part 4 adds a room-preserving Gesture Maker
-and editor, canonical versioned AGST packages, bounded GIF/MP3 validation,
-protected media and package delivery, server-owned provenance, Personal
-publish/unpublish/delete lifecycle, Admin package inspection, and shared
-optional-feature controls. Ordinary registry-backed changes still require one
-deliberate shared unlock and no redundant second confirmation; mandatory
-archive, authorization, privacy, concurrency, and validation safeguards remain
-non-optional.
+Parts 1-5 and the standalone Gesture Program are Engineering Complete. Part 5
+adds one shared master plus four subordinate server-authoritative Gesture
+capabilities, atomic Setup/Admin dependency semantics, action-time channel
+enforcement, immutable history snapshots with current-viewer media projection,
+and account-scoped per-sender gesture-media visibility.
 
-Focused Part 4 browser and SQLite/MariaDB lifecycle/concurrency certification
-are green. Exact-final r3 passed all selected quality-gate owners and all
-`87/87` Chrome scenarios across `13/13` workers with clean cleanup and zero
-unexpected observability findings. Part 5, Send Gesture/P2P transfer, Build
-000048, and hosted deployment have not begun.
+The picker retains exactly four tabs. `Create / Edit Gestures` opens
+room-preserving owned-gesture management, and both owned Edit entry points use
+one editor launcher and the existing server authorization owner. Exact-final
+r2 passed all `95/95` Chrome scenarios across `14/14` workers with exact HTTP
+`26/26`, no unmatched response, host-safety violation, or cleanup residue.
+The final owner-review deployment package is prepared but not uploaded, and
+hosting was not contacted. Build 000048 is the exact next checkpoint. Send
+Gesture/P2P transfer, Build 000051, pre-Build and Build 000064 work, and hosted
+deployment remain future-owned.
 
 ---
 
