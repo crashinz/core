@@ -7,8 +7,15 @@ const CHATSPACE_LEGACY_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
 const CHATSPACE_SCHEMA_VERSION = '2026-07-23-build-000048-part-1';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
+function chatspace_application_version(): string {
+    $path = dirname(__DIR__) . '/VERSION';
+    $version = is_file($path) ? trim((string)file_get_contents($path)) : '';
+    return $version !== '' ? $version : 'ChatSpace Community Edition';
+}
+
 require_once __DIR__ . '/security_policy.php';
 security_bootstrap();
+require_once __DIR__ . '/public_attribution.php';
 
 if (!defined('CHATSPACE_DB_DRIVER') && is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
@@ -27,6 +34,7 @@ require_once __DIR__ . '/gesture_catalog_service.php';
 require_once __DIR__ . '/gesture_package_service.php';
 require_once __DIR__ . '/media_signal_service.php';
 require_once __DIR__ . '/database_migrations.php';
+require_once __DIR__ . '/database_recovery.php';
 
 function app_base_path(): string {
     static $base = null;
@@ -126,18 +134,25 @@ function db_open_configured_connection(): PDO {
 }
 
 function db_migration_connection(): PDO {
-    static $pdo = null;
-    if (!$pdo instanceof PDO) $pdo = db_open_configured_connection();
-    return $pdo;
+    if (!($GLOBALS['CHATSPACE_MIGRATION_PDO'] ?? null) instanceof PDO) {
+        $GLOBALS['CHATSPACE_MIGRATION_PDO'] = db_open_configured_connection();
+    }
+    return $GLOBALS['CHATSPACE_MIGRATION_PDO'];
 }
 
 function db(): PDO {
-    static $pdo = null;
-    if ($pdo instanceof PDO) return $pdo;
+    if (($GLOBALS['CHATSPACE_RUNTIME_PDO'] ?? null) instanceof PDO) {
+        return $GLOBALS['CHATSPACE_RUNTIME_PDO'];
+    }
     $candidate = db_migration_connection();
     database_migrations_require_runtime_compatible($candidate);
-    $pdo = $candidate;
-    return $pdo;
+    $GLOBALS['CHATSPACE_RUNTIME_PDO'] = $candidate;
+    return $GLOBALS['CHATSPACE_RUNTIME_PDO'];
+}
+
+function db_release_connections(): void {
+    $GLOBALS['CHATSPACE_RUNTIME_PDO'] = null;
+    $GLOBALS['CHATSPACE_MIGRATION_PDO'] = null;
 }
 
 function sqlite_path(): string {

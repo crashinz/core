@@ -64,10 +64,11 @@ framework/templates/
 /deployment/
 
 # Root Markdown files are private/internal by default.
-# README.md remains public. AI_BOOTSTRAP.md therefore
-# stays local and ignored.
+# README.md and the required public modification notice remain public.
+# AI_BOOTSTRAP.md therefore stays local and ignored.
 /*.md
 !README.md
+!MODIFICATIONS.md
 
 # --------------------------------------------------
 # Node.js

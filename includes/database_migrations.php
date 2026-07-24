@@ -944,6 +944,9 @@ function database_migration_backup_readiness(PDO $pdo): array
 
 function database_migrations_require_runtime_compatible(PDO $pdo): void
 {
+    if (function_exists('database_recovery_require_runtime_available')) {
+        database_recovery_require_runtime_available();
+    }
     if (!database_migration_acquire_runtime_read_lock()) {
         $status = [
             'current' => false,
@@ -1146,11 +1149,35 @@ function database_migration_sqlite_backup(PDO $pdo, string $attemptId, ?string $
     $check = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $check->exec('PRAGMA query_only = ON');
     $integrity = (string)$check->query('PRAGMA integrity_check')->fetchColumn();
-    $tables = $check->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+    $schemaInventory = $check->query(
+        "SELECT type, name, tbl_name, sql
+           FROM sqlite_master
+          WHERE name NOT LIKE 'sqlite_%'
+          ORDER BY type, name"
+    )->fetchAll(PDO::FETCH_ASSOC);
+    $tables = [];
+    $rowCounts = [];
+    foreach ($schemaInventory as $object) {
+        if (($object['type'] ?? '') !== 'table') continue;
+        $table = (string)$object['name'];
+        $quoted = '"' . str_replace('"', '""', $table) . '"';
+        $tables[] = $table;
+        $rowCounts[$table] = (int)$check->query('SELECT COUNT(*) FROM ' . $quoted)->fetchColumn();
+    }
+    sort($tables, SORT_STRING);
+    ksort($rowCounts, SORT_STRING);
+    $foreignKeyDefects = $check->query('PRAGMA foreign_key_check')->fetchAll(PDO::FETCH_ASSOC);
     $check = null;
-    if ($integrity !== 'ok' || !in_array('users', $tables, true) || !in_array('app_settings', $tables, true)) {
+    if ($integrity !== 'ok'
+        || $foreignKeyDefects !== []
+        || !in_array('users', $tables, true)
+        || !in_array('app_settings', $tables, true)) {
         throw new CoreMigrationException('SQLite migration backup verification failed.', 'BACKUP_VERIFICATION_FAILED', 500);
     }
+    $schemaSha256 = strtoupper(hash(
+        'sha256',
+        database_migrations_canonical_json($schemaInventory) . "\n"
+    ));
     return [
         'public_id' => $publicId,
         'attempt_public_id' => $attemptId,
@@ -1159,7 +1186,16 @@ function database_migration_sqlite_backup(PDO $pdo, string $attemptId, ?string $
         'byte_size' => (int)$size,
         'sha256' => strtoupper($sha),
         'source_schema_version' => $sourceVersion,
-        'verification' => ['integrity_check' => $integrity, 'table_count' => count($tables), 'readable' => true],
+        'verification' => [
+            'format' => 'sqlite-vacuum-into',
+            'integrity_check' => $integrity,
+            'foreign_key_check' => 'ok',
+            'schema_inventory_sha256' => $schemaSha256,
+            'table_count' => count($tables),
+            'table_list' => $tables,
+            'row_counts' => $rowCounts,
+            'readable' => true,
+        ],
     ];
 }
 
@@ -1988,10 +2024,50 @@ function database_migration_verify_existing_backup(PDO $pdo, array $backup): arr
         $check = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $check->exec('PRAGMA query_only = ON');
         $integrity = (string)$check->query('PRAGMA integrity_check')->fetchColumn();
+        $schemaInventory = $check->query(
+            "SELECT type, name, tbl_name, sql
+               FROM sqlite_master
+              WHERE name NOT LIKE 'sqlite_%'
+              ORDER BY type, name"
+        )->fetchAll(PDO::FETCH_ASSOC);
+        $tables = [];
+        $rowCounts = [];
+        foreach ($schemaInventory as $object) {
+            if (($object['type'] ?? '') !== 'table') continue;
+            $table = (string)$object['name'];
+            $quoted = '"' . str_replace('"', '""', $table) . '"';
+            $tables[] = $table;
+            $rowCounts[$table] = (int)$check->query('SELECT COUNT(*) FROM ' . $quoted)->fetchColumn();
+        }
+        sort($tables, SORT_STRING);
+        ksort($rowCounts, SORT_STRING);
+        $foreignKeyDefects = $check->query('PRAGMA foreign_key_check')->fetchAll(PDO::FETCH_ASSOC);
         $check = null;
-        if ($integrity !== 'ok') {
+        $schemaSha256 = strtoupper(hash(
+            'sha256',
+            database_migrations_canonical_json($schemaInventory) . "\n"
+        ));
+        $expectedVerification = (array)$backup['verification'];
+        if ($integrity !== 'ok'
+            || $foreignKeyDefects !== []
+            || (isset($expectedVerification['schema_inventory_sha256'])
+                && !hash_equals((string)$expectedVerification['schema_inventory_sha256'], $schemaSha256))
+            || (isset($expectedVerification['table_list'])
+                && (array)$expectedVerification['table_list'] !== $tables)
+            || (isset($expectedVerification['row_counts'])
+                && (array)$expectedVerification['row_counts'] != $rowCounts)) {
             throw new CoreMigrationException('Interrupted SQLite backup failed integrity verification.', 'RECOVERY_BACKUP_INTEGRITY_FAILED', 409);
         }
+        $backup['verification'] = array_merge($expectedVerification, [
+            'format' => 'sqlite-vacuum-into',
+            'integrity_check' => $integrity,
+            'foreign_key_check' => 'ok',
+            'schema_inventory_sha256' => $schemaSha256,
+            'table_count' => count($tables),
+            'table_list' => $tables,
+            'row_counts' => $rowCounts,
+            'readable' => true,
+        ]);
     } elseif (($backup['verification']['format'] ?? '') === CORE_MIGRATION_MARIADB_BACKUP_FORMAT) {
         $verified = database_migration_verify_mariadb_logical_backup_file($path);
         $expectedRowCounts = $backup['verification']['row_counts'] ?? null;
@@ -2107,7 +2183,8 @@ function database_migrations_run(
     PDO $pdo,
     ?int $actorUserId,
     bool $cleanInstall = false,
-    ?string $requestPublicId = null
+    ?string $requestPublicId = null,
+    ?array $preparedBackup = null
 ): array
 {
     if ($requestPublicId !== null && !preg_match('/^[a-f0-9-]{36}$/i', $requestPublicId)) {
@@ -2169,7 +2246,9 @@ function database_migrations_run(
         throw new CoreMigrationException('The database cannot be updated from state: ' . $status['kind'] . '.', 'MIGRATION_STATE_BLOCKED', 409);
     }
     $backupReadiness = $status['backup_readiness'];
-    $hasRecoveryBackup = !$cleanInstall && is_array($priorState['backup'] ?? null);
+    $hasPreparedBackup = !$cleanInstall && is_array($preparedBackup);
+    $hasRecoveryBackup = !$cleanInstall
+        && ($hasPreparedBackup || is_array($priorState['backup'] ?? null));
     if (!$cleanInstall && !$hasRecoveryBackup && empty($backupReadiness['ok'])) {
         throw new CoreMigrationException((string)($backupReadiness['message'] ?? 'Migration backup is not ready.'), 'MIGRATION_BACKUP_NOT_READY', 503);
     }
@@ -2181,7 +2260,13 @@ function database_migrations_run(
     $results = [];
     try {
         if (!$cleanInstall) {
-            if ($hasRecoveryBackup) {
+            if ($hasPreparedBackup) {
+                $backup = database_migration_verify_existing_backup($pdo, (array)$preparedBackup);
+                $state['prepared_recovery_set_backup'] = true;
+                $state['backup'] = database_migration_backup_recovery_metadata($backup);
+                $state['backup_public_id'] = $backup['public_id'];
+                $state = database_migration_set_phase($pdo, $state, 'prepared-recovery-backup-verified');
+            } elseif ($hasRecoveryBackup) {
                 $backup = database_migration_verify_existing_backup($pdo, (array)$priorState['backup']);
                 $state['recovered_from_attempt_public_id'] = $priorState['attempt_public_id'] ?? null;
                 $state['backup'] = database_migration_backup_recovery_metadata($backup);

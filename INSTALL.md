@@ -59,10 +59,36 @@ ChatSpace Community Edition is designed for ordinary PHP hosting. If a host can 
 
 The normal update workflow is:
 
-1. Preserve the installation-specific `includes/config.php`, database, uploads,
-   and configured private storage.
-2. Overwrite the application files.
-3. Open the normal chat URL.
+1. Optionally use the protected Site Owner **Prepare for Update** action.
+2. Preserve the installation-specific `includes/config.php`, database, uploads,
+   configured private storage, and any verified recovery set it creates.
+3. Overwrite the application files.
+4. Open the normal chat URL.
+
+**Prepare for Update** creates one private verified paired recovery set before
+files are overwritten: a database recovery point and a snapshot of the matching
+currently installed deployable application release. The application snapshot
+uses ChatSpace's authoritative deployment inventory, records every normalized
+path, byte size, and SHA-256 hash, and does not blindly archive the
+installation. Its manifest binds the installation/release identity, database
+engine and migration/schema state, creation time, database recovery
+identity/checksums, compatibility, verification, and availability.
+
+Recovery storage remains outside the public web root, Git, upload/deployment
+packages, and private media storage. Application recovery never overwrites
+`includes/config.php`, live databases, uploads, configured private storage,
+backups, recovery/runtime state, evidence, or other installation-specific
+content. When the host cannot safely support automatic database or application
+restoration, ChatSpace remains in maintenance and provides exact bounded manual
+instructions for the same verified pair.
+
+SQLite recovery uses a verified staged database and the strongest transition
+available on the host, retaining a private failed-state safety copy until
+validation completes. MariaDB recovery first proves the deployment account can
+create isolated staging/safety schemas and perform an atomic cross-schema
+InnoDB table transition. If that bounded privilege proof fails, no production
+table is changed and the owner page presents the verified recovery-point
+identity and manual hosting-owner boundary.
 
 If the database is already current, ChatSpace opens normally. If a supported
 forward migration is pending, ChatSpace enters bounded maintenance mode. Open
@@ -129,9 +155,10 @@ to hosting or deletes hosted files automatically.
 During updates, preserve the hosted `includes/config.php`, SQLite or
 MySQL/MariaDB data, all user uploads, configured private storage, runtime issue
 screenshots, installation-specific state, and enabled private-player assets.
-Preserve private migration backups and migration recovery state as
-installation-specific data. Never place either under the public web root or
-inside an upload/deployment package.
+Preserve private migration backups, application release recovery snapshots,
+paired recovery-set manifests, and migration/recovery state as
+installation-specific data. Never place any of them under the public web root
+or inside an upload/deployment package.
 Upload the complete production `api/` tree when establishing a baseline. A
 deterministic ZIP may be produced at a final checkpoint, but ZIP deployment is
 optional and is not assumed by the staging workflow.

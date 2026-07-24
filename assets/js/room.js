@@ -7219,9 +7219,14 @@ async function pollAppVersion() {
       cache: 'no-store',
     });
     const version = String(data.version || '').trim();
+    const attribution = String(data.attribution || '').trim();
     if (!version) return;
     latestAppVersion = version;
-    if (appVersionEl) appVersionEl.textContent = version;
+    if (appVersionEl) {
+      appVersionEl.textContent = attribution
+        ? `${version} \u00B7 ${attribution}`
+        : version;
+    }
     const cachedVersion = getSeenAppVersion();
     if (!cachedVersion) {
       setSeenAppVersion(version);

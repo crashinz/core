@@ -8,6 +8,13 @@
 
 <h1 align="center">Self-hosted room chat for expressive communities.</h1>
 
+## Modification Notice
+
+This repository contains a modified version of ChatSpace Community Edition.
+Modifications have been made by **exe**. See
+[`MODIFICATIONS.md`](MODIFICATIONS.md) for a plain-language history of the
+changes.
+
 ChatSpace Community Edition gives communities self-hosted shared rooms with avatars on a live stage, real-time room chat, community-wide chat, private DMs, linked pairs, voice, webcams, games, uploads, reactions, and practical moderation tools.
 
 <p align="center">

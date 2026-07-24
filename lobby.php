@@ -428,9 +428,10 @@ $rooms = $roomsStmt->fetchAll();
 
         <section class="admin-section" id="admin-section-database">
           <div class="admin-section-title">Database</div>
-          <div class="admin-section-sub">Download full SQLite backups, or move users, rooms, settings, and files through a portable JSON bundle.</div>
+          <div class="admin-section-sub">Prepare protected application/database recovery, download SQLite backups, or move selected data through a portable JSON bundle.</div>
           <div class="admin-panel">
             <div class="admin-actions">
+              <a class="btn btn-primary" href="<?= e(app_url('/database-update.php?owner=1')) ?>">Update &amp; Recovery</a>
               <a class="btn btn-primary" href="<?= e(app_url('/api/admin_database.php?action=download')) ?>">Full Backup</a>
               <form id="admin-db-export" class="admin-export-options">
                 <?= csrf_input() ?>
