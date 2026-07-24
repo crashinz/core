@@ -313,7 +313,7 @@ function security_private_storage_directory(string $category): string
         throw new SecurityPolicyViolation('Private storage must remain outside the public web root.', 500);
     }
     $directory = rtrim($base, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $category;
-    if (!is_dir($directory) && !mkdir($directory, 0770, true) && !is_dir($directory)) {
+    if (!is_dir($directory) && !@mkdir($directory, 0770, true) && !is_dir($directory)) {
         throw new SecurityPolicyViolation('Could not create private storage.', 500);
     }
     return $directory;

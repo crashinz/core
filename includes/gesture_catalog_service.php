@@ -159,14 +159,6 @@ function gesture_catalog_create_tables(PDO $pdo): void
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY(gesture_public_id) REFERENCES gestures(public_id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-            "CREATE TABLE IF NOT EXISTS gesture_sender_media_hidden (
-                viewer_user_id INT NOT NULL,
-                target_user_id INT NOT NULL,
-                hidden_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(viewer_user_id, target_user_id),
-                FOREIGN KEY(viewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY(target_user_id) REFERENCES users(id) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
             "CREATE TABLE IF NOT EXISTS gesture_operation_requests (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 user_id INT NOT NULL,
@@ -228,14 +220,6 @@ function gesture_catalog_create_tables(PDO $pdo): void
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY(gesture_public_id) REFERENCES gestures(public_id) ON DELETE CASCADE
             )",
-            "CREATE TABLE IF NOT EXISTS gesture_sender_media_hidden (
-                viewer_user_id INTEGER NOT NULL,
-                target_user_id INTEGER NOT NULL,
-                hidden_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(viewer_user_id, target_user_id),
-                FOREIGN KEY(viewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY(target_user_id) REFERENCES users(id) ON DELETE CASCADE
-            )",
             "CREATE TABLE IF NOT EXISTS gesture_operation_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -267,7 +251,30 @@ function gesture_catalog_create_tables(PDO $pdo): void
     foreach ($statements as $statement) $pdo->exec($statement);
 }
 
-function gesture_catalog_add_preference_columns(PDO $pdo): void
+function gesture_catalog_create_sender_visibility_table(PDO $pdo): void
+{
+    if (db_driver($pdo) === 'mysql') {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS gesture_sender_media_hidden (
+            viewer_user_id INT NOT NULL,
+            target_user_id INT NOT NULL,
+            hidden_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(viewer_user_id, target_user_id),
+            FOREIGN KEY(viewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(target_user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        return;
+    }
+    $pdo->exec("CREATE TABLE IF NOT EXISTS gesture_sender_media_hidden (
+        viewer_user_id INTEGER NOT NULL,
+        target_user_id INTEGER NOT NULL,
+        hidden_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(viewer_user_id, target_user_id),
+        FOREIGN KEY(viewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(target_user_id) REFERENCES users(id) ON DELETE CASCADE
+    )");
+}
+
+function gesture_catalog_add_part3_preference_columns(PDO $pdo): void
 {
     $columns = gesture_catalog_columns($pdo, 'gesture_preferences');
     $definitions = db_driver($pdo) === 'mysql'
@@ -275,19 +282,33 @@ function gesture_catalog_add_preference_columns(PDO $pdo): void
             'show_animations' => 'TINYINT(1) NOT NULL DEFAULT 1',
             'show_text' => 'TINYINT(1) NOT NULL DEFAULT 1',
             'play_sounds' => 'TINYINT(1) NOT NULL DEFAULT 1',
-            'sender_visibility_version' => 'INT NOT NULL DEFAULT 0',
         ]
         : [
             'show_animations' => 'INTEGER NOT NULL DEFAULT 1',
             'show_text' => 'INTEGER NOT NULL DEFAULT 1',
             'play_sounds' => 'INTEGER NOT NULL DEFAULT 1',
-            'sender_visibility_version' => 'INTEGER NOT NULL DEFAULT 0',
         ];
     foreach ($definitions as $column => $definition) {
         if (!in_array($column, $columns, true)) {
             $pdo->exec("ALTER TABLE gesture_preferences ADD COLUMN {$column} {$definition}");
         }
     }
+}
+
+function gesture_catalog_add_part5_preference_columns(PDO $pdo): void
+{
+    $columns = gesture_catalog_columns($pdo, 'gesture_preferences');
+    if (in_array('sender_visibility_version', $columns, true)) return;
+    $definition = db_driver($pdo) === 'mysql'
+        ? 'INT NOT NULL DEFAULT 0'
+        : 'INTEGER NOT NULL DEFAULT 0';
+    $pdo->exec("ALTER TABLE gesture_preferences ADD COLUMN sender_visibility_version {$definition}");
+}
+
+function gesture_catalog_add_preference_columns(PDO $pdo): void
+{
+    gesture_catalog_add_part3_preference_columns($pdo);
+    gesture_catalog_add_part5_preference_columns($pdo);
 }
 
 function gesture_catalog_index(PDO $pdo, string $table, string $name, string $columns, bool $unique = false): void
@@ -405,20 +426,29 @@ function gesture_catalog_backfill(PDO $pdo): void
     }
 }
 
-function gesture_catalog_install_schema(PDO $pdo): void
+function gesture_catalog_install_base_schema(PDO $pdo): void
 {
     gesture_catalog_add_columns($pdo);
     gesture_catalog_create_tables($pdo);
-    gesture_catalog_add_preference_columns($pdo);
     gesture_catalog_backfill($pdo);
     gesture_catalog_index($pdo, 'gestures', 'idx_gestures_owner_catalog_active', 'owner_user_id, catalog_filename_key, active_catalog_key', true);
     gesture_catalog_index($pdo, 'gestures', 'idx_gestures_server_catalog', 'is_public, deleted_at, content_updated_at, id');
     gesture_catalog_index($pdo, 'gestures', 'idx_gestures_owner_catalog', 'owner_user_id, deleted_at, content_updated_at, id');
     gesture_catalog_index($pdo, 'gesture_hidden', 'idx_gesture_hidden_lookup', 'gesture_public_id, user_id');
-    gesture_catalog_index($pdo, 'gesture_sender_media_hidden', 'idx_gesture_sender_media_target', 'target_user_id, viewer_user_id');
     gesture_catalog_index($pdo, 'gesture_downloads', 'idx_gesture_download_user_status', 'user_id, status, completed_at');
     gesture_catalog_index($pdo, 'gesture_downloads', 'idx_gesture_download_status_time', 'status, started_at');
-    if (function_exists('gesture_package_install_schema')) gesture_package_install_schema($pdo);
+}
+
+function gesture_catalog_install_part3_schema(PDO $pdo): void
+{
+    gesture_catalog_add_part3_preference_columns($pdo);
+}
+
+function gesture_catalog_install_part5_schema(PDO $pdo): void
+{
+    gesture_catalog_create_sender_visibility_table($pdo);
+    gesture_catalog_add_part5_preference_columns($pdo);
+    gesture_catalog_index($pdo, 'gesture_sender_media_hidden', 'idx_gesture_sender_media_target', 'target_user_id, viewer_user_id');
 }
 
 function gesture_catalog_transaction(PDO $pdo, callable $callback): mixed

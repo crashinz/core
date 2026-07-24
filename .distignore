@@ -20,5 +20,6 @@ assets/uploads/voice/*
 assets/uploads/webcam/*
 *.log
 *.zip
+*.corechat-mariadb-backup
 __pycache__/
 *.pyc

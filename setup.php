@@ -61,8 +61,8 @@ function setup_sqlite_path(): string {
         $file = 'chatspace-' . uuid_v4() . '.sqlite';
         $path = $dir . '/' . $file;
         if (file_exists($path)) continue;
-        if (!rename($defaultPath, $path)) {
-            throw new RuntimeException('Could not rename the bundled SQLite database.');
+        if (!copy($defaultPath, $path)) {
+            throw new RuntimeException('Could not copy the bundled SQLite database.');
         }
         return $path;
     }
@@ -187,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'databas
                 $sqlitePath = setup_sqlite_path();
                 write_setup_config(['driver' => 'sqlite', 'sqlite_path' => $sqlitePath]);
                 require_once CHATSPACE_CONFIG;
-                db();
+                migrate(db_migration_connection());
                 redirect_to('/setup.php');
             }
 

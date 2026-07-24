@@ -34,11 +34,27 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Gesture Checkpoint Part 5
+Build 000048 Part 1
 
 **Framework Phase**
 
-Engineering Complete; Build 000048 is next
+Engineering Complete; Build 000048 Part 2 is next
+
+Build 000048 Part 1 establishes one forward-only core migration,
+compatibility, backup, ledger, and recovery owner shared by clean Setup and the
+protected existing-install database update flow. Ordinary runtime requests do
+not mutate schema. SQLite and MariaDB retain engine-appropriate private backup
+owners while sharing one migration manifest and final schema contract.
+
+The protected owner workflow is green across `15/15` in-app browser
+scenarios. MariaDB logical backup and isolated restoration, cross-engine
+parity, recovery, source, quality-policy, and continuation contracts are green.
+Exact-final quality gate r13 and canonical Chrome r14 are green across `95/95`
+scenarios, `14/14` workers, and `25/25` expected HTTP findings, with clean
+teardown. Build 000048 Part 1 is Engineering Complete. Part 2 is next and has
+not begun; hosting deployment remains out of scope.
+
+## Preserved Gesture Program Boundary
 
 Parts 1-5 and the standalone Gesture Program are Engineering Complete. Part 5
 adds one shared master plus four subordinate server-authoritative Gesture
@@ -52,7 +68,7 @@ one editor launcher and the existing server authorization owner. Exact-final
 r2 passed all `95/95` Chrome scenarios across `14/14` workers with exact HTTP
 `26/26`, no unmatched response, host-safety violation, or cleanup residue.
 The final owner-review deployment package is prepared but not uploaded, and
-hosting was not contacted. Build 000048 is the exact next checkpoint. Send
+hosting was not contacted. Send
 Gesture/P2P transfer, Build 000051, pre-Build and Build 000064 work, and hosted
 deployment remain future-owned.
 

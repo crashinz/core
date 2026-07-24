@@ -3,13 +3,14 @@ declare(strict_types=1);
 
 const CHATSPACE_CONFIG = __DIR__ . '/config.php';
 const CHATSPACE_DEFAULT_SQLITE = __DIR__ . '/../db/chatspace.sqlite';
-const CHATSPACE_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
+const CHATSPACE_LEGACY_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
+const CHATSPACE_SCHEMA_VERSION = '2026-07-23-build-000048-part-1';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 require_once __DIR__ . '/security_policy.php';
 security_bootstrap();
 
-if (is_file(CHATSPACE_CONFIG)) {
+if (!defined('CHATSPACE_DB_DRIVER') && is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
 }
 
@@ -25,6 +26,7 @@ require_once __DIR__ . '/runtime_issue_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
 require_once __DIR__ . '/gesture_package_service.php';
 require_once __DIR__ . '/media_signal_service.php';
+require_once __DIR__ . '/database_migrations.php';
 
 function app_base_path(): string {
     static $base = null;
@@ -96,10 +98,7 @@ function db_uses_mysql_syntax(PDO $pdo): bool {
     }
 }
 
-function db(): PDO {
-    static $pdo = null;
-    if ($pdo instanceof PDO) return $pdo;
-
+function db_open_configured_connection(): PDO {
     $driver = db_driver();
     if ($driver === 'mysql') {
         $host = defined('CHATSPACE_DB_HOST') ? CHATSPACE_DB_HOST : '127.0.0.1';
@@ -116,22 +115,28 @@ function db(): PDO {
         $pdo->exec("SET time_zone = '+00:00'");
     } else {
         $sqlitePath = defined('CHATSPACE_SQLITE_PATH') ? CHATSPACE_SQLITE_PATH : CHATSPACE_DEFAULT_SQLITE;
-        if (!is_dir(dirname($sqlitePath))) {
-            mkdir(dirname($sqlitePath), 0775, true);
-        }
+        if (!is_dir(dirname($sqlitePath))) throw new RuntimeException('The configured SQLite directory does not exist.');
         $pdo = new PDO('sqlite:' . $sqlitePath);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->exec('PRAGMA foreign_keys = ON');
         $pdo->exec('PRAGMA busy_timeout = ' . CHATSPACE_SQLITE_BUSY_TIMEOUT_MS);
     }
+    return $pdo;
+}
 
-    $schemaCurrent = db_with_sqlite_lock_retry(
-        $pdo,
-        static fn(): bool => db_schema_is_current($pdo),
-        'schema-version-read'
-    );
-    if (!$schemaCurrent) migrate($pdo);
+function db_migration_connection(): PDO {
+    static $pdo = null;
+    if (!$pdo instanceof PDO) $pdo = db_open_configured_connection();
+    return $pdo;
+}
+
+function db(): PDO {
+    static $pdo = null;
+    if ($pdo instanceof PDO) return $pdo;
+    $candidate = db_migration_connection();
+    database_migrations_require_runtime_compatible($candidate);
+    $pdo = $candidate;
     return $pdo;
 }
 
@@ -392,7 +397,7 @@ function migrate_avatar_relationship_group_schema(PDO $pdo): void {
     }
 }
 
-function migrate(PDO $pdo): void {
+function core_schema_install_published_baseline(PDO $pdo): void {
     $schema = "
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1090,11 +1095,10 @@ function migrate(PDO $pdo): void {
         }
         migrate_avatar_relationship_group_schema($pdo);
         runtime_issue_install_schema($pdo);
-        gesture_catalog_install_schema($pdo);
+        gesture_catalog_install_base_schema($pdo);
         seed_app_settings($pdo);
         seed_link_icon_catalog($pdo);
         avatar_identity_backfill($pdo);
-        db_record_schema_current($pdo);
         return;
     }
 
@@ -1148,7 +1152,7 @@ function migrate(PDO $pdo): void {
     seed_app_settings($pdo);
     seed_link_icon_catalog($pdo);
     runtime_issue_install_schema($pdo);
-    gesture_catalog_install_schema($pdo);
+    gesture_catalog_install_base_schema($pdo);
 
     $cols = $pdo->query('PRAGMA table_info(rooms)')->fetchAll();
     $hasPublicId = false;
@@ -1363,7 +1367,10 @@ function migrate(PDO $pdo): void {
     }
     migrate_avatar_relationship_group_schema($pdo);
     avatar_identity_backfill($pdo);
-    db_record_schema_current($pdo);
+}
+
+function migrate(PDO $pdo): void {
+    database_migrations_install_clean($pdo);
 }
 
 function default_link_icons(): array {

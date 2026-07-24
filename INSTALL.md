@@ -55,6 +55,35 @@ ChatSpace Community Edition is designed for ordinary PHP hosting. If a host can 
 
    A room starts with a name and an optional image or video background. Room owners, developers, and admins can edit rooms later.
 
+## Updating an Existing Installation
+
+The normal update workflow is:
+
+1. Preserve the installation-specific `includes/config.php`, database, uploads,
+   and configured private storage.
+2. Overwrite the application files.
+3. Open the normal chat URL.
+
+If the database is already current, ChatSpace opens normally. If a supported
+forward migration is pending, ChatSpace enters bounded maintenance mode. Open
+the protected Site Owner Database Update entry, authenticate as an
+administrator, review the exact status, then choose **Back Up and Update
+Database**.
+
+The update action creates and independently verifies a private server-side
+database backup before any migration mutation. SQLite uses a consistent
+snapshot. MariaDB streams a complete logical backup through the configured
+database connection; the browser does not download and re-upload the backup.
+The existing Database import/export feature remains an additional portability
+and recovery tool and is not the migration backup.
+
+Migrations are forward-only. ChatSpace does not automatically downgrade a
+newer database. Unknown, inconsistent, incomplete-release, or unsupported
+database objects fail closed. When automatic backup coverage is not safe,
+obtain and verify a complete manual MariaDB backup before proceeding. Verified
+migration backups are preserved in private storage and are not automatically
+deleted.
+
 ## Subdirectory Installs
 
 ChatSpace Community Edition is intended to run from a domain root or a hosted folder such as `/chat/`. The setup and routing helpers preserve the app base path so assets, API calls, and redirects continue to work from that hosted location.
@@ -100,6 +129,9 @@ to hosting or deletes hosted files automatically.
 During updates, preserve the hosted `includes/config.php`, SQLite or
 MySQL/MariaDB data, all user uploads, configured private storage, runtime issue
 screenshots, installation-specific state, and enabled private-player assets.
+Preserve private migration backups and migration recovery state as
+installation-specific data. Never place either under the public web root or
+inside an upload/deployment package.
 Upload the complete production `api/` tree when establishing a baseline. A
 deterministic ZIP may be produced at a final checkpoint, but ZIP deployment is
 optional and is not assumed by the staging workflow.
