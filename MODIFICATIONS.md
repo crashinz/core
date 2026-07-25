@@ -318,8 +318,12 @@ production behavior.
   anchored checkpoint without displacing Builds 000049-000064.
 - Preserved detailed future extension/branding, voice, webcam, media-quality,
   Flood Protection, P2P, game, accessibility, and final-certification scope.
-- Inventoried retained verification evidence with bounded streaming readers
-  and proposed no cleanup without separate owner approval.
+- Inventoried retained verification evidence with bounded streaming readers,
+  then executed a separate owner-approved exact-path cleanup of six inactive,
+  incomplete, unreferenced runs.
+- Removed only 246 disposable evidence files totaling 25,314,667 bytes,
+  preserved every other run unchanged, and retained the focused Part 3
+  settings-confirm rerun as historical defect-follow-up evidence.
 
 Technical reference: Post-Build 000048 Retrospective, 2026-07-25; see the
 corresponding Git history and Engineering Report.
