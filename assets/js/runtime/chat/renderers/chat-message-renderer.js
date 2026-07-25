@@ -400,8 +400,16 @@ export class ChatMessageRenderer {
                 ? ""
                 : '<button class="msg-options" type="button" aria-label="Message options">&#8942;</button>';
 
+        const snapshotDisplayName =
+            typeof message.display_name === "string" && message.display_name.trim()
+                ? message.display_name
+                : null;
+
+        const rawDisplayName =
+            snapshotDisplayName || (participant ? context.displayNameFor(participant) : "");
+
         const displayName =
-            context.esc(participant ? context.displayNameFor(participant) : message.display_name);
+            context.esc(rawDisplayName);
 
         const roleClass =
             context.participantRoleClass(author);
@@ -469,12 +477,34 @@ export class ChatMessageRenderer {
 
         });
 
-        row.querySelector(".msg-name")?.addEventListener("contextmenu", event => {
+        row.querySelector(".msg-name, .msg-compact-name")?.addEventListener("contextmenu", event => {
             if (!participant || typeof context.openParticipantActionMenu !== "function") return;
             event.preventDefault();
             event.stopPropagation();
-            context.openParticipantActionMenu(event.clientX, event.clientY, participant);
+            context.openParticipantActionMenu(event.clientX, event.clientY, participant, {
+                returnFocus: event.currentTarget,
+                focusMenu: event.detail === 0,
+            });
         });
+
+        const authorControl = row.querySelector(".msg-name, .msg-compact-name");
+        if (authorControl && Number(message.user_id) > 0
+            && typeof context.openMemberProfile === "function") {
+            authorControl.setAttribute("role", "button");
+            authorControl.setAttribute("tabindex", "0");
+            authorControl.setAttribute("aria-label", `Open ${rawDisplayName} profile`);
+            const openProfile = event => {
+                event.preventDefault();
+                event.stopPropagation();
+                context.openMemberProfile(Number(message.user_id), {
+                    returnFocus: authorControl,
+                });
+            };
+            authorControl.addEventListener("click", openProfile);
+            authorControl.addEventListener("keydown", event => {
+                if (event.key === "Enter" || event.key === " ") openProfile(event);
+            });
+        }
 
         if (message.channel !== "game") {
             row.addEventListener("contextmenu", event => {

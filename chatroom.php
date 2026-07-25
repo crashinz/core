@@ -49,6 +49,7 @@ $participant['webcam_enabled'] = 0;
 emit_event($pdo, (int)$session['id'], 'participant_join', array_merge([
     'id' => (int)$participant['id'],
     'user_id' => (int)$user['id'],
+    'username' => (string)$user['username'],
     'display_name' => $participant['display_name'],
     'role' => $user['role'] ?? 'user',
     'is_owner' => (int)$room['owner_id'] === (int)$user['id'],
@@ -711,6 +712,11 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   </form>
 </div>
 <div id="ctx-menu" role="menu" aria-label="Avatar actions">
+  <div id="ctx-identity-header" class="ctx-identity-header" role="note" aria-live="polite">
+    <strong id="ctx-identity-display-name" hidden></strong>
+    <span id="ctx-identity-username"></span>
+  </div>
+  <div class="ctx-divider ctx-identity-divider" aria-hidden="true"></div>
   <button id="ctx-change-avatar" type="button">Change Avatar</button>
   <button id="ctx-avatar-size" type="button">Maximum Avatar Display Size</button>
   <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
@@ -730,6 +736,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   <button id="ctx-avatar-visibility" type="button">Hide this avatar until it changes</button>
   <button id="ctx-avatar-user-visibility" type="button">Hide avatars from this user</button>
   <button id="ctx-gesture-sender-visibility" type="button">Hide gesture media from this user</button>
+  <button id="ctx-profile" type="button">User Profile</button>
   <button id="ctx-dm" type="button">Send DM</button>
   <button id="ctx-interact" type="button">Interact</button>
   <button id="ctx-lap-dance" type="button" aria-pressed="false">Start Lap Dance</button>
@@ -983,6 +990,31 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       <span>Searching...</span>
     </div>
     <div class="friend-list" id="friend-results" style="margin-top:12px;"></div>
+  </div>
+</div>
+<div class="modal" id="member-profile-modal" role="dialog" aria-modal="true" aria-labelledby="member-profile-title">
+  <div class="modal-box member-profile-box">
+    <div class="modal-head">
+      <strong id="member-profile-title">User Profile</strong>
+      <button class="window-close" id="member-profile-close" type="button" aria-label="Close User Profile">×</button>
+    </div>
+    <div class="member-profile-status" id="member-profile-status" role="status" aria-live="polite">Loading profile...</div>
+    <article id="member-profile-content" hidden>
+      <section class="member-profile-identity" aria-label="Member identity">
+        <div id="member-profile-avatar"></div>
+        <div>
+          <h2 id="member-profile-display-name"></h2>
+          <div class="minor" id="member-profile-username"></div>
+        </div>
+      </section>
+      <dl class="member-profile-fields" id="member-profile-fields"></dl>
+      <section class="member-profile-history" aria-labelledby="member-profile-history-title">
+        <h3 id="member-profile-history-title">Previous display names</h3>
+        <ul id="member-profile-history-list"></ul>
+      </section>
+      <div class="member-profile-warning" id="member-profile-warning" role="note" hidden></div>
+      <div class="member-profile-actions" id="member-profile-actions" aria-label="Member actions"></div>
+    </article>
   </div>
 </div>
 <?php if ($innerTranquillityPlayer['available']): ?>

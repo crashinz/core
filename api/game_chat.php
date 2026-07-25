@@ -32,8 +32,8 @@ $messagePayload = function(array $row) use ($pdo, $participant): array {
         'channel' => 'game',
         'lobby_code' => $row['lobby_code'],
         'participant_id' => (int)$row['participant_id'],
-        'user_id' => (int)$row['user_id'],
-        'display_name' => $row['display_name'] ?: 'Player',
+        'user_id' => (int)$row['author_user_id'],
+        'display_name' => $row['author_display_name'] ?: 'Player',
         'avatar_url' => $row['webcam_path'] ?: resolve_avatar($row['avatar_path'] ?? 'preset:Default'),
         'role' => $row['role'] ?? 'user',
         'is_owner' => (bool)($row['is_owner'] ?? false),
@@ -58,10 +58,12 @@ $messagePayload = function(array $row) use ($pdo, $participant): array {
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $since = (int)($source['since_id'] ?? 0);
     $stmt = $pdo->prepare(
-        'SELECT gcm.*, p.user_id, p.display_name, p.avatar_path, p.webcam_path, u.role, 0 AS is_owner
+        'SELECT gcm.*, COALESCE(gcm.user_id, p.user_id) AS author_user_id,
+                COALESCE(NULLIF(gcm.display_name, ""), p.display_name, "Player") AS author_display_name,
+                p.avatar_path, p.webcam_path, u.role, 0 AS is_owner
            FROM game_chat_messages gcm
-           JOIN participants p ON p.id = gcm.participant_id
-           JOIN users u ON u.id = p.user_id
+           LEFT JOIN participants p ON p.id = gcm.participant_id
+           LEFT JOIN users u ON u.id = COALESCE(gcm.user_id, p.user_id)
           WHERE gcm.lobby_code = ? AND gcm.id > ?
           ORDER BY gcm.id ASC LIMIT 100'
     );

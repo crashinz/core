@@ -39,9 +39,9 @@ if ($requestMethod === 'POST') {
             $limit = auth_rate_limit_status($pdo, 'database-update-login', $login);
             if (!$limit['allowed']) throw new CoreMigrationException($limit['message'], 'MIGRATION_LOGIN_RATE_LIMITED', 429);
             $stmt = $pdo->prepare(
-                "SELECT * FROM users WHERE role = 'admin' AND (LOWER(email) = LOWER(?) OR LOWER(display_name) = LOWER(?)) LIMIT 1"
+                "SELECT * FROM users WHERE role = 'admin' AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?)) LIMIT 1"
             );
-            $stmt->execute([$login, $login]);
+            $stmt->execute([$login, $login, $login]);
             $candidate = $stmt->fetch();
             if (!$candidate || !password_verify($password, (string)$candidate['password_hash'])) {
                 auth_rate_record_failure($pdo, 'database-update-login', $login);

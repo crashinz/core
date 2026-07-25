@@ -34,25 +34,25 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Build 000048 Part 1
+Build 000048 Part 3
 
 **Framework Phase**
 
-Engineering Complete; Build 000048 Part 2 is next
+Active; focused Member Profiles certification green and exact-final pending
 
-Build 000048 Part 1 establishes one forward-only core migration,
-compatibility, backup, ledger, and recovery owner shared by clean Setup and the
-protected existing-install database update flow. Ordinary runtime requests do
-not mutate schema. SQLite and MariaDB retain engine-appropriate private backup
-owners while sharing one migration manifest and final schema contract.
+Build 000048 Part 3 establishes one normalized authenticated member-profile
+owner for public projection, self editing, immutable display-name history,
+optional profile-only Name, public contact information, stale/idempotent
+mutation, and aggregate deleted-account Username-use warnings. Private
+login/recovery email and staff moderation remain outside the public projection.
 
-The protected owner workflow is green across `15/15` in-app browser
-scenarios. MariaDB logical backup and isolated restoration, cross-engine
-parity, recovery, source, quality-policy, and continuation contracts are green.
-Exact-final quality gate r13 and canonical Chrome r14 are green across `95/95`
-scenarios, `14/14` workers, and `25/25` expected HTTP findings, with clean
-teardown. Build 000048 Part 1 is Engineering Complete. Part 2 is next and has
-not begun; hosting deployment remains out of scope.
+The Account editor, room entry point, Locate Friends entry point, and existing
+member actions consume the shared owners. The responsive viewer presents the
+complete approved field set and the authoritative avatar at its actual approved
+dimensions, with proportional narrow-mobile fitting and non-disclosing
+missing/hidden placeholders. Focused source, presentation, SQLite/MariaDB, and
+in-app desktop/mobile proof are green. Exact-final certification, deployment
+verification, and publication remain pending; hosting remains out of scope.
 
 ## Preserved Gesture Program Boundary
 

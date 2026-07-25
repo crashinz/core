@@ -1177,7 +1177,42 @@ export class VoiceMediaService {
 
         }
 
-        if (this.#peers.has(id)) return SIGNAL_OUTCOME.DUPLICATE;
+        const existingPeer =
+            this.#peers.get(id) || null;
+
+        if (existingPeer) {
+
+            const videoDirection =
+                existingPeer.__voiceTransceivers?.video?.direction || null;
+
+            if (videoDirection === "recvonly" || videoDirection === "sendrecv") {
+
+                return SIGNAL_OUTCOME.DUPLICATE;
+
+            }
+
+            return this.#requestPeerNegotiation(
+                id,
+                existingPeer,
+                "remote-webcam-readiness",
+                {
+
+                    privateNegotiation:
+                        true,
+
+                    allowReceiveOnly:
+                        true,
+
+                    mediaReason:
+                        "webcam",
+
+                    webcamOperation:
+                        "remote-enable"
+
+                }
+            );
+
+        }
 
         if (!this.#clientEpochRegistered) {
 

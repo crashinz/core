@@ -42,7 +42,23 @@ export class ParticipantActionCatalogService {
         const gestureMediaHidden = Boolean(
             this.#context?.getGestureMediaVisibility?.(participant)?.hidden
         );
-        const actions = own ? [] : [
+        const actions = [
+            {
+                id: "user.profile",
+                label: "User Profile",
+                active: false,
+                disabled: false,
+                applicable: true
+            }
+        ];
+        if (!own) actions.push(
+            {
+                id: "message.direct",
+                label: "Send DM",
+                active: false,
+                disabled: blocked,
+                applicable: true
+            },
             {
                 id: "avatar.current-visibility",
                 label: visibility.exact ? "Show this avatar" : "Hide this avatar until it changes",
@@ -88,7 +104,7 @@ export class ParticipantActionCatalogService {
                 disabled: !webcamAllowed || !webcam.webcamActive,
                 applicable: true
             }
-        ];
+        );
         actions.push(...Array.from(
             this.#context?.getAvatarInteractionActions?.(participant) || []
         ));
@@ -105,7 +121,7 @@ export class ParticipantActionCatalogService {
         return Object.freeze({
             owner: "RoomRuntime",
             service: "ParticipantActionCatalogService",
-            actionDefinitionCount: 8,
+            actionDefinitionCount: 10,
             resolutionCount: this.#resolutionCount,
             duplicateCount: this.#duplicateCount
         });

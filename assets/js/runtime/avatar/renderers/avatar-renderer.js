@@ -545,6 +545,139 @@ export class AvatarRenderer {
     }
 
     /**
+     * Renders the full authoritative avatar inside a non-stage profile surface.
+     *
+     * The same source, visibility placeholder, orientation, display policy,
+     * and aspect-ratio calculation used by room avatars remain authoritative.
+     * Responsive CSS may reduce the resulting box, but this owner never crops,
+     * stretches, enlarges, or mutates the stored avatar geometry.
+     */
+    renderProfileAvatar(container, participant = {}, options = {}) {
+
+        if (!container) return null;
+
+        const documentRef =
+            options.document ||
+            container.ownerDocument ||
+            globalThis.document;
+
+        const image =
+            documentRef.createElement("img");
+
+        image.className = "member-profile-avatar-image";
+        image.draggable = false;
+
+        const avatarHidden =
+            Boolean(options.avatarHidden);
+
+        const maximumEdge =
+            Math.max(
+                1,
+                Number(
+                    participant.avatar_display_size_px ||
+                    this.#runtime.displayPolicy?.policy?.().avatarDisplayMaxPx ||
+                    200
+                )
+            );
+
+        const presentationParticipant =
+            avatarHidden
+                ? {
+                    ...participant,
+                    avatar_source_width_px: maximumEdge,
+                    avatar_source_height_px: maximumEdge,
+                    avatar_display_size_px: maximumEdge,
+                    avatarEl: image
+                }
+                : {
+                    ...participant,
+                    avatarEl: image
+                };
+
+        const source =
+            avatarHidden
+                ? hiddenAvatarPlaceholderSource(presentationParticipant)
+                : String(options.avatarSource || "");
+
+        const applyDimensions = () => {
+            const dimensions =
+                this.renderedAvatarDimensions(
+                    presentationParticipant,
+                    {
+                        fallbackSize: maximumEdge,
+                        visualMaxSize: maximumEdge,
+                        webcam: false
+                    }
+                );
+
+            image.width = dimensions.width;
+            image.height = dimensions.height;
+            image.style.width = `${dimensions.width}px`;
+            image.style.height = "auto";
+            image.dataset.authoritativeWidth = String(dimensions.width);
+            image.dataset.authoritativeHeight = String(dimensions.height);
+            container.dataset.authoritativeWidth = String(dimensions.width);
+            container.dataset.authoritativeHeight = String(dimensions.height);
+
+            return dimensions;
+        };
+
+        this.setAvatarImageSource(
+            image,
+            source,
+            {
+                flip: false,
+                window: options.window
+            }
+        );
+
+        image.classList.toggle(
+            "avatar-hidden-by-viewer",
+            avatarHidden
+        );
+
+        image.alt =
+            avatarHidden
+                ? HIDDEN_AVATAR_LABEL
+                : `${options.displayName || "User"} avatar`;
+
+        image.title =
+            avatarHidden
+                ? String(options.avatarHiddenNotice || HIDDEN_AVATAR_LABEL)
+                : "";
+
+        image.setAttribute(
+            "aria-label",
+            image.alt
+        );
+
+        if (!avatarHidden) {
+            this.setAvatarImageOrientation(
+                image,
+                options.orientation
+            );
+        }
+
+        container.replaceChildren(image);
+        applyDimensions();
+
+        if (!avatarHidden && !image.complete) {
+            image.addEventListener(
+                "load",
+                applyDimensions,
+                { once: true }
+            );
+        }
+
+        return Object.freeze({
+            element: image,
+            dimensions: applyDimensions(),
+            hidden: avatarHidden
+        });
+
+    }
+
+    /**
      * Applies a calculated avatar frame to participant presentation layers.
      *
      * @param {Object} participant

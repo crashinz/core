@@ -7,6 +7,7 @@ $ageGateEnabled = app_setting($pdo, 'age_gate_enabled', '0') === '1';
 $ageGateMinAge = max(1, min(120, (int)app_setting($pdo, 'age_gate_min_age', '13')));
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     security_authorize_outside_content_or_json($pdo, null, 'registration_avatar', ['source' => 'registration']);
+    $username = trim((string)($_POST['username'] ?? ''));
     $email = strtolower(trim($_POST['email'] ?? ''));
     $name = trim($_POST['display_name'] ?? '');
     $password = (string)($_POST['password'] ?? '');
@@ -29,23 +30,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ageVerified = !$ageGateEnabled || !empty($_POST['age_gate_confirm']);
     if ($ageGateEnabled && !$ageVerified) {
         $error = 'You must verify that you are at least ' . $ageGateMinAge . ' to create an account.';
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || $name === '' || strlen($password) < 8 || !$avatarPath) {
-        $error = 'Use a valid email, display name, password of at least 8 characters, and an avatar image between 42x42 and 250x250.';
+    } elseif ($username === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8 || !$avatarPath) {
+        $error = 'Use a valid Username, email, password of at least 8 characters, and an avatar image between 42x42 and 250x250.';
     } else {
         try {
-            $nameCheck = $pdo->prepare('SELECT 1 FROM users WHERE LOWER(display_name) = LOWER(?) LIMIT 1');
-            $nameCheck->execute([$name]);
-            if ($nameCheck->fetchColumn()) {
-                throw new RuntimeException('That display name is already taken.');
-            }
-            $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, display_name, avatar_path) VALUES (?,?,?,?)');
-            $stmt->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name, $avatarPath]);
-            authenticate_user((int)$pdo->lastInsertId());
+            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
+            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+            $identity = member_profiles_validate_identity($pdo, $username, $name);
+            $stmt = $pdo->prepare('INSERT INTO users (email, username, password_hash, display_name, avatar_path) VALUES (?,?,?,?,?)');
+            $stmt->execute([$email, $identity['username'], password_hash($password, PASSWORD_DEFAULT), $identity['display_name'], $avatarPath]);
+            $userId = (int)$pdo->lastInsertId();
+            member_profiles_initialize_user($pdo, $userId);
+            $pdo->commit();
+            authenticate_user($userId);
             redirect_to('/lobby.php');
-        } catch (RuntimeException $e) {
-            $error = $e->getMessage();
         } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
             $error = 'That email is already registered.';
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $error = $e->getMessage();
         }
     }
 }
@@ -68,7 +72,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <form class="form-grid" method="post" enctype="multipart/form-data">
       <?= csrf_input() ?>
       <label>Email<input type="email" name="email" required autocomplete="email"></label>
-      <label>Display name<input name="display_name" required autocomplete="nickname"></label>
+      <label>Username<input name="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.\x2d]{2,31}" autocomplete="username"></label>
+      <label>Display name <span class="minor">(optional; Username is shown when blank)</span><input name="display_name" autocomplete="nickname"></label>
       <label>Avatar<input type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp" required></label>
       <label>Password<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
       <?php if ($ageGateEnabled): ?>

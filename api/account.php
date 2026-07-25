@@ -8,6 +8,7 @@ $pdo = db();
 
 function account_projection(PDO $pdo, array $user): array
 {
+    $profile = member_profiles_editor_projection($pdo, (int)$user['id']);
     $restriction = $pdo->prepare('SELECT expires_at, permanent, reason FROM community_ejections WHERE user_id = ? AND ' . active_ejection_sql('community_ejections') . ' ORDER BY id DESC LIMIT 1');
     $restriction->execute([(int)$user['id']]);
     $activeRestriction = $restriction->fetch() ?: null;
@@ -16,15 +17,7 @@ function account_projection(PDO $pdo, array $user): array
     if (in_array($role, ['admin', 'developer'], true)) $capabilities[] = 'diagnostic_issues';
     if ($role === 'admin') $capabilities[] = 'community_administration';
     return [
-        'profile' => [
-            'username' => (string)($user['username'] ?: ('user' . (int)$user['id'])),
-            'usernameConfigured' => !empty($user['username']),
-            'displayName' => (string)$user['display_name'],
-            'location' => (string)($user['profile_location'] ?? ''),
-            'about' => (string)($user['profile_about'] ?? ''),
-            'visibility' => (string)($user['profile_visibility'] ?? 'community'),
-            'avatarPath' => (string)($user['avatar_path'] ?? 'preset:Default'),
-        ],
+        'profile' => $profile,
         'security' => [
             'email' => (string)$user['email'],
             'emailChangedAt' => $user['email_changed_at'] ?? null,
@@ -54,22 +47,39 @@ $body = input_json();
 $action = (string)($body['action'] ?? '');
 
 if ($action === 'update_profile') {
-    $username = strtolower(trim((string)($body['username'] ?? '')));
-    $displayName = trim((string)($body['display_name'] ?? ''));
-    $location = trim((string)($body['location'] ?? ''));
-    $about = trim((string)($body['about'] ?? ''));
-    $visibility = (string)($body['visibility'] ?? 'community');
-    if (!preg_match('/^[a-z0-9][a-z0-9_.-]{2,31}$/', $username)) json_out(['error' => 'Username must be 3-32 lowercase letters, numbers, dots, dashes, or underscores.'], 400);
-    $textLength = static fn(string $value): int => function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : (preg_match_all('/./us', $value, $matches) === false ? strlen($value) : count($matches[0]));
-    if ($displayName === '' || $textLength($displayName) > 80) json_out(['error' => 'Display name must be 1-80 characters.'], 400);
-    if ($textLength($location) > 80 || $textLength($about) > 500) json_out(['error' => 'Profile text is too long.'], 400);
-    if (!in_array($visibility, ['private', 'community', 'public'], true)) json_out(['error' => 'Invalid profile visibility.'], 400);
-    $duplicate = $pdo->prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id <> ? LIMIT 1');
-    $duplicate->execute([$username, (int)$user['id']]);
-    if ($duplicate->fetchColumn()) json_out(['error' => 'That username is already in use.'], 409);
-    $pdo->prepare('UPDATE users SET username = ?, display_name = ?, profile_location = ?, profile_about = ?, profile_visibility = ? WHERE id = ?')->execute([$username, $displayName, $location, $about, $visibility, (int)$user['id']]);
-    $pdo->prepare('UPDATE participants SET display_name = ? WHERE user_id = ?')->execute([$displayName, (int)$user['id']]);
-    json_out(['ok' => true] + account_projection($pdo, current_user() ?: $user));
+    $fields = [
+        'display_name' => $body['display_name'] ?? null,
+        'name' => $body['name'] ?? null,
+        'location' => $body['location'] ?? null,
+        'about_me' => $body['about_me'] ?? null,
+        'public_contact_email' => $body['public_contact_email'] ?? null,
+        'website' => $body['website'] ?? null,
+        'interests' => $body['interests'] ?? null,
+    ];
+    try {
+        $result = member_profiles_update(
+            $pdo,
+            (int)$user['id'],
+            (int)$user['id'],
+            $fields,
+            $body['expected_version'] ?? null,
+            $body['request_id'] ?? null
+        );
+        $projection = account_projection($pdo, current_user() ?: $user);
+        $projection['profile'] = $result['profile'];
+        $projection['profileUpdate'] = [
+            'changedFields' => $result['changedFields'] ?? [],
+            'noOp' => !empty($result['noOp']),
+            'idempotentReplay' => !empty($result['idempotentReplay']),
+        ];
+        json_out(['ok' => true] + $projection);
+    } catch (MemberProfileException $error) {
+        $payload = ['error' => $error->getMessage(), 'code' => $error->errorCode];
+        if ($error->errorCode === 'MEMBER_PROFILE_STALE_WRITE') {
+            $payload['currentProfile'] = member_profiles_editor_projection($pdo, (int)$user['id']);
+        }
+        json_out($payload, $error->httpStatus);
+    }
 }
 
 if ($action === 'update_email') {

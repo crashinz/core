@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-07-23-001-versioned-migration-control-plane';
+const CORE_MIGRATION_REQUIRED_ID = '2026-07-24-001-member-profiles';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -135,7 +135,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => 'B718F92944F87F8ACBDEDD0A7DAAE5CB249537242AE31E13A2682837F3A33576',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-07-23-001-versioned-migration-control-plane',
             'title' => 'Versioned migration control plane',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -146,6 +146,29 @@ function database_migrations_manifest(): array
                 'database_migrations_bootstrap_control_tables',
             ],
             'expected_checksum' => '1702070EA47601A1DDE162528F88A5AF39912681EDF03F301AAB86B70BDC13C8',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Member profiles and public identity history',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'member_profiles_install_schema',
+            'validate' => 'member_profiles_validate_schema',
+            'source_functions' => [
+                'member_profiles_install_schema',
+                'member_profiles_install_game_message_identity_snapshots',
+                'member_profiles_backfill',
+                'member_profiles_backfill_username',
+                'member_profiles_sync_identity_names',
+                'member_profiles_namespace_available',
+                'member_profiles_validate_username',
+                'member_profiles_validate_display_name',
+                'member_profiles_effective_display_name',
+                'member_profiles_has_custom_display_name',
+                'member_profiles_validate_schema',
+            ],
+            'expected_checksum' => '2EEF04358F98EDAB566797E175B5FEBD824644F7658F3FA156D769C397EB3568',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -620,6 +643,7 @@ function database_migration_status(PDO $pdo): array
     foreach ($manifest as $migration) $manifestById[(string)$migration['id']] = $migration;
     $releaseDefects = $preflight['defects'];
     $stateDefects = [];
+    $seenPendingMigration = false;
     $newer = false;
     foreach ($byId as $id => $row) {
         if (!isset($manifestById[$id])) {
@@ -637,7 +661,13 @@ function database_migration_status(PDO $pdo): array
     }
     $pending = [];
     foreach ($manifest as $migration) {
-        if (!isset($byId[$migration['id']])) {
+        if (isset($byId[$migration['id']])) {
+            if ($seenPendingMigration) {
+                $stateDefects[] = 'Migration ledger contains an applied entry after a missing predecessor: '
+                    . $migration['id'] . '.';
+            }
+        } else {
+            $seenPendingMigration = true;
             $pending[] = [
                 'id' => $migration['id'],
                 'title' => $migration['title'],
@@ -646,17 +676,21 @@ function database_migration_status(PDO $pdo): array
         }
     }
     $storedVersion = database_migration_read_setting($pdo, 'schema_version');
+    $supportedVersions = array_values(array_unique(array_merge(
+        [CHATSPACE_LEGACY_SCHEMA_VERSION, CHATSPACE_SCHEMA_VERSION],
+        CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS
+    )));
     $stateStatus = (string)($state['status'] ?? '');
     $kind = 'older';
     if ($stateStatus === 'active') $kind = 'active';
     elseif ($stateStatus === 'failed' || $stateStatus === 'recovery-required') $kind = 'failed';
     elseif ($newer) $kind = 'newer';
     elseif (!$variant['recognized']) $kind = 'unknown';
-    elseif ($storedVersion !== null && $storedVersion !== CHATSPACE_LEGACY_SCHEMA_VERSION && $storedVersion !== CHATSPACE_SCHEMA_VERSION) {
+    elseif ($storedVersion !== null && !in_array($storedVersion, $supportedVersions, true)) {
         $kind = strcmp($storedVersion, CHATSPACE_SCHEMA_VERSION) > 0 ? 'newer' : 'unknown';
     } elseif ($releaseDefects !== []) $kind = 'incomplete-release';
     elseif ($stateDefects !== []) $kind = 'inconsistent';
-    elseif ($pending !== [] && ($ledger !== [] || $storedVersion === CHATSPACE_SCHEMA_VERSION)) $kind = 'inconsistent';
+    elseif ($pending !== []) $kind = 'older';
     elseif ($pending === [] && $storedVersion === CHATSPACE_SCHEMA_VERSION && database_migration_validate_control_plane($pdo)) $kind = 'current';
     $backupReadiness = $kind === 'current'
         ? ['ok' => true, 'method' => 'not-required']

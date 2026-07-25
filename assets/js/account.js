@@ -22,6 +22,23 @@ function showStatus(message, error = false) {
   statusEl.classList.toggle('error', error);
 }
 
+function unicodeLength(value) {
+  return Array.from(String(value ?? '')).length;
+}
+
+function updateProfileCounters() {
+  const form = document.getElementById('account-profile-form');
+  const limits = account?.profile?.fieldLimits || {};
+  form.querySelectorAll('[data-profile-counter]').forEach(counter => {
+    const field = counter.dataset.profileCounter;
+    const control = form.elements[field];
+    const limit = Number(limits[field] || 0);
+    const count = unicodeLength(control?.value);
+    counter.textContent = limit > 0 ? `${count} / ${limit} characters` : `${count} characters`;
+    counter.classList.toggle('error', limit > 0 && count > limit);
+  });
+}
+
 function render(data) {
   account = data;
   const profile = data.profile || {};
@@ -30,9 +47,22 @@ function render(data) {
   const profileForm = document.getElementById('account-profile-form');
   profileForm.elements.username.value = profile.username || '';
   profileForm.elements.display_name.value = profile.displayName || '';
+  profileForm.elements.name.value = profile.name || '';
   profileForm.elements.location.value = profile.location || '';
-  profileForm.elements.about.value = profile.about || '';
-  profileForm.elements.visibility.value = profile.visibility || 'community';
+  profileForm.elements.about_me.value = profile.aboutMe || '';
+  profileForm.elements.public_contact_email.value = profile.publicContactEmail || '';
+  profileForm.elements.website.value = profile.website || '';
+  profileForm.elements.interests.value = profile.interests || '';
+  profileForm.dataset.profileVersion = String(profile.profileVersion || 1);
+  document.getElementById('account-profile-display-fallback').textContent = profile.displayName
+    ? 'This public Display name is used throughout ordinary chat.'
+    : `Not set — shown as ${profile.username || 'Username'}`;
+  document.getElementById('account-profile-registered').textContent = profile.registeredAt || '';
+  const history = profile.previousDisplayNames || [];
+  document.getElementById('account-profile-history').innerHTML = history.length
+    ? history.map(entry => `<li><span>${escapeHtml(entry.displayName || '')}</span><small>${escapeHtml(entry.changedAt || '')}</small></li>`).join('')
+    : '<li class="minor">None</li>';
+  updateProfileCounters();
   document.getElementById('account-email-form').elements.email.value = security.email || '';
   document.getElementById('password-last-changed').textContent = security.passwordChangedAt ? `Last changed ${security.passwordChangedAt}` : 'Password change date is not available for this existing account.';
   document.getElementById('account-recovery-card').textContent = security.hasRecoveryCode ? `Recovery code configured (ending ${security.recoveryCodeSuffix || 'unknown'}).` : 'No Lost Access recovery code is configured.';
@@ -58,13 +88,34 @@ document.querySelectorAll('[data-account-tab]').forEach(button => button.addEven
 document.getElementById('account-profile-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
+  const requestId = globalThis.crypto?.randomUUID?.()
+    || `profile-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   try {
-    showStatus('Saving profile…');
-    const data = await post('/api/account.php', { action: 'update_profile', username: form.elements.username.value, display_name: form.elements.display_name.value, location: form.elements.location.value, about: form.elements.about.value, visibility: form.elements.visibility.value });
-    render(data); showStatus('Profile saved.');
+    showStatus('Saving public profile...');
+    const data = await post('/api/account.php', {
+      action: 'update_profile',
+      expected_version: Number(form.dataset.profileVersion || 1),
+      request_id: requestId,
+      display_name: form.elements.display_name.value,
+      name: form.elements.name.value,
+      location: form.elements.location.value,
+      about_me: form.elements.about_me.value,
+      public_contact_email: form.elements.public_contact_email.value,
+      website: form.elements.website.value,
+      interests: form.elements.interests.value,
+    });
+    render(data);
+    const update = data.profileUpdate || {};
+    showStatus(update.noOp ? 'No public profile changes were needed.' : 'Public profile saved.');
   } catch (error) { showStatus(error.message, true); }
 });
 
+document.getElementById('account-profile-form').addEventListener('input', updateProfileCounters);
+
+document.getElementById('account-profile-cancel').addEventListener('click', () => {
+  if (account) render(account);
+  showStatus('Unsaved public profile changes were cleared.');
+});
 document.getElementById('account-email-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;

@@ -6,9 +6,10 @@ $pdo = db();
 $roles = ['admin', 'developer', 'guide', 'user'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $rows = $pdo->query('SELECT id, email, display_name, role, created_at FROM users ORDER BY display_name ASC')->fetchAll();
+    $rows = $pdo->query('SELECT id, username, email, display_name, role, created_at FROM users ORDER BY display_name ASC')->fetchAll();
     json_out(['users' => array_map(fn(array $u): array => [
         'id' => (int)$u['id'],
+        'username' => (string)$u['username'],
         'email' => $u['email'],
         'display_name' => $u['display_name'],
         'role' => $u['role'] ?: 'user',
@@ -22,19 +23,33 @@ $body = input_json();
 $action = (string)($body['action'] ?? '');
 
 if ($action === 'create') {
+    $username = trim((string)($body['username'] ?? ''));
     $email = trim((string)($body['email'] ?? ''));
     $name = trim((string)($body['display_name'] ?? ''));
     $password = (string)($body['password'] ?? '');
     $role = (string)($body['role'] ?? 'user');
-    if ($email === '' || $name === '' || $password === '') json_out(['error' => 'Email, name, and password required'], 400);
+    if ($username === '' || $email === '' || $password === '') {
+        json_out(['error' => 'Username, email, and password are required'], 400);
+    }
     if (!in_array($role, $roles, true)) json_out(['error' => 'Invalid role'], 400);
-    $nameCheck = $pdo->prepare('SELECT 1 FROM users WHERE LOWER(display_name) = LOWER(?) LIMIT 1');
-    $nameCheck->execute([$name]);
-    if ($nameCheck->fetchColumn()) json_out(['error' => 'That display name is already taken.'], 400);
-    $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path) VALUES (?,?,?,?,?)');
-    $stmt->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name, $role, 'preset:Default']);
-    log_tool($pdo, (int)$me['id'], 'admin_create_user', (int)$pdo->lastInsertId(), null, $name . ' (' . $role . ')');
-    json_out(['ok' => true]);
+    try {
+        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
+        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        $identity = member_profiles_validate_identity($pdo, $username, $name);
+        $stmt = $pdo->prepare('INSERT INTO users (email, username, password_hash, display_name, role, avatar_path) VALUES (?,?,?,?,?,?)');
+        $stmt->execute([$email, $identity['username'], password_hash($password, PASSWORD_DEFAULT), $identity['display_name'], $role, 'preset:Default']);
+        $userId = (int)$pdo->lastInsertId();
+        member_profiles_initialize_user($pdo, $userId);
+        log_tool($pdo, (int)$me['id'], 'admin_create_user', $userId, null, json_encode(['role' => $role, 'identity_fields' => ['username', 'display_name']]));
+        $pdo->commit();
+        json_out(['ok' => true]);
+    } catch (MemberProfileException $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
+    } catch (PDOException) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        json_out(['error' => 'That email, Username, or Display name is already in use.'], 409);
+    }
 }
 
 $userId = (int)($body['id'] ?? 0);
@@ -77,8 +92,24 @@ if ($action === 'update') {
 }
 
 if ($action === 'delete') {
-    $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
-    log_tool($pdo, (int)$me['id'], 'admin_delete_user', $userId, null, 'Deleted user');
+    try {
+        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
+        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        member_profiles_record_deleted_username_use($pdo, $userId);
+        log_tool(
+            $pdo,
+            (int)$me['id'],
+            'admin_delete_user',
+            $userId,
+            null,
+            'Deleted member account; retained only the username reuse warning record.'
+        );
+        $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        json_out(['error' => 'The member account could not be deleted safely.'], 500);
+    }
     json_out(['ok' => true]);
 }
 

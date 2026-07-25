@@ -24,8 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$limit['allowed']) {
             $error = $limit['message'];
         } else {
-            $stmt = $pdo->prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(display_name) = LOWER(?) LIMIT 1');
-            $stmt->execute([$login, $login]);
+            $stmt = $pdo->prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?) LIMIT 1');
+            $stmt->execute([$login, $login, $login]);
             $user = $stmt->fetch();
             if (!$user || empty($user['recovery_code_hash']) || !password_verify($code, (string)$user['recovery_code_hash'])) {
                 auth_rate_record_failure($pdo, 'recovery', $login);

@@ -356,7 +356,8 @@ $rooms = $roomsStmt->fetchAll();
           <div class="admin-panel">
             <form class="admin-create" id="admin-create">
               <?= csrf_input() ?>
-              <input name="display_name" placeholder="Display name" required>
+              <input name="username" placeholder="Username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.\x2d]{2,31}">
+              <input name="display_name" placeholder="Display name (optional)">
               <input name="email" type="email" placeholder="Email" required>
               <input name="password" type="password" placeholder="Password" required>
               <select name="role">
@@ -396,6 +397,15 @@ $rooms = $roomsStmt->fetchAll();
             <form class="settings-registry-form" id="lobby-admin-settings-registry-form">
               <?= csrf_input() ?>
               <div id="lobby-admin-settings-registry" class="settings-registry" aria-live="polite"></div>
+              <section id="lobby-admin-profile-limit-confirmation" class="settings-impact-confirmation" aria-live="assertive" hidden>
+                <h4>Confirm profile-limit impact</h4>
+                <p>Existing profile values will not be truncated or rewritten. The following records will remain above the proposed limit and may be retained unchanged.</p>
+                <ul id="lobby-admin-profile-limit-impact-list"></ul>
+                <div class="shared-form-actions">
+                  <button class="btn btn-primary" id="lobby-admin-profile-limit-confirm" type="button">Confirm Lower Limits</button>
+                  <button class="btn" id="lobby-admin-profile-limit-cancel" type="button">Cancel</button>
+                </div>
+              </section>
               <div class="settings-registry-sticky-actions">
                 <span id="lobby-admin-settings-dirty-summary">No unsaved changes</span>
                 <button class="btn btn-primary" id="lobby-admin-settings-save" type="submit" disabled>Save Changes</button>

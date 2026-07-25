@@ -4,7 +4,8 @@ declare(strict_types=1);
 const CHATSPACE_CONFIG = __DIR__ . '/config.php';
 const CHATSPACE_DEFAULT_SQLITE = __DIR__ . '/../db/chatspace.sqlite';
 const CHATSPACE_LEGACY_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
-const CHATSPACE_SCHEMA_VERSION = '2026-07-23-build-000048-part-1';
+const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = ['2026-07-23-build-000048-part-1'];
+const CHATSPACE_SCHEMA_VERSION = '2026-07-24-build-000048-part-3';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 function chatspace_application_version(): string {
@@ -33,6 +34,7 @@ require_once __DIR__ . '/runtime_issue_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
 require_once __DIR__ . '/gesture_package_service.php';
 require_once __DIR__ . '/media_signal_service.php';
+require_once __DIR__ . '/member_profiles.php';
 require_once __DIR__ . '/database_migrations.php';
 require_once __DIR__ . '/database_recovery.php';
 
@@ -1464,7 +1466,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), settings_registry_setting_defaults());
+    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), settings_registry_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -4921,13 +4923,17 @@ function avatar_relationship_request_payload(array $request): array {
     ];
 }
 
-function avatar_relationship_locked_request(PDO $pdo, string $requestPublicId): ?array {
+function avatar_relationship_locked_request(
+    PDO $pdo,
+    string $requestPublicId,
+    bool $lock = true
+): ?array {
     $sql = 'SELECT arr.*, ar.relationship_public_id, ar.session_id, ar.version AS current_relationship_version,
                    ar.status AS relationship_status
               FROM avatar_relationship_requests arr
               JOIN avatar_relationships ar ON ar.id = arr.relationship_id
              WHERE arr.request_public_id = ? LIMIT 1';
-    if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    if ($lock && db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$requestPublicId]);
     return $stmt->fetch() ?: null;
@@ -5595,13 +5601,29 @@ function avatar_relationship_resolve_request(
         $pdo, $sessionId, $actorParticipantId, $requestPublicId, $expectedVersion, $resolution,
         $acceptedLapSide
     ): array {
-        $request = avatar_relationship_locked_request($pdo, $requestPublicId);
-        if (!$request || (int)$request['session_id'] !== $sessionId) {
+        $requestIdentity = avatar_relationship_locked_request(
+            $pdo,
+            $requestPublicId,
+            false
+        );
+        if (!$requestIdentity || (int)$requestIdentity['session_id'] !== $sessionId) {
             return avatar_relationship_operation_error('RELATIONSHIP_REQUEST_NOT_FOUND', 'Membership request not found.', 'relationship-request-not-found', 404);
         }
-        $relationship = avatar_relationship_locked_row($pdo, $sessionId, (string)$request['relationship_public_id']);
+        $relationship = avatar_relationship_locked_row(
+            $pdo,
+            $sessionId,
+            (string)$requestIdentity['relationship_public_id']
+        );
         if (!$relationship || (string)$relationship['status'] !== 'active') {
             return avatar_relationship_operation_error('RELATIONSHIP_NOT_ACTIVE', 'Relationship is not active.', 'relationship-not-active', 409);
+        }
+        $request = avatar_relationship_locked_request($pdo, $requestPublicId);
+        if (
+            !$request
+            || (int)$request['session_id'] !== $sessionId
+            || (int)$request['relationship_id'] !== (int)$relationship['id']
+        ) {
+            return avatar_relationship_operation_error('RELATIONSHIP_REQUEST_NOT_FOUND', 'Membership request not found.', 'relationship-request-not-found', 404);
         }
         if ((string)$request['status'] === 'accepted' && $resolution === 'accept') {
             $active = avatar_relationship_target_membership($pdo, (int)$request['target_participant_id']);

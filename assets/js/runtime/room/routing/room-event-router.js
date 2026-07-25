@@ -194,6 +194,10 @@ export class RoomEventRouter {
                 this.#context?.onParticipantJoin?.(payload, event);
                 return true;
 
+            case "participant_identity":
+                this.#context?.onParticipantIdentity?.(payload, event);
+                return true;
+
             case "participant_leave":
                 this.#context?.onParticipantLeave?.(payload, event);
                 return true;

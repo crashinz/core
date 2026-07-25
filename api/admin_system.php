@@ -152,6 +152,7 @@ if ($action === 'update_settings_registry') {
             'preset' => isset($body['preset']) ? (string)$body['preset'] : null,
             'confirmed' => !empty($body['confirmed']),
             'capacity_confirmed' => !empty($body['capacity_confirmed']),
+            'profile_limits_confirmed' => !empty($body['profile_limits_confirmed']),
         ],
         $body['expected_revision'] ?? null,
         (int)$me['id'],

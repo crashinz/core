@@ -110,6 +110,38 @@ function settings_registry_definitions(): array {
         ]),
     ];
 
+    $profileLimitOrder = 10;
+    foreach (member_profiles_limit_definitions() as $settingId => $limit) {
+        $fieldLabel = (string)$limit['label'];
+        $definitions[] = settings_registry_entry([
+            'id' => $settingId,
+            'settingKey' => $settingId,
+            'owner' => 'member_profile_limits',
+            'categoryId' => 'general-appearance',
+            'subsectionId' => 'member-profiles',
+            'subsectionLabel' => 'Member Profiles',
+            'label' => $fieldLabel . ' character limit',
+            'description' => 'Maximum Unicode character count accepted for new or edited '
+                . $fieldLabel . ' values.',
+            'helpText' => 'Lowering this limit never truncates stored profile content. '
+                . 'Existing over-limit values may remain unchanged, while new or edited '
+                . 'values must meet the current limit.',
+            'aliases' => ['profile limit', strtolower($fieldLabel) . ' length'],
+            'type' => 'number',
+            'defaultValue' => (int)$limit['default'],
+            'minimum' => (int)$limit['minimum'],
+            'maximum' => (int)$limit['maximum'],
+            'step' => 1,
+            'order' => $profileLimitOrder,
+            'controlClass' => 'configurable-required',
+            'optional' => false,
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'toolLogBehavior' => 'bounded-profile-limit-operation',
+        ]);
+        $profileLimitOrder += 10;
+    }
+
     $roleLabels = ['admin' => 'Administrator', 'developer' => 'Developer', 'guide' => 'Guide', 'owner' => 'Room Owner', 'user' => 'Standard User'];
     $roleDefaults = role_color_default_palette();
     $roleOrder = 20;
@@ -730,6 +762,29 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
             return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_STALE', 'error' => 'Settings changed. Refresh and try again.', 'revision' => $actualRevision, 'http_status' => 409];
         }
+        $profileLimitTargets = [];
+        foreach ($changedIds as $id) {
+            if (($definitionMap[$id]['owner'] ?? '') === 'member_profile_limits') {
+                $profileLimitTargets[$id] = $target[$id];
+            }
+        }
+        $profileLimitImpacts = member_profiles_limit_impacts($pdo, $profileLimitTargets);
+        $profileLimitConfirmationRequired = array_values(array_filter(
+            $profileLimitImpacts,
+            static fn(array $impact): bool =>
+                !empty($impact['isLowering'])
+                && (int)$impact['recordsAboveProposedLimit'] > 0
+        ));
+        if ($profileLimitConfirmationRequired && empty($request['profile_limits_confirmed'])) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return [
+                'ok' => false,
+                'code' => 'PROFILE_LIMIT_CONFIRMATION_REQUIRED',
+                'error' => 'Review and confirm the existing profile records that will exceed the proposed limit.',
+                'profileLimitImpacts' => $profileLimitConfirmationRequired,
+                'http_status' => 409,
+            ];
+        }
         if (!$changedIds) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
             return ['ok' => true, 'idempotent' => true, 'revision' => $actualRevision, 'changedSettingCount' => 0, 'stoppedActiveCapabilityCount' => 0, 'registry' => settings_registry_snapshot($pdo, $source === 'setup' ? 'setup' : 'admin')];
@@ -842,6 +897,17 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             . '; changed ' . count($changedIds) . '; ids ' . implode(',', $listed)
             . (count($changedIds) > count($listed) ? ',+' . (count($changedIds) - count($listed)) . ' more' : '')
             . '; stopped ' . $stopped . ' active optional state(s).';
+        if ($profileLimitImpacts) {
+            $impactDetails = [];
+            foreach ($profileLimitImpacts as $impact) {
+                $impactDetails[] = $impact['settingId'] . ':'
+                    . $impact['currentLimit'] . '->' . $impact['proposedLimit']
+                    . ',over=' . $impact['recordsAboveProposedLimit'];
+            }
+            $detail .= ' Profile limits ' . implode(';', $impactDetails)
+                . '; impact-confirmed='
+                . ($profileLimitConfirmationRequired ? 'yes' : 'not-required') . '.';
+        }
         log_tool($pdo, $actorUserId > 0 ? $actorUserId : null, $source === 'setup' ? 'setup_settings_registry_update' : 'admin_settings_registry_update', null, null, $detail);
         if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
         if ($gestureCapabilityChanged) {
@@ -851,6 +917,7 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             'ok' => true, 'idempotent' => false, 'revision' => $nextRevision,
             'changedSettingCount' => count($changedIds), 'changedSettingIds' => $changedIds,
             'stoppedActiveCapabilityCount' => $stopped,
+            'profileLimitImpacts' => array_values($profileLimitImpacts),
             'registry' => settings_registry_snapshot($pdo, $source === 'setup' ? 'setup' : 'admin'),
         ];
     } catch (Throwable $error) {

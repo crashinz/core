@@ -213,13 +213,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'databas
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin') {
+    $username = trim((string)($_POST['username'] ?? ''));
     $name = trim((string)($_POST['display_name'] ?? ''));
     $email = trim((string)($_POST['email'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
     $confirm = (string)($_POST['confirm_password'] ?? '');
     try {
         if (!chatspace_configured()) throw new RuntimeException('Database setup is not complete.');
-        if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Display name and a valid email are required.');
+        if ($username === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new RuntimeException('Username and a valid private login email are required.');
+        }
         if (strlen($password) < 8 || $password !== $confirm) throw new RuntimeException('Use matching passwords of at least 8 characters.');
         $registryValues = json_decode((string)($_POST['settings_registry_values'] ?? ''), true);
         if (!is_array($registryValues)) {
@@ -238,9 +241,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
         if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
         else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
         try {
-            $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path) VALUES (?,?,?,?,?)');
-            $stmt->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name, 'admin', $avatar]);
+            $submittedDisplayLimit = (int)($registryValues['profile_limit_display_name']
+                ?? MEMBER_PROFILE_DISPLAY_NAME_MAX);
+            if ($name !== '' && member_profiles_text_length($name) > $submittedDisplayLimit) {
+                throw new RuntimeException(
+                    'Display name must be ' . $submittedDisplayLimit . ' characters or less.'
+                );
+            }
+            $identity = member_profiles_validate_identity($pdo, $username, $name);
+            $stmt = $pdo->prepare('INSERT INTO users (email, username, password_hash, display_name, role, avatar_path) VALUES (?,?,?,?,?,?)');
+            $stmt->execute([$email, $identity['username'], password_hash($password, PASSWORD_DEFAULT), $identity['display_name'], 'admin', $avatar]);
             $adminUserId = (int)$pdo->lastInsertId();
+            member_profiles_initialize_user($pdo, $adminUserId);
             $registryValues['community_name'] = $communityName;
             if ($communityLogo !== '') $registryValues['community_logo_path'] = $communityLogo;
             $registryResult = settings_registry_update(
@@ -367,7 +379,8 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
         <form method="post" class="setup-form" enctype="multipart/form-data" novalidate>
           <?= csrf_input() ?>
           <input type="hidden" name="step" value="admin">
-          <label>Display name<input name="display_name" required></label>
+          <label>Username<input name="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.\x2d]{2,31}" autocomplete="username"></label>
+          <label>Display name <span class="minor">(optional; Username is shown when blank)</span><input name="display_name" autocomplete="nickname"></label>
           <label>Avatar image
             <span class="file-picker">
               <input id="setup-avatar" type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp" required>

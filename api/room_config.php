@@ -91,13 +91,14 @@ $stmt = $pdo->prepare('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id 
 $stmt->execute([(int)$session['id']]);
 $lastEventId = (int)$stmt->fetchColumn();
 
-$stmt = $pdo->prepare('SELECT p.*, u.role FROM participants p JOIN users u ON u.id = p.user_id WHERE p.session_id = ? AND p.last_seen_at >= ? ORDER BY p.joined_at ASC');
+$stmt = $pdo->prepare('SELECT p.*, u.role, u.username FROM participants p JOIN users u ON u.id = p.user_id WHERE p.session_id = ? AND p.last_seen_at >= ? ORDER BY p.joined_at ASC');
 $stmt->execute([(int)$session['id'], stale_cutoff($pdo)]);
 $roomOwnerId = (int)$room['owner_id'];
 $participants = array_map(function(array $p) use ($roomOwnerId, $pdo): array {
     return array_merge([
         'id' => (int)$p['id'],
         'user_id' => (int)$p['user_id'],
+        'username' => (string)$p['username'],
         'display_name' => $p['display_name'],
         'role' => $p['role'] ?: 'user',
         'is_owner' => (int)$p['user_id'] === $roomOwnerId,
@@ -122,12 +123,12 @@ $stmt = $pdo->prepare(
     'SELECT *
        FROM (
         SELECT m.*,
-            COALESCE(p.display_name, m.display_name, u.display_name) AS author_display_name,
+            COALESCE(NULLIF(m.display_name, ""), p.display_name, u.display_name) AS author_display_name,
             COALESCE(p.avatar_path, m.avatar_path, u.avatar_path) AS author_avatar_path,
             COALESCE(p.webcam_path, m.avatar_url) AS author_avatar_url,
-            COALESCE(p.user_id, m.user_id) AS author_user_id,
+            COALESCE(m.user_id, p.user_id) AS author_user_id,
             u.role AS author_role,
-            CASE WHEN COALESCE(p.user_id, m.user_id) = ? THEN 1 ELSE 0 END AS author_is_owner
+            CASE WHEN COALESCE(m.user_id, p.user_id) = ? THEN 1 ELSE 0 END AS author_is_owner
      FROM messages m
      LEFT JOIN participants p ON p.id = m.participant_id
      LEFT JOIN users u ON u.id = COALESCE(p.user_id, m.user_id)

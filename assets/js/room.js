@@ -110,6 +110,11 @@ const vpMusicFrameWrap = document.getElementById('vp-music-frame-wrap');
 const messagesEl = document.getElementById('messages');
 const userListEl = document.getElementById('user-list');
 const friendListEl = document.getElementById('friend-results');
+const memberProfileModal = document.getElementById('member-profile-modal');
+const memberProfileContent = document.getElementById('member-profile-content');
+const memberProfileStatus = document.getElementById('member-profile-status');
+const memberProfileActions = document.getElementById('member-profile-actions');
+const ctxProfile = document.getElementById('ctx-profile');
 const gameListEl = document.getElementById('active-games');
 const gameStartMenu = document.getElementById('game-start-menu');
 const voiceSideSection = document.getElementById('voice-side-section');
@@ -218,6 +223,9 @@ let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastLatencyMs = null;
 let ctxMenuParticipantId = null;
+let memberProfileUserId = null;
+let memberProfileReturnFocus = null;
+let memberProfileSnapshot = null;
 let avatarOrientationPending = false;
 let avatarOrientationIntentGeneration = 0;
 let avatarOrientationQueuedIntent = null;
@@ -716,6 +724,7 @@ function configureChatMessageRenderer() {
     showGestureAgain: showGestureFromMessage,
     openMessageActionMenu,
     openParticipantActionMenu: openAvatarContextMenu,
+    openMemberProfile,
     applyReaction,
   });
 }
@@ -906,6 +915,24 @@ function configureRoomEventRouter() {
         renderParticipant(Object.assign({ online: true }, payload), { animateJoin: !hadStageAvatar });
       });
       if (!alreadyKnown && payload.id !== cfg.myParticipantId) addSystemMessage(`${payload.display_name} joined the room.`);
+    },
+    onParticipantIdentity(payload) {
+      const participant = participants.get(Number(payload.participant_id || payload.id));
+      if (!participant || Number(participant.user_id) !== Number(payload.user_id)) return;
+      participant.username = String(payload.username || participant.username || '');
+      participant.display_name = String(payload.display_name || participant.username || '');
+      renderParticipant(participant, { animateJoin: false });
+      renderPeople();
+      renderLinkTabs();
+      renderActiveChat();
+      if (ctxMenu?.classList.contains('visible')
+          && Number(ctxMenuParticipantId) === Number(participant.id)) {
+        syncParticipantIdentityHeader(participant);
+        syncParticipantActionMenu(
+          participant,
+          Number(participant.id) === Number(cfg.myParticipantId)
+        );
+      }
     },
     onParticipantLeave(payload) {
       const leavingId = payload.participant_id || payload.id;
@@ -4431,6 +4458,31 @@ function relationshipEligibilityLabel(reason) {
   })[reason] || 'Interaction is not currently available.';
 }
 
+function normalizedMemberIdentityLabel(value) {
+  return String(value ?? '').trim().normalize('NFKC').toLocaleLowerCase('en-US');
+}
+
+function syncParticipantIdentityHeader(participant) {
+  const displayElement = document.getElementById('ctx-identity-display-name');
+  const usernameElement = document.getElementById('ctx-identity-username');
+  const username = String(participant?.username || '').trim();
+  const currentDisplayName = String(participant?.display_name || '').trim();
+  const hasDistinctDisplayName = currentDisplayName !== ''
+    && normalizedMemberIdentityLabel(currentDisplayName)
+      !== normalizedMemberIdentityLabel(username);
+  if (displayElement) {
+    displayElement.textContent = hasDistinctDisplayName ? currentDisplayName : '';
+    displayElement.hidden = !hasDistinctDisplayName;
+  }
+  if (usernameElement) {
+    usernameElement.textContent = `Username: ${username}`;
+  }
+  const accessibleIdentity = hasDistinctDisplayName
+    ? `${currentDisplayName}, Username ${username}`
+    : `Username ${username}`;
+  ctxMenu?.setAttribute('aria-label', `Actions for ${accessibleIdentity}`);
+}
+
 function openAvatarContextMenu(x, y, participant, options = {}) {
   closeTextContextMenu();
   closeRoomMenu();
@@ -4445,6 +4497,7 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
     ? avatarRuntime?.coordinator?.relationshipEligibility(me, participant)
     : null;
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
+  syncParticipantIdentityHeader(participant);
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
   document.getElementById('ctx-avatar-size').style.display = isOwn ? 'block' : 'none';
   if (ctxOrientationWrap) ctxOrientationWrap.style.display = isOwn ? 'block' : 'none';
@@ -4491,6 +4544,8 @@ function syncParticipantActionButton(button, action, visible = true) {
 
 function syncParticipantActionMenu(participant, isOwn = false) {
   const actions = new Map((roomRuntime?.participantActions?.actionsFor(participant) || []).map(action => [action.id, action]));
+  syncParticipantActionButton(ctxProfile, actions.get('user.profile'), true);
+  syncParticipantActionButton(document.getElementById('ctx-dm'), actions.get('message.direct'), !isOwn);
   const exact = actions.get('avatar.current-visibility');
   const user = actions.get('avatar.user-visibility');
   const block = actions.get('user.block');
@@ -5808,6 +5863,7 @@ document.addEventListener('keydown', e => {
     closeReportProblem();
     closeDeleteMessageModal();
     cancelVoiceNote();
+    closeMemberProfile({ restoreFocus: true });
   }
 });
 
@@ -6215,6 +6271,17 @@ document.getElementById('ctx-manage-relationship')?.addEventListener('click', ()
   closeContextMenu();
   if (participantId) {
     avatarRuntime?.relationshipManagement?.openForParticipant(participantId, 'avatar-context');
+  }
+});
+
+ctxProfile?.addEventListener('click', () => {
+  const participant = participants.get(Number(ctxMenuParticipantId));
+  const returnFocus = ctxMenuReturnFocus || document.activeElement;
+  closeContextMenu();
+  if (participant) {
+    openMemberProfile(Number(participant.user_id), { returnFocus }).catch(error => {
+      showWarning(error?.message || 'User Profile could not be opened.');
+    });
   }
 });
 
@@ -7138,6 +7205,301 @@ document.querySelectorAll('[data-game]').forEach(btn => {
   });
 });
 
+function memberProfileParticipant(userId) {
+  return [...participants.values()].find(
+    participant => Number(participant.user_id) === Number(userId)
+  ) || null;
+}
+
+function closeMemberProfile(options = {}) {
+  if (!memberProfileModal?.classList.contains('open')) return;
+  memberProfileModal.classList.remove('open');
+  memberProfileUserId = null;
+  memberProfileSnapshot = null;
+  const returnFocus = memberProfileReturnFocus;
+  memberProfileReturnFocus = null;
+  if (options.restoreFocus && returnFocus?.isConnected) returnFocus.focus();
+}
+
+function appendMemberProfileField(label, value, options = {}) {
+  const hasValue = value !== null && value !== undefined && String(value).trim() !== '';
+  const renderedValue = hasValue ? String(value) : String(options.emptyText || 'Not provided');
+  const list = document.getElementById('member-profile-fields');
+  const term = document.createElement('dt');
+  term.textContent = label;
+  const description = document.createElement('dd');
+  if (hasValue && options.href) {
+    const link = document.createElement('a');
+    link.href = options.href;
+    link.textContent = renderedValue;
+    if (options.external) {
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    }
+    description.appendChild(link);
+  } else {
+    description.textContent = renderedValue;
+  }
+  if (options.multiline) description.classList.add('member-profile-multiline');
+  list.append(term, description);
+}
+
+function memberProfileAction(label, handler, options = {}) {
+  const button = document.createElement(options.href ? 'a' : 'button');
+  button.className = `btn${options.danger ? ' btn-danger' : ''}`;
+  button.textContent = label;
+  if (options.href) {
+    button.href = options.href;
+    button.target = '_blank';
+    button.rel = 'noopener noreferrer';
+  } else {
+    button.type = 'button';
+    button.disabled = Boolean(options.disabled);
+    button.addEventListener('click', handler);
+  }
+  memberProfileActions.appendChild(button);
+  return button;
+}
+
+async function setMemberProfileBlockState(profile, blocked) {
+  const participant = memberProfileParticipant(profile.userId);
+  if (participant) {
+    await setBlockState(participant, blocked);
+    return;
+  }
+  if (blocked) blockedUserIds.add(Number(profile.userId));
+  else blockedUserIds.delete(Number(profile.userId));
+  await apiPost('/api/users.php', {
+    action: blocked ? 'block_user' : 'unblock_user',
+    session_id: cfg.sessionId,
+    join_token: cfg.myJoinToken,
+    target_user_id: Number(profile.userId),
+  });
+  renderPeople();
+  renderLinkTabs();
+  renderActiveChat();
+}
+
+async function runMemberProfilePolicyAction(actionId, participant) {
+  if (!participant) return;
+  if (actionId === 'avatar.current-visibility') {
+    const policy = avatarVisibilityFor(participant);
+    await avatarRuntime?.visibility?.setExactHidden(participant, !policy.exact);
+  } else if (actionId === 'avatar.user-visibility') {
+    const policy = avatarVisibilityFor(participant);
+    await avatarRuntime?.visibility?.setUserHidden(participant, !policy.user);
+  } else if (actionId === 'gesture.sender-media-visibility') {
+    const hidden = gesturePresentation?.isSenderHidden?.(participant.user_id) === true;
+    await setGestureSenderMediaHidden(Number(participant.user_id), !hidden);
+  } else if (actionId === 'webcam.presentation') {
+    const policy = webcamViewerPolicyFor(participant);
+    await voiceRuntime?.viewerPolicy?.setParticipantPresentation(
+      participant.user_id,
+      !policy.show
+    );
+  } else if (actionId === 'webcam.receive') {
+    const policy = webcamViewerPolicyFor(participant);
+    await voiceRuntime?.viewerPolicy?.setParticipantReceive(
+      participant.user_id,
+      !policy.receive
+    );
+  }
+}
+
+function renderMemberProfileActions(profile) {
+  memberProfileActions.replaceChildren();
+  const participant = memberProfileParticipant(profile.userId);
+  if (profile.isSelf) {
+    memberProfileAction('Edit Public Profile', null, {
+      href: appUrl(`/account.php?return=room&id=${encodeURIComponent(document.body.dataset.roomId || '')}`),
+    });
+  } else {
+    const blocked = blockedUserIds.has(Number(profile.userId));
+    if (!blocked) {
+      memberProfileAction('Send DM', () => {
+        closeMemberProfile();
+        openDmWithUser({
+          id: Number(profile.userId),
+          display_name: profile.effectiveDisplayName || profile.displayName || profile.username,
+          avatar_url: profile.avatarUrl || '',
+        });
+      });
+    }
+    memberProfileAction(blocked ? 'Unblock' : 'Block', async event => {
+      event.currentTarget.disabled = true;
+      try {
+        await setMemberProfileBlockState(profile, !blocked);
+        renderMemberProfileActions(profile);
+      } catch (error) {
+        event.currentTarget.disabled = false;
+        showWarning(error?.message || 'Block setting could not be changed.');
+      }
+    }, { danger: !blocked });
+    if (participant) {
+      const delegated = new Map(
+        (roomRuntime?.participantActions?.actionsFor(participant) || [])
+          .map(action => [action.id, action])
+      );
+      [
+        'avatar.current-visibility',
+        'avatar.user-visibility',
+        'gesture.sender-media-visibility',
+        'webcam.presentation',
+        'webcam.receive',
+      ].forEach(actionId => {
+        const action = delegated.get(actionId);
+        if (!action || action.applicable === false) return;
+        memberProfileAction(action.label, async event => {
+          event.currentTarget.disabled = true;
+          try {
+            await runMemberProfilePolicyAction(actionId, participant);
+            renderMemberProfileActions(profile);
+          } catch (error) {
+            event.currentTarget.disabled = false;
+            showWarning(error?.message || 'Member setting could not be changed.');
+          }
+        }, { disabled: action.disabled });
+      });
+    }
+  }
+  memberProfileAction('Close', () => closeMemberProfile({ restoreFocus: true }));
+}
+
+function renderMemberProfile(profile) {
+  memberProfileSnapshot = profile;
+  memberProfileStatus.textContent = '';
+  memberProfileContent.hidden = false;
+  const effectiveDisplayName = profile.effectiveDisplayName
+    || profile.displayName
+    || profile.username
+    || 'Member';
+  document.getElementById('member-profile-title').textContent = `${effectiveDisplayName}'s User Profile`;
+  document.getElementById('member-profile-display-name').textContent = effectiveDisplayName;
+  document.getElementById('member-profile-username').textContent = `@${profile.username || ''}`;
+  const avatar = document.getElementById('member-profile-avatar');
+  const avatarParticipant = {
+    avatar_source_width_px: profile.avatarSourceWidthPx,
+    avatar_source_height_px: profile.avatarSourceHeightPx,
+    avatar_display_size_px: profile.avatarDisplayMaxEdgePx,
+  };
+  const renderedAvatar = avatarRuntime?.renderer?.renderProfileAvatar?.(
+    avatar,
+    avatarParticipant,
+    {
+      avatarSource: mediaUrl(profile.avatarUrl || cfg?.avatarPresets?.Default || ''),
+      avatarHidden: Boolean(profile.avatarHidden),
+      avatarHiddenNotice: profile.avatarHiddenNotice,
+      displayName: effectiveDisplayName,
+      orientation: profile.avatarOrientation,
+      window: globalThis,
+    }
+  );
+  if (!renderedAvatar) {
+    avatar.replaceChildren();
+    const placeholder = document.createElement('div');
+    placeholder.className = 'member-profile-avatar-placeholder';
+    placeholder.setAttribute('role', 'img');
+    placeholder.setAttribute(
+      'aria-label',
+      profile.avatarHidden
+        ? (profile.avatarHiddenNotice || 'Avatar hidden by you')
+        : `Standard avatar for ${effectiveDisplayName}`
+    );
+    placeholder.textContent = profile.avatarHidden ? 'Avatar hidden by you' : 'Standard avatar';
+    avatar.appendChild(placeholder);
+  }
+  document.getElementById('member-profile-fields').replaceChildren();
+  appendMemberProfileField('Username', profile.username);
+  appendMemberProfileField(
+    'Display name',
+    profile.displayName,
+    { emptyText: `Not set — shown as ${profile.username || 'Username'}` }
+  );
+  appendMemberProfileField('Name', profile.name);
+  appendMemberProfileField('Location', profile.location);
+  appendMemberProfileField('About Me', profile.aboutMe, { multiline: true });
+  appendMemberProfileField(
+    'Public profile contact email',
+    profile.publicContactEmail,
+    profile.publicContactEmail
+      ? { href: `mailto:${encodeURIComponent(profile.publicContactEmail)}` }
+      : {}
+  );
+  appendMemberProfileField(
+    'Website',
+    profile.website,
+    profile.website ? { href: profile.website, external: true } : {}
+  );
+  appendMemberProfileField('Interests', profile.interests, { multiline: true });
+  appendMemberProfileField('Registered', profile.registeredAt);
+  const history = document.getElementById('member-profile-history-list');
+  history.replaceChildren();
+  (profile.previousDisplayNames || []).forEach(entry => {
+    const item = document.createElement('li');
+    const value = document.createElement('span');
+    value.textContent = entry.displayName || '';
+    const date = document.createElement('small');
+    date.textContent = entry.changedAt || '';
+    item.append(value, date);
+    history.appendChild(item);
+  });
+  if (!history.children.length) {
+    const empty = document.createElement('li');
+    empty.className = 'minor';
+    empty.textContent = 'None';
+    history.appendChild(empty);
+  }
+  const warning = document.getElementById('member-profile-warning');
+  warning.hidden = !profile.priorUsernameUseWarning;
+  warning.textContent = profile.priorUsernameUseWarning || '';
+  renderMemberProfileActions(profile);
+}
+
+async function openMemberProfile(userId, options = {}) {
+  if (!memberProfileModal || Number(userId) < 1) return;
+  memberProfileUserId = Number(userId);
+  memberProfileReturnFocus = options.returnFocus || document.activeElement;
+  memberProfileContent.hidden = true;
+  memberProfileStatus.textContent = 'Loading profile...';
+  memberProfileModal.classList.add('open');
+  document.getElementById('member-profile-close')?.focus();
+  try {
+    const data = await runtimeRequestClient.getJson(
+      `/api/member_profile.php?user_id=${encodeURIComponent(memberProfileUserId)}`,
+      { operation: 'member-profile', endpointCategory: 'account' }
+    );
+    if (Number(userId) !== memberProfileUserId) return;
+    renderMemberProfile(data.profile || {});
+  } catch (error) {
+    if (Number(userId) !== memberProfileUserId) return;
+    memberProfileStatus.textContent = error?.message || 'User Profile could not be loaded.';
+  }
+}
+
+document.getElementById('member-profile-close')?.addEventListener(
+  'click',
+  () => closeMemberProfile({ restoreFocus: true })
+);
+memberProfileModal?.addEventListener('click', event => {
+  if (event.target === memberProfileModal) closeMemberProfile({ restoreFocus: true });
+});
+memberProfileModal?.addEventListener('keydown', event => {
+  if (event.key !== 'Tab') return;
+  const focusable = [...memberProfileModal.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter(element => !element.hidden && element.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+
 async function loadFriends() {
   const q = document.getElementById('friend-search')?.value || '';
   const loadingEl = document.getElementById('friend-loading');
@@ -7163,12 +7525,18 @@ async function loadFriends() {
         : f;
       const row = document.createElement('div');
       row.className = 'person-row';
+      const profileButton = '<button class="btn locate-profile-btn" type="button">User Profile</button>';
       const go = f.room_id
         ? (f.room_ejected
           ? `<button class="btn locate-action-btn" type="button" disabled aria-label="Room unavailable" title="Room unavailable"><img src="${esc(appUrl('/assets/images/lobby.png'))}" alt=""></button>`
           : `<a class="btn locate-action-btn" href="${esc(appUrl('/chatroom.php?id=' + encodeURIComponent(f.room_id)))}" aria-label="Go to room" title="Go"><img src="${esc(appUrl('/assets/images/lobby.png'))}" alt=""></a>`)
         : '<span class="minor locate-away">Away</span>';
-      row.innerHTML = `${avatarPresentationHtml(locateSubject, { source: locateAvatar, displayName: f.display_name, title: false })}<div><strong>${esc(f.display_name)}</strong><div class="minor">${f.room_name ? esc(f.room_name) : 'Not in a room'}</div></div><button class="btn locate-action-btn dm-locate-btn" type="button" aria-label="Send DM" title="DM"><img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""></button>${go}`;
+      row.innerHTML = `${avatarPresentationHtml(locateSubject, { source: locateAvatar, displayName: f.display_name, title: false })}<div><strong>${esc(f.display_name)}</strong><div class="minor">@${esc(f.username || '')} · ${f.room_name ? esc(f.room_name) : 'Not in a room'}</div></div>${profileButton}<button class="btn locate-action-btn dm-locate-btn" type="button" aria-label="Send DM" title="DM"><img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""></button>${go}`;
+      row.querySelector('.locate-profile-btn').addEventListener('click', event => {
+        openMemberProfile(Number(f.id), { returnFocus: event.currentTarget }).catch(error => {
+          showWarning(error?.message || 'User Profile could not be opened.');
+        });
+      });
       row.querySelector('.dm-locate-btn').addEventListener('click', () => {
         document.getElementById('locate-modal').classList.remove('open');
         openDmWithUser(dmTarget);

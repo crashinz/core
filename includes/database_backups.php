@@ -92,6 +92,7 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
         foreach (($sections['users'] ?? []) as $user) {
             if (!is_array($user)) continue;
             $email = strtolower(trim((string)($user['email'] ?? '')));
+            $username = trim((string)($user['username'] ?? ''));
             $displayName = trim((string)($user['display_name'] ?? ''));
             $hash = (string)($user['password_hash'] ?? '');
             if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $displayName === '' || $hash === '') continue;
@@ -103,12 +104,36 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
             $stmt->execute([$email]);
             $id = (int)($stmt->fetchColumn() ?: 0);
             if ($id) {
-                $pdo->prepare('UPDATE users SET password_hash = ?, display_name = ?, role = ?, avatar_path = ?, aura_effect = ? WHERE id = ?')
-                    ->execute([$hash, $displayName, $role, $avatarPath, $auraEffect, $id]);
+                member_profiles_import_identity($pdo, $id, $username, $displayName);
+                $pdo->prepare(
+                    'UPDATE users SET password_hash = ?, role = ?, avatar_path = ?, '
+                    . 'aura_effect = ? WHERE id = ?'
+                )->execute([$hash, $role, $avatarPath, $auraEffect, $id]);
             } else {
-                $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path, aura_effect) VALUES (?,?,?,?,?,?)')
-                    ->execute([$email, $hash, $displayName, $role, $avatarPath, $auraEffect]);
+                if ($username !== '') {
+                    $identity = member_profiles_validate_identity($pdo, $username, $displayName);
+                    $pdo->prepare(
+                        'INSERT INTO users '
+                        . '(email, username, password_hash, display_name, role, avatar_path, aura_effect) '
+                        . 'VALUES (?,?,?,?,?,?,?)'
+                    )->execute([
+                        $email, $identity['username'], $hash, $identity['display_name'],
+                        $role, $avatarPath, $auraEffect,
+                    ]);
+                } else {
+                    $displayName = member_profiles_validate_display_name($displayName);
+                    if (!member_profiles_namespace_available($pdo, $displayName)) {
+                        throw new MemberProfileException(
+                            'Display name is already in use as a Username or Display name.',
+                            'MEMBER_PROFILE_IDENTITY_NAME_TAKEN',
+                            409
+                        );
+                    }
+                    $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path, aura_effect) VALUES (?,?,?,?,?,?)')
+                        ->execute([$email, $hash, $displayName, $role, $avatarPath, $auraEffect]);
+                }
                 $id = (int)$pdo->lastInsertId();
+                member_profiles_initialize_user($pdo, $id);
             }
             $userMap[(int)($user['source_id'] ?? 0)] = $id;
             $userMap[$email] = $id;

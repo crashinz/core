@@ -6,6 +6,7 @@ $q = trim((string)($_GET['q'] ?? ''));
 $like = '%' . $q . '%';
 $stmt = $pdo->prepare(
     'SELECT u.id,
+            u.username,
             u.display_name,
             u.avatar_path,
             COALESCE(live_room.id, owned_room.id) AS room_id,
@@ -26,13 +27,14 @@ $stmt = $pdo->prepare(
             AND re.user_id = ?
             AND ' . active_ejection_sql('re') . '
       WHERE u.id != ?
-        AND (? = "" OR u.display_name LIKE ?)
+        AND (? = "" OR u.username LIKE ? OR u.display_name LIKE ?)
       ORDER BY u.display_name ASC'
 );
-$stmt->execute([stale_cutoff($pdo), (int)$user['id'], (int)$user['id'], $q, $like]);
+$stmt->execute([stale_cutoff($pdo), (int)$user['id'], (int)$user['id'], $q, $like, $like]);
 $friends = array_map(fn($u) => avatar_visibility_project_payload($pdo, (int)$user['id'], [
     'id' => (int)$u['id'],
     'user_id' => (int)$u['id'],
+    'username' => $u['username'],
     'display_name' => $u['display_name'],
     'avatar_path' => $u['avatar_path'],
     'avatar_url' => resolve_avatar($u['avatar_path']),

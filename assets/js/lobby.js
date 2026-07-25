@@ -765,6 +765,7 @@ const adminSettings = document.getElementById('lobby-admin-settings-registry-for
 let adminSettingsRegistry = null;
 let adminSettingsRegistryUI = null;
 let adminSettingsUnlock = null;
+let adminProfileLimitConfirmation = null;
 const adminGestureCatalog = document.getElementById('admin-gesture-catalog');
 const adminGesturePager = document.getElementById('admin-gesture-pager');
 const adminGestureStatus = document.getElementById('admin-gesture-status');
@@ -881,7 +882,7 @@ async function loadAdminUsers() {
   (data.users || []).forEach(user => {
     const row = document.createElement('form');
     row.className = 'admin-user-row';
-    row.innerHTML = `<div><strong>${esc(user.display_name)}</strong><div class="minor">${esc(user.email)}</div><div class="admin-created-meta"><span>Created On</span><strong>${adminCreatedOn(user.created_at)}</strong></div></div>
+    row.innerHTML = `<div><strong>${esc(user.display_name)}</strong><div class="minor">@${esc(user.username || '')} | ${esc(user.email)}</div><div class="admin-created-meta"><span>Created On</span><strong>${adminCreatedOn(user.created_at)}</strong></div></div>
       <select name="role">
         <option value="user">User</option>
         <option value="guide">Guide</option>
@@ -923,6 +924,7 @@ async function loadAdminSettings() {
   const data = await fetch(appUrl('/api/admin_system.php?action=settings')).then(r => r.json());
   if (data.error) throw new Error(data.error);
   adminSettingsRegistry = data.settingsRegistry;
+  clearLobbyAdminProfileLimitConfirmation();
   if (!adminSettingsUnlock) {
     adminSettingsUnlock = new window.SettingsUnlockController({
       mount: document.getElementById('lobby-admin-settings-unlock'),
@@ -944,6 +946,7 @@ async function loadAdminSettings() {
       locked: !adminSettingsUnlock.isUnlocked(),
       onOperation: handleLobbyAdminSettingsOperation,
       onDraftChange: state => {
+        clearLobbyAdminProfileLimitConfirmation();
         const summary = document.getElementById('lobby-admin-settings-dirty-summary');
         const save = document.getElementById('lobby-admin-settings-save');
         if (summary) summary.textContent = state.changedCount ? `${state.changedCount} unsaved change${state.changedCount === 1 ? '' : 's'}` : 'No unsaved changes';
@@ -1552,6 +1555,7 @@ document.getElementById('admin-create')?.addEventListener('submit', async e => {
   try {
     await adminRequest({
       action: 'create',
+      username: form.elements.username.value,
       display_name: form.elements.display_name.value,
       email: form.elements.email.value,
       password: form.elements.password.value,
@@ -1590,6 +1594,40 @@ function syncLobbyAdminSettingsMutationLocks() {
   document.querySelectorAll('#lobby-admin-settings-preset-review [data-settings-mutation]').forEach(control => {
     control.disabled = !unlocked;
   });
+}
+
+function clearLobbyAdminProfileLimitConfirmation() {
+  adminProfileLimitConfirmation = null;
+  const panel = document.getElementById('lobby-admin-profile-limit-confirmation');
+  const list = document.getElementById('lobby-admin-profile-limit-impact-list');
+  if (panel) panel.hidden = true;
+  if (list) list.replaceChildren();
+}
+
+function showLobbyAdminProfileLimitConfirmation(operation, details, impacts) {
+  const panel = document.getElementById('lobby-admin-profile-limit-confirmation');
+  const list = document.getElementById('lobby-admin-profile-limit-impact-list');
+  if (!panel || !list) throw new Error('Profile-limit impact review is unavailable.');
+  adminProfileLimitConfirmation = {
+    operation,
+    details: {
+      ...details,
+      values: details.values ? { ...details.values } : details.values,
+    },
+  };
+  list.replaceChildren();
+  for (const impact of impacts || []) {
+    const item = document.createElement('li');
+    const count = Number(impact.recordsAboveProposedLimit || 0);
+    item.textContent = `${impact.label}: ${impact.currentLimit} → ${impact.proposedLimit}; `
+      + `${count} existing record${count === 1 ? '' : 's'} above the proposed limit.`;
+    list.appendChild(item);
+  }
+  panel.hidden = false;
+  document.getElementById('lobby-admin-profile-limit-confirm')?.focus();
+  const message = 'Review the existing profile records affected by the proposed lower limit.';
+  setAdminFormStatus(adminSettings, message, 'working');
+  adminSettingsUnlock?.announce(message, 'working');
 }
 
 function lobbyAdminSettingsFailureMessage(error, fallback) {
@@ -1679,12 +1717,27 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
       adminSettingsUnlock.announce(capacityImpactMessage, 'ok');
     }
   }
-  const result = await adminSystemRequest({
-    action: 'update_settings_registry',
-    operation,
-    expected_revision: adminSettingsRegistry.revision,
-    ...details,
-  });
+  let result;
+  try {
+    result = await adminSystemRequest({
+      action: 'update_settings_registry',
+      operation,
+      expected_revision: adminSettingsRegistry.revision,
+      ...details,
+    });
+  } catch (error) {
+    if (error?.data?.code === 'PROFILE_LIMIT_CONFIRMATION_REQUIRED'
+        && !details.profile_limits_confirmed) {
+      showLobbyAdminProfileLimitConfirmation(
+        operation,
+        details,
+        error.data.profileLimitImpacts || []
+      );
+      return null;
+    }
+    throw error;
+  }
+  clearLobbyAdminProfileLimitConfirmation();
   adminSettingsRegistry = result.registry || result.settingsRegistry || adminSettingsRegistry;
   adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
   renderLobbyAdminSettingsCompatibility();
@@ -1731,6 +1784,34 @@ adminSettings?.addEventListener('submit', async event => {
     setAdminFormStatus(adminSettings, message, 'error');
     adminSettingsUnlock?.announce(message, 'error');
   }
+});
+
+document.getElementById('lobby-admin-profile-limit-confirm')?.addEventListener('click', async event => {
+  const pending = adminProfileLimitConfirmation;
+  if (!pending || !adminSettingsUnlock?.requireUnlocked()) return;
+  const confirmButton = event.currentTarget;
+  confirmButton.disabled = true;
+  try {
+    await mutateLobbyAdminSettings(pending.operation, {
+      ...pending.details,
+      profile_limits_confirmed: 1,
+    });
+  } catch (error) {
+    await loadAdminSettings().catch(() => {});
+    const message = lobbyAdminSettingsFailureMessage(error, 'Profile limits failed to save.');
+    setAdminFormStatus(adminSettings, message, 'error');
+    adminSettingsUnlock?.announce(message, 'error');
+  } finally {
+    confirmButton.disabled = false;
+  }
+});
+
+document.getElementById('lobby-admin-profile-limit-cancel')?.addEventListener('click', () => {
+  clearLobbyAdminProfileLimitConfirmation();
+  syncLobbyAdminSettingsMutationLocks();
+  const message = 'Profile-limit change was not applied; your draft remains available.';
+  setAdminFormStatus(adminSettings, message, 'ok');
+  adminSettingsUnlock?.announce(message, 'ok');
 });
 
 function showLobbyAdminPresetReview(preset) {

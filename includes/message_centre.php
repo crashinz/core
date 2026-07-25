@@ -156,12 +156,16 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
 
     if ($channel === 'game') {
         $stmt = $pdo->prepare(
-            'INSERT INTO game_chat_messages (lobby_code, participant_id, content, message_type, file_size, mime_type, original_name)
-             VALUES (?,?,?,?,?,?,?)'
+            'INSERT INTO game_chat_messages '
+            . '(lobby_code, participant_id, user_id, display_name, content, '
+            . 'message_type, file_size, mime_type, original_name) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
             (string)($payload['lobby_code'] ?? ''),
             $participantId,
+            $userId,
+            $displayName,
             $baseMsg['content'],
             $type,
             $baseMsg['file_size'],

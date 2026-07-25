@@ -271,3 +271,34 @@ Technical reference: Build 000048 Part 2, 2026-07-24, based on `befc3c1`;
 publication commit recorded in the final Engineering Report and Git history.
 
 </details>
+
+## Member profiles and identity history
+
+Signed-in community members can view a clear modern profile and manage their
+approved public profile information while private account and recovery details
+remain separate.
+
+<details>
+<summary>More about this change</summary>
+
+- Added a responsive member profile with the member's current full-size avatar,
+  Username, Display name, optional Name, public details, registration date, and
+  previous display names.
+- Added Account editing for approved public fields without exposing or
+  replacing the private login and recovery email.
+- Added identity-history safeguards that warn when a Username was previously
+  used by a deleted account without revealing or inheriting that former
+  account's profile.
+- Added one shared member-action identity header for avatar and displayed
+  chat-name entry points, showing the current Display name and stable Username
+  without exposing the profile-only Name or changing immutable action targets.
+- Added shared Setup/Admin profile-field limits with bounded impact review,
+  one-unlock/no-second-confirmation behavior, stale protection, and retention
+  of unchanged existing values above a newly lowered limit.
+- Preserved existing member actions, avatar privacy, moderation boundaries,
+  original attribution, and SQLite/MariaDB compatibility.
+
+Technical reference: Build 000048 Part 3, 2026-07-24; publication commit will
+be recorded in the final Engineering Report and Git history.
+
+</details>
