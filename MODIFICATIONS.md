@@ -268,7 +268,7 @@ application release.
   000050.
 
 Technical reference: Build 000048 Part 2, 2026-07-24, based on `befc3c1`;
-publication commit recorded in the final Engineering Report and Git history.
+published commit `5e55cd4`.
 
 </details>
 
@@ -298,7 +298,30 @@ remain separate.
 - Preserved existing member actions, avatar privacy, moderation boundaries,
   original attribution, and SQLite/MariaDB compatibility.
 
-Technical reference: Build 000048 Part 3, 2026-07-24; publication commit will
-be recorded in the final Engineering Report and Git history.
+Technical reference: Build 000048 Part 3, 2026-07-25, published commit
+`247e2e4`.
+
+</details>
+
+## Completed-build and roadmap governance audit
+
+The post-Build 000048 retrospective reconciled completed requirements,
+verification, publication, and manual-acceptance status without changing
+production behavior.
+
+<details>
+<summary>More about this audit</summary>
+
+- Made authoritative completion or explicit owner cancellation the only ways
+  approved pending scope may leave the roadmap.
+- Assigned every approved pending item an exact numbered Build or precisely
+  anchored checkpoint without displacing Builds 000049-000064.
+- Preserved detailed future extension/branding, voice, webcam, media-quality,
+  Flood Protection, P2P, game, accessibility, and final-certification scope.
+- Inventoried retained verification evidence with bounded streaming readers
+  and proposed no cleanup without separate owner approval.
+
+Technical reference: Post-Build 000048 Retrospective, 2026-07-25; see the
+corresponding Git history and Engineering Report.
 
 </details>

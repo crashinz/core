@@ -34,25 +34,28 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Build 000048 Part 3
+Post-Build 000048 Retrospective
 
 **Framework Phase**
 
-Active; focused Member Profiles certification green and exact-final pending
+Completed-build requirements, acceptance, roadmap, and evidence audit active;
+production frozen
 
-Build 000048 Part 3 establishes one normalized authenticated member-profile
-owner for public projection, self editing, immutable display-name history,
-optional profile-only Name, public contact information, stale/idempotent
-mutation, and aggregate deleted-account Username-use warnings. Private
-login/recovery email and staff moderation remain outside the public projection.
+Build 000048 Part 3 is Engineering Complete and published at commit
+`247e2e420ab9614f10789f782b1759c0d452ead6`, tree
+`7b8c0cf9952cd64dd64e38f8a273f500ddc28cf0`. Its normalized authenticated
+member-profile owner, responsive full-size avatar viewer, identity history,
+shared member-action header, Setup/Admin profile limits, SQLite/MariaDB parity,
+exact-final quality gate, canonical Chrome aggregate, deployment delta, and
+post-publication verification are complete.
 
-The Account editor, room entry point, Locate Friends entry point, and existing
-member actions consume the shared owners. The responsive viewer presents the
-complete approved field set and the authoritative avatar at its actual approved
-dimensions, with proportional narrow-mobile fitting and non-disclosing
-missing/hidden placeholders. Focused source, presentation, SQLite/MariaDB, and
-in-app desktop/mobile proof are green. Exact-final certification, deployment
-verification, and publication remain pending; hosting remains out of scope.
+The active retrospective changes no production behavior. It reconciles
+completed requirements and manual-acceptance status, makes authoritative
+completion or explicit owner cancellation the only ways approved pending scope
+can leave the roadmap, assigns every pending item a numbered or precisely
+anchored checkpoint, and inventories verification evidence in dry-run mode.
+Build 000049 is the next production checkpoint after the retrospective and its
+owner-disposition boundary; it has not begun.
 
 ## Preserved Gesture Program Boundary
 
