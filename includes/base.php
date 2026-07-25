@@ -14,6 +14,7 @@ function chatspace_application_version(): string {
     return $version !== '' ? $version : 'ChatSpace Community Edition';
 }
 
+require_once __DIR__ . '/auth_rate_limit.php';
 require_once __DIR__ . '/security_policy.php';
 security_bootstrap();
 require_once __DIR__ . '/public_attribution.php';
@@ -27,6 +28,9 @@ require_once __DIR__ . '/avatar_visibility_policy.php';
 require_once __DIR__ . '/avatar_relationship_capacity_policy.php';
 require_once __DIR__ . '/avatar_dance_capability_policy.php';
 require_once __DIR__ . '/webcam_policy.php';
+require_once __DIR__ . '/room_background_upload.php';
+require_once __DIR__ . '/server_events.php';
+require_once __DIR__ . '/tool_log.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/gesture_capability_policy.php';
 require_once __DIR__ . '/settings_registry.php';
@@ -1500,119 +1504,6 @@ function set_app_setting(PDO $pdo, string $key, string $value): void {
     $stmt->execute([$key, $value]);
 }
 
-function client_ip_address(): string {
-    return trim((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown')) ?: 'unknown';
-}
-
-function auth_rate_seconds(int $seconds): string {
-    $seconds = max(1, $seconds);
-    if ($seconds < 60) return $seconds . ' second' . ($seconds === 1 ? '' : 's');
-    $minutes = (int)ceil($seconds / 60);
-    if ($minutes < 60) return $minutes . ' minute' . ($minutes === 1 ? '' : 's');
-    $hours = (int)ceil($minutes / 60);
-    return $hours . ' hour' . ($hours === 1 ? '' : 's');
-}
-
-function auth_rate_scope_max(PDO $pdo, string $scope): int {
-    if (str_starts_with($scope, 'gesture:')) {
-        return max(1, (int)app_setting_float($pdo, 'gesture_mutation_rate_limit', 120));
-    }
-    if (str_starts_with($scope, 'outside:')) {
-        return max(1, (int)app_setting_float($pdo, 'outside_content_rate_limit', 60));
-    }
-    $key = $scope === 'recovery' ? 'auth_recovery_max_attempts' : 'auth_login_max_attempts';
-    return max(1, (int)app_setting_float($pdo, $key, $scope === 'recovery' ? 5 : 5));
-}
-
-function auth_rate_ip_max(PDO $pdo, string $scope = ''): int {
-    if (str_starts_with($scope, 'gesture:')) {
-        return max(1, (int)app_setting_float($pdo, 'gesture_mutation_ip_rate_limit', 600));
-    }
-    if (str_starts_with($scope, 'outside:')) {
-        return max(1, (int)app_setting_float($pdo, 'outside_content_ip_rate_limit', 300));
-    }
-    return max(1, (int)app_setting_float($pdo, 'auth_ip_max_attempts', 30));
-}
-
-function auth_rate_window_minutes(PDO $pdo): float {
-    return max(1.0, app_setting_float($pdo, 'auth_attempt_window_minutes', 15));
-}
-
-function auth_rate_lockout_minutes(PDO $pdo): float {
-    return max(1.0, app_setting_float($pdo, 'auth_lockout_minutes', 15));
-}
-
-function auth_rate_key_hash(string $scope, string $dimension, string $value): string {
-    $normalized = strtolower(trim($scope)) . "\n" . strtolower(trim($dimension)) . "\n" . strtolower(trim($value));
-    return hash('sha256', $normalized);
-}
-
-function auth_rate_keys(string $scope, string $identifier): array {
-    $identifier = trim($identifier) !== '' ? trim($identifier) : '(blank)';
-    return [
-        ['dimension' => 'identifier', 'hash' => auth_rate_key_hash($scope, 'identifier', $identifier)],
-        ['dimension' => 'ip', 'hash' => auth_rate_key_hash($scope, 'ip', client_ip_address())],
-    ];
-}
-
-function auth_rate_cleanup(PDO $pdo): void {
-    $windowMinutes = auth_rate_window_minutes($pdo);
-    $cutoff = gmdate('Y-m-d H:i:s', time() - (int)ceil($windowMinutes * 60));
-    $now = gmdate('Y-m-d H:i:s');
-    $stmt = $pdo->prepare('DELETE FROM auth_attempts WHERE last_attempt_at < ? AND (locked_until IS NULL OR locked_until < ?)');
-    $stmt->execute([$cutoff, $now]);
-}
-
-function auth_rate_limit_status(PDO $pdo, string $scope, string $identifier): array {
-    auth_rate_cleanup($pdo);
-    $now = time();
-    $blockedUntil = 0;
-    $stmt = $pdo->prepare('SELECT dimension, locked_until FROM auth_attempts WHERE scope = ? AND dimension = ? AND key_hash = ? LIMIT 1');
-    foreach (auth_rate_keys($scope, $identifier) as $key) {
-        $stmt->execute([$scope, $key['dimension'], $key['hash']]);
-        $row = $stmt->fetch();
-        if (!$row || empty($row['locked_until'])) continue;
-        $until = strtotime((string)$row['locked_until']) ?: 0;
-        if ($until > $blockedUntil) $blockedUntil = $until;
-    }
-    if ($blockedUntil > $now) {
-        return [
-            'allowed' => false,
-            'retry_after' => $blockedUntil - $now,
-            'message' => 'Too many attempts. Try again in ' . auth_rate_seconds($blockedUntil - $now) . '.',
-        ];
-    }
-    return ['allowed' => true, 'retry_after' => 0, 'message' => ''];
-}
-
-function auth_rate_record_failure(PDO $pdo, string $scope, string $identifier): void {
-    $now = gmdate('Y-m-d H:i:s');
-    $windowCutoff = gmdate('Y-m-d H:i:s', time() - (int)ceil(auth_rate_window_minutes($pdo) * 60));
-    $lockedUntil = gmdate('Y-m-d H:i:s', time() + (int)ceil(auth_rate_lockout_minutes($pdo) * 60));
-    $select = $pdo->prepare('SELECT attempts, last_attempt_at FROM auth_attempts WHERE scope = ? AND dimension = ? AND key_hash = ? LIMIT 1');
-    $write = $pdo->prepare(db_uses_mysql_syntax($pdo)
-        ? 'INSERT INTO auth_attempts (scope, dimension, key_hash, attempts, last_attempt_at, locked_until) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE attempts = VALUES(attempts), last_attempt_at = VALUES(last_attempt_at), locked_until = VALUES(locked_until)'
-        : 'INSERT INTO auth_attempts (scope, dimension, key_hash, attempts, last_attempt_at, locked_until) VALUES (?,?,?,?,?,?) ON CONFLICT(scope, dimension, key_hash) DO UPDATE SET attempts = excluded.attempts, last_attempt_at = excluded.last_attempt_at, locked_until = excluded.locked_until'
-    );
-    foreach (auth_rate_keys($scope, $identifier) as $key) {
-        $select->execute([$scope, $key['dimension'], $key['hash']]);
-        $row = $select->fetch();
-        $attempts = 1;
-        if ($row && (string)($row['last_attempt_at'] ?? '') >= $windowCutoff) {
-            $attempts = ((int)$row['attempts']) + 1;
-        }
-        $max = $key['dimension'] === 'ip' ? auth_rate_ip_max($pdo, $scope) : auth_rate_scope_max($pdo, $scope);
-        $lock = $attempts >= $max ? $lockedUntil : null;
-        $write->execute([$scope, $key['dimension'], $key['hash'], $attempts, $now, $lock]);
-    }
-}
-
-function auth_rate_clear_identifier(PDO $pdo, string $scope, string $identifier): void {
-    $hash = auth_rate_key_hash($scope, 'identifier', trim($identifier) !== '' ? trim($identifier) : '(blank)');
-    $stmt = $pdo->prepare("DELETE FROM auth_attempts WHERE scope = ? AND dimension = 'identifier' AND key_hash = ?");
-    $stmt->execute([$scope, $hash]);
-}
-
 function install_branding(?PDO $pdo = null): array {
     $defaults = [
         'community_name' => '',
@@ -1822,72 +1713,6 @@ function url_preview_for_text(string $text): ?array {
     return $preview;
 }
 
-function save_room_background_upload(array $upload, ?array $thumbUpload = null): array {
-    if (empty($upload['tmp_name']) || !is_uploaded_file($upload['tmp_name'])) {
-        return ['path' => null, 'mime' => null, 'thumb_path' => null];
-    }
-    $pdo = db();
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $mime = $finfo->file($upload['tmp_name']) ?: '';
-    $allowed = ['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm'];
-    if (!in_array($mime, $allowed, true) || !security_valid_uploaded_file_signature((string)$upload['tmp_name'], $mime)) {
-        throw new RuntimeException('Unsupported background type');
-    }
-    $isVideo = str_starts_with($mime, 'video/');
-    $maxBytes = $isVideo ? app_setting_bytes($pdo, 'room_video_max_size_mb', 200) : app_setting_bytes($pdo, 'room_image_max_size_mb', 10);
-    if ((int)($upload['size'] ?? 0) > $maxBytes) {
-        throw new RuntimeException('Background file is too large');
-    }
-    $ext = match ($mime) {
-        'image/png' => 'png',
-        'image/webp' => 'webp',
-        'image/gif' => 'gif',
-        'video/mp4' => 'mp4',
-        'video/webm' => 'webm',
-        default => 'jpg',
-    };
-    $dir = __DIR__ . '/../assets/uploads/backgrounds';
-    if (!is_dir($dir)) mkdir($dir, 0775, true);
-    $base = bin2hex(random_bytes(12));
-    $file = $base . '.' . $ext;
-    $dest = $dir . '/' . $file;
-    if (!move_uploaded_file($upload['tmp_name'], $dest)) {
-        throw new RuntimeException('Could not save background');
-    }
-    $path = '/assets/uploads/backgrounds/' . $file;
-    security_assert_storage_destination('room_background_upload', $path);
-    $thumbPath = null;
-    if ($isVideo && $thumbUpload && !empty($thumbUpload['tmp_name']) && is_uploaded_file($thumbUpload['tmp_name'])) {
-        $thumbInfo = new finfo(FILEINFO_MIME_TYPE);
-        $thumbMime = $thumbInfo->file($thumbUpload['tmp_name']) ?: '';
-        if (in_array($thumbMime, ['image/jpeg', 'image/png', 'image/webp'], true)
-            && security_valid_image_file((string)$thumbUpload['tmp_name'], $thumbMime)
-            && (int)($thumbUpload['size'] ?? 0) <= 2 * 1024 * 1024) {
-            $thumbExt = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$thumbMime];
-            $thumbFile = $base . '-thumb.' . $thumbExt;
-            $thumbDest = $dir . '/' . $thumbFile;
-            if (move_uploaded_file($thumbUpload['tmp_name'], $thumbDest)) {
-                $thumbPath = '/assets/uploads/backgrounds/' . $thumbFile;
-            }
-        }
-    }
-    if ($isVideo && !$thumbPath && function_exists('shell_exec')) {
-        $thumbFile = $base . '-thumb.jpg';
-        $thumbDest = $dir . '/' . $thumbFile;
-        $cmd = 'ffmpeg -y -i ' . escapeshellarg($dest) . ' -ss 00:00:01 -frames:v 1 -vf ' . escapeshellarg('scale=720:-1') . ' ' . escapeshellarg($thumbDest) . ' 2>/dev/null';
-        @shell_exec($cmd);
-        if (is_file($thumbDest) && filesize($thumbDest) > 0) {
-            $thumbPath = '/assets/uploads/backgrounds/' . $thumbFile;
-        }
-    }
-    return ['path' => $path, 'mime' => $mime, 'thumb_path' => $thumbPath];
-}
-
-function log_tool(PDO $pdo, ?int $actorUserId, string $action, ?int $targetUserId = null, ?int $roomId = null, ?string $detail = null): void {
-    $stmt = $pdo->prepare('INSERT INTO tool_logs (actor_user_id, target_user_id, room_id, action, detail) VALUES (?,?,?,?,?)');
-    $stmt->execute([$actorUserId, $targetUserId, $roomId, $action, $detail]);
-}
-
 function uuid_v4(): string {
     $data = random_bytes(16);
     $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
@@ -1996,16 +1821,6 @@ function csrf_input(): string {
 
 csrf_protect_post();
 runtime_issue_install_server_capture();
-
-function emit_event(PDO $pdo, int $sessionId, string $type, array $payload): void {
-    $stmt = $pdo->prepare('INSERT INTO events (session_id, type, payload) VALUES (?,?,?)');
-    $stmt->execute([$sessionId, $type, json_encode($payload, JSON_UNESCAPED_SLASHES)]);
-}
-
-function emit_community_event(PDO $pdo, string $scope, ?int $sessionId, ?string $linkKey, string $type, array $payload): void {
-    $stmt = $pdo->prepare('INSERT INTO community_events (scope, session_id, link_key, type, payload) VALUES (?,?,?,?,?)');
-    $stmt->execute([$scope, $sessionId, $linkKey, $type, json_encode($payload, JSON_UNESCAPED_SLASHES)]);
-}
 
 function avatar_relationship_migrate_group_foundation(PDO $pdo): void {
     $relationshipCount = (int)$pdo->query('SELECT COUNT(*) FROM avatar_relationships')->fetchColumn();

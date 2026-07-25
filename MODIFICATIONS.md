@@ -329,3 +329,26 @@ Technical reference: Post-Build 000048 Retrospective, 2026-07-25; see the
 corresponding Git history and Engineering Report.
 
 </details>
+
+## Focused server ownership
+
+Core server responsibilities now have smaller, explicit owners while existing
+public behavior and compatibility remain unchanged.
+
+<details>
+<summary>More about this change</summary>
+
+- Moved authentication and outside-content rate limiting, room-background
+  upload storage, room/community event persistence, and Tool Log persistence
+  out of the shared server composition file.
+- Preserved stable function APIs, caller-owned transactions, database schema,
+  authorization, CSRF, upload validation, event ordering, Tool Log facts, and
+  SQLite/MariaDB behavior.
+- Kept migration and recovery, session security, secure remote fetching,
+  relationship lifecycles, diagnostics, client policy, media/WebRTC, and the
+  future extension framework with their existing owners.
+
+Technical reference: Build 000049, 2026-07-25; published commit recorded in
+the Build 000049 Engineering Report.
+
+</details>
