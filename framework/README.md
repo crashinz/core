@@ -34,11 +34,11 @@ It does not replace ChatSpace.
 
 **Current Build**
 
-Post-Retrospective Verification Evidence Cleanup Execution
+Post-Build 000049 Permanent Governance and Flood-Protection Roadmap Consolidation
 
 **Framework Phase**
 
-Owner-approved exact-path evidence cleanup complete; Build 000049 next
+Governance consolidation Engineering Complete; Build 000050 next
 
 Build 000048 Part 3 is Engineering Complete and published at commit
 `247e2e420ab9614f10789f782b1759c0d452ead6`, tree
@@ -57,8 +57,27 @@ checkpoint, and inventoried verification evidence with bounded readers.
 The resolved owner disposition deleted only six exact inactive, incomplete,
 unreferenced run directories: `246` files / `25,314,667` bytes. Every other
 run manifest remains unchanged, and the focused Build 000048 Part 3
-settings-confirm rerun remains historical evidence. Build 000049 is the exact
-next checkpoint and has not begun.
+settings-confirm rerun remains historical evidence. That cleanup is complete
+and remains authoritative historical proof.
+
+Build 000049 is Engineering Complete and published at commit
+`e18e010b3bbbcc4d9ea520c000c1fecd2adf96af`, tree
+`d5585459f801290cce95b2622d2b43e89da660e2`. It extracted request rate
+limiting, room-background upload storage, room/community event persistence,
+and Tool Log persistence into cohesive server owners while preserving public
+APIs and behavior. Exact-final and canonical Chrome, SQLite/MariaDB,
+deployment, publication, configuration, and post-publication proof are green.
+
+The required post-Build 000049 governance checkpoint is Engineering Complete
+without changing production or deployable runtime. It establishes permanent
+approval-sensitive action
+preflight and repository-first complete roadmap-design transfer authorities,
+enforces them through bounded prompt/no-silent-loss checks, and records the
+complete future Authentication Protection design under the existing
+**Pre-Build 000064 Part 1 - Harness Optimization, Reliability, Evidence
+Limits, and Flood Protection** checkpoint. Flood Protection and Build 000050
+implementation remain unstarted; Build 000050 is still the exact next
+production checkpoint.
 
 ## Preserved Gesture Program Boundary
 
