@@ -1,0 +1,52 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "gesture-maker",
+  "name": "Gesture Maker",
+  "version": "1.0.0",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "gesture.catalog.read",
+    "gesture.editor.command",
+    "gesture.package.import",
+    "gesture.package.export",
+    "gesture.preview",
+    "gesture.protected-media.reference",
+    "presentation.gesture-maker"
+  ],
+  "subscriptions": [
+    "presentation.gesture-management",
+    "presentation.gesture-editor",
+    "presentation.gesture-preview",
+    "presentation.gesture-package"
+  ],
+  "services": [
+    "gesture.catalog.projection",
+    "gesture.editor.commands",
+    "gesture.package.import",
+    "gesture.package.export",
+    "gesture.preview.references",
+    "gesture.protected-media.references"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 65536,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "includes/gesture_maker_extension.php": "1ead01bcebcc48baf1ac61a83b24e340606d416c5367d750a9fcd83000276a42",
+      "extensions/gesture-maker/assets/gesture-editor.css": "bb0c963b36358322c7eeceee1df43e5bb85d6aef0d596b8975433c201562e671",
+      "extensions/gesture-maker/assets/gesture-editor.js": "c3efe9a14c478b418240b4f2964ae92f03aee0f76e12367e8e66e7ffbb26e8f7",
+      "extensions/gesture-maker/assets/gesture-editor-state.js": "3fa84017401c8fdc5a8c26584d42d4899096dc145a751dac54fdcc90f3a9ea73"
+    }
+  }
+}

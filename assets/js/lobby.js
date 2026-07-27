@@ -766,6 +766,7 @@ let adminSettingsRegistry = null;
 let adminSettingsRegistryUI = null;
 let adminSettingsUnlock = null;
 let adminProfileLimitConfirmation = null;
+let adminDatabaseCompatibilityConfirmation = null;
 const adminGestureCatalog = document.getElementById('admin-gesture-catalog');
 const adminGesturePager = document.getElementById('admin-gesture-pager');
 const adminGestureStatus = document.getElementById('admin-gesture-status');
@@ -865,6 +866,32 @@ async function adminSystemRequest(body) {
   return data;
 }
 
+async function uploadPrivateSiteBrandingAsset(entry, file) {
+  if (!adminSettingsUnlock?.requireUnlocked()) return;
+  try {
+    const data = new FormData();
+    data.append('_csrf', CSRF_TOKEN);
+    data.append('expected_revision', String(adminSettingsRegistry?.revision || 0));
+    data.append('community_logo', file, file.name);
+    adminSettingsUnlock.announce('Uploading and validating the private community logo...', 'working');
+    const response = await fetch(appUrl('/api/private_site_branding.php'), {
+      method: 'POST',
+      body: data,
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.error || result.ok === false) {
+      throw new Error(result.error || 'The private community logo could not be saved.');
+    }
+    adminSettingsRegistry = result.registry || adminSettingsRegistry;
+    adminSettingsRegistryUI?.setRegistry(adminSettingsRegistry);
+    announceAdminSettingsRevision(adminSettingsRegistry.revision);
+    renderLobbyAdminSettingsCompatibility();
+    adminSettingsUnlock.announce(`${entry.label} updated with a validated private asset.`, 'ok');
+  } catch (error) {
+    adminSettingsUnlock.announce(error.message || 'The private community logo could not be saved.', 'error');
+  }
+}
+
 async function adminLinkIconRequest(formData) {
   if (formData && !formData.has('_csrf')) formData.append('_csrf', CSRF_TOKEN);
   const resp = await fetch(appUrl('/api/admin_link_icons.php'), { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN }, body: formData });
@@ -945,6 +972,7 @@ async function loadAdminSettings() {
       readOnly: !CAN_ADMIN_SETTINGS_MUTATE,
       locked: !adminSettingsUnlock.isUnlocked(),
       onOperation: handleLobbyAdminSettingsOperation,
+      onAssetChange: uploadPrivateSiteBrandingAsset,
       onDraftChange: state => {
         clearLobbyAdminProfileLimitConfirmation();
         const summary = document.getElementById('lobby-admin-settings-dirty-summary');
@@ -1604,6 +1632,39 @@ function clearLobbyAdminProfileLimitConfirmation() {
   if (list) list.replaceChildren();
 }
 
+function settingsRegistryRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function clearLobbyAdminDatabaseCompatibilityConfirmation() {
+  adminDatabaseCompatibilityConfirmation = null;
+  const panel = document.getElementById('lobby-admin-database-compatibility-confirmation');
+  if (panel) panel.hidden = true;
+}
+
+function showLobbyAdminDatabaseCompatibilityConfirmation(operation, details) {
+  const panel = document.getElementById('lobby-admin-database-compatibility-confirmation');
+  if (!panel) throw new Error('Compatibility-enforcement risk review is unavailable.');
+  adminDatabaseCompatibilityConfirmation = {
+    operation,
+    details: {
+      ...details,
+      values: details.values ? { ...details.values } : details.values,
+    },
+  };
+  panel.hidden = false;
+  document.getElementById('lobby-admin-database-compatibility-confirm')?.focus();
+  const message = 'Review and confirm the risk of disabling proactive database/release compatibility enforcement.';
+  setAdminFormStatus(adminSettings, message, 'working');
+  adminSettingsUnlock?.announce(message, 'working');
+}
+
 function showLobbyAdminProfileLimitConfirmation(operation, details, impacts) {
   const panel = document.getElementById('lobby-admin-profile-limit-confirmation');
   const list = document.getElementById('lobby-admin-profile-limit-impact-list');
@@ -1698,6 +1759,15 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
   if (!adminSettingsUnlock?.requireUnlocked()) return null;
   if (!CAN_ADMIN_SETTINGS_MUTATE) throw new Error('Administrator access is required to change settings.');
   details = { ...details };
+  if (!details.request_id) details.request_id = settingsRegistryRequestId();
+  const compatibilityPolicyId = 'database_release_compatibility_enforcement';
+  const touchesCompatibilityPolicy = Object.prototype.hasOwnProperty.call(details.values || {}, compatibilityPolicyId)
+    || (operation === 'reset_setting' && details.setting_id === compatibilityPolicyId);
+  if (touchesCompatibilityPolicy && details.expected_database_compatibility_revision === undefined) {
+    details.expected_database_compatibility_revision = Number(
+      adminSettingsRegistryUI?.entryMap?.get(compatibilityPolicyId)?.ownerRevision ?? 0
+    );
+  }
   if (['reset_subsection', 'reset_category', 'reset_all_optional', 'apply_preset'].includes(operation)) details.confirmed = 1;
   const capacityId = 'avatar_relationship_max_regular_links';
   let capacityTarget;
@@ -1726,6 +1796,11 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
       ...details,
     });
   } catch (error) {
+    if (error?.data?.code === 'DATABASE_COMPATIBILITY_DISABLE_CONFIRMATION_REQUIRED'
+        && !details.database_compatibility_confirmed) {
+      showLobbyAdminDatabaseCompatibilityConfirmation(operation, details);
+      return null;
+    }
     if (error?.data?.code === 'PROFILE_LIMIT_CONFIRMATION_REQUIRED'
         && !details.profile_limits_confirmed) {
       showLobbyAdminProfileLimitConfirmation(
@@ -1738,6 +1813,7 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
     throw error;
   }
   clearLobbyAdminProfileLimitConfirmation();
+  clearLobbyAdminDatabaseCompatibilityConfirmation();
   adminSettingsRegistry = result.registry || result.settingsRegistry || adminSettingsRegistry;
   adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
   renderLobbyAdminSettingsCompatibility();
@@ -1812,6 +1888,34 @@ document.getElementById('lobby-admin-profile-limit-cancel')?.addEventListener('c
   const message = 'Profile-limit change was not applied; your draft remains available.';
   setAdminFormStatus(adminSettings, message, 'ok');
   adminSettingsUnlock?.announce(message, 'ok');
+});
+
+document.getElementById('lobby-admin-database-compatibility-confirm')?.addEventListener('click', async event => {
+  const pending = adminDatabaseCompatibilityConfirmation;
+  if (!pending || !adminSettingsUnlock?.requireUnlocked()) return;
+  const confirmButton = event.currentTarget;
+  confirmButton.disabled = true;
+  try {
+    await mutateLobbyAdminSettings(pending.operation, {
+      ...pending.details,
+      database_compatibility_confirmed: 1,
+    });
+  } catch (error) {
+    const message = lobbyAdminSettingsFailureMessage(error, 'Compatibility enforcement failed to save.');
+    setAdminFormStatus(adminSettings, message, 'error');
+    adminSettingsUnlock?.announce(message, 'error');
+  } finally {
+    confirmButton.disabled = false;
+  }
+});
+
+document.getElementById('lobby-admin-database-compatibility-cancel')?.addEventListener('click', () => {
+  clearLobbyAdminDatabaseCompatibilityConfirmation();
+  syncLobbyAdminSettingsMutationLocks();
+  const message = 'Compatibility-enforcement change was not applied; your draft remains available.';
+  setAdminFormStatus(adminSettings, message, 'ok');
+  adminSettingsUnlock?.announce(message, 'ok');
+  document.getElementById('lobby-admin-settings-save')?.focus();
 });
 
 function showLobbyAdminPresetReview(preset) {

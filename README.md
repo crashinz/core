@@ -46,9 +46,15 @@ ChatSpace Community Edition gives communities self-hosted shared rooms with avat
 - Games: Chess and Checkers.
 - Voice chat, voice notes, file attachments, image/PDF/document uploads, reactions, edit/delete history, and moderator-visible deleted messages.
 - `.agst` Gestures with animated GIF playback, optional audio, private/published palettes, and shared room-stage playback.
+- A repository-owned Gesture Maker extension for Create/Edit presentation and
+  previews, backed by core authorization, protected package/media handling,
+  history, and security.
 - Moderation tools for room owners, guides, developers, and admins, including warn, kick, room ejection lists, blocks, and community ejection for higher staff roles.
 - Admin dashboard for users, roles, system limits, backups, restores, tool logs, and block/ejection cleanup.
 - Setup flow with SQLite recommended and optional MySQL/MariaDB support.
+- A shared Optional Core database/release compatibility control, default
+  Disabled, for owners who want proactive update-and-recovery enforcement
+  before ordinary runtime starts.
 - Designed for ordinary PHP hosting: Apache, NGINX, LiteSpeed, and PHP 8.x.
 
 ## Install

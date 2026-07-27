@@ -1,12 +1,13 @@
 "use strict";
 
-import { GestureEditorState } from "./runtime/gesture/gesture-editor-state.js";
+import { GestureEditorState } from "./gesture-editor-state.js";
 
 const body = document.body;
 const APP_BASE = String(body?.dataset.appBase || "").replace(/\/$/, "");
 const CSRF = String(body?.dataset.csrf || "");
 const publicId = String(body?.dataset.gestureId || "");
 const admin = body?.dataset.admin === "true";
+const editorApi = String(body?.dataset.gestureEditorApi || "/api/gesture_packages.php");
 const state = new GestureEditorState({ mode: publicId ? "edit" : "create", admin });
 const byId = id => document.getElementById(id);
 const form = byId("gesture-editor-form");
@@ -151,8 +152,8 @@ async function load() {
     setStatus("Loading Gesture Maker…", "working");
     try {
         const url = publicId
-            ? appUrl(`/api/gesture_packages.php?action=detail&id=${encodeURIComponent(publicId)}&admin=${admin ? "1" : "0"}`)
-            : appUrl("/api/gesture_packages.php?action=preferences");
+            ? appUrl(`${editorApi}?action=detail&id=${encodeURIComponent(publicId)}&admin=${admin ? "1" : "0"}`)
+            : appUrl(`${editorApi}?action=preferences`);
         const response = await fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" });
         const data = await response.json();
         if (!response.ok || data.error) throw new Error(data.error || "Gesture Maker could not load.");
@@ -218,7 +219,7 @@ form.addEventListener("submit", async event => {
     if (byId("gesture-remove-poster").checked) data.append("remove_poster", "1");
     for (const [role, file] of Object.entries(state.files())) if (file) data.append(role, file, file.name);
     try {
-        const response = await fetch(appUrl("/api/gesture_packages.php"), { method: "POST", body: data, credentials: "same-origin", headers: { Accept: "application/json", "X-CSRF-Token": CSRF } });
+        const response = await fetch(appUrl(editorApi), { method: "POST", body: data, credentials: "same-origin", headers: { Accept: "application/json", "X-CSRF-Token": CSRF } });
         const payload = await response.json();
         if (!response.ok || payload.error) {
             const error = new Error(payload.error || "Gesture could not be saved.");
@@ -243,7 +244,7 @@ byId("gesture-download-package").addEventListener("click", () => {
     const gesture = state.gesture();
     if (!gesture) return;
     const requestId = requestKey("gesture-download");
-    window.location.assign(appUrl(`/api/gesture_packages.php?action=download&id=${encodeURIComponent(gesture.public_id)}&request_id=${encodeURIComponent(requestId)}`));
+    window.location.assign(appUrl(`${editorApi}?action=download&id=${encodeURIComponent(gesture.public_id)}&request_id=${encodeURIComponent(requestId)}`));
 });
 
 function closeEditor() {

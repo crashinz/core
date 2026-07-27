@@ -1,0 +1,42 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "private-site-branding",
+  "name": "Private Site Branding",
+  "version": "1.0.0",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "branding.settings.read",
+    "branding.settings.write",
+    "branding.asset.reference",
+    "presentation.branding",
+    "presentation.public-utility-link",
+    "legal.license.read",
+    "legal.modifications.read"
+  ],
+  "subscriptions": [
+    "settings.registry",
+    "presentation.branding",
+    "presentation.public-utility-links",
+    "presentation.room-version-attribution"
+  ],
+  "services": [],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 65536,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "includes/private_site_branding.php": "570d5869cd8dac5cf0a51076ba3eb823cb664f959e48a3b18ad958710121d15f"
+    }
+  }
+}

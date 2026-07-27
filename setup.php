@@ -4,7 +4,10 @@ require_once __DIR__ . '/includes/database_backups.php';
 
 $error = '';
 $success = '';
-$step = chatspace_configured() ? 'admin' : 'database';
+
+const CHATSPACE_SETUP_ATTEMPT_SCHEMA = 'chatspace-sqlite-setup-attempt-v1';
+const CHATSPACE_SETUP_ATTEMPT_FILE = 'sqlite-setup-attempt.json';
+const CHATSPACE_SETUP_ATTEMPT_MAX_BYTES = 4096;
 
 function setup_direct_pdo(): PDO {
     if (db_driver() === 'mysql') {
@@ -51,25 +54,457 @@ function setup_requirements(): array {
     ];
 }
 
-function setup_sqlite_path(): string {
-    $dir = __DIR__ . '/db';
-    $defaultPath = $dir . '/chatspace.sqlite';
-    if (!is_file($defaultPath)) {
-        throw new RuntimeException('The bundled SQLite database file is missing.');
+function setup_error_message(Throwable $error): string {
+    if ($error instanceof CoreMigrationException) {
+        return $error->getMessage() . ' [' . $error->errorCode . ']';
     }
-    for ($i = 0; $i < 8; $i++) {
-        $file = 'chatspace-' . uuid_v4() . '.sqlite';
-        $path = $dir . '/' . $file;
-        if (file_exists($path)) continue;
-        if (!copy($defaultPath, $path)) {
-            throw new RuntimeException('Could not copy the bundled SQLite database.');
-        }
-        return $path;
-    }
-    throw new RuntimeException('Could not generate a unique SQLite database path.');
+    return $error->getMessage();
 }
 
-function write_setup_config(array $cfg): void {
+function setup_sqlite_source_path(): string {
+    return __DIR__ . '/db/chatspace.sqlite';
+}
+
+function setup_attempt_storage_root(): string {
+    return security_private_storage_directory('setup');
+}
+
+function setup_attempt_record_path(): string {
+    return setup_attempt_storage_root() . DIRECTORY_SEPARATOR . CHATSPACE_SETUP_ATTEMPT_FILE;
+}
+
+function setup_attempt_lock_path(): string {
+    return setup_attempt_storage_root() . DIRECTORY_SEPARATOR . 'sqlite-setup.lock';
+}
+
+function setup_with_attempt_lock(callable $callback): mixed {
+    $lockPath = setup_attempt_lock_path();
+    $handle = fopen($lockPath, 'c+b');
+    if (!is_resource($handle)) {
+        throw new CoreMigrationException(
+            'SQLite Setup could not acquire its installation-private lock.',
+            'SETUP_SQLITE_LOCK_UNAVAILABLE',
+            503
+        );
+    }
+    try {
+        @chmod($lockPath, 0600);
+        if (!flock($handle, LOCK_EX)) {
+            throw new CoreMigrationException(
+                'SQLite Setup could not acquire its installation-private lock.',
+                'SETUP_SQLITE_LOCK_UNAVAILABLE',
+                503
+            );
+        }
+        return $callback();
+    } finally {
+        @flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+}
+
+function setup_atomic_create(string $path, string $content, string $errorCode): void {
+    if (file_exists($path) || is_link($path)) {
+        throw new CoreMigrationException(
+            'SQLite Setup refused to replace existing installation state.',
+            $errorCode,
+            409
+        );
+    }
+    $suffix = bin2hex(random_bytes(8));
+    $temporary = str_ends_with(strtolower($path), '.php')
+        ? dirname($path) . DIRECTORY_SEPARATOR . '.config.partial-' . $suffix . '.php'
+        : $path . '.partial-' . $suffix;
+    $handle = fopen($temporary, 'xb');
+    if (!is_resource($handle)) {
+        throw new CoreMigrationException(
+            'SQLite Setup could not stage installation state.',
+            $errorCode,
+            503
+        );
+    }
+    $writeFailure = null;
+    try {
+        $length = strlen($content);
+        $offset = 0;
+        while ($offset < $length) {
+            $written = fwrite($handle, substr($content, $offset));
+            if ($written === false || $written === 0) {
+                throw new CoreMigrationException(
+                    'SQLite Setup could not write installation state.',
+                    $errorCode,
+                    503
+                );
+            }
+            $offset += $written;
+        }
+        if (!fflush($handle) || (function_exists('fsync') && !fsync($handle))) {
+            throw new CoreMigrationException(
+                'SQLite Setup could not synchronize installation state.',
+                $errorCode,
+                503
+            );
+        }
+    } catch (Throwable $error) {
+        $writeFailure = $error;
+    } finally {
+        fclose($handle);
+    }
+    if ($writeFailure instanceof Throwable) {
+        @unlink($temporary);
+        throw $writeFailure;
+    }
+    if (file_exists($path) || is_link($path) || !rename($temporary, $path)) {
+        @unlink($temporary);
+        throw new CoreMigrationException(
+            'SQLite Setup could not atomically commit installation state.',
+            $errorCode,
+            503
+        );
+    }
+    @chmod($path, 0600);
+}
+
+function setup_attempt_cleanup_partial_metadata(): void {
+    $root = setup_attempt_storage_root();
+    $prefix = CHATSPACE_SETUP_ATTEMPT_FILE . '.partial-';
+    foreach (scandir($root) ?: [] as $name) {
+        if (!str_starts_with($name, $prefix)
+            || preg_match('/^sqlite-setup-attempt\.json\.partial-[a-f0-9]{16}$/', $name) !== 1) {
+            continue;
+        }
+        $path = $root . DIRECTORY_SEPARATOR . $name;
+        if (is_link($path) || (file_exists($path) && !is_file($path)) || !@unlink($path)) {
+            throw new CoreMigrationException(
+                'SQLite Setup found unsafe interrupted metadata.',
+                'SETUP_SQLITE_ATTEMPT_METADATA_UNSAFE',
+                409
+            );
+        }
+    }
+}
+
+function setup_config_cleanup_partial_files(): void {
+    $directory = dirname(CHATSPACE_CONFIG);
+    foreach (scandir($directory) ?: [] as $name) {
+        if (preg_match('/^\.config\.partial-[a-f0-9]{16}\.php$/', $name) !== 1) {
+            continue;
+        }
+        $path = $directory . DIRECTORY_SEPARATOR . $name;
+        if (is_link($path) || (file_exists($path) && !is_file($path)) || !@unlink($path)) {
+            throw new CoreMigrationException(
+                'Setup found unsafe interrupted configuration staging.',
+                'SETUP_CONFIG_PARTIAL_UNSAFE',
+                409
+            );
+        }
+    }
+}
+
+function setup_attempt_database_path(string $basename): string {
+    if (preg_match(
+        '/^chatspace-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.sqlite$/i',
+        $basename
+    ) !== 1) {
+        throw new CoreMigrationException(
+            'SQLite Setup attempt metadata contains an invalid database identity.',
+            'SETUP_SQLITE_ATTEMPT_PATH_INVALID',
+            409
+        );
+    }
+    $directory = realpath(__DIR__ . '/db');
+    if ($directory === false || !is_dir($directory) || is_link(__DIR__ . '/db')) {
+        throw new CoreMigrationException(
+            'SQLite Setup requires a safe writable db directory.',
+            'SETUP_SQLITE_DB_DIRECTORY_UNSAFE',
+            503
+        );
+    }
+    $path = $directory . DIRECTORY_SEPARATOR . $basename;
+    if (hash_equals(
+        strtolower((string)realpath(setup_sqlite_source_path())),
+        strtolower((string)realpath($path))
+    )) {
+        throw new CoreMigrationException(
+            'SQLite Setup attempt metadata may not target the bundled seed.',
+            'SETUP_SQLITE_ATTEMPT_TARGETS_SOURCE',
+            409
+        );
+    }
+    return $path;
+}
+
+function setup_attempt_read(): ?array {
+    $path = setup_attempt_record_path();
+    if (!file_exists($path) && !is_link($path)) return null;
+    if (is_link($path) || !is_file($path)) {
+        throw new CoreMigrationException(
+            'SQLite Setup attempt metadata is unsafe.',
+            'SETUP_SQLITE_ATTEMPT_METADATA_UNSAFE',
+            409
+        );
+    }
+    $bytes = filesize($path);
+    if ($bytes === false || $bytes < 2 || $bytes > CHATSPACE_SETUP_ATTEMPT_MAX_BYTES) {
+        throw new CoreMigrationException(
+            'SQLite Setup attempt metadata is incomplete.',
+            'SETUP_SQLITE_ATTEMPT_METADATA_INVALID',
+            409
+        );
+    }
+    try {
+        $record = json_decode((string)file_get_contents($path), true, 16, JSON_THROW_ON_ERROR);
+    } catch (Throwable $error) {
+        throw new CoreMigrationException(
+            'SQLite Setup attempt metadata is unreadable.',
+            'SETUP_SQLITE_ATTEMPT_METADATA_INVALID',
+            409,
+            $error
+        );
+    }
+    $expectedKeys = [
+        'attempt_public_id',
+        'created_at',
+        'database_basename',
+        'schema',
+        'source_sha256',
+    ];
+    if (!is_array($record)) {
+        throw new CoreMigrationException(
+            'SQLite Setup attempt metadata is invalid.',
+            'SETUP_SQLITE_ATTEMPT_METADATA_INVALID',
+            409
+        );
+    }
+    $actualKeys = array_keys($record);
+    sort($actualKeys, SORT_STRING);
+    sort($expectedKeys, SORT_STRING);
+    $authority = database_migration_bundled_seed_authority();
+    if ($actualKeys !== $expectedKeys
+        || ($record['schema'] ?? null) !== CHATSPACE_SETUP_ATTEMPT_SCHEMA
+        || preg_match('/^[a-f0-9-]{36}$/i', (string)($record['attempt_public_id'] ?? '')) !== 1
+        || !hash_equals($authority['sha256'], (string)($record['source_sha256'] ?? ''))
+        || !is_string($record['created_at'] ?? null)
+        || strtotime((string)$record['created_at']) === false) {
+        throw new CoreMigrationException(
+            'SQLite Setup attempt metadata is invalid.',
+            'SETUP_SQLITE_ATTEMPT_METADATA_INVALID',
+            409
+        );
+    }
+    $record['database_path'] = setup_attempt_database_path(
+        (string)$record['database_basename']
+    );
+    return $record;
+}
+
+function setup_attempt_create(string $basename): array {
+    $record = [
+        'attempt_public_id' => uuid_v4(),
+        'created_at' => gmdate('c'),
+        'database_basename' => $basename,
+        'schema' => CHATSPACE_SETUP_ATTEMPT_SCHEMA,
+        'source_sha256' => database_migration_bundled_seed_authority()['sha256'],
+    ];
+    setup_atomic_create(
+        setup_attempt_record_path(),
+        database_migrations_canonical_json($record) . "\n",
+        'SETUP_SQLITE_ATTEMPT_RECORD_COMMIT_FAILED'
+    );
+    $record['database_path'] = setup_attempt_database_path($basename);
+    return $record;
+}
+
+function setup_attempt_clear(): void {
+    $path = setup_attempt_record_path();
+    if ((file_exists($path) || is_link($path))
+        && (is_link($path) || !is_file($path) || !@unlink($path))) {
+        throw new CoreMigrationException(
+            'SQLite Setup could not clear completed attempt metadata.',
+            'SETUP_SQLITE_ATTEMPT_CLEAR_FAILED',
+            503
+        );
+    }
+}
+
+function setup_attempt_remove_database(string $path): void {
+    $expected = setup_attempt_database_path(basename($path));
+    if (!hash_equals($expected, $path)) {
+        throw new CoreMigrationException(
+            'SQLite Setup refused an unowned cleanup target.',
+            'SETUP_SQLITE_CLEANUP_TARGET_UNOWNED',
+            409
+        );
+    }
+    foreach ([$path, $path . '-wal', $path . '-shm'] as $candidate) {
+        clearstatcache(true, $candidate);
+        if (!file_exists($candidate) && !is_link($candidate)) continue;
+        if (is_link($candidate) || !is_file($candidate) || !@unlink($candidate)) {
+            throw new CoreMigrationException(
+                'SQLite Setup could not safely clean its exact failed attempt.',
+                'SETUP_SQLITE_ATTEMPT_CLEANUP_FAILED',
+                503
+            );
+        }
+    }
+}
+
+function setup_sqlite_open_direct(string $path): PDO {
+    $pdo = new PDO(
+        'sqlite:' . $path,
+        null,
+        null,
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]
+    );
+    $pdo->exec('PRAGMA foreign_keys = ON');
+    $pdo->exec('PRAGMA busy_timeout = ' . CHATSPACE_SQLITE_BUSY_TIMEOUT_MS);
+    return $pdo;
+}
+
+function setup_sqlite_validate_current(PDO $pdo): array {
+    $integrity = (string)$pdo->query('PRAGMA integrity_check')->fetchColumn();
+    $quick = (string)$pdo->query('PRAGMA quick_check')->fetchColumn();
+    $foreignKeyFinding = $pdo->query('PRAGMA foreign_key_check')->fetch();
+    $status = database_migration_status($pdo);
+    $manifest = database_migrations_manifest();
+    $ledger = database_migration_ledger_rows($pdo);
+    $ledgerComplete = count($manifest) === count($ledger);
+    if ($ledgerComplete) {
+        foreach ($manifest as $index => $migration) {
+            $row = $ledger[$index] ?? [];
+            if (($row['migration_id'] ?? null) !== $migration['id']
+                || !hash_equals((string)$migration['checksum'], (string)($row['checksum'] ?? ''))
+                || !in_array((string)($row['result'] ?? ''), ['applied', 'adopted'], true)) {
+                $ledgerComplete = false;
+                break;
+            }
+        }
+    }
+    $users = database_migration_table_exists($pdo, 'users')
+        ? (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn()
+        : -1;
+    $admins = database_migration_table_exists($pdo, 'users')
+        ? (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn()
+        : -1;
+    if ($integrity !== 'ok'
+        || $quick !== 'ok'
+        || $foreignKeyFinding !== false
+        || !$status['current']
+        || !$status['release_complete']
+        || $status['pending_count'] !== 0
+        || $status['defects'] !== []
+        || !$ledgerComplete
+        || $users !== 0
+        || $admins !== 0) {
+        throw new CoreMigrationException(
+            'SQLite Setup migration did not produce the complete current clean-install schema.',
+            'SETUP_SQLITE_FINAL_VALIDATION_FAILED',
+            500
+        );
+    }
+    return [
+        'status' => $status,
+        'integrity_check' => $integrity,
+        'quick_check' => $quick,
+        'foreign_key_check' => 'ok',
+        'ledger_count' => count($ledger),
+        'users' => $users,
+        'admins' => $admins,
+    ];
+}
+
+function setup_attempt_reconcile_locked(): array {
+    setup_attempt_cleanup_partial_metadata();
+    setup_config_cleanup_partial_files();
+    $record = setup_attempt_read();
+    if ($record === null) return ['status' => 'none'];
+    $path = (string)$record['database_path'];
+    if (chatspace_configured()) {
+        $configuredPath = defined('CHATSPACE_SQLITE_PATH')
+            ? realpath((string)CHATSPACE_SQLITE_PATH)
+            : false;
+        $attemptPath = realpath($path);
+        if (db_driver() !== 'sqlite'
+            || $configuredPath === false
+            || $attemptPath === false
+            || !hash_equals($attemptPath, $configuredPath)) {
+            throw new CoreMigrationException(
+                'SQLite Setup found attempt metadata that does not own the configured database.',
+                'SETUP_SQLITE_ATTEMPT_CONFIGURATION_MISMATCH',
+                409
+            );
+        }
+        $pdo = setup_sqlite_open_direct($path);
+        try {
+            setup_sqlite_validate_current($pdo);
+        } finally {
+            $pdo = null;
+        }
+        setup_attempt_clear();
+        return ['status' => 'configured-current-preserved'];
+    }
+    if (is_file(CHATSPACE_CONFIG) || is_link(CHATSPACE_CONFIG)) {
+        throw new CoreMigrationException(
+            'SQLite Setup found durable configuration that could not be reconciled safely.',
+            'SETUP_SQLITE_CONFIG_RECONCILIATION_REQUIRED',
+            409
+        );
+    }
+    setup_attempt_remove_database($path);
+    setup_attempt_clear();
+    return ['status' => 'unconfigured-attempt-cleaned'];
+}
+
+function setup_attempt_reconcile(): array {
+    return setup_with_attempt_lock(
+        static fn(): array => setup_attempt_reconcile_locked()
+    );
+}
+
+function setup_sqlite_copy_exact(
+    string $source,
+    string $destination,
+    ?callable $reservationObserver = null
+): void {
+    $input = fopen($source, 'rb');
+    $output = fopen($destination, 'xb');
+    if (!is_resource($input) || !is_resource($output)) {
+        if (is_resource($input)) fclose($input);
+        if (is_resource($output)) fclose($output);
+        throw new CoreMigrationException(
+            'SQLite Setup could not reserve its randomized database.',
+            'SETUP_SQLITE_DESTINATION_RESERVATION_FAILED',
+            503
+        );
+    }
+    if ($reservationObserver !== null) $reservationObserver();
+    try {
+        $copied = stream_copy_to_stream($input, $output);
+        if ($copied !== database_migration_bundled_seed_authority()['bytes']) {
+            throw new CoreMigrationException(
+                'The bundled SQLite release seed changed during transfer.',
+                'SETUP_SQLITE_SOURCE_CHANGED_DURING_TRANSFER',
+                503
+            );
+        }
+        if (!fflush($output)
+            || (function_exists('fsync') && !fsync($output))) {
+            throw new CoreMigrationException(
+                'SQLite Setup could not transfer the bundled release seed exactly.',
+                'SETUP_SQLITE_DESTINATION_TRANSFER_FAILED',
+                503
+            );
+        }
+    } finally {
+        fclose($input);
+        fclose($output);
+    }
+}
+
+function setup_config_content(array $cfg): string {
     $lines = ["<?php", "// Auto-generated by ChatSpace CE setup. Edit carefully.", "const CHATSPACE_DB_DRIVER = " . var_export($cfg['driver'], true) . ";"];
     if ($cfg['driver'] === 'mysql') {
         $lines[] = "const CHATSPACE_DB_HOST = " . var_export($cfg['host'], true) . ";";
@@ -85,7 +520,117 @@ function write_setup_config(array $cfg): void {
         }
         $lines[] = "const CHATSPACE_SQLITE_PATH = __DIR__ . '/../db/" . basename($sqlitePath) . "';";
     }
-    file_put_contents(CHATSPACE_CONFIG, implode("\n", $lines) . "\n");
+    return implode("\n", $lines) . "\n";
+}
+
+function write_setup_config(array $cfg): void {
+    $content = setup_config_content($cfg);
+    setup_atomic_create(CHATSPACE_CONFIG, $content, 'SETUP_CONFIG_ATOMIC_COMMIT_FAILED');
+    $actual = file_get_contents(CHATSPACE_CONFIG);
+    if (!is_string($actual) || !hash_equals($content, $actual)) {
+        throw new CoreMigrationException(
+            'Setup configuration could not be verified after atomic commit.',
+            'SETUP_CONFIG_POST_COMMIT_VERIFICATION_FAILED',
+            503
+        );
+    }
+}
+
+function setup_sqlite_install(?callable $phaseObserver = null): array {
+    return setup_with_attempt_lock(function () use ($phaseObserver): array {
+        setup_attempt_reconcile_locked();
+        if (chatspace_configured() || is_file(CHATSPACE_CONFIG) || is_link(CHATSPACE_CONFIG)) {
+            throw new CoreMigrationException(
+                'SQLite Setup refused to replace existing durable configuration.',
+                'SETUP_CONFIG_ALREADY_PRESENT',
+                409
+            );
+        }
+        $source = setup_sqlite_source_path();
+        database_migration_validate_bundled_seed_file($source);
+        if ($phaseObserver !== null) $phaseObserver('source-validated', null);
+
+        $attempt = null;
+        for ($index = 0; $index < 8; $index++) {
+            $basename = 'chatspace-' . uuid_v4() . '.sqlite';
+            $destination = setup_attempt_database_path($basename);
+            if (file_exists($destination) || is_link($destination)) continue;
+            $attempt = setup_attempt_create($basename);
+            break;
+        }
+        if (!is_array($attempt)) {
+            throw new CoreMigrationException(
+                'SQLite Setup could not reserve a unique randomized database.',
+                'SETUP_SQLITE_DESTINATION_IDENTITY_EXHAUSTED',
+                503
+            );
+        }
+
+        $destination = (string)$attempt['database_path'];
+        $configCommitted = false;
+        $destinationOwned = false;
+        try {
+            if ($phaseObserver !== null) $phaseObserver('attempt-owned', $destination);
+            setup_sqlite_copy_exact(
+                $source,
+                $destination,
+                static function () use (&$destinationOwned): void {
+                    $destinationOwned = true;
+                }
+            );
+            database_migration_validate_bundled_seed_file($source);
+            database_migration_validate_bundled_seed_copy($destination);
+            if ($phaseObserver !== null) $phaseObserver('copy-validated', $destination);
+
+            $pdo = setup_sqlite_open_direct($destination);
+            try {
+                database_migrations_install_clean($pdo);
+                setup_sqlite_validate_current($pdo);
+            } finally {
+                $pdo = null;
+            }
+            if ($phaseObserver !== null) $phaseObserver('migration-validated', $destination);
+
+            write_setup_config(['driver' => 'sqlite', 'sqlite_path' => $destination]);
+            $configCommitted = true;
+            if ($phaseObserver !== null) $phaseObserver('config-committed', $destination);
+            setup_attempt_clear();
+            return [
+                'status' => 'installed',
+                'database_basename' => basename($destination),
+                'attempt_public_id' => $attempt['attempt_public_id'],
+            ];
+        } catch (Throwable $error) {
+            if (!$configCommitted && !is_file(CHATSPACE_CONFIG) && !is_link(CHATSPACE_CONFIG)) {
+                $failureMessage = $error->getMessage();
+                $failureCode = $error instanceof CoreMigrationException
+                    ? $error->errorCode
+                    : 'SETUP_SQLITE_ATTEMPT_FAILED';
+                $failureStatus = $error instanceof CoreMigrationException
+                    ? $error->httpStatus
+                    : 500;
+                unset($error);
+                if (function_exists('gc_collect_cycles')) gc_collect_cycles();
+                try {
+                    if ($destinationOwned) setup_attempt_remove_database($destination);
+                    setup_attempt_clear();
+                } catch (Throwable $cleanupError) {
+                    throw new CoreMigrationException(
+                        'SQLite Setup failed and its exact attempt could not be cleaned safely.',
+                        'SETUP_SQLITE_FAILURE_CLEANUP_REQUIRED',
+                        503,
+                        $cleanupError
+                    );
+                }
+                throw new CoreMigrationException(
+                    $failureMessage,
+                    $failureCode,
+                    $failureStatus
+                );
+            }
+            throw $error;
+        }
+    });
 }
 
 function setup_avatar_upload(): string {
@@ -117,28 +662,10 @@ function setup_brand_logo_upload(): string {
         return '';
     }
     security_authorize_outside_content_or_json(chatspace_configured() ? db() : null, null, 'setup_branding', ['setup_allowed' => !setup_admin_exists(), 'source' => 'setup']);
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $mime = $finfo->file($_FILES['community_logo']['tmp_name']) ?: '';
-    $allowed = [
-        'image/png' => 'png',
-        'image/jpeg' => 'jpg',
-        'image/gif' => 'gif',
-        'image/webp' => 'webp',
-    ];
-    $dims = @getimagesize($_FILES['community_logo']['tmp_name']);
-    if (!isset($allowed[$mime]) || !security_valid_image_file((string)$_FILES['community_logo']['tmp_name'], $mime) || (int)$_FILES['community_logo']['size'] > 5 * 1024 * 1024 || !$dims || $dims[0] < 42 || $dims[1] < 42 || $dims[0] > 2000 || $dims[1] > 2000) {
-        throw new RuntimeException('Use a PNG, JPG, GIF, or WEBP logo under 5 MB and between 42x42 and 2000x2000.');
-    }
-    $dir = __DIR__ . '/assets/uploads/branding';
-    if (!is_dir($dir)) mkdir($dir, 0775, true);
-    $file = bin2hex(random_bytes(12)) . '.' . $allowed[$mime];
-    $dest = $dir . '/' . $file;
-    if (!move_uploaded_file($_FILES['community_logo']['tmp_name'], $dest)) {
-        throw new RuntimeException('Could not save community logo.');
-    }
-    $public = '/assets/uploads/branding/' . $file;
-    security_assert_storage_destination('setup_branding', $public);
-    return $public;
+    return private_site_branding_store_logo_upload(
+        (array)$_FILES['community_logo'],
+        'setup_branding'
+    );
 }
 
 function setup_response(array $payload, int $status = 200): never {
@@ -170,12 +697,21 @@ function setup_restore_backup_upload(): array {
     return $result;
 }
 
+$setupReconciliationBlocked = false;
+try {
+    setup_attempt_reconcile();
+} catch (Throwable $setupReconciliationError) {
+    $setupReconciliationBlocked = true;
+    $error = setup_error_message($setupReconciliationError);
+}
+$step = chatspace_configured() ? 'admin' : 'database';
+
 $isSetupRestorePost = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'restore';
-if (!$isSetupRestorePost && setup_admin_exists() && ($_GET['done'] ?? '') !== '1') {
+if (!$setupReconciliationBlocked && !$isSetupRestorePost && setup_admin_exists() && ($_GET['done'] ?? '') !== '1') {
     redirect_to('/login.php');
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'database') {
+if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'database') {
     $driver = (string)($_POST['db_driver'] ?? 'sqlite');
     if (!in_array($driver, ['sqlite', 'mysql'], true)) {
         $error = 'Choose SQLite or MySQL/MariaDB.';
@@ -184,10 +720,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'databas
             if ($driver === 'sqlite') {
                 if (!extension_loaded('pdo_sqlite')) throw new RuntimeException('PDO SQLite is required for SQLite installs.');
                 if (!is_writable(__DIR__ . '/includes') || !is_writable(__DIR__ . '/db')) throw new RuntimeException('includes/ and db/ must be writable.');
-                $sqlitePath = setup_sqlite_path();
-                write_setup_config(['driver' => 'sqlite', 'sqlite_path' => $sqlitePath]);
-                require_once CHATSPACE_CONFIG;
-                migrate(db_migration_connection());
+                setup_sqlite_install();
                 redirect_to('/setup.php');
             }
 
@@ -206,13 +739,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'databas
             write_setup_config(['driver' => 'mysql', 'host' => $host, 'port' => $port, 'name' => $name, 'user' => $dbUser, 'pass' => $dbPass]);
             redirect_to('/setup.php');
         } catch (Throwable $e) {
-            $error = $e->getMessage();
+            $error = setup_error_message($e);
             $step = 'database';
         }
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin') {
+if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin') {
     $username = trim((string)($_POST['username'] ?? ''));
     $name = trim((string)($_POST['display_name'] ?? ''));
     $email = trim((string)($_POST['email'] ?? ''));
@@ -240,6 +773,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
         $pdo = db();
         if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
         else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        $databaseCompatibilityTransaction = null;
         try {
             $submittedDisplayLimit = (int)($registryValues['profile_limit_display_name']
                 ?? MEMBER_PROFILE_DISPLAY_NAME_MAX);
@@ -257,15 +791,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
             if ($communityLogo !== '') $registryValues['community_logo_path'] = $communityLogo;
             $registryResult = settings_registry_update(
                 $pdo,
-                ['operation' => 'set_many', 'values' => $registryValues, 'confirmed' => true],
+                [
+                    'operation' => 'set_many',
+                    'values' => $registryValues,
+                    'confirmed' => true,
+                    'request_id' => uuid_v4(),
+                ],
                 $_POST['settings_registry_revision'] ?? null,
                 $adminUserId,
-                'setup'
+                'setup',
+                [
+                    'validated_asset_upload' => $communityLogo !== '',
+                    'external_transaction_finalizer' => true,
+                ]
             );
             if (empty($registryResult['ok'])) throw new RuntimeException((string)($registryResult['error'] ?? 'Setup settings could not be saved.'));
+            $databaseCompatibilityTransaction = $registryResult['_databaseCompatibilityTransaction'] ?? null;
             $pdo->commit();
+            if (is_array($databaseCompatibilityTransaction)) {
+                database_compatibility_policy_commit_update($databaseCompatibilityTransaction);
+                $databaseCompatibilityTransaction = null;
+            }
         } catch (Throwable $transactionError) {
             if ($pdo->inTransaction()) $pdo->rollBack();
+            if (is_array($databaseCompatibilityTransaction)) {
+                database_compatibility_policy_rollback_update($databaseCompatibilityTransaction);
+            }
             throw $transactionError;
         }
         authenticate_user($adminUserId);
@@ -276,7 +827,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'admin')
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'restore') {
+if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'restore') {
     try {
         setup_restore_backup_upload();
         setup_response(['ok' => true, 'redirect' => app_url('/setup.php?done=1&restored=1')]);
@@ -318,8 +869,8 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
       <span class="setup-step <?= $step === 'done' ? 'active' : '' ?>">Finalize</span>
     </div>
 
-    <?php if ($error): ?><div class="setup-alert setup-alert-error"><?= e($error) ?></div><?php endif; ?>
-    <?php if ($success): ?><div class="setup-alert setup-alert-ok"><?= e($success) ?></div><?php endif; ?>
+    <?php if ($error): ?><div class="setup-alert setup-alert-error" role="alert" aria-live="assertive"><?= e($error) ?></div><?php endif; ?>
+    <?php if ($success): ?><div class="setup-alert setup-alert-ok" role="status" aria-live="polite"><?= e($success) ?></div><?php endif; ?>
 
     <?php if ($step === 'database'): ?>
       <h1>Database Setup</h1>
@@ -401,6 +952,14 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
               <div><h2>Installation Settings</h2><p class="minor">Setup and Admin use the same setting IDs, categories, defaults, validation, and authoritative owners.</p></div>
               <div class="settings-registry-state" id="setup-settings-compatibility-state" aria-live="polite">Framework default</div>
             </div>
+            <section class="branding-license-authority" aria-labelledby="setup-branding-license-title">
+              <a class="btn btn-primary branding-license-link" href="<?= e(app_url('/LICENSE.md')) ?>" id="setup-branding-license-title">View original LICENSE.md</a>
+              <div class="branding-license-reminder-card">
+                <h3>Branding and License Reminder</h3>
+                <p data-branding-reminder-authority><?= e(PRIVATE_SITE_BRANDING_REMINDER_DEFAULT) ?></p>
+                <button class="btn" type="button" data-edit-branding-reminder>Edit reminder wording</button>
+              </div>
+            </section>
             <div id="setup-settings-unlock"></div>
             <div class="settings-registry-toolbar" role="search">
               <label>Search settings<input id="setup-settings-search" type="search" autocomplete="off" placeholder="Label, help, category, alias, or setting ID"></label>

@@ -9,6 +9,7 @@ function settings_registry_setting_defaults(): array {
 
 function settings_registry_categories(): array {
     return [
+        ['id' => 'private-site-branding', 'label' => 'Branding', 'order' => 5],
         ['id' => 'general-appearance', 'label' => 'General & Appearance', 'order' => 10],
         ['id' => 'avatars-presence', 'label' => 'Avatars & Presence', 'order' => 20],
         ['id' => 'avatar-interactions', 'label' => 'Avatar Interactions', 'order' => 30],
@@ -16,6 +17,7 @@ function settings_registry_categories(): array {
         ['id' => 'voice-media-players', 'label' => 'Voice, Media & Players', 'order' => 50],
         ['id' => 'rooms-games', 'label' => 'Rooms & Games', 'order' => 60],
         ['id' => 'moderation-privacy-security', 'label' => 'Moderation, Privacy & Security', 'order' => 70],
+        ['id' => 'system', 'label' => 'System', 'order' => 75],
         ['id' => 'errors-diagnostics', 'label' => 'Errors & Diagnostics', 'order' => 80],
         ['id' => 'advanced-compatibility', 'label' => 'Advanced & Compatibility', 'order' => 90],
     ];
@@ -29,6 +31,7 @@ function settings_registry_entry(array $entry): array {
         'categoryId' => 'advanced-compatibility',
         'subsectionId' => 'unresolved',
         'subsectionLabel' => 'Unresolved',
+        'subsectionOrder' => 100,
         'label' => '',
         'description' => '',
         'helpText' => '',
@@ -61,6 +64,15 @@ function settings_registry_entry(array $entry): array {
         'secret' => false,
         'fixedReason' => '',
         'bulkGroup' => null,
+        'extensionId' => null,
+        'previewPage' => '',
+        'previewField' => '',
+        'previewPath' => '',
+        'inheritanceSource' => null,
+        'standardFallback' => '',
+        'allowsOverride' => false,
+        'requiredNonBlank' => false,
+        'resetLabel' => 'Reset',
     ], $entry);
 }
 
@@ -68,30 +80,54 @@ function settings_registry_definitions(): array {
     static $definitions = null;
     if ($definitions !== null) return $definitions;
 
-    $definitions = [
+    $definitions = array_map('settings_registry_entry', private_site_branding_setting_definitions());
+    $definitions = array_merge($definitions, [
         settings_registry_entry([
-            'id' => 'community_name', 'settingKey' => 'community_name',
-            'categoryId' => 'general-appearance', 'subsectionId' => 'branding',
-            'subsectionLabel' => 'Community Branding', 'label' => 'Community name',
-            'description' => 'Optional installation name shown in shared community branding.',
-            'helpText' => 'Leave blank to use the standard ChatSpace Community Edition branding.',
-            'aliases' => ['installation name', 'site name'], 'type' => 'string',
-            'defaultValue' => '', 'maximum' => 80, 'order' => 10,
-            'controlClass' => 'optional', 'optional' => true,
-            'setupVisible' => true, 'adminVisible' => true,
+            'id' => 'database_release_compatibility_enforcement',
+            'settingKey' => null,
+            'owner' => 'database_compatibility_policy',
+            'categoryId' => 'system',
+            'subsectionId' => 'database-backup',
+            'subsectionLabel' => 'Database & Backup',
+            'subsectionOrder' => 10,
+            'label' => 'Enforce database/release compatibility before runtime',
+            'description' => 'Proactively verify the deployed release and configured database before ordinary runtime starts.',
+            'helpText' => 'Disabled attempts ordinary runtime without the proactive compatibility blocker and never claims compatibility or auto-migrates. Enabled preserves protected Update & Recovery enforcement. Disabling an enabled policy requires explicit risk confirmation.',
+            'aliases' => ['database release enforcement', 'proactive compatibility blocker', 'update and recovery'],
+            'type' => 'boolean',
+            'defaultValue' => false,
+            'order' => 10,
+            'controlClass' => 'optional-core',
+            'optional' => false,
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+            'staleWriteOwner' => 'installation-private-policy-revision',
+            'toolLogBehavior' => 'bounded-database-compatibility-policy',
+            'resetLabel' => 'Restore Default',
         ]),
         settings_registry_entry([
-            'id' => 'community_logo_path', 'settingKey' => 'community_logo_path',
-            'categoryId' => 'general-appearance', 'subsectionId' => 'branding',
-            'subsectionLabel' => 'Community Branding', 'label' => 'Community logo',
-            'description' => 'Optional uploaded logo used by community branding.',
-            'helpText' => 'The setup upload owner validates and stores the image; the registry stores no image bytes.',
-            'aliases' => ['site logo', 'branding image'], 'type' => 'asset',
-            'defaultValue' => '', 'order' => 20, 'controlClass' => 'optional',
-            'optional' => true, 'safeToReset' => false, 'bulkOperations' => [],
-            'setupVisible' => true, 'adminVisible' => false,
-            'visibilityReason' => 'The validated logo upload is available only during first-install setup.',
-            'authorization' => 'first-install-setup', 'toolLogBehavior' => 'setup-registry-operation',
+            'id' => 'extension.gesture-maker.enabled',
+            'settingKey' => 'first_party_extension.gesture-maker.enabled',
+            'owner' => 'first_party_extensions',
+            'extensionId' => 'gesture-maker',
+            'categoryId' => 'advanced-compatibility',
+            'subsectionId' => 'first-party-extensions',
+            'subsectionLabel' => 'First-Party Extensions',
+            'subsectionOrder' => 5,
+            'label' => 'Gesture Maker',
+            'description' => 'Enable the trusted repository-owned Gesture Maker presentation extension.',
+            'helpText' => 'Disabling removes Create/Edit Gesture presentation and subscriptions while mandatory gesture identity, authorization, history, package validation, protected delivery, privacy, moderation, and security remain active.',
+            'aliases' => ['gesture editor extension', 'create edit gesture'],
+            'type' => 'boolean',
+            'defaultValue' => true,
+            'order' => 10,
+            'controlClass' => 'optional',
+            'optional' => true,
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+            'toolLogBehavior' => 'bounded-extension-lifecycle',
         ]),
         settings_registry_entry([
             'id' => 'role_colors_mode', 'settingKey' => 'role_colors_mode',
@@ -107,8 +143,9 @@ function settings_registry_definitions(): array {
             'originalRelevant' => true, 'originalValueAvailable' => true,
             'originalValue' => 'disabled', 'disablingMovesTowardOriginal' => true,
             'differsFromOriginalByDefault' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'preset'],
         ]),
-    ];
+    ]);
 
     $profileLimitOrder = 10;
     foreach (member_profiles_limit_definitions() as $settingId => $limit) {
@@ -347,6 +384,7 @@ function settings_registry_definitions(): array {
             'optional' => true, 'setupVisible' => true,
             'originalRelevant' => true, 'originalValueAvailable' => true,
             'originalValue' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'preset'],
         ]),
         settings_registry_entry([
             'id' => 'gif_default_provider', 'settingKey' => 'gif_default_provider',
@@ -409,6 +447,7 @@ function settings_registry_definitions(): array {
             'dependencies' => ['diagnostic_screenshot_retention_days'],
             'originalRelevant' => true, 'originalValueAvailable' => true, 'originalValue' => false,
             'disablingMovesTowardOriginal' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'preset'],
         ]),
         settings_registry_entry([
             'id' => 'diagnostic_screenshot_retention_days', 'settingKey' => 'diagnostic_screenshot_retention_days',
@@ -420,6 +459,7 @@ function settings_registry_definitions(): array {
             'defaultValue' => 0, 'minimum' => 0, 'maximum' => 365, 'step' => 1, 'order' => 20,
             'setupVisible' => true,
             'originalRelevant' => true, 'originalValueAvailable' => true, 'originalValue' => 0,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'preset'],
         ]),
         settings_registry_entry([
             'id' => 'mandatory.security-safeguards', 'settingKey' => null,
@@ -465,6 +505,13 @@ function settings_registry_revision(PDO $pdo): int {
 function settings_registry_current_value(PDO $pdo, array $definition, array $context): mixed {
     $id = (string)$definition['id'];
     if ($definition['type'] === 'fixed') return true;
+    if ($definition['owner'] === 'database_compatibility_policy') {
+        return !empty($context['databaseCompatibility']['enabled']);
+    }
+    if ($definition['owner'] === 'first_party_extensions') {
+        $extensionId = (string)($definition['extensionId'] ?? '');
+        return $extensionId !== '' && first_party_extension_enabled($pdo, $extensionId);
+    }
     if (str_starts_with($id, 'avatar_dance.')) {
         $danceId = substr($id, strlen('avatar_dance.'));
         return !empty($context['dance']['enabled'][$danceId]);
@@ -511,6 +558,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         'webcam' => webcam_capability($pdo),
         'roleColors' => role_color_settings($pdo),
         'gestureCapabilities' => gesture_capability_policy($pdo),
+        'databaseCompatibility' => database_compatibility_policy_status(),
     ];
     $entries = [];
     foreach (settings_registry_definitions() as $definition) {
@@ -518,6 +566,9 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         $visible = $surface === 'setup' ? !empty($definition['setupVisible']) : !empty($definition['adminVisible']);
         $entry = $definition;
         $entry['currentValue'] = $current;
+        $entry['ownerRevision'] = $definition['owner'] === 'database_compatibility_policy'
+            ? (int)$context['databaseCompatibility']['revision']
+            : null;
         $entry['hasStoredValue'] = $definition['secret']
             ? app_setting($pdo, (string)$definition['settingKey'], '') !== ''
             : null;
@@ -544,15 +595,23 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
                 && $currentValues[$dependency] === false
         ));
         $entry['unmetDependencies'] = $unmet;
+        $effective = $entry['currentValue'];
+        $inheritanceSource = (string)($entry['inheritanceSource'] ?? '');
+        if ($inheritanceSource !== '' && trim((string)$effective) === '') {
+            $effective = $currentValues[$inheritanceSource] ?? '';
+        }
+        if (is_string($effective) && trim($effective) === '' && (string)($entry['standardFallback'] ?? '') !== '') {
+            $effective = (string)$entry['standardFallback'];
+        }
         $entry['effectiveValue'] = $entry['type'] === 'boolean' && $unmet
             ? false
-            : $entry['currentValue'];
+            : $effective;
     }
     unset($entry);
     usort($entries, static function (array $a, array $b): int {
         $categoryOrder = array_column(settings_registry_categories(), 'order', 'id');
-        return [$categoryOrder[$a['categoryId']] ?? 999, $a['subsectionId'], (int)$a['order'], $a['id']]
-            <=> [$categoryOrder[$b['categoryId']] ?? 999, $b['subsectionId'], (int)$b['order'], $b['id']];
+        return [$categoryOrder[$a['categoryId']] ?? 999, (int)$a['subsectionOrder'], $a['subsectionId'], (int)$a['order'], $a['id']]
+            <=> [$categoryOrder[$b['categoryId']] ?? 999, (int)$b['subsectionOrder'], $b['subsectionId'], (int)$b['order'], $b['id']];
     });
 
     $visibleEntries = array_values(array_filter($entries, static fn(array $entry): bool => !empty($entry['visibleOnSurface'])));
@@ -620,16 +679,25 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
             ],
             'relationship' => 'One canonical lobby-owned Admin menu with two intentional launch locations. The in-room launch is non-destructive and does not remove the administrator from the active room.',
         ],
+        'firstPartyExtensions' => first_party_extension_statuses($pdo),
+        'databaseCompatibilityPolicy' => database_compatibility_policy_public_status(),
     ];
 }
 
-function settings_registry_validate_value(array $definition, mixed $value, string $source): array {
+function settings_registry_validate_value(
+    array $definition,
+    mixed $value,
+    string $source,
+    array $context = []
+): array {
     $type = (string)$definition['type'];
     if ($type === 'fixed') return ['ok' => false, 'code' => 'SETTING_MANDATORY', 'error' => 'Mandatory safeguards cannot be changed.', 'http_status' => 400];
     if ($type === 'asset') {
-        if ($source !== 'setup') return ['ok' => false, 'code' => 'SETTING_ASSET_OWNER_REQUIRED', 'error' => 'Use the validated setup asset owner.', 'http_status' => 400];
+        if ($source !== 'setup' && empty($context['validated_asset_upload'])) {
+            return ['ok' => false, 'code' => 'SETTING_ASSET_OWNER_REQUIRED', 'error' => 'Use the validated branding asset owner.', 'http_status' => 400];
+        }
         $path = trim((string)$value);
-        if ($path !== '' && !str_starts_with($path, '/assets/uploads/branding/')) {
+        if ($path !== '' && !private_site_branding_valid_asset_reference($path)) {
             return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => 'The community logo path is invalid.', 'http_status' => 400];
         }
         return ['ok' => true, 'value' => $path];
@@ -657,6 +725,9 @@ function settings_registry_validate_value(array $definition, mixed $value, strin
         return ['ok' => true, 'value' => $value];
     }
     $value = trim((string)$value);
+    if (!empty($definition['requiredNonBlank']) && $value === '') {
+        return ['ok' => false, 'code' => 'SETTING_VALUE_REQUIRED', 'error' => $definition['label'] . ' cannot be blank.', 'http_status' => 400];
+    }
     if ($definition['maximum'] !== null && (function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value)) > (int)$definition['maximum']) {
         return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' is too long.', 'http_status' => 400];
     }
@@ -670,22 +741,30 @@ function settings_registry_target_ids(array $request, array $snapshot): array {
     if ($operation === 'reset_subsection') {
         $category = (string)($request['category_id'] ?? '');
         $subsection = (string)($request['subsection_id'] ?? '');
-        return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => $entry['categoryId'] === $category && $entry['subsectionId'] === $subsection && !empty($entry['safeToReset']))));
+        return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => $entry['categoryId'] === $category && $entry['subsectionId'] === $subsection && !empty($entry['safeToReset']) && in_array('subsection', (array)$entry['bulkOperations'], true))));
     }
     if ($operation === 'reset_category') {
         $category = (string)($request['category_id'] ?? '');
-        return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => $entry['categoryId'] === $category && !empty($entry['safeToReset']))));
+        return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => $entry['categoryId'] === $category && !empty($entry['safeToReset']) && in_array('category', (array)$entry['bulkOperations'], true))));
     }
-    if ($operation === 'reset_all_optional') return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => !empty($entry['optional']) && !empty($entry['safeToReset']))));
+    if ($operation === 'reset_all_optional') return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => !empty($entry['optional']) && !empty($entry['safeToReset']) && in_array('all-optional', (array)$entry['bulkOperations'], true))));
     if ($operation === 'apply_preset') {
         $preset = (string)($request['preset'] ?? '');
         if (!in_array($preset, ['original-compatible', 'framework-default'], true)) return [];
-        return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => !empty($entry['originalRelevant']) && !empty($entry['originalValueAvailable']) && !empty($entry['safeToReset']))));
+        return array_values(array_map(static fn(array $entry): string => (string)$entry['id'], array_filter($snapshot['entries'], static fn(array $entry): bool => !empty($entry['originalRelevant']) && !empty($entry['originalValueAvailable']) && !empty($entry['safeToReset']) && in_array('preset', (array)$entry['bulkOperations'], true))));
     }
     return [];
 }
 
-function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevision, int $actorUserId, string $source = 'admin'): array {
+function settings_registry_update(
+    PDO $pdo,
+    array $request,
+    mixed $expectedRevision,
+    int $actorUserId,
+    string $source = 'admin',
+    array $context = []
+): array {
+    $databaseCompatibilityTransaction = null;
     $parsedRevision = filter_var($expectedRevision, FILTER_VALIDATE_INT);
     if ($parsedRevision === false || (int)$parsedRevision < 1) return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_REVISION_REQUIRED', 'error' => 'A current settings revision is required.', 'http_status' => 400];
     $operation = (string)($request['operation'] ?? '');
@@ -744,7 +823,7 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             } else {
                 $candidate = $definition['defaultValue'];
             }
-            $validation = settings_registry_validate_value($definition, $candidate, $source);
+            $validation = settings_registry_validate_value($definition, $candidate, $source, $context);
             if (empty($validation['ok'])) {
                 if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
                 return $validation;
@@ -757,6 +836,14 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
                 ? app_setting($pdo, (string)$definitionMap[$id]['settingKey'], '')
                 : $entryMap[$id]['currentValue'];
             if (!settings_registry_values_equal($value, $comparisonValue, (string)$definitionMap[$id]['type'])) $changedIds[] = $id;
+        }
+        foreach ($target as $id => $value) {
+            if (($definitionMap[$id]['owner'] ?? '') !== 'database_compatibility_policy') continue;
+            $policyStatus = (array)($snapshot['databaseCompatibilityPolicy'] ?? []);
+            if ((empty($policyStatus['initialized']) || empty($policyStatus['valid']))
+                && !in_array($id, $changedIds, true)) {
+                $changedIds[] = $id;
+            }
         }
         if ($actualRevision !== (int)$parsedRevision && $changedIds) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
@@ -785,6 +872,48 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
                 'http_status' => 409,
             ];
         }
+        $databaseCompatibilityChanged = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool =>
+                ($definitionMap[$id]['owner'] ?? '') === 'database_compatibility_policy'
+        ));
+        if ($databaseCompatibilityChanged) {
+            $policyId = $databaseCompatibilityChanged[0];
+            $policyCurrent = !empty($entryMap[$policyId]['currentValue']);
+            $policyTarget = !empty($target[$policyId]);
+            $policyRestoreDefault = $operation === 'reset_setting';
+            if ($policyCurrent
+                && !$policyTarget
+                && !$policyRestoreDefault
+                && empty($request['database_compatibility_confirmed'])) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'DATABASE_COMPATIBILITY_DISABLE_CONFIRMATION_REQUIRED',
+                    'error' => 'Disabling proactive compatibility enforcement can expose ordinary runtime failures when application files and the database do not match. Review and confirm this risk.',
+                    'databaseCompatibilityPolicy' => $snapshot['databaseCompatibilityPolicy'],
+                    'http_status' => 409,
+                ];
+            }
+            if (!$ownsTransaction && empty($context['external_transaction_finalizer'])) {
+                throw new RuntimeException('The external transaction owner must finalize the compatibility-policy mutation.');
+            }
+            $policyExpectedRevision = $source === 'setup'
+                ? (int)($entryMap[$policyId]['ownerRevision'] ?? 0)
+                : filter_var(
+                    $request['expected_database_compatibility_revision'] ?? null,
+                    FILTER_VALIDATE_INT
+                );
+            if ($policyExpectedRevision === false || (int)$policyExpectedRevision < 0) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'DATABASE_COMPATIBILITY_POLICY_REVISION_REQUIRED',
+                    'error' => 'A current compatibility-policy revision is required.',
+                    'http_status' => 400,
+                ];
+            }
+        }
         if (!$changedIds) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
             return ['ok' => true, 'idempotent' => true, 'revision' => $actualRevision, 'changedSettingCount' => 0, 'stoppedActiveCapabilityCount' => 0, 'registry' => settings_registry_snapshot($pdo, $source === 'setup' ? 'setup' : 'admin')];
@@ -806,6 +935,30 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
         if (empty($roleValidation['ok'])) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
             return $roleValidation;
+        }
+        if ($databaseCompatibilityChanged) {
+            $policyId = $databaseCompatibilityChanged[0];
+            try {
+                $databaseCompatibilityTransaction = database_compatibility_policy_begin_update(
+                    $pdo,
+                    !empty($target[$policyId]),
+                    (int)$policyExpectedRevision,
+                    !empty($request['database_compatibility_confirmed']),
+                    $policyRestoreDefault,
+                    $actorUserId,
+                    (string)($request['request_id'] ?? ''),
+                    $source === 'setup' ? 'setup-settings-registry' : 'admin-settings-registry'
+                );
+            } catch (CoreMigrationException $policyError) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => $policyError->errorCode,
+                    'error' => $policyError->getMessage(),
+                    'databaseCompatibilityPolicy' => database_compatibility_policy_public_status(),
+                    'http_status' => $policyError->httpStatus,
+                ];
+            }
         }
 
         $stopped = 0;
@@ -838,6 +991,10 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             $capacityResult = avatar_relationship_capacity_update($pdo, $target['avatar_relationship_max_regular_links'], $capacity['revision'], $capacityConfirmed, $actorUserId, 'settings-registry');
             if (empty($capacityResult['ok'])) {
                 if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if (is_array($databaseCompatibilityTransaction)) {
+                    database_compatibility_policy_rollback_update($databaseCompatibilityTransaction);
+                    $databaseCompatibilityTransaction = null;
+                }
                 return $capacityResult;
             }
         }
@@ -851,6 +1008,19 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
         if (isset($changedMap['allow_webcam_use'])) {
             $webcamResult = webcam_capability_update($pdo, (bool)$target['allow_webcam_use']);
             $stopped += (int)($webcamResult['stoppedParticipantCount'] ?? 0);
+        }
+        $extensionChanged = array_filter(
+            $changedIds,
+            static fn(string $id): bool =>
+                ($definitionMap[$id]['owner'] ?? '') === 'first_party_extensions'
+        );
+        foreach ($extensionChanged as $extensionSettingId) {
+            $extensionId = (string)($definitionMap[$extensionSettingId]['extensionId'] ?? '');
+            first_party_extension_set_enabled_locked(
+                $pdo,
+                $extensionId,
+                (bool)$target[$extensionSettingId]
+            );
         }
         $roleChanged = array_filter($changedIds, static fn(string $id): bool => $id === 'role_colors_mode' || str_starts_with($id, 'role_color_'));
         if ($roleChanged) {
@@ -866,6 +1036,15 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
         $special = array_fill_keys(array_merge(
             array_keys(avatar_size_policy_setting_map()),
             ['avatar_relationship_max_regular_links', 'allow_webcam_use', 'role_colors_mode'],
+            array_values(array_map(
+                static fn(array $definition): string => (string)$definition['id'],
+                array_filter(
+                    $definitionMap,
+                    static fn(array $definition): bool =>
+                        ($definition['owner'] ?? '') === 'first_party_extensions'
+                )
+            )),
+            $databaseCompatibilityChanged,
             array_keys(role_color_setting_defaults()),
             array_map(static fn(array $capability): string => (string)$capability['id'], gesture_capability_registry()),
             array_map(static fn(array $dance): string => 'avatar_dance.' . $dance['id'], avatar_dance_capability_registry())
@@ -882,8 +1061,15 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
             set_app_setting($pdo, (string)$definition['settingKey'], $stored);
         }
 
-        $nextRevision = $actualRevision + 1;
-        set_app_setting($pdo, SETTINGS_REGISTRY_REVISION_SETTING, (string)$nextRevision);
+        $databaseBackedChangedIds = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool =>
+                ($definitionMap[$id]['owner'] ?? '') !== 'database_compatibility_policy'
+        ));
+        $nextRevision = $actualRevision + ($databaseBackedChangedIds ? 1 : 0);
+        if ($databaseBackedChangedIds) {
+            set_app_setting($pdo, SETTINGS_REGISTRY_REVISION_SETTING, (string)$nextRevision);
+        }
         $scope = match ($operation) {
             'reset_setting' => 'setting',
             'reset_subsection' => 'subsection',
@@ -908,20 +1094,39 @@ function settings_registry_update(PDO $pdo, array $request, mixed $expectedRevis
                 . '; impact-confirmed='
                 . ($profileLimitConfirmationRequired ? 'yes' : 'not-required') . '.';
         }
-        log_tool($pdo, $actorUserId > 0 ? $actorUserId : null, $source === 'setup' ? 'setup_settings_registry_update' : 'admin_settings_registry_update', null, null, $detail);
+        if ($databaseCompatibilityChanged) {
+            $policy = (array)($databaseCompatibilityTransaction['status'] ?? []);
+            $detail .= ' Database compatibility policy='
+                . (!empty($policy['enabled']) ? 'enabled' : 'disabled')
+                . '; policy-revision=' . (int)($policy['revision'] ?? 0) . '.';
+        }
+        if ($databaseBackedChangedIds) {
+            log_tool($pdo, $actorUserId > 0 ? $actorUserId : null, $source === 'setup' ? 'setup_settings_registry_update' : 'admin_settings_registry_update', null, null, $detail);
+        }
         if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        if ($ownsTransaction && is_array($databaseCompatibilityTransaction)) {
+            database_compatibility_policy_commit_update($databaseCompatibilityTransaction);
+            $databaseCompatibilityTransaction = null;
+        }
         if ($gestureCapabilityChanged) {
             gesture_capability_emit($pdo, gesture_capability_policy($pdo));
         }
-        return [
+        $response = [
             'ok' => true, 'idempotent' => false, 'revision' => $nextRevision,
             'changedSettingCount' => count($changedIds), 'changedSettingIds' => $changedIds,
             'stoppedActiveCapabilityCount' => $stopped,
             'profileLimitImpacts' => array_values($profileLimitImpacts),
             'registry' => settings_registry_snapshot($pdo, $source === 'setup' ? 'setup' : 'admin'),
         ];
+        if (!$ownsTransaction && is_array($databaseCompatibilityTransaction)) {
+            $response['_databaseCompatibilityTransaction'] = $databaseCompatibilityTransaction;
+        }
+        return $response;
     } catch (Throwable $error) {
         if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        if (is_array($databaseCompatibilityTransaction)) {
+            database_compatibility_policy_rollback_update($databaseCompatibilityTransaction);
+        }
         throw $error;
     }
 }

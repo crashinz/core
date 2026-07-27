@@ -26,6 +26,27 @@ function database_update_require_admin(PDO $pdo): array
     return $actor;
 }
 
+function database_update_admin_login_candidate(PDO $pdo, string $login): ?array
+{
+    $identifierColumns = [];
+    foreach (['email', 'username', 'display_name'] as $column) {
+        if (database_migration_has_columns($pdo, 'users', [$column])) {
+            $identifierColumns[] = $column;
+        }
+    }
+    if (!$identifierColumns) return null;
+    $where = implode(
+        ' OR ',
+        array_map(static fn(string $column): string => "LOWER({$column}) = LOWER(?)", $identifierColumns)
+    );
+    $stmt = $pdo->prepare(
+        "SELECT * FROM users WHERE role = 'admin' AND ({$where}) LIMIT 1"
+    );
+    $stmt->execute(array_fill(0, count($identifierColumns), $login));
+    $candidate = $stmt->fetch();
+    return is_array($candidate) ? $candidate : null;
+}
+
 $actor = database_update_actor($pdo);
 $requestMethod = (string)($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $requestAction = (string)($_POST['action'] ?? '');
@@ -38,11 +59,7 @@ if ($requestMethod === 'POST') {
             $password = (string)($_POST['password'] ?? '');
             $limit = auth_rate_limit_status($pdo, 'database-update-login', $login);
             if (!$limit['allowed']) throw new CoreMigrationException($limit['message'], 'MIGRATION_LOGIN_RATE_LIMITED', 429);
-            $stmt = $pdo->prepare(
-                "SELECT * FROM users WHERE role = 'admin' AND (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?)) LIMIT 1"
-            );
-            $stmt->execute([$login, $login, $login]);
-            $candidate = $stmt->fetch();
+            $candidate = database_update_admin_login_candidate($pdo, $login);
             if (!$candidate || !password_verify($password, (string)$candidate['password_hash'])) {
                 auth_rate_record_failure($pdo, 'database-update-login', $login);
                 throw new CoreMigrationException('Administrator sign-in was not accepted.', 'MIGRATION_LOGIN_FAILED', 403);
@@ -51,6 +68,25 @@ if ($requestMethod === 'POST') {
             authenticate_user((int)$candidate['id']);
             $actor = $candidate;
             $notice = 'Administrator authentication confirmed. Review the update status before continuing.';
+        } elseif ($action === 'compatibility_policy') {
+            $actor = database_update_require_admin($pdo);
+            $enabled = (string)($_POST['policy_enabled'] ?? '') === '1';
+            $confirmed = (string)($_POST['disable_confirm'] ?? '') === 'confirm-disable-risk';
+            $restoreDefault = (string)($_POST['restore_default'] ?? '') === '1';
+            $result = database_compatibility_policy_update(
+                $pdo,
+                $enabled,
+                (int)($_POST['expected_policy_revision'] ?? -1),
+                $confirmed,
+                $restoreDefault,
+                (int)$actor['id'],
+                (string)($_POST['request_public_id'] ?? ''),
+                'database-update'
+            );
+            $policy = (array)($result['policy'] ?? []);
+            $notice = !empty($result['idempotent'])
+                ? 'The compatibility-enforcement request was already applied.'
+                : 'Database/release compatibility enforcement was ' . (!empty($policy['enabled']) ? 'enabled.' : 'disabled.');
         } elseif ($action === 'update') {
             $actor = database_update_require_admin($pdo);
             $result = database_recovery_run_update(
@@ -138,6 +174,7 @@ if ($requestMethod === 'POST') {
 
 $status = database_migration_status($pdo);
 $recoveryStatus = database_recovery_status($pdo);
+$compatibilityPolicy = database_compatibility_policy_public_status();
 $isAdmin = $actor && ($actor['role'] ?? '') === 'admin';
 $recent = $isAdmin && security_recent_authentication_valid();
 $ownerEntryRequested = isset($_GET['owner']) || $requestAction === 'authenticate';
@@ -148,6 +185,7 @@ $title = $maintenanceRequired ? 'CoreChat Update & Recovery' : 'Database Current
 $updateRequestPublicId = uuid_v4();
 $prepareRequestPublicId = uuid_v4();
 $restoreRequestPublicId = uuid_v4();
+$compatibilityPolicyRequestPublicId = uuid_v4();
 $backupMethod = (string)($status['backup_readiness']['method'] ?? '');
 $backupMethodLabel = match ($backupMethod) {
     CORE_MIGRATION_MARIADB_BACKUP_FORMAT => 'Private server-side logical stream',
@@ -194,6 +232,40 @@ $interruptedRecovery = !empty($recoveryStatus['maintenance'])
 $automaticUpdateAllowed = $automaticUpdateAllowed
     && $installedRelease !== null
     && !$recoveryPairUnavailable;
+$prepareAllowed = $installedRelease !== null && !empty($status['backup_readiness']['ok']);
+$prepareBlockers = [];
+if ($installedRelease === null) {
+    $prepareBlockers[] = 'The installed application release is not certified: '
+        . (string)($recoveryStatus['installed_release_error_code'] ?? 'INSTALLED_RELEASE_UNAVAILABLE') . '.';
+}
+if (empty($status['backup_readiness']['ok'])) {
+    $prepareBlockers[] = (string)($status['backup_readiness']['message']
+        ?? 'Private database backup storage is not ready.');
+}
+$automaticUpdateBlockers = [];
+if ($installedRelease === null) {
+    $automaticUpdateBlockers[] = 'The installed application release is not certified: '
+        . (string)($recoveryStatus['installed_release_error_code'] ?? 'INSTALLED_RELEASE_UNAVAILABLE') . '.';
+}
+if (!$status['release_complete']) {
+    $automaticUpdateBlockers[] = 'The ordered migration package is incomplete.';
+}
+if ($updateStateBlocked) {
+    $automaticUpdateBlockers[] = match ((string)$status['kind']) {
+        'newer' => 'The database contains a newer or unknown applied migration.',
+        'unknown' => 'The database is not an exact source-proven supported predecessor.',
+        'incomplete-release' => 'The installed migration release is incomplete.',
+        'inconsistent' => 'The migration ledger and database schema are inconsistent.',
+        default => 'The database state is not eligible for automatic update.',
+    };
+}
+if (empty($status['backup_readiness']['ok'])) {
+    $automaticUpdateBlockers[] = (string)($status['backup_readiness']['message']
+        ?? 'Private database backup storage is not ready.');
+}
+if ($recoveryPairUnavailable) {
+    $automaticUpdateBlockers[] = 'The active private recovery-set record is incomplete or unavailable.';
+}
 $applicationFilesChangedAfterPrepare = $preparedMaintenance
     && $recoverySet !== null
     && $installedRelease !== null
@@ -261,6 +333,10 @@ $updateActionLabel = $status['kind'] === 'failed'
         <dt>Backup transport</dt><dd><?= e($backupMethodLabel) ?></dd>
         <dt>Attempt state</dt><dd><?= e((string)($status['migration_state']['phase'] ?? 'No prior attempt')) ?></dd>
         <dt>Recovery phase</dt><dd><?= e((string)$recoveryStatus['phase']) ?></dd>
+        <dt>Compatibility enforcement</dt><dd><?= !empty($compatibilityPolicy['enabled']) ? 'Enabled' : 'Disabled' ?> (default: Disabled)</dd>
+        <dt>Compatibility policy state</dt><dd><?= !empty($compatibilityPolicy['valid'])
+          ? (!empty($compatibilityPolicy['initialized']) ? 'Valid revision ' . (int)$compatibilityPolicy['revision'] : 'Uninitialized; safely Disabled')
+          : 'Invalid; safely Disabled (' . e((string)$compatibilityPolicy['diagnosticCode']) . ')' ?></dd>
         <dt>Paired recovery set</dt><dd><?= $recoverySet === null
           ? e((string)($recoveryStatus['recovery_set_error_code'] ?? 'Not prepared'))
           : e((string)$recoverySet['recovery_set_id']) ?></dd>
@@ -326,6 +402,47 @@ $updateActionLabel = $status['kind'] === 'failed'
           <button class="btn btn-primary" type="submit">Confirm Administrator</button>
         </form>
       <?php else: ?>
+        <h2>Database &amp; Backup policy</h2>
+        <div class="settings-warning" id="database-compatibility-policy-status" role="status">
+          <strong>Enforce database/release compatibility before runtime: <?= !empty($compatibilityPolicy['enabled']) ? 'Enabled' : 'Disabled' ?></strong>
+          <p>
+            Enabled preserves proactive release, schema, manifest, maintenance, backup, migration, locking, and recovery
+            enforcement. Disabled attempts ordinary runtime without the proactive compatibility blocker; it never
+            claims compatibility, auto-migrates, or disables active recovery maintenance or unrelated security.
+          </p>
+          <?php if (empty($compatibilityPolicy['valid'])): ?>
+            <p>The private policy record is invalid or unreadable and therefore resolves to Disabled. Diagnostic code:
+              <code><?= e((string)$compatibilityPolicy['diagnosticCode']) ?></code>. No storage path or private content is exposed.</p>
+          <?php endif; ?>
+        </div>
+        <form class="form-grid" method="post">
+          <?= csrf_input() ?>
+          <input type="hidden" name="action" value="compatibility_policy">
+          <input type="hidden" name="policy_enabled" value="<?= !empty($compatibilityPolicy['enabled']) ? '0' : '1' ?>">
+          <input type="hidden" name="expected_policy_revision" value="<?= (int)$compatibilityPolicy['revision'] ?>">
+          <input type="hidden" name="request_public_id" value="<?= e($compatibilityPolicyRequestPublicId) ?>">
+          <?php if (!empty($compatibilityPolicy['enabled'])): ?>
+            <label>
+              <input type="checkbox" name="disable_confirm" value="confirm-disable-risk" required>
+              I understand that disabling the proactive blocker can expose ordinary runtime failures when application
+              files and the database do not match.
+            </label>
+          <?php endif; ?>
+          <button class="btn <?= !empty($compatibilityPolicy['enabled']) ? 'btn-danger' : 'btn-primary' ?>" type="submit">
+            <?= !empty($compatibilityPolicy['enabled']) ? 'Disable Compatibility Enforcement' : 'Enable Compatibility Enforcement' ?>
+          </button>
+        </form>
+        <?php if (!empty($compatibilityPolicy['enabled']) || empty($compatibilityPolicy['valid'])): ?>
+          <form class="form-grid" method="post">
+            <?= csrf_input() ?>
+            <input type="hidden" name="action" value="compatibility_policy">
+            <input type="hidden" name="policy_enabled" value="0">
+            <input type="hidden" name="restore_default" value="1">
+            <input type="hidden" name="expected_policy_revision" value="<?= (int)$compatibilityPolicy['revision'] ?>">
+            <input type="hidden" name="request_public_id" value="<?= e(uuid_v4()) ?>">
+            <button class="btn" type="submit">Restore Default (Disabled)</button>
+          </form>
+        <?php endif; ?>
         <?php if (!$maintenanceRequired): ?>
           <div class="settings-warning">
             Prepare for Update is optional. It enters maintenance and creates one verified private recovery set pairing
@@ -344,8 +461,16 @@ $updateActionLabel = $status['kind'] === 'failed'
             <button
               class="btn btn-primary"
               type="submit"
-              <?= $installedRelease === null || empty($status['backup_readiness']['ok']) ? 'disabled' : '' ?>
+              <?= !$prepareAllowed ? 'disabled aria-disabled="true" aria-describedby="database-prepare-prerequisites"' : '' ?>
             >Prepare for Update</button>
+            <?php if (!$prepareAllowed): ?>
+              <div class="settings-warning database-update-prerequisites" id="database-prepare-prerequisites" role="status">
+                <strong>Prepare for Update is unavailable.</strong>
+                <ul>
+                  <?php foreach ($prepareBlockers as $blocker): ?><li><?= e($blocker) ?></li><?php endforeach; ?>
+                </ul>
+              </div>
+            <?php endif; ?>
           </form>
         <?php elseif ($status['kind'] === 'active'): ?>
           <div class="settings-warning">
@@ -437,8 +562,16 @@ $updateActionLabel = $status['kind'] === 'failed'
               <button
                 class="btn btn-primary"
                 type="submit"
-                <?= !$automaticUpdateAllowed ? 'disabled' : '' ?>
+                <?= !$automaticUpdateAllowed ? 'disabled aria-disabled="true" aria-describedby="database-update-prerequisites"' : '' ?>
               ><?= e($updateActionLabel) ?></button>
+              <?php if (!$automaticUpdateAllowed): ?>
+                <div class="settings-warning database-update-prerequisites" id="database-update-prerequisites" role="status">
+                  <strong><?= e($updateActionLabel) ?> is unavailable.</strong>
+                  <ul>
+                    <?php foreach ($automaticUpdateBlockers as $blocker): ?><li><?= e($blocker) ?></li><?php endforeach; ?>
+                  </ul>
+                </div>
+              <?php endif; ?>
             </form>
           <?php endif; ?>
           <?php if ($preparedMaintenance && $recoverySet !== null): ?>

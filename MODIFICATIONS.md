@@ -352,3 +352,118 @@ Technical reference: Build 000049, 2026-07-25; published commit recorded in
 the Build 000049 Engineering Report.
 
 </details>
+
+## Capability-safe first-party extensions and private site branding
+
+ChatSpace now has a narrow framework for trusted, repository-owned first-party
+extensions, with Private Site Branding as the sole initial pilot.
+
+<details>
+<summary>More about this change</summary>
+
+- Added versioned manifests, a core executable allowlist, deny-by-default
+  capabilities, compatibility and integrity checks, deterministic dependency
+  handling, isolated namespaced storage, lifecycle controls, safe mode, and
+  bounded failure reporting.
+- Added one shared Setup/Admin Branding editor with ten destination-organized
+  sections, inherited and per-page names, validated private logo uploads,
+  explicit previews and fallbacks, stale-write protection, and deliberate
+  reminder editing.
+- Kept the original license action ahead of editable branding controls,
+  preserved required ChatSpace authorship, source, license, version, and
+  `Modified by exe` attribution, and rendered this canonical modification
+  history through the optional public `exe's Changelog` utility.
+- Kept security, authentication, authorization, moderation, recovery,
+  canonical history, transport, concurrency, and every deferred candidate in
+  core or at its approved future checkpoint.
+
+Technical reference: Build 000050, 2026-07-25; final local verification and
+commit disposition are recorded in the Build 000050 Engineering Report.
+
+</details>
+
+## Upgrade release and recovery hardening
+
+Existing installations now receive stricter release certification, clearer
+update prerequisites, and source-proven upgrade recognition.
+
+<details>
+<summary>More about this change</summary>
+
+- Made the release manifest a deterministic derivative of the exact deployable
+  file inventory and current runtime schema authority.
+- Added exact, source-proven predecessor identities for the initial ChatSpace
+  CE release, the portable source baseline, Build 000047, and Gesture Part 5.
+  Missing, extra, partial, mixed, inconsistent, newer, or integrity-invalid
+  layouts still fail closed.
+- Preserved ordered migrations, verified private SQLite and MariaDB backups,
+  durable recovery, idempotent request replay, and installation-specific
+  configuration and content.
+- Added actual disabled semantics, visible disabled styling, and nearby
+  prerequisite explanations to unavailable update controls.
+- Included the public README, authors, installation, license, modification,
+  and version documents in the deterministic release inventory.
+
+Technical reference: Post-Build 000050 Part 1, 2026-07-26.
+
+</details>
+
+## Gesture Maker extension and optional compatibility enforcement
+
+Gesture Maker presentation now runs as a trusted first-party extension, and
+site owners can choose whether CoreChat proactively blocks ordinary runtime
+when application-release and database compatibility have not been proven.
+
+<details>
+<summary>More about this change</summary>
+
+- Moved Create/Edit Gesture presentation, editor previews and tools, package
+  import/export presentation, and Catie attribution into one integrity-checked
+  repository-owned extension while core retains identity, authorization,
+  canonical history, archive validation, protected media, persistence,
+  concurrency, privacy, moderation, and security.
+- Added the Optional Core **Enforce database/release compatibility before
+  runtime** control under shared **Setup/Admin -> System -> Database & Backup**.
+  Its installation-private default is Disabled; it is excluded from ordinary
+  optional bulk controls and remains available from the protected update and
+  recovery surface.
+- Disabled mode bypasses only the proactive compatibility blocker and never
+  auto-migrates or claims compatibility. Active recovery maintenance and every
+  unrelated security control remain enforced. Enabled mode preserves the
+  protected release, backup, migration, and recovery workflow.
+- Kept manual database export/import tools, public attribution, existing
+  gesture behavior, SQLite/MariaDB portability, and all deferred game,
+  voice-quality, and later-build scope unchanged.
+
+Technical reference: Post-Build 000050 Part 2, 2026-07-26; final private commit
+and verification are recorded in the corresponding Engineering Report.
+
+</details>
+
+## Fresh SQLite installation completeness and recoverable Setup
+
+The deployable Community Edition release now includes the exact audited clean
+SQLite seed required by the publicly presented SQLite Setup path.
+
+<details>
+<summary>More about this change</summary>
+
+- Classified only the exact reviewed `db/chatspace.sqlite` baseline as a
+  deployable Setup source while continuing to exclude generated databases,
+  configuration, backups, recovery state, dumps, WAL/SHM files, uploads, and
+  installation data.
+- Made SQLite Setup validate the immutable source and randomized destination,
+  complete the ordered current migration, verify the final clean schema and
+  ledger, and only then atomically commit durable configuration.
+- Added bounded installation-private attempt ownership so pre-configuration
+  failures clean only their exact disposable destination, while an
+  interruption after configuration preserves the validated current database
+  and deterministically resumes at first-administrator Setup.
+- Kept MariaDB Setup, existing-install upgrades and recovery, configuration
+  isolation, and the Disabled Optional-Core runtime compatibility default
+  unchanged.
+
+Technical reference: Post-Public-Release Fresh SQLite Installation
+Completeness, 2026-07-26.
+
+</details>

@@ -1,7 +1,9 @@
 <?php
 require_once __DIR__ . '/includes/base.php';
 $user = require_user();
-$ejection = active_community_ejection(db(), (int)$user['id']);
+$pdo = db();
+$branding = private_site_branding_projection($pdo, 'other');
+$ejection = active_community_ejection($pdo, (int)$user['id']);
 if (!$ejection) {
     redirect_to('/lobby.php');
 }
@@ -12,7 +14,7 @@ $expires = $ejection['expires_at'] ?? null;
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Community Ejection - ChatSpace CE</title>
+  <title><?= e(branded_page_title('Community Ejection', $pdo, 'other')) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
 </head>
 <body class="auth-shell" data-app-base="<?= e(app_base_path()) ?>">
@@ -20,7 +22,7 @@ $expires = $ejection['expires_at'] ?? null;
     <div class="brand">
       <div>
         <h1>Community Ejection</h1>
-        <span>ChatSpace Community Edition</span>
+        <span><?= e($branding['effective_name']) ?></span>
       </div>
     </div>
     <?php if (!empty($ejection['permanent'])): ?>

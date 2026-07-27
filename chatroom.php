@@ -4,6 +4,7 @@ require_once __DIR__ . '/includes/inner_tranquillity_player_capability.php';
 require_once __DIR__ . '/includes/runtime_diagnostics_capability.php';
 $user = require_user();
 $pdo = db();
+$branding = private_site_branding_projection($pdo, 'room');
 $communityEjection = active_community_ejection($pdo, (int)$user['id']);
 if ($communityEjection) {
     redirect_to('/community_ejected.php');
@@ -74,6 +75,8 @@ $csrfToken = csrf_token();
 $innerTranquillityPlayer = inner_tranquillity_player_capability($room);
 $runtimeDiagnostics = runtime_diagnostics_capability();
 $roleColors = role_color_settings($pdo);
+$gestureMakerExtension = first_party_extension_status($pdo, 'gesture-maker');
+$gestureMakerAvailable = ($gestureMakerExtension['state'] ?? '') === 'enabled';
 $roomAssetVersion = static function (string $path): string {
     $absolutePath = __DIR__ . $path;
     $version = is_file($absolutePath) ? (string)filemtime($absolutePath) : (string)time();
@@ -91,13 +94,13 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?= e($room['name']) ?> - ChatSpace CE</title>
+  <title><?= e(branded_page_title((string)$room['name'], $pdo, 'room')) ?></title>
   <link rel="stylesheet" href="<?= e($roomAssetVersion('/assets/css/styles.css')) ?>">
   <?php if ($innerTranquillityPlayer['available']): ?>
   <link rel="stylesheet" href="<?= e($innerTranquillityPlayer['assets']['css']) ?>">
   <?php endif; ?>
 </head>
-<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>" data-runtime-diagnostics-enabled="<?= $runtimeDiagnostics['enabled'] ? 'true' : 'false' ?>" data-runtime-diagnostics-mode="<?= e($runtimeDiagnostics['mode']) ?>" data-runtime-verification-controls="<?= $runtimeDiagnostics['verification_controls'] ? 'true' : 'false' ?>">
+<body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-branding-name="<?= e($branding['effective_name']) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>" data-runtime-diagnostics-enabled="<?= $runtimeDiagnostics['enabled'] ? 'true' : 'false' ?>" data-runtime-diagnostics-mode="<?= e($runtimeDiagnostics['mode']) ?>" data-runtime-verification-controls="<?= $runtimeDiagnostics['verification_controls'] ? 'true' : 'false' ?>">
 <div class="room-layout">
   <div class="version-banner" id="version-banner" hidden>
     <span id="version-banner-text">A new ChatSpace version is available.</span>
@@ -889,7 +892,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 <div class="session-lock" id="session-lock" aria-hidden="true">
   <form class="session-lock-box" id="session-lock-form">
     <div class="session-lock-brand">
-      <img src="<?= e(app_url('/assets/images/chatspace-ce-logo.png')) ?>" alt="">
+      <img class="<?= $branding['has_custom_logo'] ? 'custom-brand-logo' : '' ?>" src="<?= e(app_url($branding['compact_logo_path'])) ?>" alt="<?= e($branding['effective_name']) ?>">
       <div>
         <strong>Session Locked</strong>
         <span><?= e($user['display_name']) ?></span>
@@ -938,7 +941,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
   </div>
   <div class="media-panel gesture-catalog-panel" id="media-panel-personal-gestures" role="tabpanel" aria-labelledby="media-tab-personal-gestures">
     <div class="gesture-catalog-toolbar">
-      <button class="btn btn-primary" id="personal-gesture-create" type="button">Create / Edit Gestures</button>
+      <button class="btn btn-primary" id="personal-gesture-create" type="button"<?= $gestureMakerAvailable ? '' : ' hidden disabled' ?>>Create / Edit Gestures</button>
       <label>Search Personal Gestures<input id="personal-gesture-search" type="search" maxlength="120" autocomplete="off"></label>
       <label>Sort<select id="personal-gesture-sort"><option value="last_uploaded">Last uploaded</option><option value="file_name">File name A–Z</option><option value="custom">Custom order</option></select></label>
     </div>

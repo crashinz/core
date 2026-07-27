@@ -4,8 +4,11 @@ declare(strict_types=1);
 const CHATSPACE_CONFIG = __DIR__ . '/config.php';
 const CHATSPACE_DEFAULT_SQLITE = __DIR__ . '/../db/chatspace.sqlite';
 const CHATSPACE_LEGACY_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
-const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = ['2026-07-23-build-000048-part-1'];
-const CHATSPACE_SCHEMA_VERSION = '2026-07-24-build-000048-part-3';
+const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
+    '2026-07-23-build-000048-part-1',
+    '2026-07-24-build-000048-part-3',
+];
+const CHATSPACE_SCHEMA_VERSION = '2026-07-26-post-build-000050-part-1';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 function chatspace_application_version(): string {
@@ -17,12 +20,14 @@ function chatspace_application_version(): string {
 require_once __DIR__ . '/auth_rate_limit.php';
 require_once __DIR__ . '/security_policy.php';
 security_bootstrap();
-require_once __DIR__ . '/public_attribution.php';
 
 if (!defined('CHATSPACE_DB_DRIVER') && is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
 }
 
+require_once __DIR__ . '/first_party_extensions.php';
+require_once __DIR__ . '/private_site_branding.php';
+require_once __DIR__ . '/public_attribution.php';
 require_once __DIR__ . '/avatar_size_policy.php';
 require_once __DIR__ . '/avatar_visibility_policy.php';
 require_once __DIR__ . '/avatar_relationship_capacity_policy.php';
@@ -41,6 +46,7 @@ require_once __DIR__ . '/media_signal_service.php';
 require_once __DIR__ . '/member_profiles.php';
 require_once __DIR__ . '/database_migrations.php';
 require_once __DIR__ . '/database_recovery.php';
+require_once __DIR__ . '/database_compatibility_policy.php';
 
 function app_base_path(): string {
     static $base = null;
@@ -146,12 +152,19 @@ function db_migration_connection(): PDO {
     return $GLOBALS['CHATSPACE_MIGRATION_PDO'];
 }
 
+function database_compatibility_require_runtime(PDO $candidate): void {
+    database_recovery_require_runtime_available();
+    if (database_compatibility_policy_enabled()) {
+        database_migrations_require_runtime_compatible($candidate);
+    }
+}
+
 function db(): PDO {
     if (($GLOBALS['CHATSPACE_RUNTIME_PDO'] ?? null) instanceof PDO) {
         return $GLOBALS['CHATSPACE_RUNTIME_PDO'];
     }
     $candidate = db_migration_connection();
-    database_migrations_require_runtime_compatible($candidate);
+    database_compatibility_require_runtime($candidate);
     $GLOBALS['CHATSPACE_RUNTIME_PDO'] = $candidate;
     return $GLOBALS['CHATSPACE_RUNTIME_PDO'];
 }
@@ -1470,7 +1483,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), settings_registry_setting_defaults());
+    ], first_party_extension_setting_defaults(), private_site_branding_setting_defaults(), avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), settings_registry_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -1507,30 +1520,36 @@ function set_app_setting(PDO $pdo, string $key, string $value): void {
 function install_branding(?PDO $pdo = null): array {
     $defaults = [
         'community_name' => '',
+        'effective_name' => 'ChatSpace Community Edition',
         'logo_path' => '/assets/images/logos/chatspace-ce-full-logo.png',
+        'compact_logo_path' => '/assets/images/chatspace-ce-logo.png',
         'powered_logo_path' => '/assets/images/logos/chatspace-ce-full-logo.png',
         'has_custom_logo' => false,
     ];
     if (!chatspace_configured()) return $defaults;
     try {
         $pdo = $pdo ?: db();
-        $name = trim(app_setting($pdo, 'community_name', ''));
-        $logo = trim(app_setting($pdo, 'community_logo_path', ''));
+        $projection = private_site_branding_projection($pdo, 'shared');
         return [
-            'community_name' => $name,
-            'logo_path' => $logo !== '' ? $logo : $defaults['logo_path'],
-            'powered_logo_path' => $defaults['powered_logo_path'],
-            'has_custom_logo' => $logo !== '',
+            'community_name' => $projection['community_name'],
+            'effective_name' => $projection['effective_name'],
+            'logo_path' => $projection['logo_path'],
+            'compact_logo_path' => $projection['compact_logo_path'],
+            'powered_logo_path' => $projection['powered_logo_path'],
+            'has_custom_logo' => $projection['has_custom_logo'],
         ];
     } catch (Throwable) {
         return $defaults;
     }
 }
 
-function branded_page_title(string $page, ?PDO $pdo = null): string {
-    $brand = install_branding($pdo);
-    $prefix = $brand['community_name'] !== '' ? $brand['community_name'] . ' - ' : '';
-    return $prefix . $page . ' - ChatSpace CE';
+function branded_page_title(string $page, ?PDO $pdo = null, string $pageKey = 'other'): string {
+    if (!chatspace_configured()) return $page . ' - ChatSpace CE';
+    try {
+        return private_site_branding_page_title($pdo ?: db(), $page, $pageKey);
+    } catch (Throwable) {
+        return $page . ' - ChatSpace CE';
+    }
 }
 
 function gesture_snapshot(array $gesture, ?int $senderUserId = null): array {

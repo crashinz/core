@@ -206,6 +206,7 @@
       this.onDraftChange = options.onDraftChange || (() => {});
       this.onEntryChange = options.onEntryChange || (() => {});
       this.onOperation = options.onOperation || null;
+      this.onAssetChange = options.onAssetChange || null;
       this.registry = null;
       this.entries = [];
       this.entryMap = new Map();
@@ -234,6 +235,12 @@
       this.draft = new Map(this.entries.map(entry => [entry.id, entry.currentValue]));
       this.touched.clear();
       this.render();
+      const reminder = this.entryMap.get('branding_license_reminder');
+      if (reminder) {
+        document.querySelectorAll('[data-branding-reminder-authority]').forEach(node => {
+          node.textContent = String(reminder.currentValue || reminder.defaultValue || '');
+        });
+      }
       this.onDraftChange(this.getState());
     }
 
@@ -257,8 +264,77 @@
         input.id = id;
         input.accept = 'image/jpeg,image/png,image/gif,image/webp';
         input.disabled = this.readOnly || this.locked;
+        input.addEventListener('change', async () => {
+          const file = input.files?.[0] || null;
+          if (!file || !this.onAssetChange || this.readOnly || this.locked) return;
+          input.disabled = true;
+          try {
+            await this.onAssetChange(entry, file, this);
+          } finally {
+            input.value = '';
+            input.disabled = this.readOnly || this.locked;
+          }
+        });
         this.controls.set(entry.id, input);
         return input;
+      }
+      if (entry.type === 'editable-reminder') {
+        const wrapper = element('div', 'settings-reminder-editor');
+        const input = document.createElement('textarea');
+        input.id = id;
+        input.name = `setting[${entry.id}]`;
+        input.rows = 5;
+        input.maxLength = Number(entry.maximum || 600);
+        input.value = String(this.draft.get(entry.id) ?? '');
+        input.readOnly = true;
+        input.disabled = this.readOnly || this.locked;
+        const actions = element('div', 'shared-form-actions settings-reminder-actions');
+        const edit = element('button', 'btn', 'Edit reminder wording');
+        edit.type = 'button';
+        const save = element('button', 'btn btn-primary', 'Save wording');
+        save.type = 'button';
+        const cancel = element('button', 'btn', 'Cancel');
+        cancel.type = 'button';
+        const reset = element('button', 'btn', 'Reset to standard wording');
+        reset.type = 'button';
+        save.hidden = cancel.hidden = reset.hidden = true;
+        const finish = () => {
+          input.readOnly = true;
+          edit.hidden = false;
+          save.hidden = cancel.hidden = reset.hidden = true;
+        };
+        edit.addEventListener('click', () => {
+          if (this.readOnly || this.locked) return;
+          input.readOnly = false;
+          edit.hidden = true;
+          save.hidden = cancel.hidden = reset.hidden = false;
+          input.focus();
+        });
+        input.addEventListener('input', () => this.updateDraft(entry, input));
+        save.addEventListener('click', () => {
+          this.updateDraft(entry, input);
+          finish();
+          this.onEntryChange(entry, this.draft.get(entry.id), this.getState());
+        });
+        cancel.addEventListener('click', () => {
+          input.value = String(entry.currentValue ?? entry.defaultValue ?? '');
+          this.draft.set(entry.id, entry.currentValue ?? entry.defaultValue ?? '');
+          this.touched.delete(entry.id);
+          input.closest('[data-setting-id]')?.classList.remove('is-dirty');
+          finish();
+          this.updateSummaries();
+          this.onDraftChange(this.getState());
+        });
+        reset.addEventListener('click', () => {
+          input.value = String(entry.defaultValue ?? '');
+          this.updateDraft(entry, input);
+          finish();
+          this.onEntryChange(entry, this.draft.get(entry.id), this.getState());
+        });
+        actions.append(edit, save, cancel, reset);
+        wrapper.append(input, actions);
+        this.controls.set(entry.id, input);
+        return wrapper;
       }
       if (entry.type === 'boolean') {
         const input = document.createElement('input');
@@ -306,6 +382,11 @@
     updateDraft(entry, input) {
       if (this.readOnly || this.locked) return;
       this.draft.set(entry.id, this.readControlValue(entry, input));
+      if (entry.id === 'branding_license_reminder') {
+        document.querySelectorAll('[data-branding-reminder-authority]').forEach(node => {
+          node.textContent = String(this.draft.get(entry.id) || entry.defaultValue || '');
+        });
+      }
       this.touched.add(entry.id);
       const card = input.closest('[data-setting-id]');
       card?.classList.toggle('is-dirty', this.isDirty(entry));
@@ -450,7 +531,12 @@
       if (entry.type !== 'fixed') label.htmlFor = `settings-registry-${safeId(entry.id)}`;
       heading.appendChild(label);
       const badges = element('div', 'settings-entry-badges');
-      badges.appendChild(element('span', `settings-badge settings-badge-${safeId(entry.controlClass)}`, entry.controlClass === 'optional' ? 'Optional' : (entry.controlClass === 'mandatory-fixed' ? 'Mandatory' : 'Configurable')));
+      const controlLabel = entry.controlClass === 'optional'
+        ? 'Optional'
+        : (entry.controlClass === 'optional-core'
+          ? 'Optional Core'
+          : (entry.controlClass === 'mandatory-fixed' ? 'Mandatory' : 'Configurable'));
+      badges.appendChild(element('span', `settings-badge settings-badge-${safeId(entry.controlClass)}`, controlLabel));
       if (entry.changedFromDefault) badges.appendChild(element('span', 'settings-badge settings-badge-changed', 'Changed'));
       if (entry.originalRelevant) badges.appendChild(element('span', 'settings-badge settings-badge-original', 'Original relevant'));
       if ((entry.dependencies || []).length) {
@@ -464,9 +550,47 @@
       card.appendChild(element('p', 'settings-entry-description', entry.description));
       if (entry.helpText) card.appendChild(element('p', 'minor settings-entry-help', entry.helpText));
       if (entry.fixedReason) card.appendChild(element('p', 'minor settings-entry-fixed-reason', entry.fixedReason));
+      if (entry.previewPage || entry.previewField || entry.standardFallback) {
+        const destination = element('dl', 'settings-entry-destination');
+        const addMeta = (label, value) => {
+          if (value === '' || value === null || value === undefined) return;
+          destination.append(element('dt', '', label), element('dd', '', String(value)));
+        };
+        addMeta('Preview page', entry.previewPage);
+        addMeta('Exact field', entry.previewField);
+        addMeta('Editing state', entry.allowsOverride
+          ? (String(entry.currentValue ?? '').trim() === '' ? 'Inherited' : 'Explicit override')
+          : (entry.type === 'fixed' ? 'Protected read-only' : 'Shared value'));
+        addMeta('Inheritance source', entry.inheritanceSource
+          ? (this.entryMap.get(entry.inheritanceSource)?.label || entry.inheritanceSource)
+          : 'Shared value');
+        addMeta('Effective value', entry.effectiveValue);
+        addMeta('Standard fallback', entry.standardFallback);
+        if (entry.previewPath) {
+          destination.appendChild(element('dt', '', 'Preview'));
+          const previewValue = element('dd');
+          const link = element('a', '', `Open ${entry.previewPage || 'preview'}`);
+          const base = String(document.body?.dataset?.appBase || '').replace(/\/$/, '');
+          link.href = `${base}${entry.previewPath}`;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          previewValue.appendChild(link);
+          destination.appendChild(previewValue);
+        }
+        card.appendChild(destination);
+      }
       const controlRow = element('div', 'settings-entry-control');
       controlRow.appendChild(this.createControl(entry));
-      if (entry.safeToReset && entry.type !== 'asset' && entry.type !== 'fixed') controlRow.appendChild(this.operationButton('Reset', 'reset_setting', { setting_id: entry.id }, 'btn settings-entry-reset'));
+      if (entry.allowsOverride) {
+        const useShared = element('button', 'btn settings-entry-use-shared', 'Use shared value');
+        useShared.type = 'button';
+        useShared.disabled = this.readOnly || this.locked;
+        useShared.addEventListener('click', () => this.setDraftValues({ [entry.id]: '' }));
+        controlRow.appendChild(useShared);
+      }
+      if (entry.safeToReset && !['asset', 'fixed', 'editable-reminder'].includes(entry.type)) {
+        controlRow.appendChild(this.operationButton(entry.resetLabel || 'Reset', 'reset_setting', { setting_id: entry.id }, 'btn settings-entry-reset'));
+      }
       card.appendChild(controlRow);
       const meta = element('div', 'settings-entry-meta');
       meta.appendChild(element('code', '', entry.id));
@@ -508,7 +632,10 @@
     presetChanges(preset) {
       const changes = [];
       for (const entry of this.entries) {
-        if (!entry.originalRelevant || !entry.originalValueAvailable || !entry.safeToReset) continue;
+        if (!entry.originalRelevant
+            || !entry.originalValueAvailable
+            || !entry.safeToReset
+            || !(entry.bulkOperations || []).includes('preset')) continue;
         const target = preset === 'original-compatible' ? entry.originalValue : entry.defaultValue;
         if (!valuesEqual(this.draft.get(entry.id), target, entry.type)) changes.push({ entry, from: this.draft.get(entry.id), to: target });
       }
@@ -541,7 +668,7 @@
         summary.append(title, counts);
         details.appendChild(summary);
         const categoryActions = element('div', 'settings-scope-actions');
-        if (categoryEntries.some(entry => entry.safeToReset)) {
+        if (categoryEntries.some(entry => entry.safeToReset && (entry.bulkOperations || []).includes('category'))) {
           categoryActions.appendChild(this.operationButton('Reset Category', 'reset_category', { category_id: category.id }, 'btn'));
           details.appendChild(categoryActions);
         }
@@ -579,7 +706,9 @@
             actions.appendChild(this.operationButton('Enable All Gesture Maker and Package Features', 'set_many', { values: Object.fromEntries(packageEntries.map(entry => [entry.id, true])) }, 'btn'));
             actions.appendChild(this.operationButton('Disable All Gesture Maker and Package Features', 'set_many', { values: Object.fromEntries(packageEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
           }
-          if (sectionEntries.some(entry => entry.safeToReset)) actions.appendChild(this.operationButton('Reset Subsection', 'reset_subsection', { category_id: category.id, subsection_id: subsectionId }, 'btn'));
+          if (sectionEntries.some(entry => entry.safeToReset && (entry.bulkOperations || []).includes('subsection'))) {
+            actions.appendChild(this.operationButton('Reset Subsection', 'reset_subsection', { category_id: category.id, subsection_id: subsectionId }, 'btn'));
+          }
           header.appendChild(actions);
           section.appendChild(header);
           const grid = element('div', 'settings-entry-grid');
@@ -591,12 +720,25 @@
       }
       this.applyDependencyStates();
       this.applySearchAndFilter();
+      document.querySelectorAll('[data-edit-branding-reminder]').forEach(button => {
+        button.disabled = this.readOnly || this.locked;
+        button.onclick = () => {
+          if (this.readOnly || this.locked) return;
+          const card = Array.from(this.container.querySelectorAll('[data-setting-id]'))
+            .find(node => node.dataset.settingId === 'branding_license_reminder');
+          card?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+          card?.querySelector('.settings-reminder-actions .btn')?.click();
+        };
+      });
     }
 
     setLocked(locked) {
       this.locked = Boolean(locked);
       for (const control of this.controls.values()) control.disabled = this.readOnly || this.locked;
       for (const button of this.container.querySelectorAll('button')) button.disabled = this.readOnly || this.locked;
+      document.querySelectorAll('[data-edit-branding-reminder]').forEach(button => {
+        button.disabled = this.readOnly || this.locked;
+      });
       this.container.classList.toggle('is-settings-locked', this.locked);
     }
   }

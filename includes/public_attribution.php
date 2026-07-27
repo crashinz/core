@@ -10,13 +10,21 @@ function public_room_version_attribution_definition(): array {
         'default' => CHATSPACE_ROOM_VERSION_ATTRIBUTION_DEFAULT,
         'destination' => "Chat Room \u{2192} Sidebar version line",
         'required' => true,
-        'editable' => false,
-        'future_editing_checkpoint' => 'Build 000050 Private Site Branding Extension',
+        'editable' => true,
+        'owner' => 'Build 000050 Private Site Branding Extension',
     ];
 }
 
-function public_room_version_attribution(): string {
-    $value = trim((string)public_room_version_attribution_definition()['default']);
+function public_room_version_attribution(?PDO $pdo = null): string {
+    $value = (string)public_room_version_attribution_definition()['default'];
+    if ($pdo instanceof PDO) {
+        try {
+            $value = (string)private_site_branding_projection($pdo, 'room')['room_version_attribution'];
+        } catch (Throwable) {
+            $value = (string)public_room_version_attribution_definition()['default'];
+        }
+    }
+    $value = trim($value);
     if ($value === '') {
         throw new LogicException('The required public room-version attribution is blank.');
     }

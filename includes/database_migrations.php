@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-07-24-001-member-profiles';
+const CORE_MIGRATION_REQUIRED_ID = '2026-07-26-002-historical-runtime-schema-parity';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -148,7 +148,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => '1702070EA47601A1DDE162528F88A5AF39912681EDF03F301AAB86B70BDC13C8',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-07-24-001-member-profiles',
             'title' => 'Member profiles and public identity history',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -169,6 +169,36 @@ function database_migrations_manifest(): array
                 'member_profiles_validate_schema',
             ],
             'expected_checksum' => '2EEF04358F98EDAB566797E175B5FEBD824644F7658F3FA156D769C397EB3568',
+        ],
+        [
+            'id' => '2026-07-26-001-build-000050-setting-defaults',
+            'title' => 'Build 000050 and member-profile setting defaults',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000050_setting_defaults',
+            'validate' => 'database_migration_validate_build_000050_setting_defaults',
+            'source_functions' => [
+                'database_migration_build_000050_setting_defaults',
+                'database_migration_apply_build_000050_setting_defaults',
+                'database_migration_validate_build_000050_setting_defaults',
+            ],
+            'expected_checksum' => 'AD2433D0A0A6654057DFAE133526305DE6FE60697A3D33BE78C7B050F81BEE40',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Historical runtime schema parity',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_historical_runtime_schema_parity',
+            'validate' => 'database_migration_validate_historical_runtime_schema_parity',
+            'source_functions' => [
+                'database_migration_historical_runtime_column_definitions',
+                'database_migration_apply_historical_runtime_schema_parity',
+                'database_migration_validate_historical_runtime_schema_parity',
+            ],
+            'expected_checksum' => 'A53527F97265CC311EB392D1064230AD6F2D81C901815EAF94690B5E62553ACA',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -297,6 +327,91 @@ function database_migration_write_setting(PDO $pdo, string $key, string $value):
     )->execute([$key, $value]);
 }
 
+function database_migration_build_000050_setting_defaults(): array
+{
+    return [
+        'first_party_extension.private-site-branding.enabled' => '1',
+        'first_party_extension.private-site-branding.lifecycle_revision' => '1',
+        'first_party_extension.private-site-branding.storage_schema' => '1',
+        'first_party_extension.private-site-branding.last_failure' => '',
+        'community_name' => '',
+        'community_logo_path' => '',
+        'extension.private-site-branding.license_reminder' => PRIVATE_SITE_BRANDING_REMINDER_DEFAULT,
+        'extension.private-site-branding.login_name_override' => '',
+        'extension.private-site-branding.registration_name_override' => '',
+        'extension.private-site-branding.recovery_name_override' => '',
+        'extension.private-site-branding.lobby_name_override' => '',
+        'extension.private-site-branding.room_name_override' => '',
+        'extension.private-site-branding.other_name_override' => '',
+        'extension.private-site-branding.room_version_attribution' => PRIVATE_SITE_BRANDING_ROOM_ATTRIBUTION_DEFAULT,
+        'extension.private-site-branding.show_changelog_login' => '1',
+        'profile_limit_display_name' => '80',
+        'profile_limit_name' => '160',
+        'profile_limit_location' => '160',
+        'profile_limit_about_me' => '2000',
+        'profile_limit_public_contact_email' => '254',
+        'profile_limit_website' => '500',
+        'profile_limit_interests' => '1000',
+    ];
+}
+
+function database_migration_apply_build_000050_setting_defaults(PDO $pdo): void
+{
+    $statement = $pdo->prepare(db_driver($pdo) === 'mysql'
+        ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?, ?)'
+        : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?, ?)');
+    foreach (database_migration_build_000050_setting_defaults() as $key => $value) {
+        $statement->execute([$key, $value]);
+    }
+}
+
+function database_migration_validate_build_000050_setting_defaults(PDO $pdo): bool
+{
+    if (!database_migration_has_columns($pdo, 'app_settings', ['setting_key', 'value'])) return false;
+    $statement = $pdo->prepare('SELECT value FROM app_settings WHERE setting_key = ? LIMIT 1');
+    foreach (database_migration_build_000050_setting_defaults() as $key => $_default) {
+        $statement->execute([$key]);
+        if ($statement->fetchColumn() === false) return false;
+    }
+    return true;
+}
+
+function database_migration_historical_runtime_column_definitions(PDO $pdo): array
+{
+    return db_driver($pdo) === 'mysql'
+        ? [
+            'message_type' => "VARCHAR(32) NOT NULL DEFAULT 'text'",
+            'file_size' => 'INTEGER DEFAULT NULL',
+            'mime_type' => 'TEXT DEFAULT NULL',
+            'original_name' => 'TEXT DEFAULT NULL',
+        ]
+        : [
+            'message_type' => "TEXT NOT NULL DEFAULT 'text'",
+            'file_size' => 'INTEGER DEFAULT NULL',
+            'mime_type' => 'TEXT DEFAULT NULL',
+            'original_name' => 'TEXT DEFAULT NULL',
+        ];
+}
+
+function database_migration_apply_historical_runtime_schema_parity(PDO $pdo): void
+{
+    $columns = database_migration_columns($pdo, 'community_messages');
+    foreach (database_migration_historical_runtime_column_definitions($pdo) as $column => $definition) {
+        if (!in_array($column, $columns, true)) {
+            $pdo->exec("ALTER TABLE community_messages ADD COLUMN {$column} {$definition}");
+        }
+    }
+}
+
+function database_migration_validate_historical_runtime_schema_parity(PDO $pdo): bool
+{
+    return database_migration_has_columns(
+        $pdo,
+        'community_messages',
+        array_keys(database_migration_historical_runtime_column_definitions($pdo))
+    );
+}
+
 function database_migration_state(PDO $pdo): array
 {
     $raw = database_migration_read_setting($pdo, CORE_MIGRATION_STATE_KEY);
@@ -352,6 +467,444 @@ function database_migration_bundled_seed_tables(): array
         'room_ejections', 'room_sessions', 'rooms', 'tool_logs', 'user_blocks', 'users',
         'voice_sessions',
     ];
+}
+
+function database_migration_bundled_seed_authority(): array
+{
+    return [
+        'path' => 'db/chatspace.sqlite',
+        'bytes' => 221184,
+        'sha256' => '3D45AE12D2B016B0329467763B8E422EE2D59B778CBEB5B261CC7F476163811C',
+        'inventory_sha256' => '4E6CD0C0FBD78894A68FFB68FF7AFC87DA45B6FE4C4F5E8D8FC2CF34F1055C6B',
+        'variant' => 'bundled-seed',
+        'stored_schema_version' => null,
+        'users' => 0,
+    ];
+}
+
+function database_migration_sqlite_file_is_structurally_readable(string $path): bool
+{
+    try {
+        $pdo = new PDO(
+            'sqlite:' . $path,
+            null,
+            null,
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]
+        );
+        $pdo->exec('PRAGMA query_only = ON');
+        $integrity = (string)$pdo->query('PRAGMA integrity_check')->fetchColumn();
+        $quick = (string)$pdo->query('PRAGMA quick_check')->fetchColumn();
+        $pdo = null;
+        return $integrity === 'ok' && $quick === 'ok';
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+function database_migration_validate_bundled_seed_database(string $path, bool $source): array
+{
+    $authority = database_migration_bundled_seed_authority();
+    $expectedPath = dirname(__DIR__) . DIRECTORY_SEPARATOR
+        . str_replace('/', DIRECTORY_SEPARATOR, $authority['path']);
+    $expectedParent = realpath(dirname($expectedPath));
+    $actualParent = realpath(dirname($path));
+    $actualPath = realpath($path);
+    $expectedSourcePath = realpath($expectedPath);
+    $basename = basename($path);
+    $validBasename = $source
+        ? $basename === basename($expectedPath)
+        : preg_match(
+            '/^chatspace-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.sqlite$/i',
+            $basename
+        ) === 1;
+    $pathIsValid = $expectedParent !== false
+        && $actualParent !== false
+        && $actualPath !== false
+        && hash_equals($expectedParent, $actualParent)
+        && hash_equals(
+            $actualParent . DIRECTORY_SEPARATOR . $basename,
+            $actualPath
+        )
+        && $validBasename
+        && !is_link($path)
+        && is_file($path);
+    if ($source) {
+        $pathIsValid = $pathIsValid
+            && $expectedSourcePath !== false
+            && hash_equals($expectedSourcePath, $actualPath);
+    } else {
+        $pathIsValid = $pathIsValid
+            && ($expectedSourcePath === false || !hash_equals($expectedSourcePath, $actualPath));
+    }
+    if (!$pathIsValid) {
+        throw new CoreMigrationException(
+            $source
+                ? 'The bundled SQLite release seed is missing or its path is unsafe.'
+                : 'The installation-private SQLite copy is missing or its path is unsafe.',
+            $source
+                ? 'SETUP_SQLITE_SEED_MISSING_OR_UNSAFE'
+                : 'SETUP_SQLITE_COPY_MISSING_OR_UNSAFE',
+            503
+        );
+    }
+    $validatedPath = $actualPath;
+    $actualBytes = filesize($validatedPath);
+    $actualSha256 = strtoupper((string)hash_file('sha256', $validatedPath));
+    if ($actualBytes !== $authority['bytes']
+        || !hash_equals($authority['sha256'], $actualSha256)) {
+        $sourceIsCorrupt = $source
+            && !database_migration_sqlite_file_is_structurally_readable($validatedPath);
+        throw new CoreMigrationException(
+            $sourceIsCorrupt
+                ? 'The bundled SQLite release seed is corrupt or is not a SQLite database.'
+                : ($source
+                ? 'The bundled SQLite release seed does not match this release.'
+                : 'The installation-private SQLite copy was not transferred exactly.'),
+            $sourceIsCorrupt
+                ? 'SETUP_SQLITE_SEED_CORRUPT'
+                : ($source
+                ? 'SETUP_SQLITE_SEED_RELEASE_MISMATCH'
+                : 'SETUP_SQLITE_COPY_TRANSFER_MISMATCH'),
+            503
+        );
+    }
+    if (is_file($validatedPath . '-wal') || is_file($validatedPath . '-shm')) {
+        throw new CoreMigrationException(
+            $source
+                ? 'The bundled SQLite release seed has unexpected runtime sidecars.'
+                : 'The installation-private SQLite copy has unexpected runtime sidecars.',
+            $source
+                ? 'SETUP_SQLITE_SEED_SIDECAR_PRESENT'
+                : 'SETUP_SQLITE_COPY_SIDECAR_PRESENT',
+            503
+        );
+    }
+    try {
+        $pdo = new PDO(
+            'sqlite:' . $validatedPath,
+            null,
+            null,
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]
+        );
+        $pdo->exec('PRAGMA query_only = ON');
+        $integrity = (string)$pdo->query('PRAGMA integrity_check')->fetchColumn();
+        $quick = (string)$pdo->query('PRAGMA quick_check')->fetchColumn();
+        $foreignKeyFinding = $pdo->query('PRAGMA foreign_key_check')->fetch();
+        $variant = database_migration_variant($pdo);
+        $inventory = database_migration_inventory_fingerprint($pdo);
+        $storedSchemaVersion = database_migration_read_setting($pdo, 'schema_version');
+        $users = database_migration_table_exists($pdo, 'users')
+            ? (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn()
+            : -1;
+        if ($integrity !== 'ok'
+            || $quick !== 'ok'
+            || $foreignKeyFinding !== false
+            || $variant !== ['id' => 'bundled-seed', 'rank' => -1, 'recognized' => true]
+            || !hash_equals($authority['inventory_sha256'], $inventory)
+            || $storedSchemaVersion !== null
+            || $users !== 0) {
+            throw new CoreMigrationException(
+                $source
+                    ? 'The bundled SQLite release seed schema is not the approved clean-install baseline.'
+                    : 'The installation-private SQLite copy is not the approved clean-install baseline.',
+                $source
+                    ? 'SETUP_SQLITE_SEED_SCHEMA_MISMATCH'
+                    : 'SETUP_SQLITE_COPY_SCHEMA_MISMATCH',
+                503
+            );
+        }
+        $pdo = null;
+    } catch (CoreMigrationException $error) {
+        throw $error;
+    } catch (Throwable $error) {
+        throw new CoreMigrationException(
+            $source
+                ? 'The bundled SQLite release seed could not be validated.'
+                : 'The installation-private SQLite copy could not be validated.',
+            $source
+                ? 'SETUP_SQLITE_SEED_CORRUPT'
+                : 'SETUP_SQLITE_COPY_CORRUPT',
+            503,
+            $error
+        );
+    }
+    if (!hash_equals($authority['sha256'], strtoupper((string)hash_file('sha256', $validatedPath)))
+        || is_file($validatedPath . '-wal')
+        || is_file($validatedPath . '-shm')) {
+        throw new CoreMigrationException(
+            $source
+                ? 'The bundled SQLite release seed changed during validation.'
+                : 'The installation-private SQLite copy changed during validation.',
+            $source
+                ? 'SETUP_SQLITE_SEED_CHANGED_DURING_VALIDATION'
+                : 'SETUP_SQLITE_COPY_CHANGED_DURING_VALIDATION',
+            503
+        );
+    }
+    return [
+        'path' => $validatedPath,
+        'bytes' => $actualBytes,
+        'sha256' => $actualSha256,
+        'inventory_sha256' => $inventory,
+        'variant' => $variant,
+        'stored_schema_version' => $storedSchemaVersion,
+        'users' => $users,
+        'integrity_check' => $integrity,
+        'quick_check' => $quick,
+        'foreign_key_check' => 'ok',
+    ];
+}
+
+function database_migration_validate_bundled_seed_file(string $path): array
+{
+    return database_migration_validate_bundled_seed_database($path, true);
+}
+
+function database_migration_validate_bundled_seed_copy(string $path): array
+{
+    return database_migration_validate_bundled_seed_database($path, false);
+}
+
+/**
+ * Source-backed, complete unversioned predecessor layouts.
+ *
+ * The inventory fingerprints are SHA-256 over the canonical map of every
+ * non-engine-internal table to its ordinal column-name list. They were
+ * reproduced from the named repository revisions after running that
+ * revision's own migrate() owner against its bundled SQLite database.
+ * SQLite and MariaDB use the same logical table/column order.
+ */
+function database_migration_supported_predecessor_registry(): array
+{
+    $requiredUniqueKeys = [
+        'app_settings' => [['setting_key']],
+        'game_lobbies' => [['lobby_code']],
+        'gestures' => [['id'], ['public_id']],
+        'link_icons' => [['session_id', 'link_key']],
+        'participants' => [['id'], ['join_token'], ['session_id', 'user_id']],
+        'rooms' => [['id'], ['public_id']],
+        'room_sessions' => [['id'], ['public_id'], ['room_id']],
+        'users' => [['id'], ['email']],
+    ];
+    $requiredForeignKeys = [
+        ['table' => 'gestures', 'columns' => ['owner_user_id'], 'referenced_table' => 'users', 'referenced_columns' => ['id']],
+        ['table' => 'messages', 'columns' => ['participant_id'], 'referenced_table' => 'participants', 'referenced_columns' => ['id']],
+        ['table' => 'messages', 'columns' => ['session_id'], 'referenced_table' => 'room_sessions', 'referenced_columns' => ['id']],
+        ['table' => 'messages', 'columns' => ['user_id'], 'referenced_table' => 'users', 'referenced_columns' => ['id']],
+        ['table' => 'participants', 'columns' => ['session_id'], 'referenced_table' => 'room_sessions', 'referenced_columns' => ['id']],
+        ['table' => 'participants', 'columns' => ['user_id'], 'referenced_table' => 'users', 'referenced_columns' => ['id']],
+        ['table' => 'rooms', 'columns' => ['owner_id'], 'referenced_table' => 'users', 'referenced_columns' => ['id']],
+        ['table' => 'room_sessions', 'columns' => ['room_id'], 'referenced_table' => 'rooms', 'referenced_columns' => ['id']],
+    ];
+    $initialMariaDbUniqueKeys = $requiredUniqueKeys;
+    unset($initialMariaDbUniqueKeys['gestures']);
+    $initialMariaDbForeignKeys = array_values(array_filter(
+        $requiredForeignKeys,
+        static fn(array $key): bool => !(
+            $key['table'] === 'gestures'
+            || ($key['table'] === 'messages' && $key['columns'] === ['user_id'])
+        )
+    ));
+    return [
+        [
+            'id' => 'chatspace-ce-initial-release',
+            'rank' => -40,
+            'source_commit' => '2e7b10fde25ec57faeeb18574507bccf078e26ab',
+            'source_title' => 'Initial ChatSpace CE release',
+            'stored_schema_version' => null,
+            'inventory_sha256' => [
+                'sqlite' => '69C20FA091174C9523EFB5B7DF806FBD24F234459B64478C9840E44405ED1F35',
+                'mysql' => '1C25F3521F6D74C5539122444F4088EF029DD195F8DB74FF417D256ABA2835DF',
+            ],
+            'required_unique_keys' => [
+                'sqlite' => $requiredUniqueKeys,
+                'mysql' => $initialMariaDbUniqueKeys,
+            ],
+            'required_foreign_keys' => [
+                'sqlite' => $requiredForeignKeys,
+                'mysql' => $initialMariaDbForeignKeys,
+            ],
+        ],
+        [
+            'id' => 'chatspace-ce-june-2026-source-baseline',
+            'rank' => -30,
+            'source_commit' => '206e6087a8001157e5f4da37c370b38a1eb63fb3',
+            'source_title' => 'Add lap link interaction mode',
+            'stored_schema_version' => null,
+            'inventory_sha256' => [
+                'sqlite' => '4E6CD0C0FBD78894A68FFB68FF7AFC87DA45B6FE4C4F5E8D8FC2CF34F1055C6B',
+                'mysql' => 'D375BB10276B56AD8A46CD8ADFF4661655B8E94C1CC5DA2215645FFEB9DF5471',
+            ],
+            'required_unique_keys' => ['sqlite' => $requiredUniqueKeys, 'mysql' => $requiredUniqueKeys],
+            'required_foreign_keys' => ['sqlite' => $requiredForeignKeys, 'mysql' => $requiredForeignKeys],
+        ],
+        [
+            'id' => 'corechat-build-000047-published-baseline',
+            'rank' => -20,
+            'source_commit' => 'a5451df4b91a416ce388d905fa6cd64c102b3581',
+            'source_title' => 'Build 000047: Complete security hardening and certification',
+            'stored_schema_version' => null,
+            'inventory_sha256' => [
+                'sqlite' => '1090EE71B160B01464AF913A6536F9E784926A307014A5F34D1A3188BC71A2C4',
+                'mysql' => '7DB22D3790FF1D0FCA132E2D838EA762FF4CC7919E1BE71A21A35E5833110F0A',
+            ],
+            'required_unique_keys' => ['sqlite' => $requiredUniqueKeys, 'mysql' => $requiredUniqueKeys],
+            'required_foreign_keys' => ['sqlite' => $requiredForeignKeys, 'mysql' => $requiredForeignKeys],
+        ],
+        [
+            'id' => 'corechat-gesture-part5-published-baseline',
+            'rank' => -10,
+            'source_commit' => '7246dc336c5661cca57ffd68ec9a57ff5b3a232d',
+            'source_title' => 'Gesture Checkpoint Part 5',
+            'stored_schema_version' => CHATSPACE_LEGACY_SCHEMA_VERSION,
+            'inventory_sha256' => [
+                'sqlite' => '30069D697BEEFC4BFBF84FDD179B92A192A981630A4E0BFF729D52BFE95CD3AA',
+                'mysql' => '7F6645B1C0F0CD0415D9F1651954404FE4E85710BEA19EA300610C514EB96EFC',
+            ],
+            'required_unique_keys' => ['sqlite' => $requiredUniqueKeys, 'mysql' => $requiredUniqueKeys],
+            'required_foreign_keys' => ['sqlite' => $requiredForeignKeys, 'mysql' => $requiredForeignKeys],
+        ],
+    ];
+}
+
+function database_migration_inventory_fingerprint(PDO $pdo): string
+{
+    $inventory = [];
+    foreach (database_migration_table_names($pdo) as $table) {
+        $inventory[$table] = database_migration_columns($pdo, $table);
+    }
+    return strtoupper(hash('sha256', database_migrations_canonical_json($inventory)));
+}
+
+function database_migration_unique_key_sets(PDO $pdo, string $table): array
+{
+    if (!database_migration_table_exists($pdo, $table)) return [];
+    $keys = [];
+    if (db_driver($pdo) === 'mysql') {
+        $statement = $pdo->prepare(
+            'SELECT index_name, seq_in_index, column_name
+             FROM information_schema.statistics
+             WHERE table_schema = DATABASE() AND table_name = ? AND non_unique = 0
+             ORDER BY index_name, seq_in_index'
+        );
+        $statement->execute([$table]);
+        foreach ($statement->fetchAll() as $row) {
+            $keys[(string)$row['index_name']][(int)$row['seq_in_index']] = (string)$row['column_name'];
+        }
+    } else {
+        $primary = [];
+        foreach ($pdo->query("PRAGMA table_info({$table})")->fetchAll() as $column) {
+            if ((int)$column['pk'] > 0) $primary[(int)$column['pk']] = (string)$column['name'];
+        }
+        if ($primary !== []) $keys['PRIMARY'] = $primary;
+        foreach ($pdo->query("PRAGMA index_list({$table})")->fetchAll() as $index) {
+            if ((int)$index['unique'] !== 1) continue;
+            $name = (string)$index['name'];
+            foreach ($pdo->query("PRAGMA index_info({$name})")->fetchAll() as $column) {
+                $keys[$name][(int)$column['seqno'] + 1] = (string)$column['name'];
+            }
+        }
+    }
+    $result = [];
+    foreach ($keys as $columns) {
+        ksort($columns, SORT_NUMERIC);
+        $result[] = array_values($columns);
+    }
+    usort($result, static fn(array $a, array $b): int => strcmp(implode("\0", $a), implode("\0", $b)));
+    return $result;
+}
+
+function database_migration_has_unique_key(PDO $pdo, string $table, array $columns): bool
+{
+    foreach (database_migration_unique_key_sets($pdo, $table) as $candidate) {
+        if ($candidate === $columns) return true;
+    }
+    return false;
+}
+
+function database_migration_foreign_keys(PDO $pdo, string $table): array
+{
+    if (!database_migration_table_exists($pdo, $table)) return [];
+    $groups = [];
+    if (db_driver($pdo) === 'mysql') {
+        $statement = $pdo->prepare(
+            'SELECT constraint_name, ordinal_position, column_name, referenced_table_name, referenced_column_name
+             FROM information_schema.key_column_usage
+             WHERE table_schema = DATABASE() AND table_name = ? AND referenced_table_name IS NOT NULL
+             ORDER BY constraint_name, ordinal_position'
+        );
+        $statement->execute([$table]);
+        foreach ($statement->fetchAll() as $row) {
+            $name = (string)$row['constraint_name'];
+            $position = (int)$row['ordinal_position'];
+            $groups[$name]['referenced_table'] = (string)$row['referenced_table_name'];
+            $groups[$name]['columns'][$position] = (string)$row['column_name'];
+            $groups[$name]['referenced_columns'][$position] = (string)$row['referenced_column_name'];
+        }
+    } else {
+        foreach ($pdo->query("PRAGMA foreign_key_list({$table})")->fetchAll() as $row) {
+            $name = (string)$row['id'];
+            $position = (int)$row['seq'] + 1;
+            $groups[$name]['referenced_table'] = (string)$row['table'];
+            $groups[$name]['columns'][$position] = (string)$row['from'];
+            $groups[$name]['referenced_columns'][$position] = (string)$row['to'];
+        }
+    }
+    $result = [];
+    foreach ($groups as $group) {
+        ksort($group['columns'], SORT_NUMERIC);
+        ksort($group['referenced_columns'], SORT_NUMERIC);
+        $result[] = [
+            'columns' => array_values($group['columns']),
+            'referenced_table' => $group['referenced_table'],
+            'referenced_columns' => array_values($group['referenced_columns']),
+        ];
+    }
+    return $result;
+}
+
+function database_migration_has_foreign_key(PDO $pdo, array $required): bool
+{
+    foreach (database_migration_foreign_keys($pdo, (string)$required['table']) as $candidate) {
+        if ($candidate['columns'] === $required['columns']
+            && $candidate['referenced_table'] === $required['referenced_table']
+            && $candidate['referenced_columns'] === $required['referenced_columns']) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function database_migration_supported_predecessor(PDO $pdo): ?array
+{
+    if (database_migration_read_setting($pdo, CORE_MIGRATION_STATE_KEY) !== null) return null;
+    $engine = db_driver($pdo) === 'mysql' ? 'mysql' : 'sqlite';
+    $storedSchemaVersion = database_migration_read_setting($pdo, 'schema_version');
+    $inventorySha256 = database_migration_inventory_fingerprint($pdo);
+    foreach (database_migration_supported_predecessor_registry() as $candidate) {
+        if ($storedSchemaVersion !== $candidate['stored_schema_version']) continue;
+        $expectedInventory = $candidate['inventory_sha256'][$engine] ?? null;
+        if (!is_string($expectedInventory) || !hash_equals($expectedInventory, $inventorySha256)) continue;
+        foreach ($candidate['required_unique_keys'][$engine] as $table => $keys) {
+            foreach ($keys as $columns) {
+                if (!database_migration_has_unique_key($pdo, $table, $columns)) continue 3;
+            }
+        }
+        foreach ($candidate['required_foreign_keys'][$engine] as $foreignKey) {
+            if (!database_migration_has_foreign_key($pdo, $foreignKey)) continue 2;
+        }
+        if (db_driver($pdo) === 'sqlite' && $pdo->query('PRAGMA foreign_key_check')->fetch() !== false) {
+            return null;
+        }
+        return $candidate;
+    }
+    return null;
 }
 
 function database_migration_validate_legacy_application_baseline(PDO $pdo): bool
@@ -575,17 +1128,31 @@ function database_migration_variant(PDO $pdo): array
     if (!database_migration_table_exists($pdo, 'users') && !database_migration_table_exists($pdo, 'app_settings')) {
         return ['id' => 'empty', 'rank' => -1, 'recognized' => true];
     }
+    $actualTables = database_migration_table_names($pdo);
+    $seedTables = database_migration_bundled_seed_tables();
+    sort($actualTables, SORT_STRING);
+    sort($seedTables, SORT_STRING);
+    $seedUserCount = database_migration_table_exists($pdo, 'users')
+        ? (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn()
+        : -1;
+    if ($actualTables === $seedTables
+        && $seedUserCount === 0
+        && database_migration_read_setting($pdo, 'schema_version') === null
+        && database_migration_inventory_fingerprint($pdo)
+            === database_migration_bundled_seed_authority()['inventory_sha256']) {
+        return ['id' => 'bundled-seed', 'rank' => -1, 'recognized' => true];
+    }
+    $predecessor = database_migration_supported_predecessor($pdo);
+    if ($predecessor !== null) {
+        return [
+            'id' => $predecessor['id'],
+            'rank' => $predecessor['rank'],
+            'recognized' => true,
+            'source_commit' => $predecessor['source_commit'],
+            'inventory_sha256' => database_migration_inventory_fingerprint($pdo),
+        ];
+    }
     if (!database_migration_validate_legacy_application_baseline($pdo)) {
-        $actualTables = database_migration_table_names($pdo);
-        $seedTables = database_migration_bundled_seed_tables();
-        sort($actualTables, SORT_STRING);
-        sort($seedTables, SORT_STRING);
-        $seedUserCount = database_migration_table_exists($pdo, 'users')
-            ? (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn()
-            : -1;
-        if ($actualTables === $seedTables && $seedUserCount === 0 && database_migration_read_setting($pdo, 'schema_version') === null) {
-            return ['id' => 'bundled-seed', 'rank' => -1, 'recognized' => true];
-        }
         return ['id' => 'unknown-or-partial', 'rank' => -1, 'recognized' => false];
     }
     $part3Columns = array_map(

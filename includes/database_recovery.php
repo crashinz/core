@@ -218,11 +218,14 @@ function database_recovery_normalize_relative_path(string $path): string
         }
     }
     $lower = strtolower($path);
+    $seedPath = (string)database_migration_bundled_seed_authority()['path'];
     if ($lower === 'includes/config.php'
         || str_starts_with($lower, 'framework/')
         || str_starts_with($lower, 'deployment/')
         || str_starts_with($lower, '.git/')
-        || str_starts_with($lower, 'db/') && $lower !== 'db/.htaccess'
+        || str_starts_with($lower, 'db/')
+            && $lower !== 'db/.htaccess'
+            && $path !== $seedPath
         || str_starts_with($lower, 'assets/uploads/')
             && $lower !== 'assets/uploads/.htaccess'
             && !str_ends_with($lower, '/.gitkeep')) {
@@ -233,6 +236,154 @@ function database_recovery_normalize_relative_path(string $path): string
         );
     }
     return implode('/', $segments);
+}
+
+function database_recovery_file_identity_path(string $path): string
+{
+    $resolved = realpath($path);
+    if (!is_string($resolved)) {
+        $parent = realpath(dirname($path));
+        if (!is_string($parent)) {
+            throw new CoreMigrationException(
+                'Recovery file parent is unavailable.',
+                'RECOVERY_FILE_PARENT_UNAVAILABLE',
+                409
+            );
+        }
+        $resolved = $parent . DIRECTORY_SEPARATOR . basename($path);
+    }
+    return strtolower(str_replace('\\', '/', $resolved));
+}
+
+function database_recovery_assert_bundled_seed_is_not_live_database(string $path): void
+{
+    if (!defined('CHATSPACE_DB_DRIVER')
+        || strtolower((string)constant('CHATSPACE_DB_DRIVER')) !== 'sqlite') {
+        return;
+    }
+    if (hash_equals(
+        database_recovery_file_identity_path(sqlite_path()),
+        database_recovery_file_identity_path($path)
+    )) {
+        throw new CoreMigrationException(
+            'The deployable bundled seed cannot be the configured live SQLite database.',
+            'RECOVERY_BUNDLED_SEED_LIVE_DATABASE',
+            409
+        );
+    }
+}
+
+function database_recovery_validate_bundled_seed(string $path, bool $requirePublicSource): array
+{
+    $authority = database_migration_bundled_seed_authority();
+    $publicRoot = database_recovery_public_root();
+    $expectedSource = $publicRoot . DIRECTORY_SEPARATOR
+        . str_replace('/', DIRECTORY_SEPARATOR, (string)$authority['path']);
+    $actualPath = realpath($path);
+    $expectedPath = realpath($expectedSource);
+    if (!is_string($actualPath)
+        || !is_file($actualPath)
+        || is_link($path)
+        || ($requirePublicSource
+            && (!is_string($expectedPath)
+                || !hash_equals(
+                    database_recovery_file_identity_path($expectedPath),
+                    database_recovery_file_identity_path($actualPath)
+                )))) {
+        throw new CoreMigrationException(
+            'The recovery application seed path is missing or unsafe.',
+            'RECOVERY_BUNDLED_SEED_PATH_INVALID',
+            409
+        );
+    }
+    database_recovery_assert_bundled_seed_is_not_live_database(
+        $requirePublicSource ? $expectedSource : $actualPath
+    );
+
+    $repositoryRoot = realpath(dirname(__DIR__));
+    $resolvedPublicRoot = realpath($publicRoot);
+    if ($requirePublicSource
+        && is_string($repositoryRoot)
+        && is_string($resolvedPublicRoot)
+        && hash_equals(
+            database_recovery_file_identity_path($repositoryRoot),
+            database_recovery_file_identity_path($resolvedPublicRoot)
+        )) {
+        return database_migration_validate_bundled_seed_file($actualPath);
+    }
+
+    $bytes = filesize($actualPath);
+    $sha256 = strtoupper((string)hash_file('sha256', $actualPath));
+    if ($bytes !== (int)$authority['bytes']
+        || !hash_equals((string)$authority['sha256'], $sha256)
+        || is_file($actualPath . '-wal')
+        || is_file($actualPath . '-shm')) {
+        throw new CoreMigrationException(
+            'The recovery application seed does not match the approved release seed.',
+            'RECOVERY_BUNDLED_SEED_IDENTITY_MISMATCH',
+            409
+        );
+    }
+    try {
+        $seed = new PDO(
+            'sqlite:' . $actualPath,
+            null,
+            null,
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]
+        );
+        $seed->exec('PRAGMA query_only = ON');
+        $integrity = (string)$seed->query('PRAGMA integrity_check')->fetchColumn();
+        $quick = (string)$seed->query('PRAGMA quick_check')->fetchColumn();
+        $foreignKeyFinding = $seed->query('PRAGMA foreign_key_check')->fetch();
+        $variant = database_migration_variant($seed);
+        $inventory = database_migration_inventory_fingerprint($seed);
+        $storedSchemaVersion = database_migration_read_setting($seed, 'schema_version');
+        $users = database_migration_table_exists($seed, 'users')
+            ? (int)$seed->query('SELECT COUNT(*) FROM users')->fetchColumn()
+            : -1;
+        $seed = null;
+    } catch (Throwable $error) {
+        throw new CoreMigrationException(
+            'The recovery application seed could not be validated.',
+            'RECOVERY_BUNDLED_SEED_INVALID',
+            409,
+            $error
+        );
+    }
+    if ($integrity !== 'ok'
+        || $quick !== 'ok'
+        || $foreignKeyFinding !== false
+        || $variant !== ['id' => 'bundled-seed', 'rank' => -1, 'recognized' => true]
+        || !hash_equals((string)$authority['inventory_sha256'], $inventory)
+        || $storedSchemaVersion !== null
+        || $users !== (int)$authority['users']
+        || !hash_equals(
+            (string)$authority['sha256'],
+            strtoupper((string)hash_file('sha256', $actualPath))
+        )
+        || is_file($actualPath . '-wal')
+        || is_file($actualPath . '-shm')) {
+        throw new CoreMigrationException(
+            'The recovery application seed is not the approved clean-install baseline.',
+            'RECOVERY_BUNDLED_SEED_SCHEMA_MISMATCH',
+            409
+        );
+    }
+    return [
+        'path' => $actualPath,
+        'bytes' => $bytes,
+        'sha256' => $sha256,
+        'inventory_sha256' => $inventory,
+        'variant' => $variant,
+        'stored_schema_version' => $storedSchemaVersion,
+        'users' => $users,
+        'integrity_check' => $integrity,
+        'quick_check' => $quick,
+        'foreign_key_check' => 'ok',
+    ];
 }
 
 function database_recovery_release_manifest(
@@ -268,6 +419,16 @@ function database_recovery_release_manifest(
         $sha = strtoupper((string)($metadata['sha256'] ?? ''));
         if (!is_int($bytes) || $bytes < 0 || !preg_match('/^[A-F0-9]{64}$/', $sha)) {
             throw new CoreMigrationException('The deployed release inventory has invalid file metadata.', 'RELEASE_MANIFEST_INVALID', 409);
+        }
+        $seedAuthority = database_migration_bundled_seed_authority();
+        if ($relative === (string)$seedAuthority['path']
+            && ($bytes !== (int)$seedAuthority['bytes']
+                || !hash_equals((string)$seedAuthority['sha256'], $sha))) {
+            throw new CoreMigrationException(
+                'The deployed release seed identity is not approved.',
+                'RELEASE_MANIFEST_SEED_IDENTITY_MISMATCH',
+                409
+            );
         }
         $normalized[$relative] = ['bytes' => $bytes, 'sha256' => $sha];
         $totalBytes += $bytes;
@@ -308,6 +469,9 @@ function database_recovery_release_manifest(
                     'RELEASE_FILE_MISMATCH',
                     409
                 );
+            }
+            if ($relative === (string)database_migration_bundled_seed_authority()['path']) {
+                database_recovery_validate_bundled_seed($candidate, true);
             }
         }
     }
@@ -673,6 +837,16 @@ function database_recovery_verify_set(PDO $pdo, string $recoverySetId, bool $ver
         if ($bytes < 0 || !preg_match('/^[A-F0-9]{64}$/', $sha)) {
             throw new CoreMigrationException('The application snapshot inventory is invalid.', 'APPLICATION_SNAPSHOT_INVALID', 409);
         }
+        $seedAuthority = database_migration_bundled_seed_authority();
+        if ($relative === (string)$seedAuthority['path']
+            && ($bytes !== (int)$seedAuthority['bytes']
+                || !hash_equals((string)$seedAuthority['sha256'], $sha))) {
+            throw new CoreMigrationException(
+                'The application snapshot seed identity is not approved.',
+                'APPLICATION_SNAPSHOT_SEED_IDENTITY_MISMATCH',
+                409
+            );
+        }
         $totalBytes += $bytes;
         if ($verifyApplication) {
             $path = $snapshotRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
@@ -688,6 +862,9 @@ function database_recovery_verify_set(PDO $pdo, string $recoverySetId, bool $ver
                     'APPLICATION_SNAPSHOT_UNAVAILABLE',
                     409
                 );
+            }
+            if ($relative === (string)$seedAuthority['path']) {
+                database_recovery_validate_bundled_seed($path, false);
             }
         }
     }
@@ -1157,6 +1334,11 @@ function database_recovery_restore_application(array $manifest): array
         $relative = database_recovery_normalize_relative_path($relative);
         $source = $snapshotRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
         $target = $publicRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+        $isBundledSeed = $relative === (string)database_migration_bundled_seed_authority()['path'];
+        if ($isBundledSeed) {
+            database_recovery_validate_bundled_seed($source, false);
+            database_recovery_assert_bundled_seed_is_not_live_database($target);
+        }
         $directory = dirname($target);
         if (!is_dir($directory) && !@mkdir($directory, 0775, true) && !is_dir($directory)) {
             throw new CoreMigrationException('Application restore target directory is unavailable.', 'APPLICATION_RESTORE_TARGET_FAILED', 500);
@@ -1182,6 +1364,9 @@ function database_recovery_restore_application(array $manifest): array
             @unlink($temporary);
             throw new CoreMigrationException('Application restore file could not be finalized.', 'APPLICATION_RESTORE_REPLACE_FAILED', 500);
         }
+        if ($isBundledSeed) {
+            database_recovery_validate_bundled_seed($target, true);
+        }
         $restored++;
     }
     $quarantined = 0;
@@ -1189,6 +1374,9 @@ function database_recovery_restore_application(array $manifest): array
         $relative = database_recovery_normalize_relative_path((string)$relative);
         $target = $publicRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
         if (!is_file($target)) continue;
+        if ($relative === (string)database_migration_bundled_seed_authority()['path']) {
+            database_recovery_assert_bundled_seed_is_not_live_database($target);
+        }
         $safety = $safetyRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
         database_recovery_stream_copy($target, $safety);
         if (!@unlink($target)) {
@@ -1205,6 +1393,9 @@ function database_recovery_restore_application(array $manifest): array
             || !is_string($sha)
             || !hash_equals(strtoupper((string)$metadata['sha256']), strtoupper($sha))) {
             throw new CoreMigrationException('Restored application verification failed.', 'APPLICATION_RESTORE_VERIFY_FAILED', 500);
+        }
+        if ((string)$relative === (string)database_migration_bundled_seed_authority()['path']) {
+            database_recovery_validate_bundled_seed($path, true);
         }
     }
     return [

@@ -65,6 +65,22 @@ The normal update workflow is:
 3. Overwrite the application files.
 4. Open the normal chat URL.
 
+The shared **Enforce database/release compatibility before runtime** control is
+under **Setup/Admin -> System -> Database & Backup** and defaults to Disabled.
+When Disabled, opening the normal URL attempts ordinary runtime against the
+configured database without first running the proactive release/schema
+compatibility blocker. It does not automatically back up, migrate, repair,
+recover, or claim compatibility; a genuine mismatch may therefore surface as
+an ordinary PHP, query, or feature failure. Active recovery maintenance and
+all unrelated security controls remain enforced.
+
+When the control is Enabled, the protected compatibility workflow described
+below runs before ordinary runtime. The same control remains available on the
+owner-authenticated Update & Recovery page if ordinary Admin cannot load.
+Changing it never migrates or rolls back the database. A normal manual
+Enabled-to-Disabled change requires an inline risk confirmation; Restore
+Default returns to Disabled without that additional confirmation.
+
 **Prepare for Update** creates one private verified paired recovery set before
 files are overwritten: a database recovery point and a snapshot of the matching
 currently installed deployable application release. The application snapshot
@@ -90,11 +106,11 @@ InnoDB table transition. If that bounded privilege proof fails, no production
 table is changed and the owner page presents the verified recovery-point
 identity and manual hosting-owner boundary.
 
-If the database is already current, ChatSpace opens normally. If a supported
-forward migration is pending, ChatSpace enters bounded maintenance mode. Open
-the protected Site Owner Database Update entry, authenticate as an
-administrator, review the exact status, then choose **Back Up and Update
-Database**.
+With compatibility enforcement Enabled, ChatSpace opens normally when the
+database is current. If a supported forward migration is pending, ChatSpace
+enters bounded maintenance mode. Open the protected Site Owner Database Update
+entry, authenticate as an administrator, review the exact status, then choose
+**Back Up and Update Database**.
 
 The update action creates and independently verifies a private server-side
 database backup before any migration mutation. SQLite uses a consistent

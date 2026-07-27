@@ -3581,7 +3581,11 @@ function applyRoomUpdate(update) {
   if (update.room_name) {
     cfg.roomName = update.room_name;
     document.getElementById('room-title-text').textContent = update.room_name;
-    document.title = `${update.room_name} - ChatSpace CE`;
+    const brandingName = String(document.body.dataset.brandingName || '').trim();
+    const brandingPrefix = brandingName && brandingName !== 'ChatSpace Community Edition'
+      ? `${brandingName} - `
+      : '';
+    document.title = `${brandingPrefix}${update.room_name} - ChatSpace CE`;
     updateComposerPlaceholder();
   }
   if ('background_path' in update) {
@@ -5138,7 +5142,8 @@ function initializeGestureCatalog() {
 }
 
 function openGestureEditor(gesture = null) {
-  if (cfg.gesturePart4?.features?.editor === false) {
+  if (cfg.gesturePart4?.features?.editor === false
+      || cfg.gesturePart4?.extension?.state !== 'enabled') {
     showWarning('Gesture Maker is disabled through shared Settings.');
     return;
   }

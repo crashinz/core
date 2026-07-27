@@ -136,6 +136,7 @@ function security_outside_content_catalog(): array
         'registration_avatar' => ['auth' => 'registration', 'storage' => '/assets/uploads/avatars/', 'archive' => false],
         'setup_avatar' => ['auth' => 'setup', 'storage' => '/assets/uploads/avatars/', 'archive' => false],
         'setup_branding' => ['auth' => 'setup', 'storage' => '/assets/uploads/branding/', 'archive' => false],
+        'admin_branding' => ['auth' => 'user', 'storage' => '/assets/uploads/branding/', 'archive' => false],
         'gesture_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/gestures/', 'archive' => 'agst'],
         'gesture_package_download' => ['auth' => 'user', 'storage' => 'private', 'archive' => 'agst'],
         'chat_file_upload' => ['auth' => 'participant', 'storage' => '/assets/uploads/files/', 'archive' => false],

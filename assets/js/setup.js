@@ -146,7 +146,8 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
   const idsForScope = details => registry.visibleEntries
     .filter(entry => (!details.category_id || entry.categoryId === details.category_id)
       && (!details.subsection_id || entry.subsectionId === details.subsection_id)
-      && entry.safeToReset)
+      && entry.safeToReset
+      && (entry.bulkOperations || []).includes(details.subsection_id ? 'subsection' : 'category'))
     .map(entry => entry.id);
   const valuesDiffer = values => Object.entries(values || {}).some(([id, value]) => JSON.stringify(setupSettingsUI?.draft?.get(id)) !== JSON.stringify(value));
   const applyDraftValues = (values, message) => {
@@ -218,7 +219,9 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
   document.getElementById('setup-settings-original')?.addEventListener('click', () => applySetupPreset('original-compatible'));
   document.getElementById('setup-settings-framework')?.addEventListener('click', () => applySetupPreset('framework-default'));
   document.getElementById('setup-settings-reset-optional')?.addEventListener('click', () => {
-    const values = Object.fromEntries(registry.visibleEntries.filter(entry => entry.optional && entry.safeToReset).map(entry => [entry.id, entry.defaultValue]));
+    const values = Object.fromEntries(registry.visibleEntries
+      .filter(entry => entry.optional && entry.safeToReset && (entry.bulkOperations || []).includes('all-optional'))
+      .map(entry => [entry.id, entry.defaultValue]));
     applyDraftValues(values, 'All optional settings reset to defaults.');
   });
   setupSettingsUI.setLocked(true);

@@ -5,6 +5,13 @@ require_once __DIR__ . '/../includes/base.php';
 
 $actor = require_user();
 $pdo = db();
+$extensionStatus = first_party_extension_status($pdo, 'gesture-maker');
+if (($extensionStatus['state'] ?? '') !== 'enabled') {
+    json_out([
+        'error' => 'Gesture Maker presentation is unavailable.',
+        'error_code' => 'GESTURE_MAKER_EXTENSION_UNAVAILABLE',
+    ], 503);
+}
 $features = gesture_part4_feature_flags($pdo);
 $capabilities = gesture_capability_policy($pdo);
 $method = $_SERVER['REQUEST_METHOD'] ?? '';

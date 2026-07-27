@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/base.php';
 $user = require_user();
 $pdo = db();
+$branding = private_site_branding_projection($pdo, 'other');
 $return = (string)($_GET['return'] ?? 'lobby');
 $roomKey = trim((string)($_GET['id'] ?? ''));
 $back = $return === 'room' && $roomKey !== '' ? app_url('/chatroom.php?id=' . rawurlencode($roomKey)) : app_url('/lobby.php');
@@ -13,13 +14,13 @@ $roleColors = role_color_settings($pdo);
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Account - ChatSpace CE</title>
+  <title><?= e(branded_page_title('Account', $pdo, 'other')) ?></title>
   <link rel="stylesheet" href="<?= e($assetVersion('/assets/css/styles.css')) ?>">
 </head>
 <body class="shared-surface-body" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="shared-surface">
   <header class="shared-surface-head">
-    <div><div class="side-title">ChatSpace</div><h1>Account</h1></div>
+    <div><div class="side-title"><?= e($branding['effective_name'] === 'ChatSpace Community Edition' ? 'ChatSpace' : $branding['effective_name']) ?></div><h1>Account</h1></div>
     <a class="btn" href="<?= e($back) ?>">Back</a>
   </header>
   <nav class="shared-tabs" aria-label="Account sections">

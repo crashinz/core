@@ -411,6 +411,7 @@ $roomConfig = [
     ],
     'gesturePart4' => [
         'features' => gesture_part4_feature_flags($pdo),
+        'extension' => first_party_extension_status($pdo, 'gesture-maker'),
         'packageSchema' => GESTURE_PACKAGE_SCHEMA,
         'packageVersion' => GESTURE_PACKAGE_VERSION,
     ],

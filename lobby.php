@@ -2,7 +2,7 @@
 require_once __DIR__ . '/includes/room_importer.php';
 $user = require_user();
 $pdo = db();
-$branding = install_branding($pdo);
+$branding = private_site_branding_projection($pdo, 'lobby');
 $communityEjection = active_community_ejection($pdo, (int)$user['id']);
 if ($communityEjection) {
     redirect_to('/community_ejected.php');
@@ -71,7 +71,7 @@ $rooms = $roomsStmt->fetchAll();
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?= e(branded_page_title('Lobby', $pdo)) ?></title>
+  <title><?= e(branded_page_title('Lobby', $pdo, 'lobby')) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
@@ -80,10 +80,10 @@ $rooms = $roomsStmt->fetchAll();
     <div class="topbar">
       <div class="lobby-brand-block">
         <div class="app-title">
-          <img class="<?= $branding['has_custom_logo'] ? 'custom-brand-logo' : '' ?>" src="<?= e(app_url($branding['has_custom_logo'] ? $branding['logo_path'] : '/assets/images/chatspace-ce-logo.png')) ?>" alt="<?= e($branding['community_name'] ?: 'ChatSpace Community Edition') ?>">
+          <img class="<?= $branding['has_custom_logo'] ? 'custom-brand-logo' : '' ?>" src="<?= e(app_url($branding['compact_logo_path'])) ?>" alt="<?= e($branding['effective_name']) ?>">
           <div>
-            <div class="app-name"><?= e($branding['community_name'] ?: 'ChatSpace') ?></div>
-            <div class="app-edition"><?= $branding['community_name'] ? 'Community powered by ChatSpace CE' : 'Community Edition' ?></div>
+            <div class="app-name"><?= e($branding['effective_name'] === 'ChatSpace Community Edition' ? 'ChatSpace' : $branding['effective_name']) ?></div>
+            <div class="app-edition"><?= $branding['effective_name'] !== 'ChatSpace Community Edition' ? 'Community powered by ChatSpace CE' : 'Community Edition' ?></div>
           </div>
         </div>
         <h1 class="picker-title">Lobby</h1>
@@ -383,6 +383,14 @@ $rooms = $roomsStmt->fetchAll();
               <div><h3>Installation Settings</h3><p class="minor">Persistence remains with each authoritative policy owner.</p></div>
               <div class="settings-registry-state" id="lobby-admin-settings-compatibility-state" aria-live="polite">Loading settings…</div>
             </div>
+            <section class="branding-license-authority" aria-labelledby="admin-branding-license-title">
+              <a class="btn btn-primary branding-license-link" href="<?= e(app_url('/LICENSE.md')) ?>" id="admin-branding-license-title">View original LICENSE.md</a>
+              <div class="branding-license-reminder-card">
+                <h4>Branding and License Reminder</h4>
+                <p data-branding-reminder-authority><?= e(PRIVATE_SITE_BRANDING_REMINDER_DEFAULT) ?></p>
+                <button class="btn" type="button" data-edit-branding-reminder>Edit reminder wording</button>
+              </div>
+            </section>
             <div id="lobby-admin-settings-unlock"></div>
             <div class="settings-registry-toolbar" role="search">
               <label>Search settings<input id="lobby-admin-settings-search" type="search" autocomplete="off" placeholder="Label, help, category, alias, or setting ID"></label>
@@ -404,6 +412,19 @@ $rooms = $roomsStmt->fetchAll();
                 <div class="shared-form-actions">
                   <button class="btn btn-primary" id="lobby-admin-profile-limit-confirm" type="button">Confirm Lower Limits</button>
                   <button class="btn" id="lobby-admin-profile-limit-cancel" type="button">Cancel</button>
+                </div>
+              </section>
+              <section id="lobby-admin-database-compatibility-confirmation" class="settings-impact-confirmation" aria-live="assertive" hidden>
+                <h4>Confirm compatibility-enforcement risk</h4>
+                <p>
+                  Disabling proactive compatibility enforcement allows ordinary runtime to be attempted without first
+                  proving that the deployed application release and configured database match. A genuine mismatch may
+                  surface as an ordinary PHP, query, or feature failure. This does not disable recovery maintenance,
+                  authentication, authorization, privacy, validation, or any unrelated security safeguard.
+                </p>
+                <div class="shared-form-actions">
+                  <button class="btn btn-danger" id="lobby-admin-database-compatibility-confirm" type="button">Confirm Disable</button>
+                  <button class="btn" id="lobby-admin-database-compatibility-cancel" type="button">Cancel</button>
                 </div>
               </section>
               <div class="settings-registry-sticky-actions">

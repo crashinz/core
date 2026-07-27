@@ -65,6 +65,137 @@ function auth_rate_keys(string $scope, string $identifier): array {
     ];
 }
 
+function auth_rate_database_storage_available(PDO $pdo): bool {
+    return function_exists('database_migration_table_exists')
+        && database_migration_table_exists($pdo, 'auth_attempts');
+}
+
+function auth_rate_private_path(string $scope, string $dimension, string $keyHash): string {
+    $directory = security_private_storage_directory('pre-migration-auth-rate-limits');
+    $identity = hash('sha256', strtolower(trim($scope)) . "\n" . $dimension . "\n" . $keyHash);
+    return $directory . DIRECTORY_SEPARATOR . $identity . '.json';
+}
+
+function auth_rate_private_read(string $path): array {
+    if (!is_file($path)) return [];
+    $handle = fopen($path, 'rb');
+    if ($handle === false) throw new RuntimeException('Private authentication rate-limit state is unavailable.');
+    try {
+        if (!flock($handle, LOCK_SH)) throw new RuntimeException('Private authentication rate-limit state could not be locked.');
+        $bytes = stream_get_contents($handle, 4097);
+        flock($handle, LOCK_UN);
+    } finally {
+        fclose($handle);
+    }
+    if (!is_string($bytes) || strlen($bytes) > 4096) {
+        throw new RuntimeException('Private authentication rate-limit state is invalid.');
+    }
+    $decoded = $bytes === '' ? [] : json_decode($bytes, true);
+    if (!is_array($decoded)) throw new RuntimeException('Private authentication rate-limit state is invalid.');
+    return $decoded;
+}
+
+function auth_rate_private_write(string $path, array $state): void {
+    $bytes = json_encode($state, JSON_UNESCAPED_SLASHES);
+    if (!is_string($bytes) || strlen($bytes) > 4096) {
+        throw new RuntimeException('Private authentication rate-limit state exceeded its bounded format.');
+    }
+    $handle = fopen($path, 'c+b');
+    if ($handle === false) throw new RuntimeException('Private authentication rate-limit state is unavailable.');
+    try {
+        if (!flock($handle, LOCK_EX)) throw new RuntimeException('Private authentication rate-limit state could not be locked.');
+        if (!ftruncate($handle, 0) || fseek($handle, 0) !== 0) {
+            throw new RuntimeException('Private authentication rate-limit state could not be replaced.');
+        }
+        $written = fwrite($handle, $bytes);
+        if ($written !== strlen($bytes) || !fflush($handle)) {
+            throw new RuntimeException('Private authentication rate-limit state could not be persisted.');
+        }
+        if (function_exists('fsync') && !fsync($handle)) {
+            throw new RuntimeException('Private authentication rate-limit state could not be synchronized.');
+        }
+        flock($handle, LOCK_UN);
+    } finally {
+        fclose($handle);
+    }
+}
+
+function auth_rate_private_increment(
+    string $path,
+    int $windowCutoff,
+    int $now,
+    int $lockedUntil,
+    int $max
+): void {
+    $handle = fopen($path, 'c+b');
+    if ($handle === false) throw new RuntimeException('Private authentication rate-limit state is unavailable.');
+    try {
+        if (!flock($handle, LOCK_EX)) throw new RuntimeException('Private authentication rate-limit state could not be locked.');
+        $bytes = stream_get_contents($handle, 4097);
+        if (!is_string($bytes) || strlen($bytes) > 4096) {
+            throw new RuntimeException('Private authentication rate-limit state is invalid.');
+        }
+        $state = $bytes === '' ? [] : json_decode($bytes, true);
+        if (!is_array($state)) throw new RuntimeException('Private authentication rate-limit state is invalid.');
+        $attempts = (int)($state['last_attempt_at'] ?? 0) >= $windowCutoff
+            ? ((int)($state['attempts'] ?? 0)) + 1
+            : 1;
+        $replacement = json_encode([
+            'attempts' => $attempts,
+            'last_attempt_at' => $now,
+            'locked_until' => $attempts >= $max ? $lockedUntil : 0,
+        ], JSON_UNESCAPED_SLASHES);
+        if (!is_string($replacement) || strlen($replacement) > 4096) {
+            throw new RuntimeException('Private authentication rate-limit state exceeded its bounded format.');
+        }
+        if (!ftruncate($handle, 0) || fseek($handle, 0) !== 0) {
+            throw new RuntimeException('Private authentication rate-limit state could not be replaced.');
+        }
+        $written = fwrite($handle, $replacement);
+        if ($written !== strlen($replacement) || !fflush($handle)) {
+            throw new RuntimeException('Private authentication rate-limit state could not be persisted.');
+        }
+        if (function_exists('fsync') && !fsync($handle)) {
+            throw new RuntimeException('Private authentication rate-limit state could not be synchronized.');
+        }
+        flock($handle, LOCK_UN);
+    } finally {
+        fclose($handle);
+    }
+}
+
+function auth_rate_private_status(string $scope, string $identifier): array {
+    $now = time();
+    $blockedUntil = 0;
+    foreach (auth_rate_keys($scope, $identifier) as $key) {
+        $state = auth_rate_private_read(
+            auth_rate_private_path($scope, (string)$key['dimension'], (string)$key['hash'])
+        );
+        $blockedUntil = max($blockedUntil, (int)($state['locked_until'] ?? 0));
+    }
+    if ($blockedUntil > $now) {
+        return [
+            'allowed' => false,
+            'retry_after' => $blockedUntil - $now,
+            'message' => 'Too many attempts. Try again in ' . auth_rate_seconds($blockedUntil - $now) . '.',
+        ];
+    }
+    return ['allowed' => true, 'retry_after' => 0, 'message' => ''];
+}
+
+function auth_rate_private_record_failure(PDO $pdo, string $scope, string $identifier): void {
+    $now = time();
+    $windowCutoff = $now - (int)ceil(auth_rate_window_minutes($pdo) * 60);
+    $lockedUntil = $now + (int)ceil(auth_rate_lockout_minutes($pdo) * 60);
+    foreach (auth_rate_keys($scope, $identifier) as $key) {
+        $path = auth_rate_private_path($scope, (string)$key['dimension'], (string)$key['hash']);
+        $max = $key['dimension'] === 'ip'
+            ? auth_rate_ip_max($pdo, $scope)
+            : auth_rate_scope_max($pdo, $scope);
+        auth_rate_private_increment($path, $windowCutoff, $now, $lockedUntil, $max);
+    }
+}
+
 function auth_rate_cleanup(PDO $pdo): void {
     $windowMinutes = auth_rate_window_minutes($pdo);
     $cutoff = gmdate('Y-m-d H:i:s', time() - (int)ceil($windowMinutes * 60));
@@ -74,6 +205,9 @@ function auth_rate_cleanup(PDO $pdo): void {
 }
 
 function auth_rate_limit_status(PDO $pdo, string $scope, string $identifier): array {
+    if (!auth_rate_database_storage_available($pdo)) {
+        return auth_rate_private_status($scope, $identifier);
+    }
     auth_rate_cleanup($pdo);
     $now = time();
     $blockedUntil = 0;
@@ -96,6 +230,10 @@ function auth_rate_limit_status(PDO $pdo, string $scope, string $identifier): ar
 }
 
 function auth_rate_record_failure(PDO $pdo, string $scope, string $identifier): void {
+    if (!auth_rate_database_storage_available($pdo)) {
+        auth_rate_private_record_failure($pdo, $scope, $identifier);
+        return;
+    }
     $now = gmdate('Y-m-d H:i:s');
     $windowCutoff = gmdate('Y-m-d H:i:s', time() - (int)ceil(auth_rate_window_minutes($pdo) * 60));
     $lockedUntil = gmdate('Y-m-d H:i:s', time() + (int)ceil(auth_rate_lockout_minutes($pdo) * 60));
@@ -119,6 +257,13 @@ function auth_rate_record_failure(PDO $pdo, string $scope, string $identifier): 
 
 function auth_rate_clear_identifier(PDO $pdo, string $scope, string $identifier): void {
     $hash = auth_rate_key_hash($scope, 'identifier', trim($identifier) !== '' ? trim($identifier) : '(blank)');
+    if (!auth_rate_database_storage_available($pdo)) {
+        auth_rate_private_write(
+            auth_rate_private_path($scope, 'identifier', $hash),
+            ['attempts' => 0, 'last_attempt_at' => 0, 'locked_until' => 0]
+        );
+        return;
+    }
     $stmt = $pdo->prepare("DELETE FROM auth_attempts WHERE scope = ? AND dimension = 'identifier' AND key_hash = ?");
     $stmt->execute([$scope, $hash]);
 }
