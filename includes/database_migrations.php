@@ -28,6 +28,85 @@ final class CoreMigrationException extends RuntimeException
     }
 }
 
+/**
+ * Begin a database transaction and return the only token permitted to finish it.
+ *
+ * PDO does not consistently report or finalize a SQLite transaction opened
+ * with raw BEGIN IMMEDIATE across supported PHP versions. Keep the begin and
+ * finalizer families matched: raw SQLite transactions use raw COMMIT/ROLLBACK,
+ * while PDO transactions use PDO finalizers. A caller that joins an existing
+ * transaction never owns its finalization.
+ */
+function database_transaction_begin(PDO $pdo, bool $sqliteImmediate = false): array
+{
+    if ($pdo->inTransaction()) {
+        return [
+            'owned' => false,
+            'active' => true,
+            'mode' => 'joined',
+        ];
+    }
+
+    if ($sqliteImmediate && db_driver($pdo) === 'sqlite') {
+        $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        return [
+            'owned' => true,
+            'active' => true,
+            'mode' => 'sqlite-sql',
+        ];
+    }
+
+    $pdo->beginTransaction();
+    return [
+        'owned' => true,
+        'active' => true,
+        'mode' => 'pdo',
+    ];
+}
+
+function database_transaction_commit(PDO $pdo, array &$transaction): void
+{
+    if (empty($transaction['active'])) return;
+    if (empty($transaction['owned'])) {
+        $transaction['active'] = false;
+        return;
+    }
+
+    if (($transaction['mode'] ?? '') === 'sqlite-sql') {
+        $pdo->exec('COMMIT');
+    } elseif (($transaction['mode'] ?? '') === 'pdo') {
+        $pdo->commit();
+    } else {
+        throw new CoreMigrationException(
+            'The database transaction owner is invalid.',
+            'DATABASE_TRANSACTION_OWNER_INVALID',
+            500
+        );
+    }
+    $transaction['active'] = false;
+}
+
+function database_transaction_rollback(PDO $pdo, array &$transaction): void
+{
+    if (empty($transaction['active'])) return;
+    try {
+        if (empty($transaction['owned'])) return;
+        if (($transaction['mode'] ?? '') === 'sqlite-sql') {
+            $pdo->exec('ROLLBACK');
+        } elseif (($transaction['mode'] ?? '') === 'pdo') {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+        } else {
+            throw new CoreMigrationException(
+                'The database transaction owner is invalid.',
+                'DATABASE_TRANSACTION_OWNER_INVALID',
+                500
+            );
+        }
+    } finally {
+        $transaction['active'] = false;
+    }
+}
+
 function database_migrations_canonicalize(mixed $value): mixed
 {
     if (!is_array($value)) return $value;
@@ -1618,6 +1697,7 @@ function database_migration_claim(PDO $pdo, string $attemptId, string $ownerToke
 {
     $privateLock = database_migration_private_lock();
     $mysqlLock = false;
+    $transaction = null;
     try {
         if (db_driver($pdo) === 'mysql') {
             $stmt = $pdo->prepare('SELECT GET_LOCK(?, 0)');
@@ -1625,7 +1705,7 @@ function database_migration_claim(PDO $pdo, string $attemptId, string $ownerToke
             $mysqlLock = (int)$stmt->fetchColumn() === 1;
             if (!$mysqlLock) throw new CoreMigrationException('Another database process owns the migration lock.', 'MIGRATION_DATABASE_LOCKED', 409);
         } else {
-            $pdo->exec('BEGIN IMMEDIATE');
+            $transaction = database_transaction_begin($pdo, true);
         }
         $existing = database_migration_state($pdo);
         if (($existing['status'] ?? '') === 'active') {
@@ -1641,10 +1721,10 @@ function database_migration_claim(PDO $pdo, string $attemptId, string $ownerToke
             'heartbeat_at' => gmdate('c'),
             'required_schema_version' => CHATSPACE_SCHEMA_VERSION,
         ]);
-        if (db_driver($pdo) !== 'mysql') $pdo->commit();
+        if (is_array($transaction)) database_transaction_commit($pdo, $transaction);
         return ['private' => $privateLock, 'mysql' => $mysqlLock];
     } catch (Throwable $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        if (is_array($transaction)) database_transaction_rollback($pdo, $transaction);
         if ($mysqlLock) {
             $stmt = $pdo->prepare('SELECT RELEASE_LOCK(?)');
             $stmt->execute(['corechat:migration:' . (defined('CHATSPACE_DB_NAME') ? CHATSPACE_DB_NAME : 'configured')]);
@@ -1673,6 +1753,7 @@ function database_migration_prepare_interrupted_recovery(PDO $pdo, string $expec
     }
     $privateLock = database_migration_private_lock();
     $mysqlLock = false;
+    $transaction = null;
     try {
         if (db_driver($pdo) === 'mysql') {
             $stmt = $pdo->prepare('SELECT GET_LOCK(?, 0)');
@@ -1682,7 +1763,7 @@ function database_migration_prepare_interrupted_recovery(PDO $pdo, string $expec
                 throw new CoreMigrationException('The interrupted migration still has a database owner.', 'MIGRATION_DATABASE_LOCKED', 409);
             }
         } else {
-            $pdo->exec('BEGIN IMMEDIATE');
+            $transaction = database_transaction_begin($pdo, true);
         }
         $state = database_migration_state($pdo);
         if (($state['status'] ?? '') !== 'active' || !hash_equals((string)($state['attempt_public_id'] ?? ''), $expectedAttemptId)) {
@@ -1702,10 +1783,10 @@ function database_migration_prepare_interrupted_recovery(PDO $pdo, string $expec
             null,
             database_migrations_canonical_json(['attempt_public_id' => $expectedAttemptId])
         );
-        if (db_driver($pdo) !== 'mysql') $pdo->commit();
+        if (is_array($transaction)) database_transaction_commit($pdo, $transaction);
         return $state;
     } catch (Throwable $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        if (is_array($transaction)) database_transaction_rollback($pdo, $transaction);
         throw $error;
     } finally {
         if ($mysqlLock) {
@@ -2741,8 +2822,9 @@ function database_migration_apply_one(PDO $pdo, array $migration, string $attemp
         database_migration_record_ledger($pdo, $migration, $attemptId, $actorUserId, 'adopted');
         return 'adopted';
     }
-    $sqliteTransaction = db_driver($pdo) === 'sqlite';
-    if ($sqliteTransaction) $pdo->exec('BEGIN IMMEDIATE');
+    $transaction = db_driver($pdo) === 'sqlite'
+        ? database_transaction_begin($pdo, true)
+        : null;
     try {
         $operation = $migration['up'];
         $operation($pdo);
@@ -2750,10 +2832,10 @@ function database_migration_apply_one(PDO $pdo, array $migration, string $attemp
             throw new CoreMigrationException('Migration validation failed: ' . $migration['id'] . '.', 'MIGRATION_VALIDATION_FAILED', 500);
         }
         database_migration_record_ledger($pdo, $migration, $attemptId, $actorUserId, 'applied');
-        if ($sqliteTransaction) $pdo->commit();
+        if (is_array($transaction)) database_transaction_commit($pdo, $transaction);
         return 'applied';
     } catch (Throwable $error) {
-        if ($sqliteTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        if (is_array($transaction)) database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 }

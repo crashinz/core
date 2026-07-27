@@ -467,3 +467,34 @@ Technical reference: Post-Public-Release Fresh SQLite Installation
 Completeness, 2026-07-26.
 
 </details>
+
+## Setup backup import compatibility and transactional recovery
+
+Full SQLite restores and portable bundles now use version-aware, fail-closed
+preflight, migration, activation, and recovery owners.
+
+<details>
+<summary>More about this change</summary>
+
+- Migrates only the four source-proven predecessor SQLite layouts or accepts
+  an already-current database, while rejecting corrupt, foreign-key-invalid,
+  unknown, partial, mixed, and newer layouts before activation.
+- Preserves the uploaded source, stages and validates migration privately,
+  keeps a verified pre-restore recovery copy, and completes the Windows-safe
+  active-file transition in the next pre-bootstrap request before a database
+  connection is opened.
+- Imports source-proven portable version 1 bundles and current version 2
+  bundles through complete envelope, identity, reference, file, MIME,
+  signature, size, checksum, and destination validation.
+- Validates immutable built-in link icons against the installed release,
+  stages only bounded custom media, commits database and file effects as one
+  recoverable attempt, and removes exact attempt-owned residue after failure
+  or retry.
+- Uses one matched transaction owner for SQLite immediate transactions and
+  PDO transactions, certified on PHP 8.2.32 and PHP 8.4.23 without changing
+  MariaDB transaction semantics.
+
+Technical reference: Post-Public-Release Setup Backup Import Compatibility and
+Transactional Recovery, 2026-07-27.
+
+</details>

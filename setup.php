@@ -1,6 +1,27 @@
 <?php
-require_once __DIR__ . '/includes/base.php';
 require_once __DIR__ . '/includes/database_backups.php';
+$setupRestoreActivation = backup_sqlite_prebootstrap_activate(
+    isset($_COOKIE['corechat_restore_activation'])
+        ? (string)$_COOKIE['corechat_restore_activation']
+        : null
+);
+if (is_array($setupRestoreActivation) && ($_GET['complete_restore'] ?? '') === '1') {
+    setcookie('corechat_restore_activation', '', [
+        'expires' => time() - 3600,
+        'path' => rtrim(dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/setup.php')), '/') . '/setup.php',
+        'secure' => !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off',
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+    $script = (string)($_SERVER['SCRIPT_NAME'] ?? '/setup.php');
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        ...$setupRestoreActivation,
+        'redirect' => $script . '?done=1&restored=1',
+    ], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+require_once __DIR__ . '/includes/base.php';
 
 $error = '';
 $success = '';
@@ -690,6 +711,7 @@ function setup_restore_backup_upload(): array {
     } else {
         $result = backup_restore_sqlite_upload($tmp, true, 0);
     }
+    if (!empty($result['pending_activation'])) return $result;
     if (!setup_admin_exists()) {
         throw new RuntimeException('Backup restored, but it did not include an admin account. Import a backup with an admin user or create a new admin user.');
     }
@@ -771,8 +793,7 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
         $communityLogo = setup_brand_logo_upload();
         $avatar = setup_avatar_upload();
         $pdo = db();
-        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        $transaction = database_transaction_begin($pdo, !db_uses_mysql_syntax($pdo));
         $databaseCompatibilityTransaction = null;
         try {
             $submittedDisplayLimit = (int)($registryValues['profile_limit_display_name']
@@ -807,13 +828,13 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
             );
             if (empty($registryResult['ok'])) throw new RuntimeException((string)($registryResult['error'] ?? 'Setup settings could not be saved.'));
             $databaseCompatibilityTransaction = $registryResult['_databaseCompatibilityTransaction'] ?? null;
-            $pdo->commit();
+            database_transaction_commit($pdo, $transaction);
             if (is_array($databaseCompatibilityTransaction)) {
                 database_compatibility_policy_commit_update($databaseCompatibilityTransaction);
                 $databaseCompatibilityTransaction = null;
             }
         } catch (Throwable $transactionError) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             if (is_array($databaseCompatibilityTransaction)) {
                 database_compatibility_policy_rollback_update($databaseCompatibilityTransaction);
             }
@@ -829,7 +850,19 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
 
 if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === 'restore') {
     try {
-        setup_restore_backup_upload();
+        $restoreResult = setup_restore_backup_upload();
+        if (!empty($restoreResult['pending_activation'])) {
+            $cookiePath = rtrim(app_base_path(), '/') . '/setup.php';
+            setcookie('corechat_restore_activation', (string)$restoreResult['activation_token'], [
+                'expires' => time() + 300,
+                'path' => $cookiePath,
+                'secure' => !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off',
+                'httponly' => true,
+                'samesite' => 'Strict',
+            ]);
+            header('Location: ' . app_url('/setup.php?complete_restore=1'), true, 303);
+            exit;
+        }
         setup_response(['ok' => true, 'redirect' => app_url('/setup.php?done=1&restored=1')]);
     } catch (Throwable $e) {
         $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));

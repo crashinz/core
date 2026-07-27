@@ -1,6 +1,23 @@
 <?php
-require_once __DIR__ . '/../includes/base.php';
 require_once __DIR__ . '/../includes/database_backups.php';
+$adminRestoreActivation = backup_sqlite_prebootstrap_activate(
+    isset($_COOKIE['corechat_restore_activation'])
+        ? (string)$_COOKIE['corechat_restore_activation']
+        : null
+);
+if (is_array($adminRestoreActivation) && ($_GET['action'] ?? '') === 'complete_restore') {
+    setcookie('corechat_restore_activation', '', [
+        'expires' => time() - 3600,
+        'path' => (string)($_SERVER['SCRIPT_NAME'] ?? '/api/admin_database.php'),
+        'secure' => !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off',
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($adminRestoreActivation, JSON_UNESCAPED_SLASHES);
+    exit;
+}
+require_once __DIR__ . '/../includes/base.php';
 require_once __DIR__ . '/../includes/room_importer.php';
 
 $me = require_staff();
@@ -24,6 +41,7 @@ function add_portable_file(array &$files, ?string $path): void {
         'path' => $path,
         'mime' => $mime,
         'bytes' => filesize($full),
+        'sha256' => strtoupper((string)hash_file('sha256', $full)),
         'data' => base64_encode((string)file_get_contents($full)),
     ];
 }
@@ -73,8 +91,13 @@ function export_core_bundle(PDO $pdo, int $actorId, array $options = []): void {
     }
 
     $bundle = [
-        'format' => 'chatspace-ce-portable-bundle',
-        'version' => 1,
+        'format' => BACKUP_PORTABLE_FORMAT,
+        'version' => BACKUP_PORTABLE_CURRENT_VERSION,
+        'producer' => [
+            'application' => 'CoreChat',
+            'format_version' => BACKUP_PORTABLE_CURRENT_VERSION,
+            'schema_version' => CHATSPACE_SCHEMA_VERSION,
+        ],
         'exported_at' => gmdate('c'),
         'includes' => [
             'users' => $includeUsers,
@@ -204,7 +227,19 @@ if (is_array($decoded) && ($decoded['format'] ?? '') === 'chatspace-ce-portable-
 }
 
 try {
-    json_out(backup_restore_sqlite_upload($tmp, true, (int)$me['id']));
+    $restoreResult = backup_restore_sqlite_upload($tmp, true, (int)$me['id']);
+    if (!empty($restoreResult['pending_activation'])) {
+        setcookie('corechat_restore_activation', (string)$restoreResult['activation_token'], [
+            'expires' => time() + 300,
+            'path' => (string)($_SERVER['SCRIPT_NAME'] ?? '/api/admin_database.php'),
+            'secure' => !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off',
+            'httponly' => true,
+            'samesite' => 'Strict',
+        ]);
+        header('Location: ' . app_url('/api/admin_database.php?action=complete_restore'), true, 303);
+        exit;
+    }
+    json_out($restoreResult);
 } catch (Throwable $e) {
     json_out(['error' => $e->getMessage()], 400);
 }
