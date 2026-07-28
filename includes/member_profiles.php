@@ -14,6 +14,8 @@ const MEMBER_PROFILE_ABOUT_MAX = 2000;
 const MEMBER_PROFILE_PUBLIC_EMAIL_MAX = 254;
 const MEMBER_PROFILE_WEBSITE_MAX = 500;
 const MEMBER_PROFILE_INTERESTS_MAX = 1000;
+const MEMBER_PROFILE_DISCORD_USERNAME_MIN = 2;
+const MEMBER_PROFILE_DISCORD_USERNAME_MAX = 32;
 const MEMBER_PROFILE_REQUEST_ID_MAX = 96;
 
 function member_profiles_limit_definitions(): array
@@ -263,6 +265,215 @@ function member_profiles_validate_display_name(mixed $raw): string
     return $value;
 }
 
+function member_profiles_validate_discord_username(mixed $raw): string
+{
+    $value = strtolower(member_profiles_normalize_single((string)$raw));
+    if ($value === '') return '';
+    $length = member_profiles_text_length($value);
+    if ($length < MEMBER_PROFILE_DISCORD_USERNAME_MIN
+        || $length > MEMBER_PROFILE_DISCORD_USERNAME_MAX
+        || preg_match('/^(?!.*\.\.)[a-z0-9_][a-z0-9_.]*[a-z0-9_]$/', $value) !== 1) {
+        throw new MemberProfileException(
+            'Discord username must be 2-32 lowercase letters, numbers, underscores, or single interior dots.',
+            'MEMBER_PROFILE_DISCORD_USERNAME_INVALID'
+        );
+    }
+    return $value;
+}
+
+function member_profiles_validate_public_profile_id(mixed $raw): string
+{
+    $value = strtolower(member_profiles_normalize_single((string)$raw));
+    if (preg_match(
+        '/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/',
+        $value
+    ) !== 1) {
+        throw new MemberProfileException(
+            'The public profile identity is invalid.',
+            'MEMBER_PROFILE_PUBLIC_ID_INVALID',
+            409
+        );
+    }
+    return $value;
+}
+
+function member_profiles_boolean(mixed $raw, string $field): bool
+{
+    if (is_bool($raw)) return $raw;
+    if ($raw === 0 || $raw === 1 || $raw === '0' || $raw === '1') {
+        return (bool)(int)$raw;
+    }
+    throw new MemberProfileException(
+        $field . ' must be an explicit boolean.',
+        'MEMBER_PROFILE_BOOLEAN_INVALID'
+    );
+}
+
+/**
+ * Freeze the identity carried by a source-proven schema that predates the
+ * separate username column. This is deliberately read-only: callers run it
+ * before any migration or restore mutation and later apply the returned plan
+ * only after the published baseline has created the username column.
+ */
+function member_profiles_preflight_legacy_identity_source(
+    PDO $pdo,
+    array $sourceVariant
+): array {
+    if (!member_profiles_table_exists($pdo, 'users')) return [];
+    $columns = array_fill_keys(member_profiles_table_columns($pdo, 'users'), true);
+    if (isset($columns['username'])) return [];
+    foreach (['id', 'email', 'password_hash', 'display_name'] as $required) {
+        if (!isset($columns[$required])) {
+            throw new MemberProfileException(
+                'The supported predecessor is missing required identity data.',
+                'MEMBER_PROFILE_LEGACY_IDENTITY_INCOMPLETE',
+                409
+            );
+        }
+    }
+    if (empty($sourceVariant['recognized'])
+        || !is_string($sourceVariant['id'] ?? null)
+        || (string)$sourceVariant['id'] === '') {
+        throw new MemberProfileException(
+            'Legacy identity normalization requires a source-proven predecessor.',
+            'MEMBER_PROFILE_LEGACY_SOURCE_UNRECOGNIZED',
+            409
+        );
+    }
+
+    $rows = $pdo->query(
+        'SELECT id, email, password_hash, display_name FROM users ORDER BY id ASC'
+    )->fetchAll();
+    $emails = [];
+    $usernames = [];
+    $identities = [];
+    foreach ($rows as $row) {
+        $userId = filter_var($row['id'] ?? null, FILTER_VALIDATE_INT);
+        $email = strtolower(member_profiles_normalize_single((string)($row['email'] ?? '')));
+        $sourceDisplayName = member_profiles_normalize_single(
+            (string)($row['display_name'] ?? '')
+        );
+        $passwordHash = (string)($row['password_hash'] ?? '');
+        try {
+            $username = member_profiles_validate_username($sourceDisplayName);
+        } catch (MemberProfileException $error) {
+            throw new MemberProfileException(
+                'A legacy account does not contain a valid source username.',
+                'MEMBER_PROFILE_LEGACY_USERNAME_INVALID',
+                409,
+                $error
+            );
+        }
+        if ($userId === false
+            || (int)$userId < 1
+            || !filter_var($email, FILTER_VALIDATE_EMAIL)
+            || isset($emails[$email])
+            || isset($usernames[$username])
+            || password_get_info($passwordHash)['algoName'] === 'unknown') {
+            throw new MemberProfileException(
+                'Legacy account identity is invalid, ambiguous, or duplicated.',
+                'MEMBER_PROFILE_LEGACY_IDENTITY_AMBIGUOUS',
+                409
+            );
+        }
+        $emails[$email] = true;
+        $usernames[$username] = true;
+        $identities[] = [
+            'user_id' => (int)$userId,
+            'email' => $email,
+            'source_display_name' => $sourceDisplayName,
+            'username' => $username,
+            'password_sha256' => strtoupper(hash('sha256', $passwordHash)),
+        ];
+    }
+    return [
+        'source_variant' => (string)$sourceVariant['id'],
+        'users' => $identities,
+    ];
+}
+
+function member_profiles_apply_legacy_identity_plan(PDO $pdo, array $plan): void
+{
+    $users = $plan['users'] ?? [];
+    if (!is_array($users) || $users === []) return;
+    $columns = array_fill_keys(member_profiles_table_columns($pdo, 'users'), true);
+    if (!isset($columns['username'])) {
+        throw new MemberProfileException(
+            'The migration did not create the stable Username owner.',
+            'MEMBER_PROFILE_USERNAME_OWNER_MISSING',
+            500
+        );
+    }
+
+    $transaction = database_transaction_begin($pdo, db_driver($pdo) === 'sqlite');
+    try {
+        $select = $pdo->prepare(
+            'SELECT email, username, password_hash, display_name FROM users WHERE id = ? LIMIT 1'
+            . (db_driver($pdo) === 'mysql' ? ' FOR UPDATE' : '')
+        );
+        $updateUser = $pdo->prepare(
+            'UPDATE users SET username = ?, display_name = ? '
+            . 'WHERE id = ? AND (username IS NULL OR username = "")'
+        );
+        $updateParticipants = $pdo->prepare(
+            'UPDATE participants SET display_name = ? WHERE user_id = ?'
+        );
+        foreach ($users as $identity) {
+            if (!is_array($identity)) {
+                throw new MemberProfileException(
+                    'The frozen legacy identity plan is invalid.',
+                    'MEMBER_PROFILE_LEGACY_PLAN_INVALID',
+                    500
+                );
+            }
+            $userId = (int)($identity['user_id'] ?? 0);
+            $select->execute([$userId]);
+            $current = $select->fetch();
+            if (!$current
+                || !hash_equals(
+                    (string)($identity['email'] ?? ''),
+                    strtolower((string)$current['email'])
+                )
+                || !hash_equals(
+                    (string)($identity['source_display_name'] ?? ''),
+                    (string)$current['display_name']
+                )
+                || !hash_equals(
+                    (string)($identity['password_sha256'] ?? ''),
+                    strtoupper(hash('sha256', (string)$current['password_hash']))
+                )
+                || trim((string)$current['username']) !== '') {
+                throw new MemberProfileException(
+                    'Legacy identity changed after preflight; no identity was adopted.',
+                    'MEMBER_PROFILE_LEGACY_PLAN_DRIFT',
+                    409
+                );
+            }
+            $username = member_profiles_validate_username($identity['username'] ?? '');
+            if (!member_profiles_namespace_available($pdo, $username, $userId)) {
+                throw new MemberProfileException(
+                    'Legacy Username conflicts with another account identity.',
+                    'MEMBER_PROFILE_LEGACY_USERNAME_COLLISION',
+                    409
+                );
+            }
+            $updateUser->execute([$username, $username, $userId]);
+            if ($updateUser->rowCount() !== 1) {
+                throw new MemberProfileException(
+                    'Legacy Username could not be adopted exactly once.',
+                    'MEMBER_PROFILE_LEGACY_USERNAME_ADOPTION_FAILED',
+                    409
+                );
+            }
+            $updateParticipants->execute([$username, $userId]);
+        }
+        database_transaction_commit($pdo, $transaction);
+    } catch (Throwable $error) {
+        database_transaction_rollback($pdo, $transaction);
+        throw $error;
+    }
+}
+
 function member_profiles_effective_display_name(string $username, mixed $storedDisplayName): string
 {
     $displayName = member_profiles_normalize_single((string)$storedDisplayName);
@@ -369,6 +580,159 @@ function member_profiles_table_columns(PDO $pdo, string $table): array
 function member_profiles_table_exists(PDO $pdo, string $table): bool
 {
     return member_profiles_table_columns($pdo, $table) !== [];
+}
+
+function member_profiles_public_identity_columns_present(PDO $pdo): bool
+{
+    $columns = array_fill_keys(member_profiles_table_columns($pdo, 'member_profiles'), true);
+    return isset(
+        $columns['discord_username'],
+        $columns['discord_visible'],
+        $columns['public_profile_id']
+    );
+}
+
+function member_profiles_generate_public_profile_id(PDO $pdo): string
+{
+    $check = $pdo->prepare(
+        'SELECT 1 FROM member_profiles WHERE public_profile_id = ? LIMIT 1'
+    );
+    for ($attempt = 0; $attempt < 20; $attempt++) {
+        $candidate = strtolower(uuid_v4());
+        $check->execute([$candidate]);
+        if ($check->fetchColumn() === false) return $candidate;
+    }
+    throw new MemberProfileException(
+        'A unique public profile identity could not be reserved.',
+        'MEMBER_PROFILE_PUBLIC_ID_RESERVATION_FAILED',
+        500
+    );
+}
+
+function member_profiles_ensure_public_profile_id(PDO $pdo, int $userId): string
+{
+    if ($userId < 1 || !member_profiles_public_identity_columns_present($pdo)) {
+        throw new MemberProfileException(
+            'The public profile identity owner is unavailable.',
+            'MEMBER_PROFILE_PUBLIC_ID_OWNER_UNAVAILABLE',
+            503
+        );
+    }
+    $select = $pdo->prepare(
+        'SELECT public_profile_id FROM member_profiles WHERE user_id = ? LIMIT 1'
+    );
+    for ($attempt = 0; $attempt < 20; $attempt++) {
+        $select->execute([$userId]);
+        $current = $select->fetchColumn();
+        if ($current !== false && trim((string)$current) !== '') {
+            return member_profiles_validate_public_profile_id($current);
+        }
+        $candidate = member_profiles_generate_public_profile_id($pdo);
+        try {
+            $update = $pdo->prepare(
+                'UPDATE member_profiles SET public_profile_id = ? '
+                . 'WHERE user_id = ? AND (public_profile_id IS NULL OR public_profile_id = "")'
+            );
+            $update->execute([$candidate, $userId]);
+        } catch (PDOException $error) {
+            if ($attempt === 19) throw $error;
+            continue;
+        }
+    }
+    throw new MemberProfileException(
+        'A stable public profile identity could not be established.',
+        'MEMBER_PROFILE_PUBLIC_ID_BACKFILL_FAILED',
+        500
+    );
+}
+
+function member_profiles_install_public_identity_schema(PDO $pdo): void
+{
+    $columns = array_fill_keys(member_profiles_table_columns($pdo, 'member_profiles'), true);
+    if (!isset($columns['discord_username'])) {
+        $pdo->exec(
+            'ALTER TABLE member_profiles ADD COLUMN discord_username '
+            . (db_driver($pdo) === 'mysql'
+                ? 'VARCHAR(32) DEFAULT NULL'
+                : 'TEXT DEFAULT NULL')
+        );
+    }
+    if (!isset($columns['discord_visible'])) {
+        $pdo->exec(
+            'ALTER TABLE member_profiles ADD COLUMN discord_visible '
+            . (db_driver($pdo) === 'mysql'
+                ? 'TINYINT(1) NOT NULL DEFAULT 0'
+                : 'INTEGER NOT NULL DEFAULT 0')
+        );
+    }
+    if (!isset($columns['public_profile_id'])) {
+        $pdo->exec(
+            'ALTER TABLE member_profiles ADD COLUMN public_profile_id '
+            . (db_driver($pdo) === 'mysql'
+                ? 'VARCHAR(36) DEFAULT NULL'
+                : 'TEXT DEFAULT NULL')
+        );
+    }
+    $pdo->exec(
+        'UPDATE member_profiles SET discord_visible = 0 '
+        . 'WHERE discord_username IS NULL OR discord_username = ""'
+    );
+    $userIds = array_map(
+        'intval',
+        $pdo->query('SELECT user_id FROM member_profiles ORDER BY user_id ASC')
+            ->fetchAll(PDO::FETCH_COLUMN)
+    );
+    foreach ($userIds as $userId) {
+        member_profiles_ensure_public_profile_id($pdo, $userId);
+    }
+    if (db_driver($pdo) === 'mysql') {
+        $index = $pdo->query(
+            "SELECT 1 FROM information_schema.statistics "
+            . "WHERE table_schema = DATABASE() AND table_name = 'member_profiles' "
+            . "AND index_name = 'uq_member_profiles_public_id' LIMIT 1"
+        )->fetchColumn();
+        if ($index === false) {
+            $pdo->exec(
+                'CREATE UNIQUE INDEX uq_member_profiles_public_id '
+                . 'ON member_profiles(public_profile_id)'
+            );
+        }
+    } else {
+        $pdo->exec(
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_member_profiles_public_id '
+            . 'ON member_profiles(public_profile_id)'
+        );
+    }
+}
+
+function member_profiles_validate_public_identity_schema(PDO $pdo): bool
+{
+    if (!member_profiles_public_identity_columns_present($pdo)) return false;
+    if ((int)$pdo->query(
+        'SELECT COUNT(*) FROM member_profiles '
+        . 'WHERE public_profile_id IS NULL OR public_profile_id = "" '
+        . 'OR discord_visible NOT IN (0, 1) '
+        . 'OR ((discord_username IS NULL OR discord_username = "") AND discord_visible <> 0)'
+    )->fetchColumn() !== 0) {
+        return false;
+    }
+    $rows = $pdo->query(
+        'SELECT public_profile_id, discord_username FROM member_profiles ORDER BY user_id ASC'
+    )->fetchAll();
+    $seen = [];
+    foreach ($rows as $row) {
+        try {
+            $publicId = member_profiles_validate_public_profile_id(
+                $row['public_profile_id'] ?? ''
+            );
+            member_profiles_validate_discord_username($row['discord_username'] ?? '');
+        } catch (MemberProfileException) {
+            return false;
+        }
+        if (isset($seen[$publicId])) return false;
+        $seen[$publicId] = true;
+    }
+    return true;
 }
 
 function member_profiles_install_game_message_identity_snapshots(PDO $pdo): void
@@ -655,6 +1019,9 @@ function member_profiles_initialize_user(PDO $pdo, int $userId): void
         ? 'INSERT IGNORE INTO member_profiles (user_id) VALUES (?)'
         : 'INSERT OR IGNORE INTO member_profiles (user_id) VALUES (?)';
     $pdo->prepare($sql)->execute([$userId]);
+    if (member_profiles_public_identity_columns_present($pdo)) {
+        member_profiles_ensure_public_profile_id($pdo, $userId);
+    }
     member_profiles_sync_identity_names($pdo, $userId);
 }
 
@@ -672,7 +1039,6 @@ function member_profiles_emit_identity_update(
         emit_event($pdo, (int)$participant['session_id'], 'participant_identity', [
             'participant_id' => (int)$participant['id'],
             'user_id' => $userId,
-            'username' => $username,
             'display_name' => member_profiles_effective_display_name(
                 $username,
                 $displayName
@@ -754,6 +1120,75 @@ function member_profiles_import_identity(
         . 'updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
     )->execute([$userId]);
     member_profiles_sync_identity_names($pdo, $userId);
+}
+
+function member_profiles_import_public_identity(
+    PDO $pdo,
+    int $userId,
+    mixed $publicProfileIdRaw,
+    mixed $discordUsernameRaw,
+    mixed $discordVisibleRaw,
+    bool $newAccount,
+    int $portableVersion
+): void {
+    member_profiles_initialize_user($pdo, $userId);
+    if ($portableVersion < 3) {
+        if ($newAccount) {
+            $pdo->prepare(
+                'UPDATE member_profiles SET discord_username = NULL, discord_visible = 0 '
+                . 'WHERE user_id = ?'
+            )->execute([$userId]);
+        }
+        return;
+    }
+    $publicProfileId = member_profiles_validate_public_profile_id($publicProfileIdRaw);
+    $discordUsername = member_profiles_validate_discord_username($discordUsernameRaw);
+    $discordVisible = member_profiles_boolean(
+        $discordVisibleRaw,
+        'Discord visibility'
+    ) && $discordUsername !== '';
+    $collision = $pdo->prepare(
+        'SELECT user_id FROM member_profiles '
+        . 'WHERE public_profile_id = ? AND user_id <> ? LIMIT 1'
+    );
+    $collision->execute([$publicProfileId, $userId]);
+    if ($collision->fetchColumn() !== false) {
+        throw new MemberProfileException(
+            'Portable import contains a public profile identity collision.',
+            'MEMBER_PROFILE_PUBLIC_ID_COLLISION',
+            409
+        );
+    }
+    $current = $pdo->prepare(
+        'SELECT public_profile_id, discord_visible '
+        . 'FROM member_profiles WHERE user_id = ? LIMIT 1'
+    );
+    $current->execute([$userId]);
+    $currentProfile = $current->fetch() ?: [];
+    $currentPublicId = (string)($currentProfile['public_profile_id'] ?? '');
+    if (!$newAccount
+        && !hash_equals(
+            member_profiles_validate_public_profile_id($currentPublicId),
+            $publicProfileId
+        )) {
+        throw new MemberProfileException(
+            'Portable import cannot change an existing public profile identity.',
+            'MEMBER_PROFILE_PUBLIC_ID_IMMUTABLE',
+            409
+        );
+    }
+    if (!$newAccount && empty($currentProfile['discord_visible'])) {
+        $discordVisible = false;
+    }
+    $pdo->prepare(
+        'UPDATE member_profiles SET public_profile_id = ?, discord_username = ?, '
+        . 'discord_visible = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
+    )->execute([
+        $publicProfileId,
+        $discordUsername === '' ? null : $discordUsername,
+        $discordVisible ? 1 : 0,
+        $userId,
+    ]);
 }
 
 function member_profiles_backfill(PDO $pdo): void
@@ -895,6 +1330,26 @@ function member_profiles_record_deleted_username_use(PDO $pdo, int $userId): voi
     $pdo->prepare($sql)->execute([$normalized, $identityKey]);
 }
 
+function member_profiles_user_id_for_public_profile_id(
+    PDO $pdo,
+    mixed $publicProfileIdRaw
+): int {
+    $publicProfileId = member_profiles_validate_public_profile_id($publicProfileIdRaw);
+    $stmt = $pdo->prepare(
+        'SELECT user_id FROM member_profiles WHERE public_profile_id = ? LIMIT 1'
+    );
+    $stmt->execute([$publicProfileId]);
+    $userId = (int)($stmt->fetchColumn() ?: 0);
+    if ($userId < 1) {
+        throw new MemberProfileException(
+            'That member profile is unavailable.',
+            'MEMBER_PROFILE_NOT_FOUND',
+            404
+        );
+    }
+    return $userId;
+}
+
 function member_profiles_row(PDO $pdo, int $userId, bool $forUpdate = false): ?array
 {
     $sql = 'SELECT u.id, u.username, u.display_name, u.avatar_path, '
@@ -902,7 +1357,8 @@ function member_profiles_row(PDO $pdo, int $userId, bool $forUpdate = false): ?a
         . 'u.avatar_orientation, u.avatar_display_size_px, u.avatar_size_version, '
         . 'u.created_at, '
         . 'p.profile_name, p.location, p.about_me, p.public_contact_email, '
-        . 'p.website, p.interests, p.profile_version, p.updated_at '
+        . 'p.website, p.interests, p.discord_username, p.discord_visible, '
+        . 'p.public_profile_id, p.profile_version, p.updated_at '
         . 'FROM users u JOIN member_profiles p ON p.user_id = u.id WHERE u.id = ? LIMIT 1';
     if ($forUpdate && db_driver($pdo) === 'mysql') $sql .= ' FOR UPDATE';
     $stmt = $pdo->prepare($sql);
@@ -946,9 +1402,15 @@ function member_profiles_projection(PDO $pdo, int $viewerUserId, int $targetUser
         ? max(1, (int)$row['avatar_source_height_px'])
         : null;
     $count = member_profiles_deleted_username_count($pdo, $username);
+    $publicProfileId = member_profiles_validate_public_profile_id(
+        $row['public_profile_id'] ?? ''
+    );
+    $discordUsername = !empty($row['discord_visible'])
+        ? member_profiles_validate_discord_username($row['discord_username'] ?? '')
+        : '';
     $profile = [
-        'userId' => $targetUserId,
-        'username' => $username,
+        'publicProfileId' => $publicProfileId,
+        'profileUrl' => app_url('/profile.php?id=' . rawurlencode($publicProfileId)),
         'displayName' => $displayName,
         'effectiveDisplayName' => $effectiveDisplayName,
         'location' => $row['location'],
@@ -982,6 +1444,7 @@ function member_profiles_projection(PDO $pdo, int $viewerUserId, int $targetUser
             : avatar_orientation_normalize($row['avatar_orientation'] ?? null),
         'isSelf' => $viewerUserId === $targetUserId,
     ];
+    if ($discordUsername !== '') $profile['discordUsername'] = $discordUsername;
     if ($row['profile_name'] !== null && trim((string)$row['profile_name']) !== '') {
         $profile['name'] = (string)$row['profile_name'];
     }
@@ -999,8 +1462,13 @@ function member_profiles_editor_projection(PDO $pdo, int $userId): array
             404
         );
     }
+    $profile['username'] = (string)$row['username'];
+    $profile['discordUsername'] = (string)($row['discord_username'] ?? '');
+    $profile['discordVisible'] = !empty($row['discord_visible'])
+        && trim((string)($row['discord_username'] ?? '')) !== '';
     $profile['profileVersion'] = max(1, (int)$row['profile_version']);
     $profile['fieldLimits'] = member_profiles_effective_limits($pdo);
+    $profile['fieldLimits']['discord_username'] = MEMBER_PROFILE_DISCORD_USERNAME_MAX;
     return $profile;
 }
 
@@ -1054,6 +1522,7 @@ function member_profiles_update(
     $allowed = [
         'display_name', 'name', 'location', 'about_me',
         'public_contact_email', 'website', 'interests',
+        'discord_username', 'discord_visible',
     ];
     $unknown = array_diff(array_keys($input), $allowed);
     if ($unknown !== []) {
@@ -1074,6 +1543,15 @@ function member_profiles_update(
     }
     $requestedDisplayName = member_profiles_validate_display_name($input['display_name']);
     $fields = member_profiles_validate_fields($input);
+    $discordUsername = member_profiles_validate_discord_username(
+        $input['discord_username']
+    );
+    $discordVisible = member_profiles_boolean(
+        $input['discord_visible'],
+        'Discord visibility'
+    ) && $discordUsername !== '';
+    $fields['discord_username'] = $discordUsername === '' ? null : $discordUsername;
+    $fields['discord_visible'] = $discordVisible ? 1 : 0;
     $fingerprintInput = ['expected_version' => (int)$expectedVersion, 'fields' => $input];
     ksort($fingerprintInput['fields'], SORT_STRING);
     $requestSha = strtoupper(hash(
@@ -1145,9 +1623,17 @@ function member_profiles_update(
             'public_contact_email' => 'public_contact_email',
             'website' => 'website',
             'interests' => 'interests',
+            'discord_username' => 'discord_username',
+            'discord_visible' => 'discord_visible',
         ];
         foreach ($columnMap as $publicField => $column) {
-            if (($current[$column] ?? null) !== $fields[$column]) $changed[] = $publicField;
+            if ($column === 'discord_visible') {
+                if ((int)($current[$column] ?? 0) !== (int)$fields[$column]) {
+                    $changed[] = $publicField;
+                }
+            } elseif (($current[$column] ?? null) !== $fields[$column]) {
+                $changed[] = $publicField;
+            }
         }
         $displayChanged = !hash_equals(
             (string)$current['display_name'],
@@ -1163,6 +1649,8 @@ function member_profiles_update(
             'public_contact_email' => (string)($fields['public_contact_email'] ?? ''),
             'website' => (string)($fields['website'] ?? ''),
             'interests' => (string)($fields['interests'] ?? ''),
+            'discord_username' => (string)($fields['discord_username'] ?? ''),
+            'discord_visible' => $fields['discord_visible'] ? 'visible' : 'hidden',
         ];
         $labels = [
             'display_name' => 'Display name',
@@ -1172,14 +1660,24 @@ function member_profiles_update(
             'public_contact_email' => 'Public profile contact email',
             'website' => 'Website',
             'interests' => 'Interests',
+            'discord_username' => 'Discord username',
+            'discord_visible' => 'Discord visibility',
         ];
         foreach ($changed as $changedField) {
-            member_profiles_assert_effective_length(
-                $pdo,
-                $changedField,
-                $labels[$changedField],
-                $effectiveValues[$changedField]
-            );
+            if ($changedField === 'discord_username') {
+                member_profiles_assert_length(
+                    $labels[$changedField],
+                    $effectiveValues[$changedField],
+                    MEMBER_PROFILE_DISCORD_USERNAME_MAX
+                );
+            } elseif ($changedField !== 'discord_visible') {
+                member_profiles_assert_effective_length(
+                    $pdo,
+                    $changedField,
+                    $labels[$changedField],
+                    $effectiveValues[$changedField]
+                );
+            }
         }
         $nextVersion = $changed === [] ? $currentVersion : $currentVersion + 1;
         if ($changed !== []) {
@@ -1207,7 +1705,8 @@ function member_profiles_update(
             }
             $pdo->prepare(
                 'UPDATE member_profiles SET profile_name = ?, location = ?, about_me = ?, '
-                . 'public_contact_email = ?, website = ?, interests = ?, profile_version = ?, '
+                . 'public_contact_email = ?, website = ?, interests = ?, '
+                . 'discord_username = ?, discord_visible = ?, profile_version = ?, '
                 . 'updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
             )->execute([
                 $fields['profile_name'],
@@ -1216,6 +1715,8 @@ function member_profiles_update(
                 $fields['public_contact_email'],
                 $fields['website'],
                 $fields['interests'],
+                $fields['discord_username'],
+                $fields['discord_visible'],
                 $nextVersion,
                 $userId,
             ]);

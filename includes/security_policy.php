@@ -11,6 +11,9 @@ final class SecurityPolicyViolation extends RuntimeException
 
 function security_request_is_https(): bool
 {
+    if (function_exists('network_privacy_request_context')) {
+        return (bool)network_privacy_request_context()['https'];
+    }
     return strtolower((string)($_SERVER['HTTPS'] ?? '')) === 'on'
         || (string)($_SERVER['SERVER_PORT'] ?? '') === '443';
 }
@@ -35,6 +38,9 @@ function security_send_browser_headers(): void
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), browsing-topics=()');
     header('Content-Security-Policy: ' . security_content_security_policy());
+    if (function_exists('network_privacy_should_send_hsts') && network_privacy_should_send_hsts()) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
 }
 
 function security_start_session(): void
@@ -60,6 +66,9 @@ function security_start_session(): void
 
 function security_bootstrap(): void
 {
+    if (function_exists('network_privacy_enforce_transport')) {
+        network_privacy_enforce_transport();
+    }
     security_send_browser_headers();
     security_start_session();
 }
@@ -182,7 +191,34 @@ function security_authorize_outside_content(?PDO $pdo, ?array $actor, string $op
         throw new SecurityPolicyViolation('Outside content is disabled for this installation.', 403);
     }
 
-    $identifier = (string)((int)($actor['id'] ?? $actor['user_id'] ?? 0));
+    $actorUserId = (int)($actor['id'] ?? $actor['user_id'] ?? 0);
+    if ($pdo && $actorUserId > 0 && function_exists('moderation_trust_policy')) {
+        $master = moderation_trust_policy($pdo);
+        if (!empty($master['effectiveEnabled'])) {
+            $capabilityMap = [
+                'avatar_upload' => 'upload-avatar',
+                'gesture_upload' => 'upload-personal-gestures',
+                'room_create' => 'create-regular-room',
+                'room_background_upload' => 'upload-room-background-video',
+                'room_import_preview' => 'import-website-room',
+                'room_import_create' => 'import-website-room',
+            ];
+            if (isset($capabilityMap[$operation])) {
+                moderation_identity_require_capability($pdo, $actorUserId, $capabilityMap[$operation]);
+            }
+        }
+    }
+    $confirmation = null;
+    if ($pdo && $actorUserId > 0 && function_exists('moderation_account_authorize_outside_content')) {
+        $confirmation = moderation_account_authorize_outside_content(
+            $pdo,
+            $actorUserId,
+            $operation,
+            $context
+        );
+    }
+
+    $identifier = (string)$actorUserId;
     if ($identifier === '0') $identifier = session_id() ?: client_ip_address();
     if ($pdo && function_exists('auth_rate_limit_status')) {
         $scope = 'outside:' . $operation;
@@ -193,12 +229,13 @@ function security_authorize_outside_content(?PDO $pdo, ?array $actor, string $op
 
     return [
         'operation' => $operation,
-        'actor_user_id' => (int)($actor['id'] ?? $actor['user_id'] ?? 0),
+        'actor_user_id' => $actorUserId,
         'authentication' => $authMode,
         'trust' => 'build_000048_foundation_pending',
         'capability' => 'build_000048_foundation_pending',
         'terms_rules' => 'build_000048_foundation_pending',
-        'confirmation_mode' => 'build_000051_workflow_pending',
+        'confirmation_mode' => $confirmation['effectiveMode'] ?? 'disabled',
+        'confirmation' => $confirmation,
         'installation_policy' => 'enabled',
         'storage' => $policy['storage'],
         'archive' => $policy['archive'],
@@ -210,6 +247,11 @@ function security_authorize_outside_content_or_json(?PDO $pdo, ?array $actor, st
 {
     try {
         return security_authorize_outside_content($pdo, $actor, $operation, $context);
+    } catch (ModerationIdentityPolicyException|ModerationAccountWorkflowException $error) {
+        json_out([
+            'error' => $error->getMessage(),
+            'code' => $error->errorCode,
+        ] + $error->projection, $error->httpStatus);
     } catch (SecurityPolicyViolation $error) {
         json_out(['error' => $error->getMessage()], $error->httpStatus);
     }

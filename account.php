@@ -1,4 +1,5 @@
 <?php
+define('CHATSPACE_RESTRICTED_ACCOUNT_ROUTE', true);
 require_once __DIR__ . '/includes/base.php';
 $user = require_user();
 $pdo = db();
@@ -26,7 +27,10 @@ $roleColors = role_color_settings($pdo);
   <nav class="shared-tabs" aria-label="Account sections">
     <button class="active" data-account-tab="profile" type="button">Public Profile</button>
     <button data-account-tab="security" type="button">Security</button>
+    <button data-account-tab="private-chat" type="button">Private Chat Protection</button>
     <button data-account-tab="status" type="button">Account Status</button>
+    <button data-account-tab="requests" type="button">Requests &amp; Notices</button>
+    <button data-account-tab="safety" type="button">Safety</button>
   </nav>
   <div class="shared-status" id="account-page-status" role="status"></div>
   <section class="shared-panel active" data-account-panel="profile">
@@ -48,7 +52,14 @@ $roleColors = role_color_settings($pdo);
       <p class="minor field-help" id="profile-email-help">This email is shown on your member profile. It is separate from the private email used for login and account recovery.</p>
       <label>Website <input name="website" type="url" inputmode="url" placeholder="https://example.com" aria-describedby="profile-website-count"><span class="profile-field-count" id="profile-website-count" data-profile-counter="website"></span></label>
       <label>Interests <textarea name="interests" rows="4" aria-describedby="profile-interests-count"></textarea><span class="profile-field-count" id="profile-interests-count" data-profile-counter="interests"></span></label>
+      <label>Discord username <input name="discord_username" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="profile-discord-help profile-discord-username-count"><span class="profile-field-count" id="profile-discord-username-count" data-profile-counter="discord_username"></span></label>
+      <p class="minor field-help" id="profile-discord-help">Optional. Use your current 2-32 character Discord username. It is hidden unless you explicitly enable authenticated-member visibility below. Clearing it also turns visibility off.</p>
+      <label class="settings-checkbox-row profile-visibility-row">
+        <input name="discord_visible" type="checkbox" value="1">
+        <span><strong>Show Discord username to authenticated profile viewers</strong><br>Unauthenticated visitors cannot open member profiles.</span>
+      </label>
       <div class="account-profile-readonly">
+        <div><span>Shareable member profile</span><a id="account-profile-share-link" href=""></a></div>
         <div><span>Registered</span><strong id="account-profile-registered"></strong></div>
         <div>
           <span>Previous display names</span>
@@ -80,11 +91,92 @@ $roleColors = role_color_settings($pdo);
     <div class="account-recovery-card" id="account-recovery-card">Checking recovery status…</div>
     <button class="btn" id="account-recovery-generate" type="button">Create Recovery Code</button>
   </section>
+  <section class="shared-panel" data-account-panel="private-chat">
+    <h2>Private Chat Protection</h2>
+    <p class="minor">Trusted devices hold end-to-end encryption keys. The server and staff have no decryption backdoor. Device labels do not grant access.</p>
+    <div class="account-recovery-card" id="account-private-chat-warning">
+      If every trusted device and the Private Chat Recovery Phrase are lost, affected private-chat history cannot be recovered.
+    </div>
+    <div class="shared-form-actions">
+      <button class="btn btn-primary" id="account-private-chat-device-create" type="button">Register This Device</button>
+      <button class="btn" id="account-private-chat-recovery-create" type="button">Create or Replace Recovery Phrase</button>
+    </div>
+    <h3>Trusted and Pending Devices</h3>
+    <div id="account-private-chat-devices" class="admin-scroll-list" aria-live="polite"></div>
+    <h3>Private Chat Recovery Phrase</h3>
+    <p class="minor">This is separate from your password and Lost Access recovery code. It is generated and encrypted in this browser. CoreChat never receives the phrase.</p>
+    <output id="account-private-chat-recovery-output" class="account-recovery-card" aria-live="assertive">Recovery phrase hidden.</output>
+    <p class="minor" id="account-private-chat-recovery-state">Checking recovery configuration…</p>
+  </section>
   <section class="shared-panel" data-account-panel="status">
     <h2>Account Status</h2>
     <dl class="account-status-list" id="account-status-list"></dl>
     <h2>Current Capabilities</h2>
     <div class="capability-list" id="account-capabilities"></div>
+  </section>
+  <section class="shared-panel" data-account-panel="requests">
+    <h2>Requests, Appeals, and Notices</h2>
+    <p class="minor">Requests do not grant access automatically. Current restrictions and suspensions remain enforced while a request or appeal is reviewed.</p>
+    <div id="account-request-explanation" class="account-recovery-card"></div>
+    <form id="account-trusted-review-form" class="shared-form compact-form">
+      <h3>Request Trusted Review</h3>
+      <label>Private note <textarea name="note" rows="4" maxlength="2000" aria-describedby="trusted-review-note-help"></textarea></label>
+      <p class="minor" id="trusted-review-note-help">Optional. Up to 2,000 characters; visible only to authorized reviewers.</p>
+      <button class="btn btn-primary" type="submit">Request Trusted Review</button>
+    </form>
+    <form id="account-capability-request-form" class="shared-form">
+      <h3>Request Capabilities</h3>
+      <div class="shared-form-actions">
+        <button class="btn" id="account-capability-select-all" type="button">Select all available</button>
+        <button class="btn" id="account-capability-clear" type="button">Clear selection</button>
+      </div>
+      <div id="account-capability-request-options" class="capability-list"></div>
+      <label>Private note <textarea name="note" rows="4" maxlength="2000"></textarea></label>
+      <button class="btn btn-primary" type="submit">Submit Capability Request</button>
+    </form>
+    <form id="account-appeal-form" class="shared-form compact-form">
+      <h3>Appeal Restriction or Suspension</h3>
+      <label>Private appeal <textarea name="note" rows="5" maxlength="2000" required></textarea></label>
+      <button class="btn btn-primary" type="submit">Submit Appeal</button>
+    </form>
+    <h3>Request and Appeal Status</h3>
+    <div id="account-cases" class="admin-scroll-list"></div>
+    <h3>Notices</h3>
+    <div id="account-notices" class="admin-scroll-list"></div>
+  </section>
+  <section class="shared-panel" data-account-panel="safety">
+    <h2>Report, Mute, and Block</h2>
+    <p class="minor">Reporting never punishes automatically. The reported person is not told who submitted a report. Mute is private and reversible; Block is stronger and server-enforced.</p>
+    <form id="account-report-form" class="shared-form">
+      <h3>Report</h3>
+      <label>Origin
+        <select name="origin_type" required>
+          <option value="user">User</option><option value="profile">Profile</option>
+          <option value="avatar">Avatar</option><option value="message">Message</option>
+          <option value="room">Room</option><option value="community">Community</option>
+          <option value="dm">Direct message</option><option value="relationship">Relationship</option>
+          <option value="game">Game</option><option value="gesture">Gesture</option>
+          <option value="media">Media</option><option value="file">File offer</option>
+          <option value="website-room">Website room</option>
+        </select>
+      </label>
+      <label>Exact item or user reference <input name="origin_reference" maxlength="191" required></label>
+      <label>Reported user ID (optional) <input name="reported_user_id" type="number" min="1"></label>
+      <label>Reason <textarea name="reason" rows="5" maxlength="2000" required></textarea></label>
+      <button class="btn btn-primary" type="submit">Submit Report</button>
+    </form>
+    <form id="account-mute-form" class="shared-form compact-form">
+      <h3>Mute User</h3>
+      <label>User ID <input name="target_user_id" type="number" min="1" required></label>
+      <label>Duration
+        <select name="duration"><option value="until-unmute">Until I unmute</option><option value="1-hour">1 hour</option><option value="24-hours">24 hours</option></select>
+      </label>
+      <button class="btn btn-primary" type="submit">Mute Privately</button>
+    </form>
+    <h3>Muted Users</h3>
+    <div id="account-muted-users" class="admin-scroll-list"></div>
+    <h3>My Reports</h3>
+    <div id="account-reports" class="admin-scroll-list"></div>
   </section>
 </main>
 <script src="<?= e($assetVersion('/assets/js/account.js')) ?>"></script>

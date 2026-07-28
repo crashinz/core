@@ -125,8 +125,7 @@ if ($action === 'block_user' || $action === 'unblock_user') {
     }
     if (!$targetUserId || $targetUserId === (int)$p['user_id']) json_out(['error' => 'User required'], 400);
     if ($action === 'block_user') {
-        $pdo->prepare(db_uses_mysql_syntax($pdo) ? 'INSERT IGNORE INTO user_blocks (blocker_user_id, blocked_user_id) VALUES (?,?)' : 'INSERT OR IGNORE INTO user_blocks (blocker_user_id, blocked_user_id) VALUES (?,?)')
-            ->execute([(int)$p['user_id'], $targetUserId]);
+        $blockResult = moderation_safety_set_block($pdo, (int)$p['user_id'], $targetUserId, true);
         $relationshipDeparture = null;
         $activeRelationship = avatar_relationship_active_for_participant(
             $pdo,
@@ -157,14 +156,11 @@ if ($action === 'block_user' || $action === 'unblock_user') {
                 ]
                 : null,
         ]);
-        log_tool($pdo, (int)$p['user_id'], 'block_user', $targetUserId, null, 'User block');
     } else {
-        $pdo->prepare('DELETE FROM user_blocks WHERE blocker_user_id = ? AND blocked_user_id = ?')
-            ->execute([(int)$p['user_id'], $targetUserId]);
+        $blockResult = moderation_safety_set_block($pdo, (int)$p['user_id'], $targetUserId, false);
         emit_event($pdo, $sessionId, 'unblock', ['blocker_user_id' => (int)$p['user_id'], 'blocked_user_id' => $targetUserId]);
-        log_tool($pdo, (int)$p['user_id'], 'unblock_user', $targetUserId, null, 'User unblock');
     }
-    json_out(['ok' => true, 'target_user_id' => $targetUserId]);
+    json_out(['ok' => true, 'target_user_id' => $targetUserId, 'block' => $blockResult]);
 }
 
 if ($action === 'link_icon') {

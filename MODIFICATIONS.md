@@ -498,3 +498,70 @@ Technical reference: Post-Public-Release Setup Backup Import Compatibility and
 Transactional Recovery, 2026-07-27.
 
 </details>
+
+## Moderation, trust, privacy, and message-protection foundations
+
+CoreChat now provides one Optional-Core moderation and trust system with
+versioned policy, explicit authority, privacy-safe moderation workflows,
+message protection, and bounded retention controls.
+
+<details>
+<summary>More about this change</summary>
+
+- Added one shared Setup/Admin master with preserved subordinate settings and
+  mandatory security, legal-consent, blocking, active restriction, evidence,
+  migration, and recovery boundaries that remain enforced when optional
+  behavior is disabled.
+- Added versioned Terms and Rules, registration and invitation policy,
+  Installation Owner identity and atomic owner-only transfer, roles, trust
+  states, capability grants, requests, appeals, notices, moderation cases,
+  evidence, Personal Mute, and stronger Block reconciliation.
+- Added mandatory HTTPS policy, trusted-proxy handling, private opaque network
+  identities, short exact-IP reveal leases, and privacy-safe audit records.
+- Added versioned Standard, server-encrypted, and private-chat E2EE protection
+  with trusted devices, a separate recovery phrase, truthful transition
+  coverage, and no staff decryption backdoor.
+- Added configurable message and resolved-evidence retention, safety holds,
+  batched idempotent expiry, session revocation, opaque lifecycle identity,
+  and room/Installation Owner safeguards.
+- Retired the unsafe direct Admin user-deletion action. Download Personal Data,
+  voluntary deactivation, grace/cancellation, and irreversible Delete Account
+  remain reserved exclusively for Build 000053.
+
+Technical reference: Build 000051, 2026-07-27.
+
+</details>
+
+## Legacy import, Gesture/Admin usability, public documents, and profile identity
+
+CoreChat now preserves source-backed legacy account identity during supported
+imports, makes Gesture and Settings administration fully deliberate and
+reachable, presents its original license and changelog safely in the browser,
+and gives members a privacy-controlled Discord field with an opaque shareable
+profile identity.
+
+<details>
+<summary>More about this change</summary>
+
+- Migrates supported historical portable and full-SQLite identities without
+  generated placeholders, credential loss, ambiguous collisions, or unsafe
+  activation, while retaining fail-closed recovery and cross-database rules.
+- Keeps public gestures in Server and owner-private gestures in Personal,
+  preserves pagination and picker state, and adds explicit Admin Gesture dirty,
+  validation, save, conflict, provenance, and navigation-warning behavior.
+- Makes the complete Setup/Admin Settings surface vertically reachable through
+  one accessible button-based unlock owner, including explicit review before
+  disabling active optional Moderation and Trust workflows.
+- Adds safe browser presentations for the canonical original license and this
+  modification history without exposing their denied Markdown source paths.
+- Adds optional Discord profile data with hidden-by-default authenticated
+  visibility and stable opaque profile links that do not expose login
+  usernames or internal numeric identifiers.
+- Establishes condition-based bounded recovery and populated visual
+  certification while preserving SQLite/MariaDB, security, configuration,
+  accessibility, private-completion, and public-release boundaries.
+
+Technical reference: Post-Build 000051 consolidated checkpoint, 2026-07-28;
+final private commit and verification are recorded in its Engineering Report.
+
+</details>

@@ -11,6 +11,9 @@ declare(strict_types=1);
  */
 
 function client_ip_address(): string {
+    if (function_exists('network_privacy_client_ip')) {
+        return network_privacy_client_ip();
+    }
     return trim((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown')) ?: 'unknown';
 }
 

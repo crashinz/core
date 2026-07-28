@@ -14,15 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     json_out(['error' => 'Unsupported method'], 405);
 }
 
-$targetUserId = filter_var($_GET['user_id'] ?? null, FILTER_VALIDATE_INT);
-if ($targetUserId === false || (int)$targetUserId < 1) {
-    json_out([
-        'error' => 'Choose a valid community member.',
-        'code' => 'MEMBER_PROFILE_TARGET_INVALID',
-    ], 400);
-}
-
 try {
+    $targetUserId = member_profiles_user_id_for_public_profile_id(
+        db(),
+        $_GET['profile_id'] ?? ''
+    );
     json_out([
         'profile' => member_profiles_projection(
             db(),

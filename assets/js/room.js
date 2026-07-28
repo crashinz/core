@@ -60,6 +60,8 @@ let gesturePresentation = null;
 let gestureCatalogController = null;
 let gestureCatalogBroadcastChannel = null;
 let GestureCatalogControllerClass = null;
+const messageProtectionPending = new Set();
+const messageProtectionContextCache = new Map();
 const runtimeRequestAbortController = new AbortController();
 function stopRoomForDocumentExit(reason) {
   roomExitInProgress = true;
@@ -249,6 +251,7 @@ let webcamOperationGeneration = 0;
 const pendingRemoteVideoStreams = new Map();
 const AVATAR_STAGE_SIZE = 150;
 const blockedUserIds = new Set();
+const mutedUserPolicies = new Map();
 let voiceNoteRecorder = null;
 let voiceNoteChunks = [];
 let voiceNoteStream = null;
@@ -864,6 +867,586 @@ function configureChatComposer() {
   });
 }
 
+function messageProtectionBase64Url(bytes) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function messageProtectionBase64UrlDecode(value) {
+  const padded = String(value || '').replace(/-/g, '+').replace(/_/g, '/')
+    + '='.repeat((4 - (String(value || '').length % 4)) % 4);
+  const decoded = atob(padded);
+  return Uint8Array.from(decoded, character => character.charCodeAt(0));
+}
+
+function messageProtectionCanonical(value) {
+  if (Array.isArray(value)) return value.map(messageProtectionCanonical);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, messageProtectionCanonical(value[key])]));
+}
+
+function messageProtectionCanonicalJson(value) {
+  return JSON.stringify(messageProtectionCanonical(value));
+}
+
+function messageProtectionConversation(chatKey = activeChatKey()) {
+  if (chatKey.startsWith('dm:')) {
+    const peer = Number(chatKey.slice(3));
+    const ids = [Number(cfg?.myUserId || 0), peer].sort((left, right) => left - right);
+    return { kind: 'dm', key: `dm:${ids[0]}:${ids[1]}` };
+  }
+  if (chatKey.startsWith('link:')) {
+    const relationship = chatPrivateChats().relationshipRequest(chatKey);
+    const key = String(relationship?.conversation_id || relationship?.conversation_public_id || '');
+    return key ? { kind: 'link', key } : null;
+  }
+  if (chatKey === 'community') {
+    return {
+      kind: 'community',
+      key: String(cfg?.messageProtection?.community?.conversationKey || 'community'),
+    };
+  }
+  if (chatKey === 'room') {
+    const key = String(cfg?.messageProtection?.room?.conversationKey || '');
+    return key ? { kind: 'room', key } : null;
+  }
+  return null;
+}
+
+function messageProtectionPolicyFor(chatKey = activeChatKey()) {
+  const conversation = messageProtectionConversation(chatKey);
+  if (!conversation) return null;
+  const projection = cfg?.messageProtection || {};
+  if (conversation.kind === 'dm') {
+    return (projection.dm || []).find(policy => policy.conversationKey === conversation.key) || {
+      conversationKind: 'dm',
+      conversationKey: conversation.key,
+      mode: 'standard',
+      protocolVersion: 1,
+      keyEpoch: 1,
+      revision: 0,
+    };
+  }
+  const policy = projection[conversation.kind];
+  return policy?.conversationKey === conversation.key ? policy : null;
+}
+
+function messageProtectionUpdatePolicy(policy) {
+  if (!policy || !cfg?.messageProtection) return;
+  if (policy.conversationKind === 'dm') {
+    const policies = cfg.messageProtection.dm || [];
+    const index = policies.findIndex(item => item.conversationKey === policy.conversationKey);
+    if (index >= 0) policies[index] = policy;
+    else policies.push(policy);
+    cfg.messageProtection.dm = policies;
+  } else {
+    cfg.messageProtection[policy.conversationKind] = policy;
+  }
+  updateComposerPlaceholder();
+}
+
+function messageProtectionDb() {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('corechat-message-protection-v1', 1);
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains('devices')) {
+        open.result.createObjectStore('devices', { keyPath: 'deviceId' });
+      }
+    };
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => resolve(open.result);
+  });
+}
+
+async function messageProtectionLocalDevices() {
+  if (!globalThis.indexedDB || !globalThis.crypto?.subtle) return [];
+  const database = await messageProtectionDb();
+  const devices = await new Promise((resolve, reject) => {
+    const transaction = database.transaction('devices', 'readonly');
+    const request = transaction.objectStore('devices').getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return devices;
+}
+
+async function messageProtectionStoreDevice(device) {
+  const database = await messageProtectionDb();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction('devices', 'readwrite');
+    transaction.objectStore('devices').put(device);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+async function messageProtectionFetchContext(conversation, deviceId = '', fresh = false) {
+  const cacheKey = `${conversation.kind}:${conversation.key}:${deviceId}`;
+  if (!fresh && messageProtectionContextCache.has(cacheKey)) {
+    return messageProtectionContextCache.get(cacheKey);
+  }
+  const query = new URLSearchParams({
+    conversation_kind: conversation.kind,
+    conversation_key: conversation.key,
+  });
+  if (deviceId) query.set('device_id', deviceId);
+  const promise = runtimeRequestClient.getJson(`/api/message_protection.php?${query}`, {
+    operation: 'message-protection-context',
+    endpointCategory: 'message-protection',
+    cache: 'no-store',
+  });
+  messageProtectionContextCache.set(cacheKey, promise);
+  try {
+    return await promise;
+  } catch (error) {
+    messageProtectionContextCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+async function messageProtectionTrustedLocalDevice(accountProjection = null) {
+  const account = accountProjection || (await messageProtectionFetchContext(
+    messageProtectionConversation(activeChatKey()),
+    '',
+    true
+  )).account;
+  const trusted = new Set((account?.devices || [])
+    .filter(device => device.status === 'trusted')
+    .map(device => device.deviceId));
+  return (await messageProtectionLocalDevices()).find(device => trusted.has(device.deviceId)) || null;
+}
+
+async function messageProtectionSha256(value) {
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))))
+    .map(byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+async function messageProtectionVerifySignature(publicJwk, material, signature) {
+  const key = await crypto.subtle.importKey(
+    'jwk',
+    publicJwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['verify']
+  );
+  return crypto.subtle.verify(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    key,
+    messageProtectionBase64UrlDecode(signature),
+    new TextEncoder().encode(material)
+  );
+}
+
+async function messageProtectionWrapKey(rawKey, conversation, epoch, sender, recipient) {
+  const ephemeral = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveBits']
+  );
+  const recipientKey = await crypto.subtle.importKey(
+    'jwk',
+    recipient.encryptionPublicJwk,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+  const shared = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: recipientKey },
+    ephemeral.privateKey,
+    256
+  );
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const baseKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  const wrapKey = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt,
+      info: new TextEncoder().encode(messageProtectionCanonicalJson({
+        protocol: 'corechat-message-protection-v1',
+        conversationKind: conversation.kind,
+        conversationKey: conversation.key,
+        keyEpoch: epoch,
+        recipientDeviceId: recipient.deviceId,
+      })),
+    },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
+  const sealed = new Uint8Array(await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: nonce, tagLength: 128 },
+    wrapKey,
+    rawKey
+  ));
+  const material = {
+    conversationKind: conversation.kind,
+    conversationKey: conversation.key,
+    keyEpoch: epoch,
+    recipientDeviceId: recipient.deviceId,
+    senderDeviceId: sender.deviceId,
+    ephemeralPublicJwk: await crypto.subtle.exportKey('jwk', ephemeral.publicKey),
+    salt: messageProtectionBase64Url(salt),
+    nonce: messageProtectionBase64Url(nonce),
+    ciphertext: messageProtectionBase64Url(sealed.slice(0, -16)),
+    tag: messageProtectionBase64Url(sealed.slice(-16)),
+  };
+  const signature = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    sender.signingPrivateKey,
+    new TextEncoder().encode(messageProtectionCanonicalJson(material))
+  );
+  return {
+    ...material,
+    signature: messageProtectionBase64Url(signature),
+  };
+}
+
+async function messageProtectionUnwrapKey(item, context, conversation, localDevice) {
+  const sender = (context.conversationDevices || [])
+    .find(device => device.deviceId === item.senderDeviceId);
+  if (!sender) throw new Error('The private-chat key sender is unavailable.');
+  const envelope = item.envelope || {};
+  const material = {
+    conversationKind: conversation.kind,
+    conversationKey: conversation.key,
+    keyEpoch: Number(item.keyEpoch),
+    recipientDeviceId: localDevice.deviceId,
+    senderDeviceId: item.senderDeviceId,
+    ephemeralPublicJwk: envelope.ephemeralPublicJwk,
+    salt: envelope.salt,
+    nonce: envelope.nonce,
+    ciphertext: envelope.ciphertext,
+    tag: envelope.tag,
+  };
+  if (!await messageProtectionVerifySignature(
+    sender.signingPublicJwk,
+    messageProtectionCanonicalJson(material),
+    envelope.signature
+  )) {
+    throw new Error('The private-chat key envelope signature is invalid.');
+  }
+  const ephemeralKey = await crypto.subtle.importKey(
+    'jwk',
+    envelope.ephemeralPublicJwk,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+  const shared = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: ephemeralKey },
+    localDevice.encryptionPrivateKey,
+    256
+  );
+  const baseKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  const wrapKey = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: messageProtectionBase64UrlDecode(envelope.salt),
+      info: new TextEncoder().encode(messageProtectionCanonicalJson({
+        protocol: 'corechat-message-protection-v1',
+        conversationKind: conversation.kind,
+        conversationKey: conversation.key,
+        keyEpoch: Number(item.keyEpoch),
+        recipientDeviceId: localDevice.deviceId,
+      })),
+    },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
+  const sealed = new Uint8Array([
+    ...messageProtectionBase64UrlDecode(envelope.ciphertext),
+    ...messageProtectionBase64UrlDecode(envelope.tag),
+  ]);
+  const rawKey = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: messageProtectionBase64UrlDecode(envelope.nonce),
+      tagLength: 128,
+    },
+    wrapKey,
+    sealed
+  );
+  return crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+async function messageProtectionContentKey(conversation, epoch) {
+  const initial = await messageProtectionFetchContext(conversation, '', true);
+  const localDevice = await messageProtectionTrustedLocalDevice(initial.account);
+  if (!localDevice) {
+    throw new Error('Register or recover a trusted Private Chat Protection device before using E2EE.');
+  }
+  const storageKey = `${conversation.kind}:${conversation.key}:${epoch}`;
+  if (localDevice.conversationKeys?.[storageKey]) {
+    return { key: localDevice.conversationKeys[storageKey], device: localDevice, context: initial };
+  }
+  let context = await messageProtectionFetchContext(conversation, localDevice.deviceId, true);
+  const storedEnvelope = (context.keyEnvelopes || []).find(item => Number(item.keyEpoch) === Number(epoch));
+  let contentKey;
+  if (storedEnvelope) {
+    contentKey = await messageProtectionUnwrapKey(storedEnvelope, context, conversation, localDevice);
+  } else {
+    const recipients = context.conversationDevices || [];
+    const participantIds = new Set(recipients.map(device => Number(device.userId)));
+    if (conversation.kind === 'dm' && participantIds.size < 2) {
+      throw new Error('Every participant needs a trusted device before E2EE can start.');
+    }
+    if (!recipients.length) throw new Error('No trusted private-chat devices are available.');
+    const rawKey = crypto.getRandomValues(new Uint8Array(32));
+    for (const recipient of recipients) {
+      const envelope = await messageProtectionWrapKey(rawKey, conversation, epoch, localDevice, recipient);
+      await apiPost('/api/message_protection.php', {
+        action: 'store_key_envelope',
+        conversationKind: conversation.kind,
+        conversationKey: conversation.key,
+        keyEpoch: epoch,
+        senderDeviceId: localDevice.deviceId,
+        recipientDeviceId: recipient.deviceId,
+        envelope: {
+          ephemeralPublicJwk: envelope.ephemeralPublicJwk,
+          salt: envelope.salt,
+          nonce: envelope.nonce,
+          ciphertext: envelope.ciphertext,
+          tag: envelope.tag,
+          signature: envelope.signature,
+        },
+      });
+    }
+    contentKey = await crypto.subtle.importKey(
+      'raw',
+      rawKey,
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    messageProtectionContextCache.clear();
+    context = await messageProtectionFetchContext(conversation, localDevice.deviceId, true);
+  }
+  localDevice.conversationKeys = { ...(localDevice.conversationKeys || {}), [storageKey]: contentKey };
+  await messageProtectionStoreDevice(localDevice);
+  return { key: contentKey, device: localDevice, context };
+}
+
+async function messageProtectionDecryptMessage(message, chatKey) {
+  const conversation = messageProtectionConversation(chatKey);
+  const envelope = message?.protection_envelope;
+  if (!conversation || !envelope) throw new Error('The protected message envelope is unavailable.');
+  const { key, context } = await messageProtectionContentKey(conversation, Number(envelope.keyEpoch));
+  const sender = (context.conversationDevices || [])
+    .find(device => device.deviceId === envelope.senderDeviceId);
+  if (!sender) throw new Error('The message sender device is no longer trusted.');
+  const aad = {
+    protocol: 'corechat-message-protection-v1',
+    mode: 'e2ee-private',
+    conversation: conversation.key,
+    clientMessageId: envelope.clientMessageId,
+    senderUserId: Number(envelope.senderUserId),
+    senderDeviceId: envelope.senderDeviceId,
+    keyEpoch: Number(envelope.keyEpoch),
+    sequence: Number(envelope.sequence),
+    messageType: String(message.message_type || 'text'),
+  };
+  const aadJson = messageProtectionCanonicalJson(aad);
+  if (await messageProtectionSha256(aadJson) !== String(envelope.aadSha256 || '').toUpperCase()) {
+    throw new Error('The encrypted message metadata failed integrity validation.');
+  }
+  const signatureMaterial = `${aadJson}\n${envelope.nonce}.${envelope.ciphertext}.${envelope.tag}`;
+  if (!await messageProtectionVerifySignature(sender.signingPublicJwk, signatureMaterial, envelope.signature)) {
+    throw new Error('The encrypted message signature is invalid.');
+  }
+  const sealed = new Uint8Array([
+    ...messageProtectionBase64UrlDecode(envelope.ciphertext),
+    ...messageProtectionBase64UrlDecode(envelope.tag),
+  ]);
+  const plaintext = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: messageProtectionBase64UrlDecode(envelope.nonce),
+      additionalData: new TextEncoder().encode(aadJson),
+      tagLength: 128,
+    },
+    key,
+    sealed
+  );
+  const packageData = JSON.parse(new TextDecoder().decode(plaintext));
+  return {
+    ...message,
+    content: String(packageData.content || ''),
+    original_content: packageData.originalContent || null,
+    url_preview: packageData.urlPreview || null,
+    reply_to: packageData.replyTo || null,
+    _messageProtectionResolved: true,
+  };
+}
+
+async function sendProtectedTextMessage(content, chatKey) {
+  const conversation = messageProtectionConversation(chatKey);
+  if (!conversation || !['dm', 'link'].includes(conversation.kind)) {
+    throw new Error('E2EE is available only in direct and active relationship chats.');
+  }
+  const latest = await messageProtectionFetchContext(conversation, '', true);
+  const policy = latest.conversation?.policy;
+  if (policy?.mode !== 'e2ee-private') {
+    messageProtectionUpdatePolicy(policy);
+    return chatComposer().sendTextMessage(content, chatKey);
+  }
+  const { key, device } = await messageProtectionContentKey(conversation, Number(policy.keyEpoch));
+  const clientMessageId = crypto.randomUUID();
+  const sequence = (Date.now() * 1000) + crypto.getRandomValues(new Uint16Array(1))[0];
+  const reply = chatReply().draftForChat(chatKey);
+  const packageData = {
+    content,
+    originalContent: null,
+    urlPreview: null,
+    replyTo: reply || null,
+  };
+  const aad = {
+    protocol: 'corechat-message-protection-v1',
+    mode: 'e2ee-private',
+    conversation: conversation.key,
+    clientMessageId,
+    senderUserId: Number(cfg.myUserId),
+    senderDeviceId: device.deviceId,
+    keyEpoch: Number(policy.keyEpoch),
+    sequence,
+    messageType: 'text',
+  };
+  const aadJson = messageProtectionCanonicalJson(aad);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = new Uint8Array(await crypto.subtle.encrypt(
+    {
+      name: 'AES-GCM',
+      iv: nonce,
+      additionalData: new TextEncoder().encode(aadJson),
+      tagLength: 128,
+    },
+    key,
+    new TextEncoder().encode(messageProtectionCanonicalJson(packageData))
+  ));
+  const envelope = {
+    ...aad,
+    nonce: messageProtectionBase64Url(nonce),
+    ciphertext: messageProtectionBase64Url(sealed.slice(0, -16)),
+    tag: messageProtectionBase64Url(sealed.slice(-16)),
+    aadSha256: await messageProtectionSha256(aadJson),
+  };
+  envelope.signature = messageProtectionBase64Url(await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    device.signingPrivateKey,
+    new TextEncoder().encode(`${aadJson}\n${envelope.nonce}.${envelope.ciphertext}.${envelope.tag}`)
+  ));
+  let payload = chatReply().appendReplyPayload({
+    session_id: cfg.sessionId,
+    join_token: cfg.myJoinToken,
+    channel: chatKey,
+    content: '',
+    client_message_id: clientMessageId,
+    protection_envelope: envelope,
+  }, chatKey);
+  const relationship = activeRelationshipRequest();
+  const dmUserId = activeDmUserId();
+  if (relationship) {
+    payload = {
+      ...payload,
+      channel: 'link',
+      relationship_id: relationship.relationship_id,
+      conversation_id: relationship.conversation_id,
+    };
+  } else if (dmUserId) {
+    payload = { ...payload, channel: 'dm', target_user_id: dmUserId };
+  }
+  stopTypingNow();
+  const message = await apiPost('/api/messages.php', payload);
+  chatReply().clearDraft();
+  if (message.channel === 'link') {
+    addMessageToChannel(message, relationship?.chatKey || chatKey, false);
+  } else if (message.channel === 'dm') {
+    addMessageToChannel(message, `dm:${dmUserId}`, false);
+    showDmFlight(message);
+  }
+  return message;
+}
+
+async function changeMessageProtectionMode() {
+  const chatKey = activeChatKey();
+  const conversation = messageProtectionConversation(chatKey);
+  if (!conversation) return;
+  const current = await messageProtectionFetchContext(conversation, '', true);
+  const policy = current.conversation?.policy;
+  if (!policy) throw new Error('Message-protection policy is unavailable.');
+  const requested = String(prompt(
+    `Current mode: ${policy.mode}\nEnter standard, server-encrypted, or e2ee-private:`,
+    policy.mode
+  ) || '').trim();
+  if (!requested || requested === policy.mode) return;
+  const explanation = String(prompt(
+    'Explain why this mode is changing. Old content keeps its truthful per-message protection state until verified conversion completes:',
+    ''
+  ) || '').trim();
+  if (!explanation) return;
+  const warning = requested === 'e2ee-private'
+    ? 'The server and staff cannot recover E2EE history. Losing every trusted device and the exact Private Chat Recovery Phrase can make history unrecoverable.'
+    : 'Changing to a server-readable mode does not silently decrypt E2EE history. Existing rows retain their truthful per-message mode.';
+  if (!confirm(`${warning}\n\nContinue with this explicit mode change?`)) return;
+  let result = await apiPost('/api/message_protection.php', {
+    action: 'request_transition',
+    requestId: crypto.randomUUID(),
+    conversationKind: conversation.kind,
+    conversationKey: conversation.key,
+    toMode: requested,
+    explanation,
+    confirmed: true,
+    expectedRevision: Number(policy.revision),
+  });
+  let transition = result.transition;
+  while (['preparing', 'migrating', 'validating', 'interrupted'].includes(transition?.status)) {
+    result = await apiPost('/api/message_protection.php', {
+      action: 'continue_transition',
+      requestId: transition.requestId,
+      batchSize: 100,
+    });
+    transition = result.conversation?.transition;
+  }
+  const refreshed = await messageProtectionFetchContext(conversation, '', true);
+  messageProtectionUpdatePolicy(refreshed.conversation?.policy);
+  alert(`Message protection is now ${refreshed.conversation?.policy?.mode || requested}.`);
+}
+
+function syncMessageProtectionControl() {
+  const composer = document.getElementById('composer');
+  if (!composer) return;
+  let button = document.getElementById('message-protection-mode-button');
+  if (!button) {
+    button = document.createElement('button');
+    button.id = 'message-protection-mode-button';
+    button.className = 'btn';
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      changeMessageProtectionMode().catch(error => showWarning(error.message || 'Message protection could not change.'));
+    });
+    const submit = composer.querySelector('[type="submit"]');
+    const actions = submit?.parentElement;
+    if (submit && actions && composer.contains(actions)) {
+      actions.insertBefore(button, submit);
+    } else {
+      composer.appendChild(button);
+    }
+  }
+  const policy = messageProtectionPolicyFor(activeChatKey());
+  button.hidden = !policy;
+  button.textContent = policy ? `Protection: ${policy.mode}` : 'Protection';
+  button.setAttribute('aria-label', policy
+    ? `Change message protection. Current mode ${policy.mode}.`
+    : 'Message protection unavailable.');
+}
+
 function configureChatMediaSend() {
   chatRuntime?.mediaSend?.configure({
     apiPost,
@@ -919,8 +1502,7 @@ function configureRoomEventRouter() {
     onParticipantIdentity(payload) {
       const participant = participants.get(Number(payload.participant_id || payload.id));
       if (!participant || Number(participant.user_id) !== Number(payload.user_id)) return;
-      participant.username = String(payload.username || participant.username || '');
-      participant.display_name = String(payload.display_name || participant.username || '');
+      participant.display_name = String(payload.display_name || participant.display_name || 'Member');
       renderParticipant(participant, { animateJoin: false });
       renderPeople();
       renderLinkTabs();
@@ -2317,6 +2899,7 @@ function updateComposerPlaceholder() {
   const activeChat = activeChatKey();
   if (activeChat === 'room') input.placeholder = `Message ${cfg.roomName || 'room'}`;
   else input.placeholder = `Message ${chatLabel(activeChat)}`;
+  syncMessageProtectionControl();
 }
 
 function preloadImage(src) {
@@ -3069,7 +3652,37 @@ function renderActiveChat() {
 }
 
 function addMessageToChannel(msg, chatKey, live = false) {
+  if (msg?.protection_mode === 'e2ee-private' && !msg._messageProtectionResolved) {
+    const pendingKey = `${chatKey}:${msg.client_message_id || msg.id || ''}`;
+    if (messageProtectionPending.has(pendingKey)) return;
+    messageProtectionPending.add(pendingKey);
+    messageProtectionDecryptMessage(msg, chatKey)
+      .then(decrypted => addMessageToChannel(decrypted, chatKey, live))
+      .catch(error => addMessageToChannel({
+        ...msg,
+        content: `Encrypted message unavailable on this device. ${error.message || ''}`.trim(),
+        url_preview: null,
+        reply_to: null,
+        _messageProtectionResolved: true,
+        protection_resolution_failed: true,
+      }, chatKey, live))
+      .finally(() => messageProtectionPending.delete(pendingKey));
+    return;
+  }
   if (!messageVisible(msg)) return;
+  const mutedPolicy = mutedUserPolicies.get(Number(msg.user_id || participants.get(msg.participant_id)?.user_id || 0));
+  const authoritativeGameOrSystem = Boolean(msg.system)
+    || chatKey.startsWith('game:')
+    || ['game_action', 'game_score', 'system', 'required_state'].includes(String(msg.message_type || ''));
+  if (mutedPolicy && !authoritativeGameOrSystem && mutedPolicy.scopes.includes('text-bubbles')) {
+    msg = {
+      ...msg,
+      muted_original_content: msg.content,
+      content: 'Muted message — reveal this one message from its message actions.',
+      muted_collapsed: true,
+      one_message_reveal_allowed: true,
+    };
+  }
   const activeChat = activeChatKey();
   const result = chatMessageState().addMessageToChannel(msg, chatKey);
   const existing = result.existing;
@@ -3086,10 +3699,11 @@ function addMessageToChannel(msg, chatKey, live = false) {
       bindMessageAutoScroll(row, true);
     }
     clearUnread(chatKey);
-  } else {
+  } else if (!(mutedPolicy && mutedPolicy.scopes.includes('notices-unread'))) {
     chatUnread().recordInactiveLiveMessage(msg, chatKey, { live });
   }
-  if (live && chatKey === 'room' && msg.participant_id) {
+  if (live && chatKey === 'room' && msg.participant_id
+    && !(mutedPolicy && mutedPolicy.scopes.includes('gestures-audio'))) {
     showTyping(msg.participant_id, false);
     showAvatarSpeech(msg.participant_id, msg);
   }
@@ -3641,7 +4255,7 @@ function updateComposerState() {
   counter.style.color = heat <= 0 ? '#ffffff' : `hsl(${Math.round(8 - (8 * Math.min(1, heat)))} 86% ${Math.round(72 - (22 * Math.min(1, heat)))}%)`;
 }
 
-document.getElementById('composer').addEventListener('submit', e => {
+document.getElementById('composer').addEventListener('submit', async e => {
   e.preventDefault();
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
@@ -3654,7 +4268,13 @@ document.getElementById('composer').addEventListener('submit', e => {
     sendGameMessage(content).catch(err => alert(err.message || err));
     return;
   }
-  chatComposer().sendTextMessage(content, activeChat);
+  const policy = messageProtectionPolicyFor(activeChat);
+  try {
+    if (policy?.mode === 'e2ee-private') await sendProtectedTextMessage(content, activeChat);
+    else await chatComposer().sendTextMessage(content, activeChat);
+  } catch (error) {
+    showWarning(error.message || 'Message could not be sent.');
+  }
 });
 
 function renderLatency(ms) {
@@ -4462,29 +5082,18 @@ function relationshipEligibilityLabel(reason) {
   })[reason] || 'Interaction is not currently available.';
 }
 
-function normalizedMemberIdentityLabel(value) {
-  return String(value ?? '').trim().normalize('NFKC').toLocaleLowerCase('en-US');
-}
-
 function syncParticipantIdentityHeader(participant) {
   const displayElement = document.getElementById('ctx-identity-display-name');
   const usernameElement = document.getElementById('ctx-identity-username');
-  const username = String(participant?.username || '').trim();
-  const currentDisplayName = String(participant?.display_name || '').trim();
-  const hasDistinctDisplayName = currentDisplayName !== ''
-    && normalizedMemberIdentityLabel(currentDisplayName)
-      !== normalizedMemberIdentityLabel(username);
+  const currentDisplayName = String(participant?.display_name || 'Member').trim();
   if (displayElement) {
-    displayElement.textContent = hasDistinctDisplayName ? currentDisplayName : '';
-    displayElement.hidden = !hasDistinctDisplayName;
+    displayElement.textContent = currentDisplayName;
+    displayElement.hidden = false;
   }
   if (usernameElement) {
-    usernameElement.textContent = `Username: ${username}`;
+    usernameElement.textContent = 'Authenticated community member';
   }
-  const accessibleIdentity = hasDistinctDisplayName
-    ? `${currentDisplayName}, Username ${username}`
-    : `Username ${username}`;
-  ctxMenu?.setAttribute('aria-label', `Actions for ${accessibleIdentity}`);
+  ctxMenu?.setAttribute('aria-label', `Actions for ${currentDisplayName}`);
 }
 
 function openAvatarContextMenu(x, y, participant, options = {}) {
@@ -6284,7 +6893,10 @@ ctxProfile?.addEventListener('click', () => {
   const returnFocus = ctxMenuReturnFocus || document.activeElement;
   closeContextMenu();
   if (participant) {
-    openMemberProfile(Number(participant.user_id), { returnFocus }).catch(error => {
+    openMemberProfile(Number(participant.user_id), {
+      returnFocus,
+      publicProfileId: participant.public_profile_id,
+    }).catch(error => {
       showWarning(error?.message || 'User Profile could not be opened.');
     });
   }
@@ -7267,18 +7879,18 @@ function memberProfileAction(label, handler, options = {}) {
 }
 
 async function setMemberProfileBlockState(profile, blocked) {
-  const participant = memberProfileParticipant(profile.userId);
+  const participant = memberProfileParticipant(memberProfileUserId);
   if (participant) {
     await setBlockState(participant, blocked);
     return;
   }
-  if (blocked) blockedUserIds.add(Number(profile.userId));
-  else blockedUserIds.delete(Number(profile.userId));
+  if (blocked) blockedUserIds.add(Number(memberProfileUserId));
+  else blockedUserIds.delete(Number(memberProfileUserId));
   await apiPost('/api/users.php', {
     action: blocked ? 'block_user' : 'unblock_user',
     session_id: cfg.sessionId,
     join_token: cfg.myJoinToken,
-    target_user_id: Number(profile.userId),
+    target_user_id: Number(memberProfileUserId),
   });
   renderPeople();
   renderLinkTabs();
@@ -7313,24 +7925,30 @@ async function runMemberProfilePolicyAction(actionId, participant) {
 
 function renderMemberProfileActions(profile) {
   memberProfileActions.replaceChildren();
-  const participant = memberProfileParticipant(profile.userId);
+  const participant = memberProfileParticipant(memberProfileUserId);
   if (profile.isSelf) {
     memberProfileAction('Edit Public Profile', null, {
       href: appUrl(`/account.php?return=room&id=${encodeURIComponent(document.body.dataset.roomId || '')}`),
     });
   } else {
-    const blocked = blockedUserIds.has(Number(profile.userId));
+    const blocked = blockedUserIds.has(Number(memberProfileUserId));
     if (!blocked) {
       memberProfileAction('Send DM', () => {
         closeMemberProfile();
         openDmWithUser({
-          id: Number(profile.userId),
-          display_name: profile.effectiveDisplayName || profile.displayName || profile.username,
+          id: Number(memberProfileUserId),
+          display_name: profile.effectiveDisplayName || profile.displayName || 'Member',
           avatar_url: profile.avatarUrl || '',
         });
       });
     }
     memberProfileAction(blocked ? 'Unblock' : 'Block', async event => {
+      if (!blocked && event.currentTarget.dataset.blockConfirmed !== '1') {
+        event.currentTarget.dataset.blockConfirmed = '1';
+        event.currentTarget.textContent = 'Confirm Block';
+        showWarning('Blocking ends active direct pairs and prevents direct messages, relationship actions, invitations, direct files, and directed media. It does not delete unrelated group members or history.');
+        return;
+      }
       event.currentTarget.disabled = true;
       try {
         await setMemberProfileBlockState(profile, !blocked);
@@ -7340,6 +7958,36 @@ function renderMemberProfileActions(profile) {
         showWarning(error?.message || 'Block setting could not be changed.');
       }
     }, { danger: !blocked });
+    memberProfileAction('Report', () => {
+      const target = new URL(appUrl('/account.php'), globalThis.location.origin);
+      target.searchParams.set('tab', 'safety');
+      target.searchParams.set('report_user_id', String(memberProfileUserId));
+      target.searchParams.set('report_reference', `profile:${profile.publicProfileId || ''}`);
+      globalThis.open(target.toString(), '_blank', 'noopener,noreferrer');
+    });
+    memberProfileAction('Mute', async event => {
+      event.currentTarget.disabled = true;
+      try {
+        await apiPost('/api/moderation.php', {
+          action: 'mute',
+          target_user_id: Number(memberProfileUserId),
+          duration: 'until-unmute',
+          scopes: ['text-bubbles', 'gestures-audio', 'notices-unread', 'voice', 'avatar-webcam-placeholder'],
+        });
+        showWarning('User muted privately. Game actions, scores, and required system state remain visible.');
+      } catch (error) {
+        event.currentTarget.disabled = false;
+        showWarning(error?.message || 'Mute setting could not be changed.');
+      }
+    });
+    if (cfg.canModerateMessages) {
+      memberProfileAction('Open Moderation Panel', () => {
+        const target = new URL(appUrl('/lobby.php'), globalThis.location.origin);
+        target.searchParams.set('admin', 'users');
+        target.searchParams.set('target_user_id', String(memberProfileUserId));
+        globalThis.open(target.toString(), '_blank', 'noopener,noreferrer');
+      });
+    }
     if (participant) {
       const delegated = new Map(
         (roomRuntime?.participantActions?.actionsFor(participant) || [])
@@ -7367,6 +8015,9 @@ function renderMemberProfileActions(profile) {
       });
     }
   }
+  if (profile.profileUrl) {
+    memberProfileAction('Open Shareable Profile', null, { href: profile.profileUrl });
+  }
   memberProfileAction('Close', () => closeMemberProfile({ restoreFocus: true }));
 }
 
@@ -7376,11 +8027,10 @@ function renderMemberProfile(profile) {
   memberProfileContent.hidden = false;
   const effectiveDisplayName = profile.effectiveDisplayName
     || profile.displayName
-    || profile.username
     || 'Member';
   document.getElementById('member-profile-title').textContent = `${effectiveDisplayName}'s User Profile`;
   document.getElementById('member-profile-display-name').textContent = effectiveDisplayName;
-  document.getElementById('member-profile-username').textContent = `@${profile.username || ''}`;
+  document.getElementById('member-profile-username').textContent = 'Authenticated community member';
   const avatar = document.getElementById('member-profile-avatar');
   const avatarParticipant = {
     avatar_source_width_px: profile.avatarSourceWidthPx,
@@ -7414,11 +8064,10 @@ function renderMemberProfile(profile) {
     avatar.appendChild(placeholder);
   }
   document.getElementById('member-profile-fields').replaceChildren();
-  appendMemberProfileField('Username', profile.username);
   appendMemberProfileField(
     'Display name',
     profile.displayName,
-    { emptyText: `Not set — shown as ${profile.username || 'Username'}` }
+    { emptyText: `Not separately set — shown as ${effectiveDisplayName}` }
   );
   appendMemberProfileField('Name', profile.name);
   appendMemberProfileField('Location', profile.location);
@@ -7436,6 +8085,9 @@ function renderMemberProfile(profile) {
     profile.website ? { href: profile.website, external: true } : {}
   );
   appendMemberProfileField('Interests', profile.interests, { multiline: true });
+  if (profile.discordUsername) {
+    appendMemberProfileField('Discord username', profile.discordUsername);
+  }
   appendMemberProfileField('Registered', profile.registeredAt);
   const history = document.getElementById('member-profile-history-list');
   history.replaceChildren();
@@ -7462,6 +8114,12 @@ function renderMemberProfile(profile) {
 
 async function openMemberProfile(userId, options = {}) {
   if (!memberProfileModal || Number(userId) < 1) return;
+  const publicProfileId = String(
+    options.publicProfileId
+      || memberProfileParticipant(userId)?.public_profile_id
+      || ''
+  ).trim();
+  if (!publicProfileId) throw new Error('The member profile identity is unavailable.');
   memberProfileUserId = Number(userId);
   memberProfileReturnFocus = options.returnFocus || document.activeElement;
   memberProfileContent.hidden = true;
@@ -7470,7 +8128,7 @@ async function openMemberProfile(userId, options = {}) {
   document.getElementById('member-profile-close')?.focus();
   try {
     const data = await runtimeRequestClient.getJson(
-      `/api/member_profile.php?user_id=${encodeURIComponent(memberProfileUserId)}`,
+      `/api/member_profile.php?profile_id=${encodeURIComponent(publicProfileId)}`,
       { operation: 'member-profile', endpointCategory: 'account' }
     );
     if (Number(userId) !== memberProfileUserId) return;
@@ -7536,9 +8194,12 @@ async function loadFriends() {
           ? `<button class="btn locate-action-btn" type="button" disabled aria-label="Room unavailable" title="Room unavailable"><img src="${esc(appUrl('/assets/images/lobby.png'))}" alt=""></button>`
           : `<a class="btn locate-action-btn" href="${esc(appUrl('/chatroom.php?id=' + encodeURIComponent(f.room_id)))}" aria-label="Go to room" title="Go"><img src="${esc(appUrl('/assets/images/lobby.png'))}" alt=""></a>`)
         : '<span class="minor locate-away">Away</span>';
-      row.innerHTML = `${avatarPresentationHtml(locateSubject, { source: locateAvatar, displayName: f.display_name, title: false })}<div><strong>${esc(f.display_name)}</strong><div class="minor">@${esc(f.username || '')} · ${f.room_name ? esc(f.room_name) : 'Not in a room'}</div></div>${profileButton}<button class="btn locate-action-btn dm-locate-btn" type="button" aria-label="Send DM" title="DM"><img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""></button>${go}`;
+      row.innerHTML = `${avatarPresentationHtml(locateSubject, { source: locateAvatar, displayName: f.display_name, title: false })}<div><strong>${esc(f.display_name)}</strong><div class="minor">${f.room_name ? esc(f.room_name) : 'Not in a room'}</div></div>${profileButton}<button class="btn locate-action-btn dm-locate-btn" type="button" aria-label="Send DM" title="DM"><img src="${esc(appUrl('/assets/images/chat-pane-dm.png'))}" alt=""></button>${go}`;
       row.querySelector('.locate-profile-btn').addEventListener('click', event => {
-        openMemberProfile(Number(f.id), { returnFocus: event.currentTarget }).catch(error => {
+        openMemberProfile(Number(f.id), {
+          returnFocus: event.currentTarget,
+          publicProfileId: f.public_profile_id,
+        }).catch(error => {
           showWarning(error?.message || 'User Profile could not be opened.');
         });
       });
@@ -7867,6 +8528,7 @@ async function bootRoom() {
   });
   restoreSessionLock();
   (cfg.blockedUserIds || []).forEach(id => blockedUserIds.add(Number(id)));
+  (cfg.mutedUsers || []).forEach(policy => mutedUserPolicies.set(Number(policy.muted_user_id), policy));
   avatarRuntime?.relationships?.seedPersistedRelationships(cfg.relationships || []);
   await avatarRuntime?.relationshipManagement?.refresh({ render: false });
   chatPrivateChats().syncRelationshipChat(

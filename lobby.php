@@ -11,10 +11,11 @@ $ejectionNotice = $_SESSION['room_ejection_notice'] ?? null;
 unset($_SESSION['room_ejection_notice']);
 $lobbyError = null;
 $canonicalAdminLaunch = (string)($_GET['admin'] ?? '') === '1';
-$staffRoles = ['admin', 'developer'];
+$staffRoles = ['admin', 'moderator', 'developer'];
+$isInstallationOwner = moderation_identity_is_owner($pdo, (int)$user['id']);
 if ($canonicalAdminLaunch && !in_array($user['role'] ?? 'user', $staffRoles, true)) {
     http_response_code(403);
-    exit('Administrator or developer access is required.');
+    exit('Authorized staff access is required.');
 }
 if (!$canonicalAdminLaunch) cleanup_stale_participants($pdo);
 $roleColors = role_color_settings($pdo);
@@ -74,7 +75,7 @@ $rooms = $roomsStmt->fetchAll();
   <title><?= e(branded_page_title('Lobby', $pdo, 'lobby')) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
 </head>
-<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
+<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="picker-shell">
   <section class="picker-main">
     <div class="topbar">
@@ -353,6 +354,113 @@ $rooms = $roomsStmt->fetchAll();
         <section class="admin-section" id="admin-section-users">
           <div class="admin-section-title">Manage Users</div>
           <div class="admin-section-sub">Create accounts, reset passwords, and set account roles.</div>
+          <?php if ($isInstallationOwner): ?>
+          <div class="admin-panel admin-owner-policy-sections" aria-label="Installation Owner policy sections">
+            <h3>Installation Owner</h3>
+            <ul>
+              <li>Security &amp; Privacy</li>
+              <li>Staff &amp; Capabilities</li>
+              <li>Network &amp; Trusted Proxies</li>
+              <li>Ownership &amp; Recovery</li>
+            </ul>
+            <section id="admin-owner-transfer-panel" aria-labelledby="admin-owner-transfer-title">
+              <h4 id="admin-owner-transfer-title">Ownership &amp; Recovery</h4>
+              <p class="minor">Only the current Installation Owner may atomically transfer ownership to another Administrator. Both accounts remain Administrators. This does not delete, deactivate, or weaken either account.</p>
+              <p class="minor" id="admin-owner-current" aria-live="polite">Loading current ownership...</p>
+              <form id="admin-owner-transfer-form" class="admin-create">
+                <?= csrf_input() ?>
+                <label>New Installation Owner
+                  <select name="new_owner_id" required></select>
+                </label>
+                <label>Reason
+                  <textarea name="reason" minlength="3" maxlength="500" rows="3" required></textarea>
+                </label>
+                <button class="btn btn-primary" type="submit">Review Ownership Transfer</button>
+                <div class="admin-form-status" id="admin-owner-transfer-status" aria-live="polite"></div>
+                <section id="admin-owner-transfer-confirmation" class="settings-impact-confirmation" aria-live="assertive" hidden>
+                  <h4>Confirm Installation Owner transfer</h4>
+                  <p id="admin-owner-transfer-preview"></p>
+                  <div class="shared-form-actions">
+                    <button class="btn btn-danger" id="admin-owner-transfer-confirm" type="button">Confirm Transfer</button>
+                    <button class="btn" id="admin-owner-transfer-cancel" type="button">Cancel</button>
+                  </div>
+                </section>
+              </form>
+            </section>
+          </div>
+          <div class="admin-panel" id="admin-network-privacy-panel">
+            <h3>Network &amp; Trusted Proxies</h3>
+            <p class="minor">HTTPS enforcement is mandatory. Forwarded addresses and protocol are trusted only from the private trusted-proxy list. Saved addresses remain masked.</p>
+            <form id="admin-network-policy-form">
+              <?= csrf_input() ?>
+              <div class="admin-create">
+                <label><input id="admin-network-hsts" type="checkbox"> Deployment has verified HSTS readiness</label>
+                <label><input id="admin-network-exact-enabled" type="checkbox"> Enable owner-only Exact IP Access</label>
+                <label>Default reveal duration (1–60 minutes)
+                  <input id="admin-network-reveal-default" type="number" min="1" max="60" value="5" required>
+                </label>
+                <label>Replace trusted proxy IP/CIDR list
+                  <textarea id="admin-network-trusted-proxies" rows="4" placeholder="One complete IP or CIDR per line"></textarea>
+                </label>
+                <p class="minor" id="admin-network-trusted-proxies-current">No trusted proxies are configured.</p>
+                <button class="btn btn-primary" type="submit">Save Network Policy</button>
+                <div class="admin-form-status" id="admin-network-policy-status" aria-live="polite"></div>
+              </div>
+            </form>
+            <hr>
+            <h4>Exact IP Access</h4>
+            <p class="minor">Ordinary views use opaque identifiers. Reveals require recent authentication, a reason, and a non-extendable lease. Exact addresses are never written to Tool Logs.</p>
+            <div class="admin-create">
+              <label>Opaque network identifier
+                <input id="admin-network-opaque-id" readonly>
+              </label>
+              <label>Reason
+                <textarea id="admin-network-reveal-reason" maxlength="500" rows="3"></textarea>
+              </label>
+              <label>Duration
+                <input id="admin-network-reveal-minutes" type="number" min="1" max="60" value="5">
+              </label>
+              <div class="shared-form-actions">
+                <button class="btn btn-danger" id="admin-network-reveal" type="button">Reveal Exact IP</button>
+                <button class="btn" id="admin-network-hide" type="button">Hide now</button>
+              </div>
+              <output id="admin-network-reveal-output" aria-live="assertive">Exact IP hidden.</output>
+            </div>
+          </div>
+          <div class="admin-panel" id="admin-retention-panel">
+            <h3>Retention and Account-Lifecycle Foundations</h3>
+            <p class="minor">Configure message and resolved-report evidence retention. Open reports and safety holds override expiry. Account deletion is unavailable in Build 000051.</p>
+            <form id="admin-retention-form" class="admin-create">
+              <?= csrf_input() ?>
+              <label>Data class
+                <select name="domain">
+                  <option value="room-community">Room and Community messages</option>
+                  <option value="dm">Direct messages</option>
+                  <option value="relationship">Relationship chat</option>
+                  <option value="game">Game chat</option>
+                  <option value="resolved-report-evidence">Resolved report evidence</option>
+                </select>
+              </label>
+              <label>Retention days
+                <input name="days" type="number" min="1" max="3650" value="30" required>
+              </label>
+              <label><input name="keep_forever" type="checkbox"> Keep forever</label>
+              <button class="btn btn-primary" type="submit">Preview Change</button>
+              <div class="admin-form-status" id="admin-retention-status" aria-live="polite"></div>
+              <section id="admin-retention-confirmation" class="settings-impact-confirmation" aria-live="assertive" hidden>
+                <h4>Review retention change</h4>
+                <p id="admin-retention-preview"></p>
+                <p id="admin-retention-backup-disclosure"></p>
+                <div class="shared-form-actions">
+                  <button class="btn btn-danger" id="admin-retention-confirm" type="button">Confirm and Apply</button>
+                  <button class="btn" id="admin-retention-cancel" type="button">Cancel</button>
+                </div>
+              </section>
+            </form>
+            <div id="admin-retention-policies" class="admin-scroll-list" aria-live="polite"></div>
+            <p class="minor">Non-destructive suspension and session revocation remain distinct from future Delete Account execution. Ownership transfer is required before any future irreversible lifecycle action.</p>
+          </div>
+          <?php endif; ?>
           <div class="admin-panel">
             <form class="admin-create" id="admin-create">
               <?= csrf_input() ?>
@@ -362,6 +470,7 @@ $rooms = $roomsStmt->fetchAll();
               <input name="password" type="password" placeholder="Password" required>
               <select name="role">
                 <option value="user">User</option>
+                <option value="moderator">Moderator</option>
                 <option value="guide">Guide</option>
                 <option value="developer">Developer</option>
                 <option value="admin">Admin</option>
@@ -373,25 +482,44 @@ $rooms = $roomsStmt->fetchAll();
           <div class="admin-panel">
             <div class="admin-users admin-scroll-list" id="admin-users"></div>
           </div>
+          <div class="admin-panel">
+            <h3>Trusted Review, Capability Requests, and Appeals</h3>
+            <p class="minor">Select all only selects items for review; it never grants a capability. Public reasons are shown to the member. Internal notes remain private.</p>
+            <div class="admin-users admin-scroll-list" id="admin-moderation-cases"></div>
+          </div>
+          <div class="admin-panel">
+            <h3>Moderation — Users</h3>
+            <form id="admin-moderation-user-search" class="admin-create">
+              <input name="search" type="search" placeholder="Search online or offline users">
+              <select name="sort"><option value="name">Name</option><option value="newest">Newest</option><option value="trust">Trust state</option></select>
+              <select name="per_page"><option value="25">25 per page</option><option value="50">50 per page</option><option value="100">100 per page</option></select>
+              <button class="btn" type="submit">Search</button>
+            </form>
+            <div class="admin-users admin-scroll-list" id="admin-moderation-users"></div>
+            <div class="shared-form-actions"><button class="btn" id="admin-moderation-prev" type="button">Previous</button><span id="admin-moderation-page">Page 1</span><button class="btn" id="admin-moderation-next" type="button">Next</button></div>
+          </div>
         </section>
 
         <section class="admin-section" id="admin-section-settings">
           <div class="admin-section-title">Settings</div>
           <div class="admin-section-sub">Search and manage installation policy through the shared Setup/Admin registry.</div>
-          <div class="admin-panel settings-registry-shell">
+          <div class="admin-panel settings-registry-shell" data-settings-scroll-owner tabindex="0" role="region" aria-label="Complete Admin installation settings">
             <div class="settings-registry-heading">
               <div><h3>Installation Settings</h3><p class="minor">Persistence remains with each authoritative policy owner.</p></div>
               <div class="settings-registry-state" id="lobby-admin-settings-compatibility-state" aria-live="polite">Loading settings…</div>
             </div>
+            <div id="lobby-admin-settings-unlock"></div>
             <section class="branding-license-authority" aria-labelledby="admin-branding-license-title">
-              <a class="btn btn-primary branding-license-link" href="<?= e(app_url('/LICENSE.md')) ?>" id="admin-branding-license-title">View original LICENSE.md</a>
+              <div class="branding-license-actions">
+                <a class="btn btn-primary branding-license-link" href="<?= e(app_url('/license.php')) ?>" id="admin-branding-license-title">View original License</a>
+                <a class="btn branding-license-link" href="<?= e(app_url('/changelog.php')) ?>">View exe's Changelog</a>
+              </div>
               <div class="branding-license-reminder-card">
                 <h4>Branding and License Reminder</h4>
                 <p data-branding-reminder-authority><?= e(PRIVATE_SITE_BRANDING_REMINDER_DEFAULT) ?></p>
                 <button class="btn" type="button" data-edit-branding-reminder>Edit reminder wording</button>
               </div>
             </section>
-            <div id="lobby-admin-settings-unlock"></div>
             <div class="settings-registry-toolbar" role="search">
               <label>Search settings<input id="lobby-admin-settings-search" type="search" autocomplete="off" placeholder="Label, help, category, alias, or setting ID"></label>
               <label>Filter<select id="lobby-admin-settings-filter"><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="changed">Changed from default</option><option value="original">Original-author compatibility relevant</option></select></label>
@@ -425,6 +553,17 @@ $rooms = $roomsStmt->fetchAll();
                 <div class="shared-form-actions">
                   <button class="btn btn-danger" id="lobby-admin-database-compatibility-confirm" type="button">Confirm Disable</button>
                   <button class="btn" id="lobby-admin-database-compatibility-cancel" type="button">Cancel</button>
+                </div>
+              </section>
+              <section id="lobby-admin-moderation-trust-confirmation" class="settings-impact-confirmation" aria-live="assertive" hidden>
+                <h4>Confirm Moderation and Trust impact</h4>
+                <p id="lobby-admin-moderation-trust-impact">
+                  Disabling optional Moderation and Trust workflows stops active optional requests and approvals while
+                  preserving mandatory safety, cases, evidence, restrictions, suspensions, retention, and Tool Logs.
+                </p>
+                <div class="shared-form-actions">
+                  <button class="btn btn-danger" id="lobby-admin-moderation-trust-confirm" type="button">Confirm Disable</button>
+                  <button class="btn" id="lobby-admin-moderation-trust-cancel" type="button">Cancel</button>
                 </div>
               </section>
               <div class="settings-registry-sticky-actions">

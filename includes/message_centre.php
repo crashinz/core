@@ -91,6 +91,17 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
         'original_name' => $payload['original_name'] ?? null,
         'sent_at' => gmdate('Y-m-d H:i:s'),
     ];
+    $protection = message_protection_prepare_message($pdo, $channel, $type, $payload);
+    $baseMsg['content'] = $protection['projection']['content'];
+    $baseMsg['url_preview'] = $protection['projection']['urlPreview'];
+    $baseMsg['reply_to'] = $protection['projection']['replyTo'];
+    $baseMsg['protection_mode'] = $protection['mode'];
+    $baseMsg['protection_version'] = $protection['version'];
+    $baseMsg['protection_key_epoch'] = $protection['keyEpoch'];
+    $baseMsg['client_message_id'] = $protection['clientMessageId'];
+    $baseMsg['protection_envelope'] = $protection['envelopeJson'] === null
+        ? null
+        : json_decode($protection['envelopeJson'], true);
 
     if (in_array($channel, ['community', 'link', 'dm'], true)) {
         $columns = ['scope'];
@@ -117,6 +128,11 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
             'file_size',
             'mime_type',
             'original_name',
+            'protection_mode',
+            'protection_version',
+            'protection_key_epoch',
+            'protection_envelope_json',
+            'client_message_id',
         ]);
         $values = array_merge($values, [
             $participantId,
@@ -124,13 +140,18 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
             $displayName,
             $avatarPath,
             $avatarUrl,
-            $baseMsg['content'],
-            $urlPreviewJson,
-            $replyToJson,
+            $protection['storageContent'],
+            $protection['storageUrlPreview'],
+            $protection['storageReplyTo'],
             $type,
             $baseMsg['file_size'],
             $baseMsg['mime_type'],
             $baseMsg['original_name'],
+            $protection['mode'],
+            $protection['version'],
+            $protection['keyEpoch'],
+            $protection['envelopeJson'],
+            $protection['clientMessageId'],
         ]);
         $stmt = $pdo->prepare('INSERT INTO community_messages (' . implode(', ', $columns) . ') VALUES (' . implode(',', array_fill(0, count($columns), '?')) . ')');
         $stmt->execute($values);
@@ -139,7 +160,14 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
             $msg['link_key'] = (string)($payload['link_key'] ?? '');
             $msg['relationship_id'] = (string)($payload['relationship_id'] ?? '');
             $msg['relationship_version'] = max(1, (int)($payload['relationship_version'] ?? 1));
-            emit_community_event($pdo, 'link', (int)($payload['session_id'] ?? 0), $msg['link_key'], 'link_message', $msg);
+            emit_community_event(
+                $pdo,
+                'link',
+                (int)($payload['session_id'] ?? 0),
+                $msg['link_key'],
+                'link_message',
+                message_protection_event_payload($msg, 'community_messages')
+            );
             return $msg;
         }
         if ($channel === 'dm') {
@@ -147,14 +175,35 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
             $msg['target_user_id'] = (int)($payload['target_user_id'] ?? 0);
             $msg['partner_user_id'] = $msg['target_user_id'];
             $msg['is_owner'] = false;
-            emit_community_event($pdo, 'dm', null, $msg['dm_key'], 'dm_message', $msg);
+            emit_community_event(
+                $pdo,
+                'dm',
+                null,
+                $msg['dm_key'],
+                'dm_message',
+                message_protection_event_payload($msg, 'community_messages')
+            );
             return $msg;
         }
-        emit_community_event($pdo, 'community', null, null, 'community_message', $msg);
+        emit_community_event(
+            $pdo,
+            'community',
+            null,
+            null,
+            'community_message',
+            message_protection_event_payload($msg, 'community_messages')
+        );
         return $msg;
     }
 
     if ($channel === 'game') {
+        if ($protection['mode'] !== 'standard') {
+            throw new MessageProtectionException(
+                'This message-protection mode is unavailable for game chat.',
+                'MESSAGE_PROTECTION_MODE_UNAVAILABLE',
+                422
+            );
+        }
         $stmt = $pdo->prepare(
             'INSERT INTO game_chat_messages '
             . '(lobby_code, participant_id, user_id, display_name, content, '
@@ -177,8 +226,12 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
 
     $sessionId = (int)($payload['session_id'] ?? 0);
     $stmt = $pdo->prepare(
-        'INSERT INTO messages (session_id, participant_id, user_id, display_name, avatar_path, avatar_url, content, url_preview_json, reply_to_json, message_type, file_size, mime_type, original_name)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        'INSERT INTO messages
+         (session_id, participant_id, user_id, display_name, avatar_path, avatar_url,
+          content, url_preview_json, reply_to_json, message_type, file_size, mime_type,
+          original_name, protection_mode, protection_version, protection_key_epoch,
+          protection_envelope_json, client_message_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     );
     $stmt->execute([
         $sessionId,
@@ -187,15 +240,20 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
         $displayName,
         $avatarPath,
         $avatarUrl,
-        $baseMsg['content'],
-        $urlPreviewJson,
-        $replyToJson,
+        $protection['storageContent'],
+        $protection['storageUrlPreview'],
+        $protection['storageReplyTo'],
         $type,
         $baseMsg['file_size'],
         $baseMsg['mime_type'],
         $baseMsg['original_name'],
+        $protection['mode'],
+        $protection['version'],
+        $protection['keyEpoch'],
+        $protection['envelopeJson'],
+        $protection['clientMessageId'],
     ]);
     $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => 'room'] + $baseMsg;
-    emit_event($pdo, $sessionId, 'message', $msg);
+    emit_event($pdo, $sessionId, 'message', message_protection_event_payload($msg, 'messages'));
     return $msg;
 }

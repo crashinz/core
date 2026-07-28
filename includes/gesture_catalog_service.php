@@ -822,14 +822,19 @@ function gesture_catalog_eligible_ids(PDO $pdo, int $userId, string $scope, bool
 {
     $scope = gesture_catalog_scope($scope);
     if ($scope === 'personal') {
-        $stmt = $pdo->prepare('SELECT public_id FROM gestures WHERE owner_user_id = ? AND deleted_at IS NULL ORDER BY id ASC');
+        $stmt = $pdo->prepare(
+            'SELECT public_id FROM gestures '
+            . 'WHERE owner_user_id = ? AND is_public = 0 AND deleted_at IS NULL '
+            . 'ORDER BY id ASC'
+        );
         $stmt->execute([$userId]);
     } else {
-        $sql = 'SELECT g.public_id FROM gestures g WHERE g.is_public = 1 AND g.owner_user_id <> ? AND g.deleted_at IS NULL';
+        $sql = 'SELECT g.public_id FROM gestures g '
+            . 'WHERE g.is_public = 1 AND g.deleted_at IS NULL';
         if (!$includeHidden) $sql .= ' AND NOT EXISTS (SELECT 1 FROM gesture_hidden h WHERE h.user_id = ? AND h.gesture_public_id = g.public_id)';
         $sql .= ' ORDER BY g.id ASC';
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($includeHidden ? [$userId] : [$userId, $userId]);
+        $stmt->execute($includeHidden ? [] : [$userId]);
     }
     return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 }
@@ -981,8 +986,11 @@ function gesture_catalog_hide(PDO $pdo, int $userId, string $publicId, bool $hid
     return gesture_catalog_idempotent($pdo, $userId, $hidden ? 'hide' : 'unhide', $requestKey, compact('publicId', 'hidden', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $hidden, $expectedVersion): array {
         gesture_catalog_lock_user($pdo, $userId);
         gesture_catalog_require_scope_policy($pdo, 'server', true);
-        $stmt = $pdo->prepare('SELECT public_id FROM gestures WHERE public_id = ? AND owner_user_id <> ? AND deleted_at IS NULL LIMIT 1');
-        $stmt->execute([$publicId, $userId]);
+        $stmt = $pdo->prepare(
+            'SELECT public_id FROM gestures '
+            . 'WHERE public_id = ? AND is_public = 1 AND deleted_at IS NULL LIMIT 1'
+        );
+        $stmt->execute([$publicId]);
         if (!$stmt->fetch()) throw new GestureCatalogException('Server Gesture not found.', 404, 'GESTURE_NOT_FOUND');
         $preferences = gesture_catalog_preferences($pdo, $userId, true);
         gesture_catalog_require_version((int)$preferences['hidden_version'], $expectedVersion, 'HIDDEN_VERSION_CONFLICT', $preferences);
@@ -1114,14 +1122,14 @@ function gesture_catalog_query(PDO $pdo, int $userId, string $scope, array $opti
     if ($admin) {
         $where = 'g.deleted_at IS NULL AND g.is_public = 1';
     } elseif ($scope === 'personal') {
-        $where = 'g.deleted_at IS NULL AND g.owner_user_id = ?';
+        $where = 'g.deleted_at IS NULL AND g.is_public = 0 AND g.owner_user_id = ?';
         $params[] = $userId;
     } elseif ($scope === 'hidden') {
-        $where = 'g.deleted_at IS NULL AND g.is_public = 1 AND g.owner_user_id <> ? AND EXISTS (SELECT 1 FROM gesture_hidden h WHERE h.user_id = ? AND h.gesture_public_id = g.public_id)';
-        array_push($params, $userId, $userId);
+        $where = 'g.deleted_at IS NULL AND g.is_public = 1 AND EXISTS (SELECT 1 FROM gesture_hidden h WHERE h.user_id = ? AND h.gesture_public_id = g.public_id)';
+        $params[] = $userId;
     } else {
-        $where = 'g.deleted_at IS NULL AND g.is_public = 1 AND g.owner_user_id <> ? AND NOT EXISTS (SELECT 1 FROM gesture_hidden h WHERE h.user_id = ? AND h.gesture_public_id = g.public_id)';
-        array_push($params, $userId, $userId);
+        $where = 'g.deleted_at IS NULL AND g.is_public = 1 AND NOT EXISTS (SELECT 1 FROM gesture_hidden h WHERE h.user_id = ? AND h.gesture_public_id = g.public_id)';
+        $params[] = $userId;
     }
     if ($query !== '') {
         $columns = ['g.catalog_filename', 'g.title', 'g.gesture_text'];
@@ -1278,6 +1286,16 @@ function gesture_catalog_update_personal_metadata(PDO $pdo, int $userId, string 
 function gesture_catalog_admin_update(PDO $pdo, array $actor, string $publicId, array $changes, int $expectedVersion, string $requestKey): array
 {
     if (($actor['role'] ?? '') !== 'admin') throw new GestureCatalogException('Administrator authorization is required.', 403, 'ADMIN_REQUIRED');
+    $allowedChanges = ['catalog_filename', 'title', 'text', 'creator_credit'];
+    $unknownChanges = array_values(array_diff(array_keys($changes), $allowedChanges));
+    if ($unknownChanges !== []) {
+        throw new GestureCatalogException(
+            'Admin gesture metadata contains unsupported fields.',
+            400,
+            'ADMIN_GESTURE_FIELD_NOT_ALLOWED',
+            ['unsupported_fields' => $unknownChanges]
+        );
+    }
     $actorId = (int)$actor['id'];
     return gesture_catalog_idempotent($pdo, $actorId, 'admin-update-metadata', $requestKey, compact('publicId', 'changes', 'expectedVersion'), function () use ($pdo, $actorId, $publicId, $changes, $expectedVersion): array {
         $row = gesture_catalog_lock_row($pdo, $publicId);
@@ -1353,8 +1371,11 @@ function gesture_catalog_begin_download(PDO $pdo, int $userId, string $gesturePu
             }
             return ['ok' => true, 'idempotent' => true, 'download' => $row];
         }
-        $gesture = $pdo->prepare('SELECT public_id FROM gestures WHERE public_id = ? AND is_public = 1 AND owner_user_id <> ? AND deleted_at IS NULL LIMIT 1');
-        $gesture->execute([$gesturePublicId, $userId]);
+        $gesture = $pdo->prepare(
+            'SELECT public_id FROM gestures '
+            . 'WHERE public_id = ? AND is_public = 1 AND deleted_at IS NULL LIMIT 1'
+        );
+        $gesture->execute([$gesturePublicId]);
         if (!$gesture->fetch()) throw new GestureCatalogException('Server Gesture is not eligible for download.', 403, 'DOWNLOAD_NOT_AUTHORIZED');
         $policy = gesture_catalog_download_policy($pdo);
         $now = gmdate('Y-m-d H:i:s');

@@ -5,15 +5,14 @@ $pdo = db();
 $branding = private_site_branding_projection($pdo, 'login');
 $content = '';
 $available = true;
-try {
-    $markdown = first_party_extension_read_document(
-        $pdo,
-        PRIVATE_SITE_BRANDING_ID,
-        'legal.modifications.read',
-        'MODIFICATIONS.md'
-    );
+$sourcePath = __DIR__ . '/MODIFICATIONS.md';
+$sourceSize = is_file($sourcePath) ? filesize($sourcePath) : false;
+if ($sourceSize !== false && $sourceSize <= 262144) {
+    $markdown = file_get_contents($sourcePath);
+}
+if (isset($markdown) && $markdown !== false) {
     $content = private_site_branding_render_modifications($markdown);
-} catch (Throwable) {
+} else {
     http_response_code(404);
     $available = false;
 }
@@ -40,7 +39,7 @@ try {
     <nav class="public-document-actions" aria-label="Changelog navigation">
       <a class="btn btn-primary" href="<?= e(app_url('/login.php')) ?>">Return to Login</a>
       <a class="btn" href="<?= e(app_url('/about.html')) ?>">About ChatSpace CE</a>
-      <a class="btn" href="<?= e(app_url('/LICENSE.md')) ?>">View original LICENSE.md</a>
+      <a class="btn" href="<?= e(app_url('/license.php')) ?>">View original License</a>
     </nav>
   </header>
   <article class="public-document-content changelog-content">
@@ -48,7 +47,7 @@ try {
       <?= $content ?>
     <?php else: ?>
       <h2>Changelog unavailable</h2>
-      <p>This optional first-party extension utility is not currently available.</p>
+      <p>The canonical modification-history source is missing, unreadable, or exceeds the bounded document limit.</p>
     <?php endif; ?>
   </article>
   <footer class="public-document-footer">

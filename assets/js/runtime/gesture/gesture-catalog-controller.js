@@ -221,7 +221,13 @@ export class GestureCatalogController {
                 next.type = "button";
                 next.dataset.page = String(this.#managementPage + 1);
                 next.disabled = this.#managementPage >= this.#managementPages;
-                management.pager.append(previous, label, next);
+                management.pager.append(
+                    previous,
+                    element("span", "gesture-pager-separator", "—"),
+                    label,
+                    element("span", "gesture-pager-separator", "—"),
+                    next
+                );
             }
             if (management.status) {
                 const total = Number(data.total || 0);
@@ -366,9 +372,23 @@ export class GestureCatalogController {
             const visibility = element("button", "gesture-global", "🌐");
             visibility.type = "button";
             visibility.disabled = this.capabilities().allowUserGestureMutation === false;
-            visibility.title = gesture.is_public ? "Make Personal" : "Make public";
-            visibility.addEventListener("click", () => this.#options.onTogglePublic?.(gesture, !gesture.is_public));
+            visibility.title = "Make public";
+            visibility.addEventListener("click", () => this.#options.onTogglePublic?.(gesture, true));
             tile.append(owner, visibility);
+        } else if (gesture.mine) {
+            const visibility = element("button", "gesture-global", "🌐");
+            visibility.type = "button";
+            visibility.disabled = this.capabilities().allowUserGestureMutation === false;
+            visibility.title = "Make Personal";
+            visibility.setAttribute(
+                "aria-label",
+                `Make ${gesture.title || gesture.text || "gesture"} Personal`
+            );
+            visibility.addEventListener(
+                "click",
+                () => this.#options.onTogglePublic?.(gesture, false)
+            );
+            tile.appendChild(visibility);
         }
         if (!gesture.audio_is_silent && gesture.audio_path) {
             const audio = element("button", "gesture-audio", "🎧");
@@ -466,7 +486,13 @@ export class GestureCatalogController {
         next.type = "button";
         next.disabled = state.page >= state.pages;
         next.addEventListener("click", () => { state.page += 1; this.load(scope); });
-        pager.append(previous, label, next);
+        pager.append(
+            previous,
+            element("span", "gesture-pager-separator", "—"),
+            label,
+            element("span", "gesture-pager-separator", "—"),
+            next
+        );
     }
 
     #renderGuidance(scope) {
@@ -549,7 +575,19 @@ export class GestureCatalogController {
         if (scope === "server" && this.features().hide_unhide !== false) {
             action("Hide Server Gesture", () => this.#hideGesture(gesture), scopeDisabled);
         }
+        if (scope === "server" && gesture.mine) {
+            action(
+                "Make Personal",
+                () => this.#options.onTogglePublic?.(gesture, false),
+                mutationDisabled
+            );
+        }
         if (scope === "personal" && gesture.mine) {
+            action(
+                "Make Public",
+                () => this.#options.onTogglePublic?.(gesture, true),
+                mutationDisabled
+            );
             action("Edit Gesture", () => this.#options.onEdit?.(gesture), this.part4Features().editor === false || mutationDisabled);
         }
         if ((scope === "personal" && gesture.mine || scope === "server") && this.part4Features().user_package_download !== false) {

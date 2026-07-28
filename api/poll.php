@@ -58,6 +58,7 @@ $mapRoomEvent = function(array $event) use ($pdo, $sessionId, $me): array {
             );
         }
     }
+    $payload = message_protection_project_event($pdo, $payload);
     $payload = gesture_capability_project_message_payload(
         $pdo,
         (int)$me['user_id'],
@@ -155,19 +156,16 @@ for ($i = 0; $i < $pollAttempts; $i++) {
     if ($rows || $communityRows) {
         json_out([
         'events' => array_map($mapRoomEvent, $rows),
-        'community_events' => array_map(fn($e) => [
-            'id' => (int)$e['id'],
-            'type' => $e['type'],
-            'payload' => avatar_visibility_project_payload(
-                $pdo,
-                (int)$me['user_id'],
-                gesture_capability_project_message_payload(
-                    $pdo,
-                    (int)$me['user_id'],
-                    json_decode($e['payload'], true) ?: []
-                )
-            ),
-        ], $communityRows),
+        'community_events' => array_map(function(array $event) use ($pdo, $me): array {
+            $payload = json_decode((string)$event['payload'], true) ?: [];
+            $payload = message_protection_project_event($pdo, $payload);
+            $payload = gesture_capability_project_message_payload($pdo, (int)$me['user_id'], $payload);
+            return [
+                'id' => (int)$event['id'],
+                'type' => $event['type'],
+                'payload' => avatar_visibility_project_payload($pdo, (int)$me['user_id'], $payload),
+            ];
+        }, $communityRows),
         'avatar_visibility_preferences' => avatar_visibility_preferences($pdo, (int)$me['user_id']),
         'gesture_preferences' => gesture_catalog_preferences_payload($pdo, (int)$me['user_id']),
         'gesture_capabilities' => gesture_capability_policy($pdo),

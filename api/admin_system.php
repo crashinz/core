@@ -155,6 +155,8 @@ if ($action === 'update_settings_registry') {
             'profile_limits_confirmed' => !empty($body['profile_limits_confirmed']),
             'database_compatibility_confirmed' => !empty($body['database_compatibility_confirmed']),
             'expected_database_compatibility_revision' => $body['expected_database_compatibility_revision'] ?? null,
+            'moderation_trust_impact_confirmed' => !empty($body['moderation_trust_impact_confirmed']),
+            'expected_moderation_trust_revision' => $body['expected_moderation_trust_revision'] ?? null,
             'request_id' => isset($body['request_id']) ? (string)$body['request_id'] : '',
         ],
         $body['expected_revision'] ?? null,

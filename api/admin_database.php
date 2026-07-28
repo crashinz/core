@@ -51,7 +51,13 @@ function export_core_bundle(PDO $pdo, int $actorId, array $options = []): void {
     $includeGestures = array_key_exists('gestures', $options) ? (bool)$options['gestures'] : false;
     $includeRooms = array_key_exists('rooms', $options) ? (bool)$options['rooms'] : true;
     $includeSettings = array_key_exists('settings', $options) ? (bool)$options['settings'] : true;
-    $users = $pdo->query('SELECT id, email, username, password_hash, display_name, role, avatar_path, aura_effect, created_at FROM users ORDER BY id ASC')->fetchAll();
+    $users = $pdo->query(
+        'SELECT u.id, u.email, u.username, u.password_hash, u.display_name, '
+        . 'u.role, u.avatar_path, u.aura_effect, u.created_at, '
+        . 'p.discord_username, p.discord_visible, p.public_profile_id '
+        . 'FROM users u JOIN member_profiles p ON p.user_id = u.id '
+        . 'ORDER BY u.id ASC'
+    )->fetchAll();
     $rooms = $pdo->query(
         'SELECT r.id, r.public_id, r.owner_id, u.email AS owner_email, r.name, r.background_path, r.background_mime, r.background_thumb_path, r.import_url, r.import_layout_json, r.music_playlist_json, r.created_at
            FROM rooms r
@@ -116,6 +122,11 @@ function export_core_bundle(PDO $pdo, int $actorId, array $options = []): void {
                 'password_hash' => $row['password_hash'],
                 'username' => $row['username'],
                 'display_name' => $row['display_name'],
+                'discord_username' => $row['discord_username'] ?: null,
+                'discord_visible' => !empty($row['discord_visible']),
+                'public_profile_id' => member_profiles_validate_public_profile_id(
+                    $row['public_profile_id'] ?? ''
+                ),
                 'role' => $row['role'] ?: 'user',
                 'avatar_path' => $row['avatar_path'] ?: 'preset:Default',
                 'aura_effect' => $row['aura_effect'] ?: null,

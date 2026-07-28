@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 const BACKUP_PORTABLE_FORMAT = 'chatspace-ce-portable-bundle';
-const BACKUP_PORTABLE_CURRENT_VERSION = 2;
+const BACKUP_PORTABLE_CURRENT_VERSION = 3;
 const BACKUP_PORTABLE_MAX_FILE_BYTES = 230686720;
 const BACKUP_PORTABLE_MAX_TOTAL_BYTES = 536870912;
 
@@ -305,7 +305,7 @@ function backup_portable_validate_bundle(PDO $pdo, array $bundle): array {
         throw new RuntimeException('Uploaded file is not a ChatSpace portable bundle.');
     }
     $version = filter_var($bundle['version'] ?? null, FILTER_VALIDATE_INT);
-    if (!in_array($version, [1, BACKUP_PORTABLE_CURRENT_VERSION], true)) {
+    if (!in_array($version, [1, 2, BACKUP_PORTABLE_CURRENT_VERSION], true)) {
         throw new RuntimeException('Portable bundle version is not supported by this release.');
     }
     $allowedRoot = $version === 1
@@ -331,7 +331,7 @@ function backup_portable_validate_bundle(PDO $pdo, array $bundle): array {
         if (!is_array($producer)
             || $producerKeys !== ['application', 'format_version', 'schema_version']
             || ($producer['application'] ?? '') !== 'CoreChat'
-            || (int)($producer['format_version'] ?? 0) !== BACKUP_PORTABLE_CURRENT_VERSION
+            || (int)($producer['format_version'] ?? 0) !== $version
             || !is_string($producer['schema_version'] ?? null)
             || (string)$producer['schema_version'] === '') {
             throw new RuntimeException('Portable bundle producer identity is invalid.');
@@ -425,26 +425,143 @@ function backup_portable_validate_bundle(PDO $pdo, array $bundle): array {
 
     $sourceIds = [];
     $emails = [];
-    foreach (($sections['users'] ?? []) as $user) {
+    $usernames = [];
+    $identityNames = [];
+    $publicProfileIds = [];
+    foreach (($sections['users'] ?? []) as $userIndex => $user) {
         if (!is_array($user)) throw new RuntimeException('Portable bundle contains an invalid user.');
+        if ($version >= 3) {
+            $userKeys = array_keys($user);
+            sort($userKeys, SORT_STRING);
+            $expectedUserKeys = [
+                'aura_effect',
+                'avatar_path',
+                'created_at',
+                'discord_username',
+                'discord_visible',
+                'display_name',
+                'email',
+                'password_hash',
+                'public_profile_id',
+                'role',
+                'source_id',
+                'username',
+            ];
+            sort($expectedUserKeys, SORT_STRING);
+            if ($userKeys !== $expectedUserKeys) {
+                throw new RuntimeException(
+                    'Portable bundle contains missing or unknown current profile fields.'
+                );
+            }
+        }
         $sourceId = filter_var($user['source_id'] ?? null, FILTER_VALIDATE_INT);
         $email = strtolower(trim((string)($user['email'] ?? '')));
-        $username = trim((string)($user['username'] ?? ''));
-        $displayName = trim((string)($user['display_name'] ?? ''));
+        $sourceDisplayName = trim((string)($user['display_name'] ?? ''));
+        try {
+            $username = $version === 1
+                ? member_profiles_validate_username($sourceDisplayName)
+                : member_profiles_validate_username($user['username'] ?? '');
+            $displayName = $version === 1
+                ? ''
+                : member_profiles_validate_display_name($sourceDisplayName);
+            $discordUsername = $version >= 3
+                ? member_profiles_validate_discord_username(
+                    $user['discord_username'] ?? ''
+                )
+                : '';
+            $discordVisible = $version >= 3
+                ? member_profiles_boolean(
+                    $user['discord_visible'] ?? null,
+                    'Discord visibility'
+                )
+                : false;
+            $publicProfileId = $version >= 3
+                ? member_profiles_validate_public_profile_id(
+                    $user['public_profile_id'] ?? ''
+                )
+                : '';
+        } catch (MemberProfileException $error) {
+            throw new RuntimeException(
+                'Portable bundle contains an invalid source-backed user identity.',
+                0,
+                $error
+            );
+        }
+        if ($displayName !== ''
+            && strtolower($displayName) === strtolower($username)) {
+            $displayName = '';
+        }
         $passwordHash = (string)($user['password_hash'] ?? '');
         if ($sourceId === false
             || $sourceId < 1
             || isset($sourceIds[$sourceId])
             || !filter_var($email, FILTER_VALIDATE_EMAIL)
             || isset($emails[$email])
-            || ($version >= 2 && $username === '')
-            || $displayName === ''
+            || isset($usernames[$username])
+            || isset($identityNames[strtolower($username)])
+            || ($displayName !== '' && isset($identityNames[strtolower($displayName)]))
+            || ($version >= 3 && isset($publicProfileIds[$publicProfileId]))
+            || ($version >= 3 && $discordVisible && $discordUsername === '')
             || password_get_info($passwordHash)['algoName'] === 'unknown'
             || !in_array((string)($user['role'] ?? 'user'), ['user', 'guide', 'developer', 'admin'], true)) {
             throw new RuntimeException('Portable bundle contains an invalid or duplicate user identity.');
         }
+        $existing = $pdo->prepare(
+            'SELECT u.id, u.username, p.public_profile_id '
+            . 'FROM users u JOIN member_profiles p ON p.user_id = u.id '
+            . 'WHERE LOWER(u.email) = LOWER(?) LIMIT 1'
+        );
+        $existing->execute([$email]);
+        $existingUser = $existing->fetch();
+        if ($existingUser) {
+            $existingUsername = member_profiles_validate_username(
+                $existingUser['username'] ?? ''
+            );
+            if (!hash_equals($existingUsername, $username)) {
+                throw new RuntimeException(
+                    'Portable bundle identity conflicts with the existing account for that email.'
+                );
+            }
+            if ($version >= 3
+                && !hash_equals(
+                    member_profiles_validate_public_profile_id(
+                        $existingUser['public_profile_id'] ?? ''
+                    ),
+                    $publicProfileId
+                )) {
+                throw new RuntimeException(
+                    'Portable bundle cannot change an existing public profile identity.'
+                );
+            }
+        } elseif (!member_profiles_namespace_available($pdo, $username)
+            || ($displayName !== ''
+                && !member_profiles_namespace_available($pdo, $displayName))) {
+            throw new RuntimeException(
+                'Portable bundle identity conflicts with an existing Username or Display name.'
+            );
+        }
+        if ($version >= 3 && !$existingUser) {
+            $publicIdCollision = $pdo->prepare(
+                'SELECT 1 FROM member_profiles WHERE public_profile_id = ? LIMIT 1'
+            );
+            $publicIdCollision->execute([$publicProfileId]);
+            if ($publicIdCollision->fetchColumn() !== false) {
+                throw new RuntimeException(
+                    'Portable bundle public profile identity conflicts with an existing account.'
+                );
+            }
+        }
         $sourceIds[$sourceId] = true;
         $emails[$email] = true;
+        $usernames[$username] = true;
+        $identityNames[strtolower($username)] = true;
+        if ($displayName !== '') $identityNames[strtolower($displayName)] = true;
+        if ($version >= 3) $publicProfileIds[$publicProfileId] = true;
+        $sections['users'][$userIndex]['username'] = $username;
+        $sections['users'][$userIndex]['display_name'] = $displayName;
+        $sections['users'][$userIndex]['discord_username'] = $discordUsername;
+        $sections['users'][$userIndex]['discord_visible'] = $discordVisible;
+        $sections['users'][$userIndex]['public_profile_id'] = $publicProfileId;
         $requireCustomFile((string)($user['avatar_path'] ?? 'preset:Default'), ['avatars']);
     }
 
@@ -517,6 +634,7 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
     backup_portable_reconcile_attempts($pdo);
     $preflight = backup_portable_validate_bundle($pdo, $bundle);
     $sections = $preflight['sections'];
+    $portableVersion = (int)$preflight['version'];
     $attempt = backup_portable_prepare_files($preflight['files'], $preflight['version']);
 
     $userMap = [];
@@ -536,8 +654,10 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
 
         foreach (($sections['users'] ?? []) as $user) {
             $email = strtolower(trim((string)($user['email'] ?? '')));
-            $username = trim((string)($user['username'] ?? ''));
-            $displayName = trim((string)($user['display_name'] ?? ''));
+            $username = member_profiles_validate_username($user['username'] ?? '');
+            $displayName = member_profiles_validate_display_name(
+                $user['display_name'] ?? ''
+            );
             $hash = (string)($user['password_hash'] ?? '');
             $role = in_array(($user['role'] ?? 'user'), ['user', 'guide', 'developer', 'admin'], true) ? (string)$user['role'] : 'user';
             $avatarPath = (string)($user['avatar_path'] ?? 'preset:Default');
@@ -546,6 +666,7 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
             $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
             $stmt->execute([$email]);
             $id = (int)($stmt->fetchColumn() ?: 0);
+            $newAccount = $id < 1;
             if ($id) {
                 member_profiles_import_identity($pdo, $id, $username, $displayName);
                 $pdo->prepare(
@@ -553,31 +674,31 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
                     . 'aura_effect = ? WHERE id = ?'
                 )->execute([$hash, $role, $avatarPath, $auraEffect, $id]);
             } else {
-                if ($username !== '') {
-                    $identity = member_profiles_validate_identity($pdo, $username, $displayName);
-                    $pdo->prepare(
-                        'INSERT INTO users '
-                        . '(email, username, password_hash, display_name, role, avatar_path, aura_effect) '
-                        . 'VALUES (?,?,?,?,?,?,?)'
-                    )->execute([
-                        $email, $identity['username'], $hash, $identity['display_name'],
-                        $role, $avatarPath, $auraEffect,
-                    ]);
-                } else {
-                    $displayName = member_profiles_validate_display_name($displayName);
-                    if (!member_profiles_namespace_available($pdo, $displayName)) {
-                        throw new MemberProfileException(
-                            'Display name is already in use as a Username or Display name.',
-                            'MEMBER_PROFILE_IDENTITY_NAME_TAKEN',
-                            409
-                        );
-                    }
-                    $pdo->prepare('INSERT INTO users (email, password_hash, display_name, role, avatar_path, aura_effect) VALUES (?,?,?,?,?,?)')
-                        ->execute([$email, $hash, $displayName, $role, $avatarPath, $auraEffect]);
-                }
+                $identity = member_profiles_validate_identity(
+                    $pdo,
+                    $username,
+                    $displayName
+                );
+                $pdo->prepare(
+                    'INSERT INTO users '
+                    . '(email, username, password_hash, display_name, role, avatar_path, aura_effect) '
+                    . 'VALUES (?,?,?,?,?,?,?)'
+                )->execute([
+                    $email, $identity['username'], $hash, $identity['display_name'],
+                    $role, $avatarPath, $auraEffect,
+                ]);
                 $id = (int)$pdo->lastInsertId();
                 member_profiles_initialize_user($pdo, $id);
             }
+            member_profiles_import_public_identity(
+                $pdo,
+                $id,
+                $user['public_profile_id'] ?? '',
+                $user['discord_username'] ?? '',
+                $user['discord_visible'] ?? false,
+                $newAccount,
+                $portableVersion
+            );
             $userMap[(int)($user['source_id'] ?? 0)] = $id;
             $userMap[$email] = $id;
         }

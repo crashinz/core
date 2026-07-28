@@ -8,7 +8,7 @@ const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
     '2026-07-23-build-000048-part-1',
     '2026-07-24-build-000048-part-3',
 ];
-const CHATSPACE_SCHEMA_VERSION = '2026-07-26-post-build-000050-part-1';
+const CHATSPACE_SCHEMA_VERSION = '2026-07-27-build-000051-part-7';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 function chatspace_application_version(): string {
@@ -19,11 +19,11 @@ function chatspace_application_version(): string {
 
 require_once __DIR__ . '/auth_rate_limit.php';
 require_once __DIR__ . '/security_policy.php';
-security_bootstrap();
-
 if (!defined('CHATSPACE_DB_DRIVER') && is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
 }
+require_once __DIR__ . '/network_privacy.php';
+security_bootstrap();
 
 require_once __DIR__ . '/first_party_extensions.php';
 require_once __DIR__ . '/private_site_branding.php';
@@ -38,6 +38,12 @@ require_once __DIR__ . '/server_events.php';
 require_once __DIR__ . '/tool_log.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/gesture_capability_policy.php';
+require_once __DIR__ . '/moderation_trust.php';
+require_once __DIR__ . '/moderation_identity_policy.php';
+require_once __DIR__ . '/moderation_account_workflows.php';
+require_once __DIR__ . '/moderation_safety.php';
+require_once __DIR__ . '/message_protection.php';
+require_once __DIR__ . '/retention_lifecycle.php';
 require_once __DIR__ . '/settings_registry.php';
 require_once __DIR__ . '/runtime_issue_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
@@ -1748,12 +1754,65 @@ function current_user(): ?array {
 
 function authenticate_user(int $userId): void {
     security_mark_authenticated($userId);
+    if (function_exists('retention_lifecycle_session_authorized')) {
+        unset($_SESSION['_account_session_generation']);
+        retention_lifecycle_session_authorized(db(), $userId);
+    }
 }
 
 function require_user(): array {
     $user = current_user();
     if (!$user) {
         redirect_to('/login.php');
+    }
+    if (function_exists('moderation_identity_policy_acceptance_current')
+        && !defined('CHATSPACE_POLICY_ACCEPTANCE_ROUTE')
+        && !moderation_identity_policy_acceptance_current(db(), (int)$user['id'])) {
+        $isApi = str_contains(
+            str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '')),
+            '/api/'
+        );
+        if ($isApi) {
+            json_out([
+                'error' => 'Review and accept the complete current Terms and Community Rules.',
+                'code' => 'POLICY_REACCEPTANCE_REQUIRED',
+                'policyUrl' => app_url('/policy.php'),
+            ], 428);
+        }
+        redirect_to('/policy.php');
+    }
+    if (function_exists('moderation_account_session_authorization')) {
+        $authorization = moderation_account_session_authorization(db(), (int)$user['id']);
+        if (empty($authorization['ordinaryAccessAllowed'])
+            && !defined('CHATSPACE_RESTRICTED_ACCOUNT_ROUTE')) {
+            $isApi = str_contains(
+                str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '')),
+                '/api/'
+            );
+            if ($isApi) {
+                json_out([
+                    'error' => 'Ordinary access is unavailable while this account is suspended.',
+                    'code' => 'ACCOUNT_SUSPENDED',
+                    'accountUrl' => app_url('/account.php'),
+                ], 403);
+            }
+            redirect_to('/account.php');
+        }
+    }
+    if (function_exists('retention_lifecycle_session_authorized')
+        && !retention_lifecycle_session_authorized(db(), (int)$user['id'])) {
+        security_destroy_session();
+        $isApi = str_contains(
+            str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '')),
+            '/api/'
+        );
+        if ($isApi) {
+            json_out([
+                'error' => 'This account session was revoked. Sign in again.',
+                'code' => 'ACCOUNT_SESSION_REVOKED',
+            ], 401);
+        }
+        redirect_to('/login.php?session=revoked');
     }
     return $user;
 }

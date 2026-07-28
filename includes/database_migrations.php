@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-07-26-002-historical-runtime-schema-parity';
+const CORE_MIGRATION_REQUIRED_ID = '2026-07-28-001-post-build-000051-profile-identity';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -265,7 +265,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => 'AD2433D0A0A6654057DFAE133526305DE6FE60697A3D33BE78C7B050F81BEE40',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-07-26-002-historical-runtime-schema-parity',
             'title' => 'Historical runtime schema parity',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -278,6 +278,153 @@ function database_migrations_manifest(): array
                 'database_migration_validate_historical_runtime_schema_parity',
             ],
             'expected_checksum' => 'A53527F97265CC311EB392D1064230AD6F2D81C901815EAF94690B5E62553ACA',
+        ],
+        [
+            'id' => '2026-07-27-001-build-000051-optional-core-foundations',
+            'title' => 'Build 000051 Optional-Core foundations',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000051_optional_core_foundations',
+            'validate' => 'database_migration_validate_build_000051_optional_core_foundations',
+            'source_functions' => [
+                'moderation_trust_schema_statements',
+                'moderation_trust_detect_new_install',
+                'moderation_trust_install_foundations',
+                'moderation_trust_schema_valid',
+                'database_migration_apply_build_000051_optional_core_foundations',
+                'database_migration_validate_build_000051_optional_core_foundations',
+            ],
+            'expected_checksum' => 'D8C6A16D3908D702FC5EB3DBD8D320793EDA06619623B783C6964EC6D6172620',
+        ],
+        [
+            'id' => '2026-07-27-002-build-000051-identity-policy-trust',
+            'title' => 'Build 000051 identity, policy and trust',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000051_identity_policy_trust',
+            'validate' => 'database_migration_validate_build_000051_identity_policy_trust',
+            'source_functions' => [
+                'moderation_identity_schema_statements',
+                'moderation_identity_upsert_catalog',
+                'moderation_identity_upsert_documents',
+                'moderation_identity_selected_upgrade_owner',
+                'moderation_identity_install_schema',
+                'moderation_identity_schema_valid',
+                'database_migration_apply_build_000051_identity_policy_trust',
+                'database_migration_validate_build_000051_identity_policy_trust',
+            ],
+            'expected_checksum' => 'D5328EE253A6A80C97F5B7D3F0A3A024DCAE3661B96F4D2963261C932AE5FECC',
+        ],
+        [
+            'id' => '2026-07-27-003-build-000051-account-workflows-confirmations',
+            'title' => 'Build 000051 Account workflows and outside-content confirmations',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000051_account_workflows_confirmations',
+            'validate' => 'database_migration_validate_build_000051_account_workflows_confirmations',
+            'source_functions' => [
+                'moderation_account_schema_statements',
+                'moderation_account_outside_mode_default',
+                'moderation_account_install_schema',
+                'moderation_account_schema_valid',
+                'database_migration_apply_build_000051_account_workflows_confirmations',
+                'database_migration_validate_build_000051_account_workflows_confirmations',
+            ],
+            'expected_checksum' => '5D1BD4FA9A82F62A0E33BD3D3546FEC3E7E74A49E4C6EBF87C2DCC554A8C47DF',
+        ],
+        [
+            'id' => '2026-07-27-004-build-000051-moderation-safety-evidence',
+            'title' => 'Build 000051 moderation safety and protected evidence',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000051_moderation_safety_evidence',
+            'validate' => 'database_migration_validate_build_000051_moderation_safety_evidence',
+            'source_functions' => [
+                'moderation_safety_schema_statements',
+                'moderation_safety_delivery_policy_catalog',
+                'moderation_safety_install_schema',
+                'moderation_safety_schema_valid',
+                'database_migration_apply_build_000051_moderation_safety_evidence',
+                'database_migration_validate_build_000051_moderation_safety_evidence',
+            ],
+            'expected_checksum' => '820CB798017046FA5B8674446C4A50FB80456312BB990B9A4EB13437C4D2DC98',
+        ],
+        [
+            'id' => '2026-07-27-005-build-000051-network-privacy',
+            'title' => 'Build 000051 HTTPS, trusted proxy and network privacy',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000051_network_privacy',
+            'validate' => 'database_migration_validate_build_000051_network_privacy',
+            'source_functions' => [
+                'network_privacy_schema_statements',
+                'network_privacy_install_schema',
+                'network_privacy_schema_valid',
+                'database_migration_apply_build_000051_network_privacy',
+                'database_migration_validate_build_000051_network_privacy',
+            ],
+            'expected_checksum' => '7DBA14B5E7D1C5B827D8A677DED9A05C6552871DC803C2B5B17707C91074CE0E',
+        ],
+        [
+            'id' => '2026-07-27-006-build-000051-message-protection-recovery',
+            'title' => 'Build 000051 message protection and private-chat recovery',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000051_message_protection_recovery',
+            'validate' => 'database_migration_validate_build_000051_message_protection_recovery',
+            'source_functions' => [
+                'message_protection_schema_statements',
+                'message_protection_add_message_columns',
+                'message_protection_install_schema',
+                'message_protection_schema_valid',
+                'database_migration_apply_build_000051_message_protection_recovery',
+                'database_migration_validate_build_000051_message_protection_recovery',
+            ],
+            'expected_checksum' => '80862AE4078CB3788154A5230E730F74C72DA0846C8CEA123B65A5940D13AB18',
+        ],
+        [
+            'id' => '2026-07-27-007-build-000051-retention-lifecycle-foundations',
+            'title' => 'Build 000051 retention and account-lifecycle foundations',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000051_retention_lifecycle_foundations',
+            'validate' => 'database_migration_validate_build_000051_retention_lifecycle_foundations',
+            'source_functions' => [
+                'retention_lifecycle_schema_statements',
+                'retention_lifecycle_install_schema',
+                'retention_lifecycle_schema_valid',
+                'database_migration_apply_build_000051_retention_lifecycle_foundations',
+                'database_migration_validate_build_000051_retention_lifecycle_foundations',
+            ],
+            'expected_checksum' => '46327E5E8BF2011BECF852CA900BD41C04124318E7033D7C98ACC4B8AFFF1C7A',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Post-Build 000051 profile identity and privacy',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_post_build_000051_profile_identity',
+            'validate' => 'database_migration_validate_post_build_000051_profile_identity',
+            'source_functions' => [
+                'member_profiles_public_identity_columns_present',
+                'member_profiles_generate_public_profile_id',
+                'member_profiles_ensure_public_profile_id',
+                'member_profiles_install_public_identity_schema',
+                'member_profiles_validate_public_identity_schema',
+                'member_profiles_validate_discord_username',
+                'member_profiles_validate_public_profile_id',
+                'database_migration_apply_post_build_000051_profile_identity',
+                'database_migration_validate_post_build_000051_profile_identity',
+            ],
+            'expected_checksum' => 'EDB589B6A27AFC6E54AC21102DD9DC636DF743C0E72AED38924B5C603DE47B8F',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -1104,6 +1251,86 @@ function database_migration_apply_gesture_part4(PDO $pdo): void
 function database_migration_apply_gesture_part5(PDO $pdo): void
 {
     gesture_catalog_install_part5_schema($pdo);
+}
+
+function database_migration_apply_build_000051_optional_core_foundations(PDO $pdo): void
+{
+    moderation_trust_install_foundations($pdo);
+}
+
+function database_migration_validate_build_000051_optional_core_foundations(PDO $pdo): bool
+{
+    return moderation_trust_schema_valid($pdo);
+}
+
+function database_migration_apply_build_000051_identity_policy_trust(PDO $pdo): void
+{
+    moderation_identity_install_schema($pdo);
+}
+
+function database_migration_validate_build_000051_identity_policy_trust(PDO $pdo): bool
+{
+    return moderation_identity_schema_valid($pdo);
+}
+
+function database_migration_apply_build_000051_account_workflows_confirmations(PDO $pdo): void
+{
+    moderation_account_install_schema($pdo);
+}
+
+function database_migration_validate_build_000051_account_workflows_confirmations(PDO $pdo): bool
+{
+    return moderation_account_schema_valid($pdo);
+}
+
+function database_migration_apply_build_000051_moderation_safety_evidence(PDO $pdo): void
+{
+    moderation_safety_install_schema($pdo);
+}
+
+function database_migration_validate_build_000051_moderation_safety_evidence(PDO $pdo): bool
+{
+    return moderation_safety_schema_valid($pdo);
+}
+
+function database_migration_apply_build_000051_network_privacy(PDO $pdo): void
+{
+    network_privacy_install_schema($pdo);
+}
+
+function database_migration_validate_build_000051_network_privacy(PDO $pdo): bool
+{
+    return network_privacy_schema_valid($pdo);
+}
+
+function database_migration_apply_build_000051_message_protection_recovery(PDO $pdo): void
+{
+    message_protection_install_schema($pdo);
+}
+
+function database_migration_validate_build_000051_message_protection_recovery(PDO $pdo): bool
+{
+    return message_protection_schema_valid($pdo);
+}
+
+function database_migration_apply_build_000051_retention_lifecycle_foundations(PDO $pdo): void
+{
+    retention_lifecycle_install_schema($pdo);
+}
+
+function database_migration_validate_build_000051_retention_lifecycle_foundations(PDO $pdo): bool
+{
+    return retention_lifecycle_schema_valid($pdo);
+}
+
+function database_migration_apply_post_build_000051_profile_identity(PDO $pdo): void
+{
+    member_profiles_install_public_identity_schema($pdo);
+}
+
+function database_migration_validate_post_build_000051_profile_identity(PDO $pdo): bool
+{
+    return member_profiles_validate_public_identity_schema($pdo);
 }
 
 function database_migrations_bootstrap_control_tables(PDO $pdo): void
@@ -2885,6 +3112,10 @@ function database_migrations_run(
     if (!$variant['recognized']) {
         throw new CoreMigrationException('The database schema is unknown or partially upgraded. No mutation was attempted.', 'MIGRATION_SCHEMA_UNRECOGNIZED', 409);
     }
+    $legacyIdentityPlan = member_profiles_preflight_legacy_identity_source(
+        $pdo,
+        $variant
+    );
     if ($cleanInstall && $variant['id'] !== 'empty') {
         $userCount = database_migration_table_exists($pdo, 'users') ? (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn() : 0;
         if ($userCount > 0) throw new CoreMigrationException('Clean installation cannot replace an existing database.', 'CLEAN_INSTALL_DATABASE_NOT_EMPTY', 409);
@@ -2989,6 +3220,10 @@ function database_migrations_run(
             $state = database_migration_set_phase($pdo, $state, 'migration-started', $migration['id']);
             $results[$migration['id']] = database_migration_apply_one($pdo, $migration, $attemptId, $actorUserId);
             $state = database_migration_set_phase($pdo, $state, 'migration-validated', $migration['id']);
+            if ($migration['id'] === '2026-07-19-001-core-published-baseline'
+                && $legacyIdentityPlan !== []) {
+                member_profiles_apply_legacy_identity_plan($pdo, $legacyIdentityPlan);
+            }
         }
         database_migration_write_setting($pdo, 'schema_version', CHATSPACE_SCHEMA_VERSION);
         database_migration_write_state($pdo, [

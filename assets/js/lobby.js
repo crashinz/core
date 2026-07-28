@@ -3,6 +3,7 @@
 const APP_BASE = document.body?.dataset.appBase || '';
 const CSRF_TOKEN = document.body?.dataset.csrf || '';
 const CAN_ADMIN_SETTINGS_MUTATE = document.body?.dataset.isAdmin === 'true';
+const IS_INSTALLATION_OWNER = document.body?.dataset.isInstallationOwner === 'true';
 
 function appUrl(path) {
   if (!path) return APP_BASE || '/';
@@ -224,6 +225,13 @@ function adminCreatedOn(value) {
   if (!date) return 'Unknown';
   const absolute = date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   return `${absolute} <span>${esc(relativeTimeLabel(date))}</span>`;
+}
+
+function adminCreatedOnText(value) {
+  const date = parseServerDate(value);
+  if (!date) return 'Unknown';
+  const absolute = date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  return `${absolute} (${relativeTimeLabel(date)})`;
 }
 
 function setLobbyRoomPreview(path, mime = '') {
@@ -757,6 +765,10 @@ recoveryGenerate?.addEventListener('click', async () => {
 
 const adminModal = document.getElementById('admin-modal');
 const adminUsers = document.getElementById('admin-users');
+const adminModerationCases = document.getElementById('admin-moderation-cases');
+const adminModerationUsers = document.getElementById('admin-moderation-users');
+const adminModerationSearch = document.getElementById('admin-moderation-user-search');
+let adminModerationPage = 1;
 const adminToolLogs = document.getElementById('admin-tool-logs');
 const adminBlocks = document.getElementById('admin-blocks');
 const adminRoomEjections = document.getElementById('admin-room-ejections');
@@ -767,12 +779,32 @@ let adminSettingsRegistryUI = null;
 let adminSettingsUnlock = null;
 let adminProfileLimitConfirmation = null;
 let adminDatabaseCompatibilityConfirmation = null;
+let adminModerationTrustConfirmation = null;
+let adminRetentionConfirmation = null;
+let adminOwnerTransferConfirmation = null;
+let adminInstallationOwner = null;
+const adminOwnerTransferForm = document.getElementById('admin-owner-transfer-form');
+const adminNetworkPolicyForm = document.getElementById('admin-network-policy-form');
+const adminNetworkTrustedProxies = document.getElementById('admin-network-trusted-proxies');
+const adminNetworkRevealOutput = document.getElementById('admin-network-reveal-output');
+let adminNetworkPolicy = null;
+let adminNetworkTrustedProxiesDirty = false;
 const adminGestureCatalog = document.getElementById('admin-gesture-catalog');
 const adminGesturePager = document.getElementById('admin-gesture-pager');
 const adminGestureStatus = document.getElementById('admin-gesture-status');
 const adminGestureSearch = document.getElementById('admin-gesture-search');
 const adminGestureSort = document.getElementById('admin-gesture-sort');
-const adminGestureState = { page: 1, pages: 1, total: 0, loading: false, request: 0, features: {} };
+const adminGestureState = {
+  page: 1,
+  pages: 1,
+  total: 0,
+  loading: false,
+  request: 0,
+  features: {},
+  query: '',
+  sort: 'last_uploaded',
+  dirtyRows: new Set(),
+};
 let adminGestureSearchTimer = 0;
 const adminGestureChannel = typeof BroadcastChannel === 'function'
   ? new BroadcastChannel('chatspace-gesture-catalog')
@@ -816,6 +848,10 @@ function setAdminFormStatus(form, message, type = '') {
 }
 
 function showAdminSection(id) {
+  const active = document.querySelector('.admin-section.active')?.id || '';
+  const leavingGestures = active === 'admin-section-gestures' && id !== 'gestures';
+  if (leavingGestures && !confirmAdminGestureDiscard(`Opening the ${id} Admin section`)) return false;
+  if (leavingGestures) clearAdminGestureDirtyState();
   document.querySelectorAll('.admin-section').forEach(section => {
     section.classList.toggle('active', section.id === `admin-section-${id}`);
   });
@@ -823,6 +859,7 @@ function showAdminSection(id) {
     btn.classList.toggle('active', btn.dataset.adminSection === id);
   });
   if (id === 'gestures') loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture catalog could not be loaded.', 'error'));
+  return true;
 }
 
 document.addEventListener('click', e => {
@@ -866,6 +903,234 @@ async function adminSystemRequest(body) {
   return data;
 }
 
+async function adminNetworkRequest(body = null) {
+  const options = { cache: 'no-store' };
+  if (body !== null) {
+    options.method = 'POST';
+    options.headers = { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN };
+    options.body = JSON.stringify({ ...body, _csrf: CSRF_TOKEN });
+  }
+  const response = await fetch(appUrl('/api/admin_network.php'), options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    const error = new Error(data.error || 'Network privacy request failed.');
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+function setAdminNetworkStatus(message, type = '') {
+  const status = document.getElementById('admin-network-policy-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.className = `admin-form-status ${type}`.trim();
+}
+
+function renderAdminNetworkPolicy(data) {
+  adminNetworkPolicy = data.policy || adminNetworkPolicy;
+  if (!adminNetworkPolicy) return;
+  const hsts = document.getElementById('admin-network-hsts');
+  const exact = document.getElementById('admin-network-exact-enabled');
+  const defaultMinutes = document.getElementById('admin-network-reveal-default');
+  const revealMinutes = document.getElementById('admin-network-reveal-minutes');
+  const opaque = document.getElementById('admin-network-opaque-id');
+  if (hsts) hsts.checked = Boolean(adminNetworkPolicy.hstsDeploymentVerified);
+  if (exact) exact.checked = Boolean(adminNetworkPolicy.exactIpAccessEnabled);
+  if (defaultMinutes) defaultMinutes.value = String(adminNetworkPolicy.defaultRevealMinutes || 5);
+  if (revealMinutes) revealMinutes.value = String(adminNetworkPolicy.defaultRevealMinutes || 5);
+  if (opaque && data.currentNetworkIdentifier) opaque.value = data.currentNetworkIdentifier;
+  const current = document.getElementById('admin-network-trusted-proxies-current');
+  if (current) {
+    const masked = adminNetworkPolicy.trustedProxiesMasked || [];
+    current.textContent = masked.length
+      ? `Saved privately: ${masked.join(', ')}. Enter a complete replacement list only when changing it.`
+      : 'No trusted proxies are configured.';
+  }
+  if (adminNetworkTrustedProxies) adminNetworkTrustedProxies.value = '';
+  adminNetworkTrustedProxiesDirty = false;
+}
+
+async function loadAdminNetworkPolicy() {
+  if (!IS_INSTALLATION_OWNER || !adminNetworkPolicyForm) return;
+  const data = await adminNetworkRequest();
+  renderAdminNetworkPolicy(data);
+}
+
+async function adminRetentionRequest(payload) {
+  const response = await fetch(appUrl('/api/admin_retention.php'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+    body: JSON.stringify({ ...payload, _csrf: CSRF_TOKEN }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) throw new Error(data.error || 'Retention request failed.');
+  return data;
+}
+
+async function adminRetentionProjection() {
+  const response = await fetch(appUrl('/api/admin_retention.php'), { cache: 'no-store' });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) throw new Error(data.error || 'Retention policy could not load.');
+  return data;
+}
+
+function renderAdminRetention(data) {
+  const retention = data.retention || {};
+  const list = document.getElementById('admin-retention-policies');
+  if (list) {
+    list.innerHTML = (retention.policies || []).map(policy => `
+      <article class="admin-user-row">
+        <strong>${esc(policy.domain)}</strong>
+        <span>${policy.keepForever ? 'Keep forever' : `${Number(policy.days)} days`}</span>
+        <small>Revision ${Number(policy.revision || 1)}</small>
+      </article>`).join('');
+  }
+  const disclosure = document.getElementById('admin-retention-backup-disclosure');
+  if (disclosure) disclosure.textContent = retention.backupDisclosure || '';
+}
+
+async function loadAdminRetention() {
+  const panel = document.getElementById('admin-retention-panel');
+  if (!panel) return;
+  const data = await adminRetentionProjection();
+  renderAdminRetention(data);
+}
+
+document.getElementById('admin-retention-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.getElementById('admin-retention-status');
+  const confirmation = document.getElementById('admin-retention-confirmation');
+  try {
+    status.textContent = 'Calculating bounded preview...';
+    const payload = {
+      action: 'preview',
+      domain: form.elements.domain.value,
+      days: Number(form.elements.days.value),
+      keepForever: form.elements.keep_forever.checked,
+    };
+    const result = await adminRetentionRequest(payload);
+    adminRetentionConfirmation = {
+      ...payload,
+      expectedRevision: Number((await adminRetentionProjection()).retention.policies
+        .find(policy => policy.domain === payload.domain)?.revision || 0),
+      preview: result.preview,
+    };
+    document.getElementById('admin-retention-preview').textContent =
+      `${result.preview.estimatedEligibleItems} currently eligible items. `
+      + `${result.preview.keepForever ? 'Future expiry will be disabled.' : `New retention: ${result.preview.days} days.`}`;
+    confirmation.hidden = false;
+    status.textContent = 'Review the exact estimate and backup disclosure before confirming.';
+    document.getElementById('admin-retention-confirm')?.focus();
+  } catch (error) {
+    status.textContent = error.message || 'Retention preview failed.';
+    confirmation.hidden = true;
+    adminRetentionConfirmation = null;
+  }
+});
+
+document.getElementById('admin-retention-confirm')?.addEventListener('click', async () => {
+  if (!adminRetentionConfirmation) return;
+  const status = document.getElementById('admin-retention-status');
+  try {
+    let result = await adminRetentionRequest({
+      action: 'request_change',
+      requestId: crypto.randomUUID(),
+      domain: adminRetentionConfirmation.domain,
+      days: adminRetentionConfirmation.days,
+      keepForever: adminRetentionConfirmation.keepForever,
+      expectedRevision: adminRetentionConfirmation.expectedRevision,
+      confirmed: true,
+    });
+    let request = result.request;
+    while (['preparing', 'running', 'interrupted'].includes(request.status)) {
+      result = await adminRetentionRequest({
+        action: 'continue',
+        requestId: request.requestId,
+        batchSize: 100,
+      });
+      request = result.request;
+    }
+    status.textContent = `Retention change complete. ${request.deletedMessages || 0} messages and ${request.deletedEvidence || 0} evidence items expired.`;
+    document.getElementById('admin-retention-confirmation').hidden = true;
+    adminRetentionConfirmation = null;
+    await Promise.all([loadAdminRetention(), loadAdminLogs()]);
+  } catch (error) {
+    status.textContent = error.message || 'Retention change failed safely.';
+  }
+});
+
+document.getElementById('admin-retention-cancel')?.addEventListener('click', () => {
+  adminRetentionConfirmation = null;
+  document.getElementById('admin-retention-confirmation').hidden = true;
+  document.getElementById('admin-retention-status').textContent = 'Retention change canceled before mutation.';
+});
+
+adminNetworkTrustedProxies?.addEventListener('input', () => {
+  adminNetworkTrustedProxiesDirty = true;
+});
+
+adminNetworkPolicyForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!IS_INSTALLATION_OWNER || !adminSettingsUnlock?.requireUnlocked()) return;
+  const payload = {
+    action: 'update_policy',
+    expectedRevision: Number(adminNetworkPolicy?.revision || 0),
+    hstsDeploymentVerified: Boolean(document.getElementById('admin-network-hsts')?.checked),
+    exactIpAccessEnabled: Boolean(document.getElementById('admin-network-exact-enabled')?.checked),
+    defaultRevealMinutes: Number(document.getElementById('admin-network-reveal-default')?.value || 5),
+  };
+  if (adminNetworkTrustedProxiesDirty) {
+    payload.trustedProxies = String(adminNetworkTrustedProxies?.value || '')
+      .split(/\r?\n/)
+      .map(value => value.trim())
+      .filter(Boolean);
+  }
+  setAdminNetworkStatus('Saving private network policy...', 'working');
+  try {
+    const data = await adminNetworkRequest(payload);
+    renderAdminNetworkPolicy(data);
+    setAdminNetworkStatus('Network policy saved. Stored proxy values are masked.', 'ok');
+    await loadAdminLogs();
+  } catch (error) {
+    setAdminNetworkStatus(error.message || 'Network policy could not be saved.', 'error');
+  }
+});
+
+document.getElementById('admin-network-reveal')?.addEventListener('click', async () => {
+  if (!IS_INSTALLATION_OWNER || !adminSettingsUnlock?.requireUnlocked()) return;
+  const button = document.getElementById('admin-network-reveal');
+  button.disabled = true;
+  try {
+    const data = await adminNetworkRequest({
+      action: 'reveal',
+      opaqueId: document.getElementById('admin-network-opaque-id')?.value || '',
+      reason: document.getElementById('admin-network-reveal-reason')?.value || '',
+      durationMinutes: Number(document.getElementById('admin-network-reveal-minutes')?.value || 5),
+    });
+    const reveal = data.reveal || {};
+    adminNetworkRevealOutput.textContent = `${reveal.opaqueId}: ${reveal.exactIp}; hides at ${reveal.expiresAt} UTC. This lease cannot be extended.`;
+    await loadAdminLogs();
+  } catch (error) {
+    adminNetworkRevealOutput.textContent = error.message || 'Exact IP could not be revealed.';
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById('admin-network-hide')?.addEventListener('click', async () => {
+  if (!IS_INSTALLATION_OWNER || !adminSettingsUnlock?.requireUnlocked()) return;
+  try {
+    await adminNetworkRequest({ action: 'hide' });
+    adminNetworkRevealOutput.textContent = 'Exact IP hidden.';
+    document.getElementById('admin-network-reveal-reason').value = '';
+    await loadAdminLogs();
+  } catch (error) {
+    adminNetworkRevealOutput.textContent = error.message || 'Exact IP could not be hidden.';
+  }
+});
+
 async function uploadPrivateSiteBrandingAsset(entry, file) {
   if (!adminSettingsUnlock?.requireUnlocked()) return;
   try {
@@ -906,19 +1171,39 @@ async function loadAdminUsers() {
   adminUsers.innerHTML = '';
   setAdminCount(adminCounts.users, (data.users || []).length);
   setAdminCount(adminCounts.summaryUsers, (data.users || []).length);
+  adminInstallationOwner = data.installationOwner || null;
+  if (adminOwnerTransferForm) {
+    const current = document.getElementById('admin-owner-current');
+    if (current) {
+      current.textContent = adminInstallationOwner
+        ? `Current Installation Owner: ${adminInstallationOwner.displayName} (@${adminInstallationOwner.username}), revision ${Number(adminInstallationOwner.revision || 1)}.`
+        : 'Installation Owner details are unavailable to this account.';
+    }
+    const select = adminOwnerTransferForm.elements.new_owner_id;
+    const candidates = (data.users || []).filter(user =>
+      user.role === 'admin' && Number(user.id) !== Number(adminInstallationOwner?.userId || 0)
+    );
+    select.innerHTML = candidates.length
+      ? `<option value="">Choose an Administrator</option>${candidates.map(user =>
+          `<option value="${Number(user.id)}">${esc(user.display_name)} (@${esc(user.username)})</option>`
+        ).join('')}`
+      : '<option value="">No other Administrator is available</option>';
+    select.disabled = !candidates.length;
+  }
   (data.users || []).forEach(user => {
     const row = document.createElement('form');
     row.className = 'admin-user-row';
-    row.innerHTML = `<div><strong>${esc(user.display_name)}</strong><div class="minor">@${esc(user.username || '')} | ${esc(user.email)}</div><div class="admin-created-meta"><span>Created On</span><strong>${adminCreatedOn(user.created_at)}</strong></div></div>
+    row.innerHTML = `<div><strong>${esc(user.display_name)}</strong><div class="minor">@${esc(user.username || '')} | ${esc(user.email)}</div><div class="minor">Trust: ${esc(user.trust_state || 'pending-approval')}</div><div class="admin-created-meta"><span>Created On</span><strong>${adminCreatedOn(user.created_at)}</strong></div></div>
       <select name="role">
         <option value="user">User</option>
+        <option value="moderator">Moderator</option>
         <option value="guide">Guide</option>
         <option value="developer">Developer</option>
         <option value="admin">Admin</option>
       </select>
       <input name="password" type="password" placeholder="New password">
       <button class="btn btn-primary" type="submit">Save</button>
-      <button class="btn btn-danger" type="button">Delete</button>
+      <button class="btn" type="button" disabled title="Use Moderation Actions for non-destructive suspension. Build 000053 owns Delete Account.">Delete unavailable</button>
       <div class="admin-row-status" aria-live="polite"></div>`;
     row.querySelector('select').value = user.role || 'user';
     row.addEventListener('submit', async e => {
@@ -937,14 +1222,191 @@ async function loadAdminUsers() {
         saveBtn.disabled = false;
       }
     });
-    row.querySelector('.btn-danger').addEventListener('click', async () => {
-      if (!confirm(`Delete ${user.display_name}?`)) return;
-      await adminRequest({ action: 'delete', id: user.id });
-      await loadAdminUsers();
-    });
     adminUsers.appendChild(row);
   });
+  if (adminModerationCases) {
+    adminModerationCases.innerHTML = '';
+    (data.moderationCases || []).forEach(item => {
+      const row = document.createElement('form');
+      row.className = 'admin-user-row';
+      const itemControls = (item.items || []).map(part => `
+        <label><input type="checkbox" name="case_item" value="${esc(part.item_key)}"> ${esc(part.item_key)} (${esc(part.status)})</label>
+        <select data-case-item="${esc(part.item_key)}">
+          <option value="">No decision</option>
+          <option value="approved">Approve selected</option>
+          <option value="denied">Deny selected</option>
+          <option value="modified">Modify selected</option>
+          <option value="closed">Close selected</option>
+        </select>`).join('');
+      row.innerHTML = `<div><strong>${esc(item.case_type)} — ${esc(item.display_name || item.username)}</strong>
+          <div class="minor">Reference ${esc(item.public_id)}; ${esc(item.status)}; revision ${Number(item.revision || 1)}</div>
+          ${itemControls}
+        </div>
+        <select name="status">
+          <option value="under-review">Under Review</option>
+          <option value="approved">Approved</option>
+          <option value="denied">Denied</option>
+          <option value="modified">Modified</option>
+          <option value="closed">Closed</option>
+        </select>
+        <input name="public_reason" maxlength="500" placeholder="Public reason">
+        <textarea name="internal_note" maxlength="2000" placeholder="Private internal note"></textarea>
+        <button class="btn btn-primary" type="submit">Record Decision</button>
+        <div class="admin-row-status" aria-live="polite"></div>`;
+      row.addEventListener('submit', async event => {
+        event.preventDefault();
+        const decisions = {};
+        row.querySelectorAll('[data-case-item]').forEach(select => {
+          const selected = row.querySelector(`input[name="case_item"][value="${CSS.escape(select.dataset.caseItem)}"]`)?.checked;
+          if (selected && select.value) decisions[select.dataset.caseItem] = select.value;
+        });
+        try {
+          setAdminFormStatus(row, 'Saving decision...', 'working');
+          await adminRequest({
+            action: 'decide_moderation_case',
+            case_public_id: item.public_id,
+            expected_revision: Number(item.revision || 1),
+            request_id: globalThis.crypto?.randomUUID?.() || `case-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            status: row.elements.status.value,
+            public_reason: row.elements.public_reason.value,
+            internal_note: row.elements.internal_note.value,
+            item_decisions: decisions,
+          });
+          await loadAdminUsers();
+          await loadAdminLogs();
+        } catch (error) {
+          setAdminFormStatus(row, error.message || 'Decision failed.', 'error');
+        }
+      });
+      adminModerationCases.appendChild(row);
+    });
+    if (!(data.moderationCases || []).length) {
+      adminModerationCases.innerHTML = '<p class="minor">No active Trusted Review, capability request, or appeal cases.</p>';
+    }
+  }
 }
+
+adminOwnerTransferForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  const status = document.getElementById('admin-owner-transfer-status');
+  const confirmation = document.getElementById('admin-owner-transfer-confirmation');
+  const target = adminOwnerTransferForm.elements.new_owner_id.selectedOptions[0];
+  const newOwnerId = Number(adminOwnerTransferForm.elements.new_owner_id.value || 0);
+  const reason = String(adminOwnerTransferForm.elements.reason.value || '').trim();
+  if (!adminInstallationOwner || !newOwnerId || reason.length < 3) {
+    status.textContent = 'Choose another Administrator and enter a reviewable reason.';
+    confirmation.hidden = true;
+    adminOwnerTransferConfirmation = null;
+    return;
+  }
+  adminOwnerTransferConfirmation = {
+    newOwnerId,
+    expectedRevision: Number(adminInstallationOwner.revision || 0),
+    reason,
+  };
+  document.getElementById('admin-owner-transfer-preview').textContent =
+    `Transfer Installation Owner authority from ${adminInstallationOwner.displayName} (@${adminInstallationOwner.username}) to ${target.textContent}. The transfer is atomic and both accounts remain Administrators.`;
+  confirmation.hidden = false;
+  status.textContent = 'Review the exact ownership transfer before confirming.';
+  document.getElementById('admin-owner-transfer-confirm')?.focus();
+});
+
+document.getElementById('admin-owner-transfer-confirm')?.addEventListener('click', async () => {
+  if (!adminOwnerTransferConfirmation) return;
+  const status = document.getElementById('admin-owner-transfer-status');
+  try {
+    status.textContent = 'Transferring Installation Owner authority atomically...';
+    await adminRequest({
+      action: 'transfer_installation_owner',
+      request_id: globalThis.crypto?.randomUUID?.() || `owner-transfer-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      new_owner_id: adminOwnerTransferConfirmation.newOwnerId,
+      expected_revision: adminOwnerTransferConfirmation.expectedRevision,
+      reason: adminOwnerTransferConfirmation.reason,
+      confirmed: true,
+    });
+    adminOwnerTransferConfirmation = null;
+    document.getElementById('admin-owner-transfer-confirmation').hidden = true;
+    status.textContent = 'Installation Owner authority transferred. This account no longer has owner-only access.';
+    await Promise.all([loadAdminUsers(), loadAdminLogs()]);
+  } catch (error) {
+    status.textContent = error.message || 'Ownership transfer failed safely.';
+  }
+});
+
+document.getElementById('admin-owner-transfer-cancel')?.addEventListener('click', () => {
+  adminOwnerTransferConfirmation = null;
+  document.getElementById('admin-owner-transfer-confirmation').hidden = true;
+  document.getElementById('admin-owner-transfer-status').textContent =
+    'Ownership transfer canceled before mutation.';
+});
+
+async function loadAdminModerationUsers() {
+  if (!adminModerationUsers || !adminModerationSearch) return;
+  const params = new URLSearchParams({
+    view: 'users',
+    search: adminModerationSearch.elements.search.value,
+    sort: adminModerationSearch.elements.sort.value,
+    page: String(adminModerationPage),
+    per_page: adminModerationSearch.elements.per_page.value,
+  });
+  const response = await fetch(appUrl(`/api/moderation.php?${params}`));
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    adminModerationUsers.innerHTML = `<p class="minor">${esc(data.error || 'Moderation users are unavailable.')}</p>`;
+    return;
+  }
+  document.getElementById('admin-moderation-page').textContent = `Page ${data.page} of ${Math.max(1, Math.ceil(data.total / data.perPage))}`;
+  document.getElementById('admin-moderation-prev').disabled = data.page <= 1;
+  document.getElementById('admin-moderation-next').disabled = data.page * data.perPage >= data.total;
+  adminModerationUsers.innerHTML = '';
+  (data.users || []).forEach(target => {
+    const row = document.createElement('form');
+    row.className = 'admin-user-row';
+    row.innerHTML = `<div><strong>${esc(target.display_name || target.username)}</strong><small>@${esc(target.username)}; ${target.online ? 'Online' : 'Offline'}; ${esc(target.trust_state)}</small></div>
+      <select name="action_type"><option value="warn">Warn</option><option value="temporarily-restrict">Temporarily Restrict</option><option value="suspend-account">Suspend Account</option><option value="undo-eligible-restriction">Undo Eligible Restriction</option></select>
+      <select name="duration"><option value="60">1 hour</option><option value="1440">24 hours</option><option value="10080">7 days</option><option value="43200">30 days</option><option value="indefinite">Indefinite suspension</option></select>
+      <input name="public_reason" maxlength="500" placeholder="Required public reason">
+      <textarea name="internal_note" maxlength="2000" placeholder="Optional private internal note"></textarea>
+      <button class="btn btn-primary" type="submit">Open Moderation Action</button>
+      <div class="admin-row-status" aria-live="polite"></div>`;
+    row.addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        setAdminFormStatus(row, 'Applying moderation action...', 'working');
+        await lobbyApiPost('/api/moderation.php', {
+          action: 'moderate',
+          action_type: row.elements.action_type.value,
+          target_user_id: Number(target.id),
+          expected_revision: Number(target.trust_revision || 1),
+          duration: row.elements.duration.value,
+          public_reason: row.elements.public_reason.value,
+          internal_note: row.elements.internal_note.value,
+          request_id: globalThis.crypto?.randomUUID?.() || `moderate-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        });
+        setAdminFormStatus(row, 'Action applied.', 'ok');
+        await loadAdminModerationUsers();
+        await loadAdminLogs();
+      } catch (error) {
+        setAdminFormStatus(row, error.message || 'Moderation action failed.', 'error');
+      }
+    });
+    adminModerationUsers.appendChild(row);
+  });
+}
+
+adminModerationSearch?.addEventListener('submit', event => {
+  event.preventDefault();
+  adminModerationPage = 1;
+  loadAdminModerationUsers();
+});
+document.getElementById('admin-moderation-prev')?.addEventListener('click', () => {
+  adminModerationPage = Math.max(1, adminModerationPage - 1);
+  loadAdminModerationUsers();
+});
+document.getElementById('admin-moderation-next')?.addEventListener('click', () => {
+  adminModerationPage += 1;
+  loadAdminModerationUsers();
+});
 
 async function loadAdminSettings() {
   if (!adminSettings) return;
@@ -959,7 +1421,6 @@ async function loadAdminSettings() {
       authorized: CAN_ADMIN_SETTINGS_MUTATE,
       onLockChange: locked => {
         adminSettingsRegistryUI?.setLocked(locked);
-        if (locked && adminSettingsRegistryUI?.registry) adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
         syncLobbyAdminSettingsMutationLocks();
       },
     });
@@ -1029,6 +1490,10 @@ function renderAdminGestureFeatureSummary() {
   if (adminGestureSearch) adminGestureSearch.disabled = !enabled;
   if (adminGestureSort) adminGestureSort.disabled = !enabled;
   if (!enabled && adminGestureCatalog) {
+    if (hasDirtyAdminGestures()) {
+      setAdminGestureStatus('The Admin gesture catalog was disabled elsewhere. Unsaved row drafts remain visible until you confirm a refresh or leave this section.', 'error');
+      return;
+    }
     adminGestureCatalog.replaceChildren();
     adminGesturePager?.replaceChildren();
     setAdminCount(document.getElementById('admin-gesture-count'), 0);
@@ -1042,16 +1507,60 @@ function setAdminGestureStatus(message, type = '') {
   adminGestureStatus.className = `minor ${type}`.trim();
 }
 
-function adminGestureCell(role, text, className = '') {
+function hasDirtyAdminGestures() {
+  return adminGestureState.dirtyRows.size > 0;
+}
+
+function confirmAdminGestureDiscard(reason) {
+  if (!hasDirtyAdminGestures()) return true;
+  const count = adminGestureState.dirtyRows.size;
+  return window.confirm(
+    `${count} Server Gesture row${count === 1 ? ' has' : 's have'} unsaved changes. `
+    + `${reason} will discard them. Continue?`
+  );
+}
+
+function clearAdminGestureDirtyState() {
+  adminGestureState.dirtyRows.clear();
+}
+
+function setAdminGestureRowResult(row, message, type = '') {
+  const target = row?.querySelector?.('.admin-gesture-row-status');
+  if (!target) return;
+  target.textContent = message || '';
+  target.className = `admin-gesture-row-status ${type}`.trim();
+}
+
+function refreshAdminGestureRowDirtyState(row) {
+  if (!row) return false;
+  const dirty = [...row.querySelectorAll('[data-gesture-field]')]
+    .some(control => control.value !== control.defaultValue);
+  const publicId = String(row.dataset.gesturePublicId || '');
+  if (dirty) adminGestureState.dirtyRows.add(publicId);
+  else adminGestureState.dirtyRows.delete(publicId);
+  row.classList.toggle('dirty', dirty);
+  row.querySelector('[data-admin-gesture-save]')?.toggleAttribute('disabled', !dirty);
+  if (dirty) {
+    if (!['conflict', 'error', 'saving'].includes(row.dataset.resultState || '')) {
+      setAdminGestureRowResult(row, 'Unsaved changes.', 'dirty');
+    }
+  } else if (row.dataset.resultState !== 'success') {
+    setAdminGestureRowResult(row, 'No unsaved changes.');
+  }
+  return dirty;
+}
+
+function adminGestureCell(role, text, className = '', label = '') {
   const cell = document.createElement('div');
   cell.setAttribute('role', role);
   if (className) cell.className = className;
+  if (label) cell.dataset.label = label;
   cell.textContent = String(text ?? '');
   return cell;
 }
 
 function adminGestureEditorCell(item, field, label, multiline = false) {
-  const cell = adminGestureCell('cell', '', 'admin-gesture-editor-cell');
+  const cell = adminGestureCell('cell', '', 'admin-gesture-editor-cell', label);
   const control = document.createElement(multiline ? 'textarea' : 'input');
   if (!multiline) control.type = 'text';
   control.maxLength = field === 'text' ? 180 : 120;
@@ -1059,18 +1568,36 @@ function adminGestureEditorCell(item, field, label, multiline = false) {
   control.defaultValue = control.value;
   control.dataset.gestureField = field;
   control.setAttribute('aria-label', `${label} for ${item.catalog_filename}`);
+  control.addEventListener('input', () => {
+    const row = control.closest('.admin-gesture-row');
+    if (row) {
+      row.dataset.resultState = '';
+      refreshAdminGestureRowDirtyState(row);
+    }
+  });
+  control.addEventListener('invalid', () => {
+    setAdminGestureRowResult(
+      control.closest('.admin-gesture-row'),
+      `${label} is invalid; review the highlighted field.`,
+      'error'
+    );
+  });
   cell.appendChild(control);
   return cell;
 }
 
 function adminGesturePackageCell(item) {
   const media = Object.keys(item.package?.media || {});
-  const cell = adminGestureCell('cell', '', 'admin-gesture-package');
+  const cell = adminGestureCell('cell', '', 'admin-gesture-package', 'Package');
   const status = document.createElement('strong');
   status.textContent = `${item.package_status || item.package?.status || 'unknown'} · v${Number(item.package_version || item.package?.version || 0)} · generation ${Number(item.package_generation || item.package?.generation || 0)}`;
   const compatibility = document.createElement('span');
   compatibility.textContent = `${item.package?.compatibility || (item.legacy_metadata ? 'legacy' : 'native')} · ${media.length ? media.join(', ') : 'no media summary'}`;
-  cell.append(status, compatibility);
+  const original = document.createElement('span');
+  original.textContent = `Original package: ${item.original_filename || 'unknown'}`;
+  const identity = document.createElement('span');
+  identity.textContent = `Stable ID: ${item.public_id || 'unknown'}`;
+  cell.append(status, compatibility, original, identity);
   return cell;
 }
 
@@ -1084,32 +1611,62 @@ async function adminGestureRequest(body) {
   if (!response.ok || data.error) {
     const error = new Error(data.error || 'Admin gesture update failed.');
     error.code = data.error_code || '';
+    error.authoritative = data.authoritative || null;
     throw error;
   }
   return data;
 }
 
 async function saveAdminGestureRow(row, item, button) {
+  if (!refreshAdminGestureRowDirtyState(row)) return;
   const changes = {};
   row.querySelectorAll('[data-gesture-field]').forEach(control => { changes[control.dataset.gestureField] = control.value; });
   button.disabled = true;
+  row.classList.add('saving');
+  row.dataset.resultState = 'saving';
+  setAdminGestureRowResult(row, 'Saving changes…', 'working');
   setAdminGestureStatus(`Saving ${item.catalog_filename}…`, 'working');
   try {
-    await adminGestureRequest({
+    const result = await adminGestureRequest({
       action: 'update_metadata',
       public_id: item.public_id,
       expected_version: Number(row.dataset.gestureVersion),
       request_key: `gesture-admin-metadata-${Date.now().toString(36)}-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`,
       changes,
     });
+    const saved = result.gesture || {};
+    row.dataset.gestureVersion = String(saved.version ?? (Number(row.dataset.gestureVersion) + 1));
+    row.querySelectorAll('[data-gesture-field]').forEach(control => {
+      const savedValue = String(saved[control.dataset.gestureField] ?? control.value);
+      control.value = savedValue;
+      control.defaultValue = savedValue;
+    });
+    adminGestureState.dirtyRows.delete(String(item.public_id));
+    row.classList.remove('dirty', 'conflict');
+    row.classList.add('success');
+    row.dataset.resultState = 'success';
+    setAdminGestureRowResult(row, 'Saved. Publication, ownership, and upload provenance were unchanged.', 'success');
     adminGestureChannel?.postMessage({ type: 'gesture-saved', gesturePublicId: item.public_id });
-    await loadAdminGestures();
     setAdminGestureStatus('Server Gesture metadata saved without changing publication or ownership.', 'ok');
   } catch (error) {
-    if (error.code === 'GESTURE_VERSION_CONFLICT') await loadAdminGestures().catch(() => {});
-    setAdminGestureStatus(error.code === 'GESTURE_VERSION_CONFLICT' ? 'This gesture changed elsewhere. The authoritative row was refreshed; review before saving again.' : error.message, 'error');
+    row.classList.remove('success');
+    row.classList.toggle('conflict', error.code === 'GESTURE_VERSION_CONFLICT');
+    row.dataset.resultState = error.code === 'GESTURE_VERSION_CONFLICT' ? 'conflict' : 'error';
+    if (error.code === 'GESTURE_VERSION_CONFLICT') {
+      const review = row.querySelector('[data-admin-gesture-review]');
+      if (review) {
+        review.hidden = false;
+        review.dataset.authoritativeVersion = String(error.authoritative?.version ?? '');
+      }
+      setAdminGestureRowResult(row, 'Conflict: this draft is preserved. Review the latest authoritative row before retrying.', 'conflict');
+      setAdminGestureStatus('This gesture changed elsewhere. Your local draft was preserved for review and was not overwritten.', 'error');
+    } else {
+      setAdminGestureRowResult(row, `Not saved: ${error.message}`, 'error');
+      setAdminGestureStatus(error.message, 'error');
+    }
   } finally {
-    button.disabled = false;
+    row.classList.remove('saving');
+    button.disabled = !refreshAdminGestureRowDirtyState(row);
   }
 }
 
@@ -1121,6 +1678,7 @@ function openAdminGestureEditor(item) {
 
 function renderAdminGestureCatalog(data) {
   if (!adminGestureCatalog || !adminGesturePager) return;
+  clearAdminGestureDirtyState();
   adminGestureCatalog.replaceChildren();
   const header = document.createElement('div');
   header.className = 'admin-gesture-row admin-gesture-header';
@@ -1129,7 +1687,8 @@ function renderAdminGestureCatalog(data) {
     adminGestureCell('columnheader', 'File name'),
     adminGestureCell('columnheader', 'Title'),
     adminGestureCell('columnheader', 'Gesture text'),
-    adminGestureCell('columnheader', 'Creator / uploaded by'),
+    adminGestureCell('columnheader', 'Creator credit'),
+    adminGestureCell('columnheader', 'Uploaded by'),
     adminGestureCell('columnheader', 'Package'),
     adminGestureCell('columnheader', 'Actions')
   );
@@ -1140,13 +1699,20 @@ function renderAdminGestureCatalog(data) {
     row.setAttribute('role', 'row');
     row.dataset.gesturePublicId = item.public_id;
     row.dataset.gestureVersion = String(item.version);
-    const provenance = adminGestureEditorCell(item, 'creator_credit', 'Creator credit');
-    const uploaded = document.createElement('small');
-    uploaded.textContent = `Uploaded by ${item.uploaded_by || 'unknown'} · ${adminCreatedOn(item.last_uploaded_at)}`;
-    provenance.appendChild(uploaded);
-    const actions = adminGestureCell('cell', '', 'admin-gesture-actions');
+    row.dataset.resultState = '';
+    const uploaded = adminGestureCell(
+      'cell',
+      `Uploaded by ${item.uploaded_by || 'unknown'} · ${adminCreatedOnText(item.last_uploaded_at)}`,
+      'admin-gesture-uploaded',
+      'Uploaded by'
+    );
+    const actions = adminGestureCell('cell', '', 'admin-gesture-actions', 'Actions');
     const save = document.createElement('button');
-    save.type = 'button'; save.className = 'btn btn-primary'; save.textContent = 'Save';
+    save.type = 'button';
+    save.className = 'btn btn-primary';
+    save.textContent = 'Save Gesture';
+    save.dataset.adminGestureSave = '';
+    save.disabled = true;
     save.addEventListener('click', () => saveAdminGestureRow(row, item, save));
     const manage = document.createElement('button');
     manage.type = 'button'; manage.className = 'btn'; manage.textContent = 'Manage package';
@@ -1157,12 +1723,27 @@ function renderAdminGestureCatalog(data) {
     download.setAttribute('role', 'button');
     if (adminGestureState.features.admin_package_inspection === false) download.setAttribute('aria-disabled', 'true');
     else download.href = appUrl(`/api/gesture_packages.php?action=download&admin=1&id=${encodeURIComponent(item.public_id)}&request_id=admin-${Date.now().toString(36)}`);
-    actions.append(save, manage, download);
+    const review = document.createElement('button');
+    review.type = 'button';
+    review.className = 'btn';
+    review.textContent = 'Review latest';
+    review.dataset.adminGestureReview = '';
+    review.hidden = true;
+    review.addEventListener('click', () => {
+      if (!confirmAdminGestureDiscard('Reviewing the latest authoritative row')) return;
+      loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message, 'error'));
+    });
+    const status = document.createElement('p');
+    status.className = 'admin-gesture-row-status';
+    status.setAttribute('aria-live', 'polite');
+    status.textContent = 'No unsaved changes.';
+    actions.append(save, review, manage, download, status);
     row.append(
       adminGestureEditorCell(item, 'catalog_filename', 'Safe catalog file name'),
       adminGestureEditorCell(item, 'title', 'Gesture title'),
       adminGestureEditorCell(item, 'text', 'Gesture text', true),
-      provenance,
+      adminGestureEditorCell(item, 'creator_credit', 'Creator credit'),
+      uploaded,
       adminGesturePackageCell(item),
       actions
     );
@@ -1180,27 +1761,41 @@ function renderAdminGestureCatalog(data) {
   previous.textContent = 'Previous';
   previous.disabled = adminGestureState.page <= 1;
   previous.addEventListener('click', () => {
+    if (!confirmAdminGestureDiscard('Changing pages')) return;
     adminGestureState.page = Math.max(1, adminGestureState.page - 1);
-    loadAdminGestures().catch(error => setAdminGestureStatus(error.message, 'error'));
+    loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message, 'error'));
   });
+  const previousSeparator = document.createElement('span');
+  previousSeparator.className = 'admin-gesture-pager-separator';
+  previousSeparator.setAttribute('aria-hidden', 'true');
+  previousSeparator.textContent = '—';
   const label = document.createElement('span');
   label.textContent = `Page ${adminGestureState.page} of ${adminGestureState.pages}`;
+  const nextSeparator = previousSeparator.cloneNode(true);
   const next = document.createElement('button');
   next.type = 'button';
   next.className = 'btn';
   next.textContent = 'Next';
   next.disabled = adminGestureState.page >= adminGestureState.pages;
   next.addEventListener('click', () => {
+    if (!confirmAdminGestureDiscard('Changing pages')) return;
     adminGestureState.page = Math.min(adminGestureState.pages, adminGestureState.page + 1);
-    loadAdminGestures().catch(error => setAdminGestureStatus(error.message, 'error'));
+    loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message, 'error'));
   });
-  adminGesturePager.append(previous, label, next);
+  adminGesturePager.append(previous, previousSeparator, label, nextSeparator, next);
 }
 
-async function loadAdminGestures() {
-  if (!adminGestureCatalog || !adminSettingsRegistry) return;
+async function loadAdminGestures({ allowDiscard = false, reason = 'Refreshing the Server Gesture catalog' } = {}) {
+  if (!adminGestureCatalog || !adminSettingsRegistry) return false;
+  if (!allowDiscard && !confirmAdminGestureDiscard(reason)) return false;
   renderAdminGestureFeatureSummary();
-  if (!adminGestureCatalogEnabled()) return;
+  if (!adminGestureCatalogEnabled()) {
+    if (hasDirtyAdminGestures()) {
+      clearAdminGestureDirtyState();
+      renderAdminGestureFeatureSummary();
+    }
+    return false;
+  }
   const request = ++adminGestureState.request;
   adminGestureState.loading = true;
   setAdminGestureStatus('Loading Server Gesture metadata and package catalog...', 'working');
@@ -1218,9 +1813,12 @@ async function loadAdminGestures() {
     adminGestureState.pages = Math.max(1, Number(data.pages || 1));
     adminGestureState.total = Math.max(0, Number(data.total || 0));
     adminGestureState.features = data.features || {};
+    adminGestureState.query = adminGestureSearch?.value || '';
+    adminGestureState.sort = adminGestureSort?.value || 'last_uploaded';
     setAdminCount(document.getElementById('admin-gesture-count'), adminGestureState.total);
     renderAdminGestureCatalog(data);
     setAdminGestureStatus(`${adminGestureState.total} Server Gesture${adminGestureState.total === 1 ? '' : 's'}; 50 rows per page.`, 'ok');
+    return true;
   } finally {
     if (request === adminGestureState.request) adminGestureState.loading = false;
   }
@@ -1503,6 +2101,7 @@ document.getElementById('issue-status-filter')?.addEventListener('change', loadA
 async function loadAdminDashboard() {
   await Promise.all([
     loadAdminUsers(),
+    loadAdminModerationUsers(),
     loadAdminSettings(),
     loadAdminLogs(),
     loadAdminBlocks(),
@@ -1510,6 +2109,8 @@ async function loadAdminDashboard() {
     loadAdminCommunityEjections(),
     loadAdminLinkIcons(),
     loadAdminIssues(),
+    loadAdminNetworkPolicy(),
+    loadAdminRetention(),
   ]);
 }
 
@@ -1523,7 +2124,7 @@ async function openCanonicalAdmin() {
 document.getElementById('admin-open')?.addEventListener('click', openCanonicalAdmin);
 
 document.getElementById('admin-gesture-open-settings')?.addEventListener('click', () => {
-  showAdminSection('settings');
+  if (!showAdminSection('settings')) return;
   const search = document.getElementById('lobby-admin-settings-search');
   if (!search) return;
   search.value = 'gesture';
@@ -1534,14 +2135,22 @@ document.getElementById('admin-gesture-open-settings')?.addEventListener('click'
 adminGestureSearch?.addEventListener('input', () => {
   window.clearTimeout(adminGestureSearchTimer);
   adminGestureSearchTimer = window.setTimeout(() => {
+    if (!confirmAdminGestureDiscard('Searching the Server Gesture catalog')) {
+      adminGestureSearch.value = adminGestureState.query;
+      return;
+    }
     adminGestureState.page = 1;
-    loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture search failed.', 'error'));
+    loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message || 'Gesture search failed.', 'error'));
   }, 180);
 });
 
 adminGestureSort?.addEventListener('change', () => {
+  if (!confirmAdminGestureDiscard('Sorting the Server Gesture catalog')) {
+    adminGestureSort.value = adminGestureState.sort;
+    return;
+  }
   adminGestureState.page = 1;
-  loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture sort failed.', 'error'));
+  loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message || 'Gesture sort failed.', 'error'));
 });
 
 adminGestureChannel?.addEventListener('message', event => {
@@ -1557,6 +2166,8 @@ window.addEventListener('message', event => {
 window.addEventListener('pagehide', () => adminGestureChannel?.close(), { once: true });
 
 document.getElementById('admin-close')?.addEventListener('click', () => {
+  if (!confirmAdminGestureDiscard('Closing Admin')) return;
+  clearAdminGestureDirtyState();
   adminSettingsUnlock?.relock('Settings changes locked because the Admin interface closed.', 'closure');
   const params = new URLSearchParams(window.location.search);
   if (params.get('admin') === '1' && params.get('return') === 'room') {
@@ -1568,6 +2179,12 @@ document.getElementById('admin-close')?.addEventListener('click', () => {
   }
   adminModal.classList.remove('open');
   if (params.get('admin') === '1') history.replaceState({}, '', appUrl('/lobby.php'));
+});
+
+window.addEventListener('beforeunload', event => {
+  if (!hasDirtyAdminGestures()) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
 
 if (new URLSearchParams(window.location.search).get('admin') === '1') {
@@ -1615,12 +2232,19 @@ function renderLobbyAdminSettingsCompatibility() {
 function syncLobbyAdminSettingsMutationLocks() {
   const unlocked = Boolean(adminSettingsUnlock?.isUnlocked());
   const resetOptional = document.getElementById('lobby-admin-settings-reset-optional');
-  if (resetOptional) resetOptional.disabled = !unlocked;
+  if (resetOptional) {
+    resetOptional.disabled = !unlocked;
+    adminSettingsRegistryUI?.applyControlLockSemantics(resetOptional);
+  }
   const save = document.getElementById('lobby-admin-settings-save');
   const changed = Object.keys(adminSettingsRegistryUI?.changedValues?.() || {}).length;
-  if (save) save.disabled = !unlocked || changed === 0;
+  if (save) {
+    save.disabled = !unlocked || changed === 0;
+    adminSettingsRegistryUI?.applyControlLockSemantics(save);
+  }
   document.querySelectorAll('#lobby-admin-settings-preset-review [data-settings-mutation]').forEach(control => {
     control.disabled = !unlocked;
+    adminSettingsRegistryUI?.applyControlLockSemantics(control);
   });
 }
 
@@ -1646,6 +2270,32 @@ function clearLobbyAdminDatabaseCompatibilityConfirmation() {
   adminDatabaseCompatibilityConfirmation = null;
   const panel = document.getElementById('lobby-admin-database-compatibility-confirmation');
   if (panel) panel.hidden = true;
+}
+
+function clearLobbyAdminModerationTrustConfirmation() {
+  adminModerationTrustConfirmation = null;
+  const panel = document.getElementById('lobby-admin-moderation-trust-confirmation');
+  if (panel) panel.hidden = true;
+}
+
+function showLobbyAdminModerationTrustConfirmation(operation, details, policy) {
+  const panel = document.getElementById('lobby-admin-moderation-trust-confirmation');
+  const impact = document.getElementById('lobby-admin-moderation-trust-impact');
+  if (!panel || !impact) throw new Error('Moderation and Trust impact review is unavailable.');
+  adminModerationTrustConfirmation = {
+    operation,
+    details: {
+      ...details,
+      values: details.values ? { ...details.values } : details.values,
+    },
+  };
+  const activeCount = Number(policy?.activeOptionalStateCount || 0);
+  impact.textContent = `Disabling optional Moderation and Trust workflows will stop ${activeCount} active optional state${activeCount === 1 ? '' : 's'} while preserving mandatory safety, cases, evidence, restrictions, suspensions, retention, and Tool Logs.`;
+  panel.hidden = false;
+  document.getElementById('lobby-admin-moderation-trust-confirm')?.focus();
+  const message = 'Review and confirm the active optional Moderation and Trust workflows that will stop.';
+  setAdminFormStatus(adminSettings, message, 'working');
+  adminSettingsUnlock?.announce(message, 'working');
 }
 
 function showLobbyAdminDatabaseCompatibilityConfirmation(operation, details) {
@@ -1768,6 +2418,15 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
       adminSettingsRegistryUI?.entryMap?.get(compatibilityPolicyId)?.ownerRevision ?? 0
     );
   }
+  const moderationTrustId = 'moderation_trust_optional_core_enabled';
+  const touchesModerationTrust = Object.prototype.hasOwnProperty.call(details.values || {}, moderationTrustId)
+    || (operation === 'reset_setting' && details.setting_id === moderationTrustId)
+    || operation === 'apply_preset';
+  if (touchesModerationTrust && details.expected_moderation_trust_revision === undefined) {
+    details.expected_moderation_trust_revision = Number(
+      adminSettingsRegistryUI?.entryMap?.get(moderationTrustId)?.ownerRevision ?? 0
+    );
+  }
   if (['reset_subsection', 'reset_category', 'reset_all_optional', 'apply_preset'].includes(operation)) details.confirmed = 1;
   const capacityId = 'avatar_relationship_max_regular_links';
   let capacityTarget;
@@ -1810,10 +2469,20 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
       );
       return null;
     }
+    if (error?.data?.code === 'MODERATION_TRUST_DISABLE_IMPACT_CONFIRMATION_REQUIRED'
+        && !details.moderation_trust_impact_confirmed) {
+      showLobbyAdminModerationTrustConfirmation(
+        operation,
+        details,
+        error.data.moderationTrustPolicy || {}
+      );
+      return null;
+    }
     throw error;
   }
   clearLobbyAdminProfileLimitConfirmation();
   clearLobbyAdminDatabaseCompatibilityConfirmation();
+  clearLobbyAdminModerationTrustConfirmation();
   adminSettingsRegistry = result.registry || result.settingsRegistry || adminSettingsRegistry;
   adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
   renderLobbyAdminSettingsCompatibility();
@@ -1913,6 +2582,34 @@ document.getElementById('lobby-admin-database-compatibility-cancel')?.addEventLi
   clearLobbyAdminDatabaseCompatibilityConfirmation();
   syncLobbyAdminSettingsMutationLocks();
   const message = 'Compatibility-enforcement change was not applied; your draft remains available.';
+  setAdminFormStatus(adminSettings, message, 'ok');
+  adminSettingsUnlock?.announce(message, 'ok');
+  document.getElementById('lobby-admin-settings-save')?.focus();
+});
+
+document.getElementById('lobby-admin-moderation-trust-confirm')?.addEventListener('click', async event => {
+  const pending = adminModerationTrustConfirmation;
+  if (!pending || !adminSettingsUnlock?.requireUnlocked()) return;
+  const confirmButton = event.currentTarget;
+  confirmButton.disabled = true;
+  try {
+    await mutateLobbyAdminSettings(pending.operation, {
+      ...pending.details,
+      moderation_trust_impact_confirmed: 1,
+    });
+  } catch (error) {
+    const message = lobbyAdminSettingsFailureMessage(error, 'Moderation and Trust failed to save.');
+    setAdminFormStatus(adminSettings, message, 'error');
+    adminSettingsUnlock?.announce(message, 'error');
+  } finally {
+    confirmButton.disabled = false;
+  }
+});
+
+document.getElementById('lobby-admin-moderation-trust-cancel')?.addEventListener('click', () => {
+  clearLobbyAdminModerationTrustConfirmation();
+  syncLobbyAdminSettingsMutationLocks();
+  const message = 'Moderation and Trust change was not applied; your draft remains available.';
   setAdminFormStatus(adminSettings, message, 'ok');
   adminSettingsUnlock?.announce(message, 'ok');
   document.getElementById('lobby-admin-settings-save')?.focus();

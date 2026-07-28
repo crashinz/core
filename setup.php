@@ -779,6 +779,9 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
             throw new RuntimeException('Username and a valid private login email are required.');
         }
         if (strlen($password) < 8 || $password !== $confirm) throw new RuntimeException('Use matching passwords of at least 8 characters.');
+        if (empty($_POST['accept_terms']) || empty($_POST['accept_rules'])) {
+            throw new RuntimeException('Review and accept the complete current Terms and Community Rules.');
+        }
         $registryValues = json_decode((string)($_POST['settings_registry_values'] ?? ''), true);
         if (!is_array($registryValues)) {
             $registryValues = [];
@@ -808,6 +811,8 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
             $stmt->execute([$email, $identity['username'], password_hash($password, PASSWORD_DEFAULT), $identity['display_name'], 'admin', $avatar]);
             $adminUserId = (int)$pdo->lastInsertId();
             member_profiles_initialize_user($pdo, $adminUserId);
+            moderation_identity_initialize_user($pdo, $adminUserId, 'setup', true);
+            moderation_identity_record_acceptance($pdo, $adminUserId, 'setup-owner-creation');
             $registryValues['community_name'] = $communityName;
             if ($communityLogo !== '') $registryValues['community_logo_path'] = $communityLogo;
             $registryResult = settings_registry_update(
@@ -977,23 +982,31 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
             <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
             <label>Confirm password<input name="confirm_password" type="password" minlength="8" required autocomplete="new-password"></label>
           </div>
+          <div class="policy-acceptance-summary">
+            <p>Review the complete <a href="<?= e(app_url('/policy.php')) ?>" target="_blank" rel="noopener">Terms of Use v<?= e(MODERATION_IDENTITY_TERMS_VERSION) ?> and Community Rules v<?= e(MODERATION_IDENTITY_RULES_VERSION) ?></a>.</p>
+            <label class="check-label"><input type="checkbox" name="accept_terms" value="1" required> I accept the complete current Terms of Use.</label>
+            <label class="check-label"><input type="checkbox" name="accept_rules" value="1" required> I accept the complete current Community Rules.</label>
+          </div>
           <input id="setup-settings-registry-values" type="hidden" name="settings_registry_values" value="">
           <input type="hidden" name="settings_registry_revision" value="<?= e((string)($setupSettingsRegistry['revision'] ?? 1)) ?>">
           <script id="setup-settings-registry-data" type="application/json"><?= json_encode($setupSettingsRegistry, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
-          <div class="setup-branding-fields settings-registry-setup">
+          <div class="setup-branding-fields settings-registry-setup" data-settings-scroll-owner tabindex="0" role="region" aria-label="Complete Setup installation settings">
             <div class="settings-registry-heading">
               <div><h2>Installation Settings</h2><p class="minor">Setup and Admin use the same setting IDs, categories, defaults, validation, and authoritative owners.</p></div>
               <div class="settings-registry-state" id="setup-settings-compatibility-state" aria-live="polite">Framework default</div>
             </div>
+            <div id="setup-settings-unlock"></div>
             <section class="branding-license-authority" aria-labelledby="setup-branding-license-title">
-              <a class="btn btn-primary branding-license-link" href="<?= e(app_url('/LICENSE.md')) ?>" id="setup-branding-license-title">View original LICENSE.md</a>
+              <div class="branding-license-actions">
+                <a class="btn btn-primary branding-license-link" href="<?= e(app_url('/license.php')) ?>" id="setup-branding-license-title">View original License</a>
+                <a class="btn branding-license-link" href="<?= e(app_url('/changelog.php')) ?>">View exe's Changelog</a>
+              </div>
               <div class="branding-license-reminder-card">
                 <h3>Branding and License Reminder</h3>
                 <p data-branding-reminder-authority><?= e(PRIVATE_SITE_BRANDING_REMINDER_DEFAULT) ?></p>
                 <button class="btn" type="button" data-edit-branding-reminder>Edit reminder wording</button>
               </div>
             </section>
-            <div id="setup-settings-unlock"></div>
             <div class="settings-registry-toolbar" role="search">
               <label>Search settings<input id="setup-settings-search" type="search" autocomplete="off" placeholder="Label, help, category, alias, or setting ID"></label>
               <label>Filter<select id="setup-settings-filter"><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="changed">Changed from default</option><option value="original">Original-author compatibility relevant</option></select></label>

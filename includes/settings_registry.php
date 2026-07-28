@@ -83,6 +83,151 @@ function settings_registry_definitions(): array {
     $definitions = array_map('settings_registry_entry', private_site_branding_setting_definitions());
     $definitions = array_merge($definitions, [
         settings_registry_entry([
+            'id' => MODERATION_TRUST_MASTER_SETTING_ID,
+            'settingKey' => MODERATION_TRUST_MASTER_SETTING,
+            'owner' => 'moderation_trust_policy',
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'moderation-trust',
+            'subsectionLabel' => 'Moderation and Trust',
+            'subsectionOrder' => 5,
+            'label' => 'Enable Moderation and Trust',
+            'description' => 'Enable optional trust, capability, request, invitation, approval, and outside-content confirmation workflows.',
+            'helpText' => 'Disabling preserves stored policy, requests, history, cases, evidence, mutes, blocks, restrictions, suspensions, message protection, retention, integrity, and Tool Logs. Mandatory safety remains active.',
+            'aliases' => ['moderation trust master', 'optional core moderation', 'trust workflows'],
+            'type' => 'boolean',
+            'defaultValue' => true,
+            'order' => 1,
+            'controlClass' => 'optional-core-parent',
+            'optional' => true,
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting', 'preset'],
+            'originalRelevant' => true,
+            'originalValueAvailable' => true,
+            'originalValue' => false,
+            'disablingMovesTowardOriginal' => true,
+            'differsFromOriginalByDefault' => true,
+            'staleWriteOwner' => MODERATION_TRUST_REVISION_SETTING,
+            'toolLogBehavior' => 'bounded-moderation-trust-transition',
+            'resetLabel' => 'Restore Provenance Default',
+        ]),
+        settings_registry_entry([
+            'id' => MODERATION_IDENTITY_SETUP_PRESET_SETTING,
+            'settingKey' => MODERATION_IDENTITY_SETUP_PRESET_SETTING,
+            'owner' => 'moderation_identity_policy',
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'moderation-trust',
+            'subsectionLabel' => 'Moderation and Trust',
+            'subsectionOrder' => 5,
+            'label' => 'Community trust preset',
+            'description' => 'Choose Private, Small Trusted, Public, or explicitly reviewed Custom values.',
+            'helpText' => 'Presets populate reviewable values and never skip the final Setup or Admin review.',
+            'aliases' => ['private community', 'small trusted', 'public community', 'custom trust'],
+            'type' => 'select',
+            'defaultValue' => 'small-trusted',
+            'allowedValues' => ['private', 'small-trusted', 'public', 'custom'],
+            'order' => 2,
+            'controlClass' => 'optional-core-subordinate',
+            'optional' => true,
+            'dependencies' => [MODERATION_TRUST_MASTER_SETTING_ID],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => MODERATION_IDENTITY_REGISTRATION_MODE_SETTING,
+            'settingKey' => MODERATION_IDENTITY_REGISTRATION_MODE_SETTING,
+            'owner' => 'moderation_identity_policy',
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'moderation-trust',
+            'subsectionLabel' => 'Moderation and Trust',
+            'subsectionOrder' => 5,
+            'label' => 'Registration mode',
+            'description' => 'Choose Open, Administrator approval, Invitation only, or Administrator-created only.',
+            'helpText' => 'Guests are never permitted. When the parent is disabled on an upgrade, legacy-compatible Open registration is effective without discarding this stored value.',
+            'aliases' => ['open registration', 'approval', 'invitation only', 'admin created'],
+            'type' => 'select',
+            'defaultValue' => 'approval',
+            'allowedValues' => MODERATION_IDENTITY_REGISTRATION_MODES,
+            'order' => 3,
+            'controlClass' => 'optional-core-subordinate',
+            'optional' => true,
+            'dependencies' => [MODERATION_TRUST_MASTER_SETTING_ID],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING,
+            'settingKey' => MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING,
+            'owner' => 'moderation_account_workflows',
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'moderation-trust',
+            'subsectionLabel' => 'Moderation and Trust',
+            'subsectionOrder' => 5,
+            'label' => 'Outside-Content Confirmations',
+            'description' => 'Choose confirmation for every upload/import, public sharing only, reminders, or Disabled.',
+            'helpText' => 'Terms, trust, capabilities, validation, security, reporting, and moderation remain enforced in every mode.',
+            'aliases' => ['upload confirmation', 'import permission', 'outside content reminder'],
+            'type' => 'select',
+            'defaultValue' => 'public-only',
+            'allowedValues' => MODERATION_ACCOUNT_OUTSIDE_MODES,
+            'order' => 4,
+            'controlClass' => 'optional-core-subordinate',
+            'optional' => true,
+            'dependencies' => [MODERATION_TRUST_MASTER_SETTING_ID],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+            'toolLogBehavior' => 'content-free-mode-change',
+        ]),
+        settings_registry_entry([
+            'id' => MODERATION_SAFETY_AVATAR_DELIVERY_SETTING,
+            'settingKey' => MODERATION_SAFETY_AVATAR_DELIVERY_SETTING,
+            'owner' => 'moderation_safety',
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'moderation-trust',
+            'subsectionLabel' => 'Moderation and Trust',
+            'subsectionOrder' => 5,
+            'label' => 'Avatar delivery mode',
+            'description' => 'Keep server-stored delivery or choose an implemented built-in/generated-only policy.',
+            'helpText' => 'The future P2P mode remains unavailable and server-denied until its named implementation and certification owner completes.',
+            'aliases' => ['avatar p2p delivery', 'built in avatars only'],
+            'type' => 'select',
+            'defaultValue' => 'server-stored',
+            'allowedValues' => MODERATION_SAFETY_AVATAR_DELIVERY_MODES,
+            'order' => 5,
+            'controlClass' => 'optional-core-subordinate',
+            'optional' => true,
+            'dependencies' => [MODERATION_TRUST_MASTER_SETTING_ID],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => MODERATION_SAFETY_GESTURE_DELIVERY_SETTING,
+            'settingKey' => MODERATION_SAFETY_GESTURE_DELIVERY_SETTING,
+            'owner' => 'moderation_safety',
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'moderation-trust',
+            'subsectionLabel' => 'Moderation and Trust',
+            'subsectionOrder' => 5,
+            'label' => 'Gesture delivery mode',
+            'description' => 'Keep server-stored personal/community delivery or choose built-in-only.',
+            'helpText' => 'The future P2P personal mode remains unavailable and server-denied until its named implementation and certification owner completes.',
+            'aliases' => ['gesture p2p delivery', 'built in gestures only'],
+            'type' => 'select',
+            'defaultValue' => 'server-stored-personal-community',
+            'allowedValues' => MODERATION_SAFETY_GESTURE_DELIVERY_MODES,
+            'order' => 6,
+            'controlClass' => 'optional-core-subordinate',
+            'optional' => true,
+            'dependencies' => [MODERATION_TRUST_MASTER_SETTING_ID],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
             'id' => 'database_release_compatibility_enforcement',
             'settingKey' => null,
             'owner' => 'database_compatibility_policy',
@@ -508,6 +653,9 @@ function settings_registry_current_value(PDO $pdo, array $definition, array $con
     if ($definition['owner'] === 'database_compatibility_policy') {
         return !empty($context['databaseCompatibility']['enabled']);
     }
+    if ($definition['owner'] === 'moderation_trust_policy') {
+        return !empty($context['moderationTrust']['storedEnabled']);
+    }
     if ($definition['owner'] === 'first_party_extensions') {
         $extensionId = (string)($definition['extensionId'] ?? '');
         return $extensionId !== '' && first_party_extension_enabled($pdo, $extensionId);
@@ -559,6 +707,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         'roleColors' => role_color_settings($pdo),
         'gestureCapabilities' => gesture_capability_policy($pdo),
         'databaseCompatibility' => database_compatibility_policy_status(),
+        'moderationTrust' => moderation_trust_policy($pdo),
     ];
     $entries = [];
     foreach (settings_registry_definitions() as $definition) {
@@ -566,15 +715,20 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         $visible = $surface === 'setup' ? !empty($definition['setupVisible']) : !empty($definition['adminVisible']);
         $entry = $definition;
         $entry['currentValue'] = $current;
-        $entry['ownerRevision'] = $definition['owner'] === 'database_compatibility_policy'
-            ? (int)$context['databaseCompatibility']['revision']
-            : null;
+        $entry['ownerRevision'] = match ($definition['owner']) {
+            'database_compatibility_policy' => (int)$context['databaseCompatibility']['revision'],
+            'moderation_trust_policy' => (int)$context['moderationTrust']['revision'],
+            default => null,
+        };
+        $entry['provenanceDefaultValue'] = $definition['owner'] === 'moderation_trust_policy'
+            ? (bool)$context['moderationTrust']['provenanceDefaultEnabled']
+            : $definition['defaultValue'];
         $entry['hasStoredValue'] = $definition['secret']
             ? app_setting($pdo, (string)$definition['settingKey'], '') !== ''
             : null;
         $entry['changedFromDefault'] = $definition['secret']
             ? (bool)$entry['hasStoredValue']
-            : !settings_registry_values_equal($current, $definition['defaultValue'], (string)$definition['type']);
+            : !settings_registry_values_equal($current, $entry['provenanceDefaultValue'], (string)$definition['type']);
         $entry['enabled'] = $definition['optional'] ? (
             $definition['type'] === 'boolean'
                 ? (bool)$current
@@ -681,6 +835,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         ],
         'firstPartyExtensions' => first_party_extension_statuses($pdo),
         'databaseCompatibilityPolicy' => database_compatibility_policy_public_status(),
+        'moderationTrustPolicy' => $context['moderationTrust'],
     ];
 }
 
@@ -821,7 +976,7 @@ function settings_registry_update(
             } elseif ($operation === 'apply_preset' && (string)$request['preset'] === 'original-compatible') {
                 $candidate = $definition['originalValue'];
             } else {
-                $candidate = $definition['defaultValue'];
+                $candidate = $entryMap[$id]['provenanceDefaultValue'] ?? $definition['defaultValue'];
             }
             $validation = settings_registry_validate_value($definition, $candidate, $source, $context);
             if (empty($validation['ok'])) {
@@ -829,6 +984,34 @@ function settings_registry_update(
                 return $validation;
             }
             $target[$id] = $validation['value'];
+        }
+        if (array_key_exists(MODERATION_IDENTITY_SETUP_PRESET_SETTING, $target)) {
+            try {
+                $presetValues = moderation_identity_preset_registry_values(
+                    (string)$target[MODERATION_IDENTITY_SETUP_PRESET_SETTING]
+                );
+            } catch (ModerationIdentityPolicyException $presetError) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => $presetError->errorCode,
+                    'error' => $presetError->getMessage(),
+                    'http_status' => $presetError->httpStatus,
+                ];
+            }
+            foreach ($presetValues as $presetId => $presetValue) {
+                $presetValidation = settings_registry_validate_value(
+                    $definitionMap[$presetId],
+                    $presetValue,
+                    $source,
+                    $context
+                );
+                if (empty($presetValidation['ok'])) {
+                    if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                    return $presetValidation;
+                }
+                $target[$presetId] = $presetValidation['value'];
+            }
         }
         $changedIds = [];
         foreach ($target as $id => $value) {
@@ -914,6 +1097,45 @@ function settings_registry_update(
                 ];
             }
         }
+        $moderationTrustChanged = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool =>
+                ($definitionMap[$id]['owner'] ?? '') === 'moderation_trust_policy'
+        ));
+        if ($moderationTrustChanged) {
+            $policyId = $moderationTrustChanged[0];
+            $policyCurrent = !empty($entryMap[$policyId]['currentValue']);
+            $policyTarget = !empty($target[$policyId]);
+            $activeCount = (int)($snapshot['moderationTrustPolicy']['activeOptionalStateCount'] ?? 0);
+            if ($policyCurrent
+                && !$policyTarget
+                && $activeCount > 0
+                && empty($request['moderation_trust_impact_confirmed'])) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'MODERATION_TRUST_DISABLE_IMPACT_CONFIRMATION_REQUIRED',
+                    'error' => 'Review and confirm the active optional workflows that will stop.',
+                    'moderationTrustPolicy' => $snapshot['moderationTrustPolicy'],
+                    'http_status' => 409,
+                ];
+            }
+            $policyExpectedRevision = $source === 'setup'
+                ? (int)($entryMap[$policyId]['ownerRevision'] ?? 0)
+                : filter_var(
+                    $request['expected_moderation_trust_revision'] ?? null,
+                    FILTER_VALIDATE_INT
+                );
+            if ($policyExpectedRevision === false || (int)$policyExpectedRevision < 1) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'MODERATION_TRUST_POLICY_REVISION_REQUIRED',
+                    'error' => 'A current Moderation and Trust policy revision is required.',
+                    'http_status' => 400,
+                ];
+            }
+        }
         if (!$changedIds) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
             return ['ok' => true, 'idempotent' => true, 'revision' => $actualRevision, 'changedSettingCount' => 0, 'stoppedActiveCapabilityCount' => 0, 'registry' => settings_registry_snapshot($pdo, $source === 'setup' ? 'setup' : 'admin')];
@@ -922,6 +1144,23 @@ function settings_registry_update(
         $effective = [];
         foreach ($entryMap as $id => $entry) $effective[$id] = $entry['currentValue'];
         foreach ($target as $id => $value) $effective[$id] = $value;
+        $deliveryAvailability = [
+            MODERATION_SAFETY_AVATAR_DELIVERY_SETTING => moderation_safety_delivery_policy_catalog()['avatar']['available'],
+            MODERATION_SAFETY_GESTURE_DELIVERY_SETTING => moderation_safety_delivery_policy_catalog()['gesture']['available'],
+        ];
+        foreach ($deliveryAvailability as $settingId => $availableModes) {
+            if (!isset($target[$settingId])) continue;
+            $mode = (string)$target[$settingId];
+            if (empty($availableModes[$mode])) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'DELIVERY_MODE_IMPLEMENTATION_UNAVAILABLE',
+                    'error' => 'That delivery mode is unavailable until its named implementation and certification owner completes.',
+                    'http_status' => 409,
+                ];
+            }
+        }
         if (!empty($effective['diagnostic_screenshots_enabled'])) {
             $days = (int)$effective['diagnostic_screenshot_retention_days'];
             if ($days < 1 || $days > 365) {
@@ -975,6 +1214,31 @@ function settings_registry_update(
             }
             $gestureCapabilityResult = gesture_capability_update_locked($pdo, $capabilityValues);
             $gestureCapabilityProjection = $gestureCapabilityResult['capability'];
+        }
+        if ($moderationTrustChanged) {
+            $policyId = $moderationTrustChanged[0];
+            try {
+                $moderationTrustResult = moderation_trust_update_locked(
+                    $pdo,
+                    !empty($target[$policyId]),
+                    (int)$policyExpectedRevision,
+                    $actualRevision + 1,
+                    !empty($request['moderation_trust_impact_confirmed']),
+                    $actorUserId,
+                    (string)($request['request_id'] ?? ''),
+                    $source === 'setup' ? 'setup-settings-registry' : 'admin-settings-registry'
+                );
+                $stopped += (int)($moderationTrustResult['stoppedStateCount'] ?? 0);
+            } catch (ModerationTrustPolicyException $policyError) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => $policyError->errorCode,
+                    'error' => $policyError->getMessage(),
+                    'moderationTrustPolicy' => $policyError->projection,
+                    'http_status' => $policyError->httpStatus,
+                ];
+            }
         }
         $danceChanged = array_filter($changedIds, static fn(string $id): bool => str_starts_with($id, 'avatar_dance.'));
         if ($danceChanged) {
@@ -1045,6 +1309,7 @@ function settings_registry_update(
                 )
             )),
             $databaseCompatibilityChanged,
+            $moderationTrustChanged,
             array_keys(role_color_setting_defaults()),
             array_map(static fn(array $capability): string => (string)$capability['id'], gesture_capability_registry()),
             array_map(static fn(array $dance): string => 'avatar_dance.' . $dance['id'], avatar_dance_capability_registry())
@@ -1099,6 +1364,12 @@ function settings_registry_update(
             $detail .= ' Database compatibility policy='
                 . (!empty($policy['enabled']) ? 'enabled' : 'disabled')
                 . '; policy-revision=' . (int)($policy['revision'] ?? 0) . '.';
+        }
+        if ($moderationTrustChanged) {
+            $policy = moderation_trust_policy($pdo);
+            $detail .= ' Moderation and Trust='
+                . (!empty($policy['effectiveEnabled']) ? 'enabled' : 'disabled')
+                . '; policy-revision=' . (int)$policy['revision'] . '.';
         }
         if ($databaseBackedChangedIds) {
             log_tool($pdo, $actorUserId > 0 ? $actorUserId : null, $source === 'setup' ? 'setup_settings_registry_update' : 'admin_settings_registry_update', null, null, $detail);

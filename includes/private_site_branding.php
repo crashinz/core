@@ -362,14 +362,21 @@ function private_site_branding_page_title(PDO $pdo, string $page, string $pageKe
 
 function private_site_branding_utility_links(PDO $pdo): array {
     $projection = private_site_branding_projection($pdo, 'login');
-    return !empty($projection['enabled']) && !empty($projection['show_changelog_login'])
-        ? [[
+    $links = [[
+        'id' => 'original-license',
+        'label' => 'Original License',
+        'path' => '/license.php',
+        'primary' => false,
+    ]];
+    if (!empty($projection['show_changelog_login'])) {
+        $links[] = [
             'id' => 'exe-changelog',
             'label' => "exe's Changelog",
             'path' => '/changelog.php',
             'primary' => false,
-        ]]
-        : [];
+        ];
+    }
+    return $links;
 }
 
 function private_site_branding_valid_asset_reference(string $path): bool {
@@ -441,8 +448,14 @@ function private_site_branding_inline_markdown(string $text): string {
         '/\[([^\]]+)\]\(([^)]+)\)/',
         static function (array $match): string {
             $target = html_entity_decode($match[2], ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $allowedLocal = ['LICENSE.md', 'README.md', 'AUTHORS.md', 'MODIFICATIONS.md'];
-            if (in_array($target, $allowedLocal, true)) {
+            $browserRoutes = [
+                'LICENSE.md' => '/license.php',
+                'MODIFICATIONS.md' => '/changelog.php',
+            ];
+            $allowedLocal = ['README.md', 'AUTHORS.md'];
+            if (isset($browserRoutes[$target])) {
+                $href = app_url($browserRoutes[$target]);
+            } elseif (in_array($target, $allowedLocal, true)) {
                 $href = app_url('/' . $target);
             } elseif (filter_var($target, FILTER_VALIDATE_URL)
                 && in_array(parse_url($target, PHP_URL_SCHEME), ['https'], true)) {

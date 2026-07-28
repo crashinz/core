@@ -25,9 +25,6 @@
       this.onLockChange = options.onLockChange || (() => {});
       this.locked = true;
       this.inactivityTimer = null;
-      this.pointerStartX = null;
-      this.pointerWidth = 0;
-      this.keyboardActive = false;
       this.render();
       this.bind();
       this.updatePresentation();
@@ -45,62 +42,29 @@
       this.warning = element('p', 'settings-unlock-warning', SETTINGS_UNLOCK_WARNING);
       this.warning.id = `${this.mount.id || 'settings-unlock'}-warning`;
       const control = element('div', 'settings-unlock-control');
-      this.slider = document.createElement('input');
-      this.slider.className = 'settings-unlock-slider';
-      this.slider.type = 'range';
-      this.slider.min = '0';
-      this.slider.max = '100';
-      this.slider.step = '10';
-      this.slider.value = '0';
-      this.slider.setAttribute('aria-label', 'Slide to unlock settings changes');
-      this.slider.setAttribute('aria-describedby', this.warning.id);
-      this.slider.setAttribute('aria-valuetext', 'Locked. Slide fully to unlock.');
-      this.slider.autocomplete = 'off';
-      this.hint = element('span', 'settings-unlock-hint', 'Slide fully to unlock. Keyboard: press End, or use the arrow keys to reach 100%.');
-      control.append(this.slider, this.hint);
+      this.unlockButton = element('button', 'btn btn-primary settings-unlock-button', 'Unlock settings changes');
+      this.unlockButton.type = 'button';
+      this.unlockButton.setAttribute('aria-describedby', this.warning.id);
+      this.hint = element('span', 'settings-unlock-hint', 'Select Unlock settings changes to enable authorized controls temporarily.');
+      control.append(this.unlockButton, this.hint);
       this.lockNow = element('button', 'btn settings-unlock-lock-now', 'Lock now');
       this.lockNow.type = 'button';
       this.lockNow.hidden = true;
       this.status = element('div', 'settings-unlock-status', 'Settings changes are locked.');
       this.status.setAttribute('role', 'status');
       this.status.setAttribute('aria-live', 'polite');
-      this.mount.append(heading, this.warning, control, this.lockNow, this.status);
+      this.mount.append(heading, control, this.warning, this.lockNow, this.status);
     }
 
     bind() {
-      if (!this.slider) return;
-      this.slider.addEventListener('pointerdown', event => {
-        this.keyboardActive = false;
-        this.pointerStartX = event.clientX;
-        this.pointerWidth = Math.max(1, this.slider.getBoundingClientRect().width);
+      if (!this.unlockButton) return;
+      this.unlockButton.addEventListener('click', event => {
+        this.unlock(event.detail === 0 ? 'keyboard' : 'button');
       });
-      this.slider.addEventListener('pointerup', event => {
-        const distance = this.pointerStartX === null ? 0 : event.clientX - this.pointerStartX;
-        const deliberate = distance >= this.pointerWidth * 0.6 && Number(this.slider.value) >= 90;
-        this.pointerStartX = null;
-        if (deliberate) this.unlock('slide');
-        else this.resetSlider();
-      });
-      this.slider.addEventListener('pointercancel', () => {
-        this.pointerStartX = null;
-        this.resetSlider();
-      });
-      this.slider.addEventListener('keydown', event => {
-        this.keyboardActive = true;
-        if (event.key === 'End') {
-          event.preventDefault();
-          this.slider.value = '100';
-          this.unlock('keyboard');
-        }
-      });
-      this.slider.addEventListener('input', () => {
-        const value = Number(this.slider.value);
-        this.slider.setAttribute('aria-valuetext', value >= 100 ? 'Ready to unlock.' : `Locked. ${value}% complete.`);
-        if (this.keyboardActive && value >= 100) this.unlock('keyboard');
-      });
-      this.slider.addEventListener('blur', () => {
-        this.keyboardActive = false;
-        if (this.locked) this.resetSlider();
+      this.unlockButton.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        this.unlock('keyboard');
       });
       this.lockNow?.addEventListener('click', () => this.relock('Settings changes locked.'));
       for (const eventName of ['pointerdown', 'keydown', 'input']) {
@@ -109,15 +73,9 @@
       window.addEventListener('pagehide', () => this.relock('', ''));
     }
 
-    resetSlider() {
-      if (!this.slider) return;
-      this.slider.value = '0';
-      this.slider.setAttribute('aria-valuetext', 'Locked. Slide fully to unlock.');
-    }
-
     updatePresentation() {
-      if (!this.slider) return;
-      this.slider.disabled = !this.authorized || !this.locked;
+      if (!this.unlockButton) return;
+      this.unlockButton.disabled = !this.authorized || !this.locked;
       this.lockNow.hidden = this.locked;
       this.state.textContent = this.locked ? 'Locked' : 'Unlocked';
       this.mount.classList.toggle('is-unlocked', !this.locked);
@@ -126,7 +84,7 @@
         this.hint.textContent = 'You are not authorized to change registry-backed settings.';
       } else {
         this.hint.textContent = this.locked
-          ? 'Slide fully to unlock. Keyboard: press End, or use the arrow keys to reach 100%.'
+          ? 'Select Unlock settings changes to enable authorized controls temporarily.'
           : 'Settings changes are temporarily unlocked for this presentation.';
       }
     }
@@ -137,12 +95,12 @@
       this.status.className = `settings-unlock-status ${type}`.trim();
     }
 
-    unlock(source = 'slide') {
+    unlock(source = 'button') {
       if (!this.authorized || !this.locked) return false;
       this.locked = false;
       this.clearTimer();
       this.updatePresentation();
-      this.announce(`Settings changes unlocked by ${source === 'keyboard' ? 'keyboard' : 'slide'}.`, 'ok');
+      this.announce(`Settings changes unlocked by ${source === 'keyboard' ? 'keyboard' : 'button'}.`, 'ok');
       this.onLockChange(false, source);
       this.noteActivity();
       return true;
@@ -152,7 +110,6 @@
       const changed = !this.locked;
       this.locked = true;
       this.clearTimer();
-      this.resetSlider();
       this.updatePresentation();
       if (message) this.announce(message, reason === 'authorization' ? 'error' : '');
       if (changed) this.onLockChange(true, reason);
@@ -184,7 +141,7 @@
       }
       if (this.locked) {
         this.announce('Unlock settings changes before changing registry-backed settings.', 'error');
-        this.slider?.focus();
+        this.unlockButton?.focus();
         return false;
       }
       this.noteActivity();
@@ -207,6 +164,9 @@
       this.onEntryChange = options.onEntryChange || (() => {});
       this.onOperation = options.onOperation || null;
       this.onAssetChange = options.onAssetChange || null;
+      this.lockDescriptionId = options.lockDescriptionId
+        || this.container.closest('[data-settings-scroll-owner]')?.querySelector('.settings-unlock-warning')?.id
+        || '';
       this.registry = null;
       this.entries = [];
       this.entryMap = new Map();
@@ -722,6 +682,7 @@
       this.applySearchAndFilter();
       document.querySelectorAll('[data-edit-branding-reminder]').forEach(button => {
         button.disabled = this.readOnly || this.locked;
+        this.applyControlLockSemantics(button);
         button.onclick = () => {
           if (this.readOnly || this.locked) return;
           const card = Array.from(this.container.querySelectorAll('[data-setting-id]'))
@@ -732,12 +693,31 @@
       });
     }
 
+    applyControlLockSemantics(control) {
+      if (!control) return;
+      const locked = this.readOnly || this.locked;
+      control.toggleAttribute('aria-disabled', locked);
+      if (!this.lockDescriptionId) return;
+      const descriptions = new Set(String(control.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean));
+      if (locked) descriptions.add(this.lockDescriptionId);
+      else descriptions.delete(this.lockDescriptionId);
+      if (descriptions.size) control.setAttribute('aria-describedby', [...descriptions].join(' '));
+      else control.removeAttribute('aria-describedby');
+    }
+
     setLocked(locked) {
       this.locked = Boolean(locked);
-      for (const control of this.controls.values()) control.disabled = this.readOnly || this.locked;
-      for (const button of this.container.querySelectorAll('button')) button.disabled = this.readOnly || this.locked;
+      for (const control of this.controls.values()) {
+        control.disabled = this.readOnly || this.locked;
+        this.applyControlLockSemantics(control);
+      }
+      for (const button of this.container.querySelectorAll('button')) {
+        button.disabled = this.readOnly || this.locked;
+        this.applyControlLockSemantics(button);
+      }
       document.querySelectorAll('[data-edit-branding-reminder]').forEach(button => {
         button.disabled = this.readOnly || this.locked;
+        this.applyControlLockSemantics(button);
       });
       this.container.classList.toggle('is-settings-locked', this.locked);
     }

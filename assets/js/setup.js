@@ -135,8 +135,10 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
     authorized: true,
     onLockChange: locked => {
       setupSettingsUI?.setLocked(locked);
-      for (const control of setupMutationControls) control.disabled = locked;
-      if (locked && setupSettingsUI?.registry) setupSettingsUI.setRegistry(registry);
+      for (const control of setupMutationControls) {
+        control.disabled = locked;
+        setupSettingsUI?.applyControlLockSemantics(control);
+      }
     },
   });
   const updateHidden = state => {
@@ -225,7 +227,10 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
     applyDraftValues(values, 'All optional settings reset to defaults.');
   });
   setupSettingsUI.setLocked(true);
-  for (const control of setupMutationControls) control.disabled = true;
+  for (const control of setupMutationControls) {
+    control.disabled = true;
+    setupSettingsUI.applyControlLockSemantics(control);
+  }
   updateHidden(setupSettingsUI.getState());
 }
 

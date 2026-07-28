@@ -54,6 +54,7 @@ function community_message_payload(
     array $reactionsMap,
     ?int $partnerUserId = null
 ): array {
+    $m = message_protection_project_row($m);
     $row = [
         'id' => (int)$m['id'],
         'channel' => $channel,
@@ -73,7 +74,14 @@ function community_message_payload(
         'edited_at' => $m['edited_at'] ?? null,
         'sent_at' => $m['sent_at'],
         'reactions' => $reactionsMap[(int)$m['id']] ?? [],
+        'protection_mode' => $m['protection_mode'],
+        'protection_version' => $m['protection_version'],
+        'protection_key_epoch' => $m['protection_key_epoch'],
+        'client_message_id' => $m['client_message_id'],
     ];
+    if ($m['protection_mode'] === 'e2ee-private') {
+        $row['protection_envelope'] = $m['protection_envelope'];
+    }
     if (($row['message_type'] ?? 'text') === 'gesture') {
         $row['gesture'] = message_gesture((string)$m['content']);
     }
@@ -91,14 +99,22 @@ $stmt = $pdo->prepare('SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id 
 $stmt->execute([(int)$session['id']]);
 $lastEventId = (int)$stmt->fetchColumn();
 
-$stmt = $pdo->prepare('SELECT p.*, u.role, u.username FROM participants p JOIN users u ON u.id = p.user_id WHERE p.session_id = ? AND p.last_seen_at >= ? ORDER BY p.joined_at ASC');
+$stmt = $pdo->prepare(
+    'SELECT p.*, u.role, mp.public_profile_id '
+    . 'FROM participants p '
+    . 'JOIN users u ON u.id = p.user_id '
+    . 'JOIN member_profiles mp ON mp.user_id = p.user_id '
+    . 'WHERE p.session_id = ? AND p.last_seen_at >= ? ORDER BY p.joined_at ASC'
+);
 $stmt->execute([(int)$session['id'], stale_cutoff($pdo)]);
 $roomOwnerId = (int)$room['owner_id'];
 $participants = array_map(function(array $p) use ($roomOwnerId, $pdo): array {
     return array_merge([
         'id' => (int)$p['id'],
         'user_id' => (int)$p['user_id'],
-        'username' => (string)$p['username'],
+        'public_profile_id' => member_profiles_validate_public_profile_id(
+            $p['public_profile_id'] ?? ''
+        ),
         'display_name' => $p['display_name'],
         'role' => $p['role'] ?: 'user',
         'is_owner' => (int)$p['user_id'] === $roomOwnerId,
@@ -163,6 +179,7 @@ if ($messageIds) {
     }
 }
 $messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMap, $pdo, $user): array {
+    $m = message_protection_project_row($m);
     $row = [
         'id' => (int)$m['id'],
         'participant_id' => $m['participant_id'] ? (int)$m['participant_id'] : null,
@@ -184,7 +201,14 @@ $messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMa
         'is_deleted' => !empty($m['is_deleted']),
         'sent_at' => $m['sent_at'],
         'reactions' => $reactionsMap[(int)$m['id']] ?? [],
+        'protection_mode' => $m['protection_mode'],
+        'protection_version' => $m['protection_version'],
+        'protection_key_epoch' => $m['protection_key_epoch'],
+        'client_message_id' => $m['client_message_id'],
     ];
+    if ($m['protection_mode'] === 'e2ee-private') {
+        $row['protection_envelope'] = $m['protection_envelope'];
+    }
     if (($row['message_type'] ?? 'text') === 'gesture') {
         $row['gesture'] = message_gesture((string)$m['content']);
     }
@@ -196,6 +220,7 @@ $messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMa
 
 $stmt = $pdo->query(
     "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json, cm.reply_to_json,
+            cm.protection_mode, cm.protection_version, cm.protection_key_epoch, cm.protection_envelope_json, cm.client_message_id,
             cm.message_type, cm.file_size, cm.mime_type, cm.original_name, cm.edited_at, cm.sent_at,
             u.role AS author_role,
             0 AS author_is_owner
@@ -246,6 +271,7 @@ $linkHistory = avatar_relationship_transaction($pdo, function() use (
     if (!$access) return ['access' => null, 'messages' => []];
     $stmt = $pdo->prepare(
         "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json, cm.reply_to_json,
+                cm.protection_mode, cm.protection_version, cm.protection_key_epoch, cm.protection_envelope_json, cm.client_message_id,
                 cm.message_type, cm.file_size, cm.mime_type, cm.original_name, cm.edited_at, cm.sent_at, cm.link_key,
                 u.role AS author_role,
                 CASE WHEN cm.user_id = ? THEN 1 ELSE 0 END AS author_is_owner
@@ -305,6 +331,7 @@ $dmLeft = 'dm:' . (int)$user['id'] . ':%';
 $dmRight = 'dm:%:' . (int)$user['id'];
 $stmt = $pdo->prepare(
     "SELECT cm.id, cm.participant_id, cm.user_id, cm.display_name, cm.avatar_path, cm.avatar_url, cm.content, cm.url_preview_json, cm.reply_to_json,
+            cm.protection_mode, cm.protection_version, cm.protection_key_epoch, cm.protection_envelope_json, cm.client_message_id,
             cm.message_type, cm.file_size, cm.mime_type, cm.original_name, cm.edited_at, cm.sent_at, cm.link_key,
             u.role AS author_role,
             0 AS author_is_owner
@@ -354,6 +381,7 @@ $lastCommunityEventId = (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM commu
 $stmt = $pdo->prepare('SELECT blocked_user_id FROM user_blocks WHERE blocker_user_id = ?');
 $stmt->execute([(int)$user['id']]);
 $blockedUserIds = array_map(fn(array $row): int => (int)$row['blocked_user_id'], $stmt->fetchAll());
+$mutedUsers = moderation_safety_mute_projection($pdo, (int)$user['id']);
 $roomEffects = array_values(room_effect_catalog());
 $activeRoomEffect = active_room_effect($pdo, (int)$session['id']);
 $relationships = avatar_relationship_payloads_for_session(
@@ -387,6 +415,7 @@ $roomConfig = [
     ],
     'myRole' => $user['role'] ?? 'user',
     'blockedUserIds' => $blockedUserIds,
+    'mutedUsers' => $mutedUsers,
     'sessionId' => $session['public_id'],
     'myParticipantId' => (int)$participant['id'],
     'myUserId' => (int)$user['id'],
@@ -416,6 +445,24 @@ $roomConfig = [
         'packageVersion' => GESTURE_PACKAGE_VERSION,
     ],
     'gestureCapabilities' => gesture_capability_policy($pdo),
+    'messageProtection' => [
+        'protocol' => MESSAGE_PROTECTION_PROTOCOL,
+        'room' => message_protection_policy($pdo, 'room', (string)(int)$session['id']),
+        'community' => message_protection_policy($pdo, 'community', 'community'),
+        'link' => $linkConversationId !== ''
+            ? message_protection_policy($pdo, 'link', $linkConversationId)
+            : null,
+        'dm' => array_values(array_map(
+            fn(array $dm): array => message_protection_policy(
+                $pdo,
+                'dm',
+                dm_key_for((int)$user['id'], (int)$dm['user_id'])
+            ),
+            $dmUsers
+        )),
+        'e2eeSupportedMessageTypes' => MESSAGE_PROTECTION_E2EE_TYPES,
+        'noStaffBackdoor' => true,
+    ],
     'messages' => $messages,
     'communityMessages' => $communityMessages,
     'linkMessages' => $linkMessages,

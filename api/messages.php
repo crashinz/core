@@ -78,6 +78,7 @@ function reply_snapshot(PDO $pdo, array $body, string $channel, int $sessionId, 
         if ($message && !community_message_accessible($pdo, $message, $channel, $sessionId, $participant)) $message = false;
     }
     if (!$message) json_out(['error' => 'Reply target unavailable'], 404);
+    $message = message_protection_project_row($message);
 
     return [
         'id' => (int)$message['id'],
@@ -122,6 +123,9 @@ if ($action === 'edit') {
             if ((int)$message['participant_id'] !== (int)$participant['id'] || !empty($message['is_deleted'])) {
                 return ['error' => 'Cannot edit this message', 'http_status' => 403];
             }
+            if (($message['protection_mode'] ?? 'standard') !== 'standard') {
+                return ['error' => 'Protected message edits are not supported in protocol v1.', 'http_status' => 409];
+            }
             if (($message['message_type'] ?? 'text') !== 'text') {
                 return ['error' => 'Cannot edit this message', 'http_status' => 403];
             }
@@ -163,6 +167,7 @@ if ($action === 'edit') {
         $message = $stmt->fetch();
         if (!$message || !community_message_accessible($pdo, $message, $channel, $sessionId, $participant)) json_out(['error' => 'Message not found'], 404);
         if ((int)$message['participant_id'] !== (int)$participant['id'] || !empty($message['is_deleted'])) json_out(['error' => 'Cannot edit this message'], 403);
+        if (($message['protection_mode'] ?? 'standard') !== 'standard') json_out(['error' => 'Protected message edits are not supported in protocol v1.'], 409);
         if (($message['message_type'] ?? 'text') !== 'text') json_out(['error' => 'Cannot edit this message'], 403);
 
         $editedAt = gmdate('Y-m-d H:i:s');
@@ -204,6 +209,7 @@ if ($action === 'edit') {
     $stmt->execute([$messageId, $sessionId]);
     $message = $stmt->fetch();
     if (!$message || (int)$message['participant_id'] !== (int)$participant['id']) json_out(['error' => 'Cannot edit this message'], 403);
+    if (($message['protection_mode'] ?? 'standard') !== 'standard') json_out(['error' => 'Protected message edits are not supported in protocol v1.'], 409);
     if (($message['message_type'] ?? 'text') !== 'text' || !empty($message['is_deleted'])) json_out(['error' => 'Cannot edit this message'], 403);
 
     $editedAt = gmdate('Y-m-d H:i:s');
@@ -334,6 +340,9 @@ $originalName = null;
 $snapshot = null;
 $gestureId = 0;
 $gestureRequestKey = '';
+$incomingProtectionEnvelope = is_array($body['protection_envelope'] ?? null)
+    ? $body['protection_envelope']
+    : null;
 if ($messageType === 'gif') {
     $content = trim((string)($body['gif_url'] ?? ''));
     $originalName = trim((string)($body['title'] ?? 'GIF'));
@@ -353,10 +362,12 @@ if ($messageType === 'gif') {
 } else {
     $content = trim((string)($body['content'] ?? ''));
 }
-if ($content === '') json_out(['error' => 'Message required'], 400);
+if ($content === '' && (($incomingProtectionEnvelope['mode'] ?? '') !== 'e2ee-private')) {
+    json_out(['error' => 'Message required'], 400);
+}
 $contentLength = function_exists('mb_strlen') ? mb_strlen($content, 'UTF-8') : strlen($content);
 if ($messageType === 'text' && $contentLength > 1000) json_out(['error' => 'Message too long'], 400);
-$urlPreview = $messageType === 'text' ? url_preview_for_text($content) : null;
+$urlPreview = $messageType === 'text' && $content !== '' ? url_preview_for_text($content) : null;
 $urlPreviewJson = $urlPreview ? json_encode($urlPreview, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
 $replyTo = null;
 $replyToJson = null;
@@ -390,7 +401,8 @@ if ($channel === 'link') {
             $originalName,
             $authorContext,
             $gestureId,
-            $gestureRequestKey
+            $gestureRequestKey,
+            $incomingProtectionEnvelope
         ): array {
             $access = avatar_relationship_chat_access(
                 $pdo,
@@ -417,6 +429,8 @@ if ($channel === 'link') {
                 'gesture' => $messageType === 'gesture' ? $snapshot : null,
                 'gesture_id' => $messageType === 'gesture' ? $gestureId : null,
                 'request_key' => $messageType === 'gesture' ? $gestureRequestKey : null,
+                'client_message_id' => trim((string)($body['client_message_id'] ?? '')),
+                'protection_envelope' => $incomingProtectionEnvelope,
                 'mime_type' => $mimeType,
                 'original_name' => $originalName,
                 'link_key' => $access['conversation_id'],
@@ -427,6 +441,8 @@ if ($channel === 'link') {
         });
     } catch (GestureCatalogException $error) {
         json_out(gesture_message_exception_payload($error), $error->httpStatus);
+    } catch (MessageProtectionException $error) {
+        json_out(['error' => $error->getMessage(), 'code' => $error->errorCode] + $error->projection, $error->httpStatus);
     }
     $status = (int)($result['http_status'] ?? 200);
     unset($result['http_status']);
@@ -472,6 +488,8 @@ try {
         'gesture' => $messageType === 'gesture' ? $snapshot : null,
         'gesture_id' => $messageType === 'gesture' ? $gestureId : null,
         'request_key' => $messageType === 'gesture' ? $gestureRequestKey : null,
+        'client_message_id' => trim((string)($body['client_message_id'] ?? '')),
+        'protection_envelope' => $incomingProtectionEnvelope,
         'mime_type' => $mimeType,
         'original_name' => $originalName,
         'link_key' => $linkKey ?? null,
@@ -480,6 +498,8 @@ try {
     ]);
 } catch (GestureCatalogException $error) {
     json_out(gesture_message_exception_payload($error), $error->httpStatus);
+} catch (MessageProtectionException $error) {
+    json_out(['error' => $error->getMessage(), 'code' => $error->errorCode] + $error->projection, $error->httpStatus);
 }
 if ($messageType === 'gesture') {
     $msg = gesture_capability_project_message_payload(
