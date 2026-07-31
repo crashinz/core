@@ -421,6 +421,7 @@ $roomConfig = [
     'myUserId' => (int)$user['id'],
     'myJoinToken' => $participant['join_token'],
     'lastEventId' => $lastEventId,
+    'transport' => transport_policy_projection($pdo),
     'participants' => $participants,
     'relationships' => $relationships,
     'relationshipDiagnostics' => [

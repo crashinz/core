@@ -2090,6 +2090,14 @@ function configureChatPoll() {
     pollInterval: 25,
     failureBackoffBase: 1000,
     failureBackoffMax: 30000,
+    getTransportPolicy: () => cfg.transport || {},
+    resolveUrl: appUrl,
+    createEventSource(url) {
+      return new EventSource(url, { withCredentials: true });
+    },
+    createWebSocket(url, protocols) {
+      return new WebSocket(url, protocols);
+    },
     fetchPoll(query) {
       return runtimeRequestClient.getJson('/api/poll.php?' + query, {
         operation: 'poll-room-events',
@@ -2120,6 +2128,13 @@ function configureChatPoll() {
         retryDelay: Number(retry.retryDelay || 0),
       });
       warnRuntimeRequest(error);
+    },
+    onAdapterChange(state = {}) {
+      recordRuntimeDiagnostic('requests', 'room-event-transport-changed', {
+        activeAdapter: String(state.activeAdapter || 'polling'),
+        fallbackAdapter: String(state.fallbackAdapter || 'polling'),
+        reason: String(state.reason || '').slice(0, 240),
+      });
     },
   });
 }

@@ -419,7 +419,7 @@ function backup_portable_validate_bundle(PDO $pdo, array $bundle): array {
             }
         }
         if (!$matched || !backup_portable_custom_file_allowed($path)) {
-            throw new RuntimeException('Portable bundle file reference is outside its source-backed destination class.');
+            throw new RuntimeException('Portable bundle file reference is outside its allowed destination.');
         }
     };
 
@@ -482,7 +482,7 @@ function backup_portable_validate_bundle(PDO $pdo, array $bundle): array {
                 : '';
         } catch (MemberProfileException $error) {
             throw new RuntimeException(
-                'Portable bundle contains an invalid source-backed user identity.',
+                'Portable bundle contains an invalid user identity.',
                 0,
                 $error
             );

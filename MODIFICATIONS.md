@@ -516,8 +516,9 @@ message protection, and bounded retention controls.
   Installation Owner identity and atomic owner-only transfer, roles, trust
   states, capability grants, requests, appeals, notices, moderation cases,
   evidence, Personal Mute, and stronger Block reconciliation.
-- Added mandatory HTTPS policy, trusted-proxy handling, private opaque network
-  identities, short exact-IP reveal leases, and privacy-safe audit records.
+- Added mandatory HTTPS policy, trusted-proxy handling, and private opaque
+  network identities. The earlier reversible exact-address/reveal-lease design
+  is permanently superseded by the later opaque-network moderation correction.
 - Added versioned Standard, server-encrypted, and private-chat E2EE protection
   with trusted devices, a separate recovery phrase, truthful transition
   coverage, and no staff decryption backdoor.
@@ -563,5 +564,185 @@ profile identity.
 
 Technical reference: Post-Build 000051 consolidated checkpoint, 2026-07-28;
 final private commit and verification are recorded in its Engineering Report.
+
+</details>
+
+## Measured capacity, diagnostics, and System Health
+
+CoreChat now uses one measured operational-capacity authority, one finite
+production diagnostic selector, and one sanitized Admin System Health
+projection without weakening mandatory security or changing trust policy.
+
+<details>
+<summary>More about this change</summary>
+
+- Adds Shared/Conservative, Standard, Dedicated/High-Capacity, and Custom
+  capacity states. Fresh installations begin with Shared/Conservative;
+  upgrades preserve their existing behavior as Custom until an administrator
+  deliberately reviews and applies a measured profile.
+- Keeps every profile value inside a certified hard envelope and presents
+  exact current/proposed values, utilization, provenance, and impact before
+  one atomic, revisioned, idempotent profile action.
+- Adds Off, Errors only, Errors and warnings, and temporary 60-minute Verbose
+  client diagnostic collection. Errors only is the default; Verbose returns
+  to its immediately preceding finite mode and repeated requests do not extend
+  its lease.
+- Keeps diagnostic screenshots off with zero-day retention by default,
+  proposes 30 days when deliberately enabled, preserves holds and active
+  investigations, and performs evidence cleanup only through an explicit,
+  bounded, leased, retry-safe maintenance owner.
+- Adds a capability-restricted System Health workspace containing only
+  sanitized aggregate capacity, migration, storage, host/runtime, transport,
+  extension, diagnostic, and maintenance facts. It excludes evidence content,
+  member content, credentials, network addresses, connection details, and
+  filesystem paths.
+- Preserves Polling as the default and permanent fallback. Unknown or
+  unproven SSE/WSS capability remains unsupported.
+
+Technical reference: Build 000052 Part 1, 2026-07-28.
+
+</details>
+
+## Capability-safe room event transports
+
+CoreChat now delivers room and community events through one authoritative
+cursor, authorization, filtering, and replay contract while retaining Polling
+as the mandatory default and permanent fallback.
+
+<details>
+<summary>More about this change</summary>
+
+- Adds one shared Setup/Admin choice between **Polling only — Default** and
+  **Automatic best available**. Automatic tries only capability-proven WSS,
+  then capability-proven HTTPS Server-Sent Events, then Polling.
+- Keeps the existing room/community event ledgers as the sole persistence,
+  ordering, and history authority. Transport adapters perform framing and
+  lifecycle work only.
+- Adds bounded client cursor and deduplication ownership shared across
+  transport changes, reconnect, and fallback without duplicating, reordering,
+  or inventing event truth.
+- Adds a one-batch Server-Sent Events adapter over the same server-side
+  authorization and privacy projection. It is eligible only when HTTPS,
+  response-buffering, and direct or proven proxy ownership are established.
+- Includes an inert same-origin WSS client adapter boundary while truthfully
+  keeping WebSocket unavailable until a repository-owned persistent process
+  and its dependency, deployment, TLS/proxy, authorization, resource,
+  lifecycle, and cleanup audits are complete.
+- Revalidates room access on every bounded server wait iteration and returns
+  truthfully to Polling if an optional adapter fails, without changing active
+  room state or describing transport encryption as end-to-end encryption.
+
+Technical reference: Build 000052 Part 2, 2026-07-28.
+
+</details>
+
+## Runtime issue reconciliation and clearer administration
+
+CoreChat now groups recurring runtime issues without exposing private
+diagnostic content, gives authorized staff a complete evidence lifecycle, and
+uses a compact, human-readable Setup and Admin settings presentation.
+
+<details>
+<summary>More about this change</summary>
+
+- Adds bounded issue grouping, recurrence tracking, sanitized environment
+  context, revisioned states, retention holds, reviewed support exports,
+  hosted-pending handoffs, and separately confirmed evidence deletion.
+- Keeps network addresses out of issue views, exports, screenshots, handoffs,
+  System Health, and ordinary Tool Logs. The later opaque-network moderation
+  correction removes the superseded exact-address security-export path.
+- Reorganizes Settings and Manage Users into accessible selectable sections,
+  preserves one shared settings owner and one sticky save workflow, and moves
+  network, retention, and moderation panels to their canonical destinations.
+- Replaces large setting cards with compact grouped rows across Admin and the
+  guided Setup subset, with adjacent units and ranges, accessible information
+  disclosures, persistent validation, and responsive two-column or
+  single-column layouts.
+- Keeps expanded plain-language setting information clear of the global
+  sticky Save area while preserving focus, scrolling, and the shared settings
+  owner.
+- Adds synchronized accessible role-color controls, plain-language retention,
+  branding, Limits, and Gesture presentation, while preserving the exact
+  **ChatSpace Community Edition** default branding and required attribution.
+- Preserves SQLite and MariaDB behavior, migration and recovery compatibility,
+  private configuration, security boundaries, and the exclusion of
+  Build 000053 account deletion work.
+
+Technical reference: Post-Build 000052 hosted runtime-issue reconciliation and
+evidence lifecycle, 2026-07-29.
+
+</details>
+
+## Admin focus, opaque-network moderation, and stronger visual verification
+
+CoreChat now uses one intentional Admin heading-focus treatment, never reveals
+or reversibly stores a network address, and gives the Installation Owner a
+privacy-bounded, source-backed Manual Network Ban workflow.
+
+<details>
+<summary>More about this change</summary>
+
+- Replaces browser/default or detached Admin heading focus rectangles with one
+  generic theme-consistent indicator that wraps its heading while preserving
+  programmatic focus, announcement, scroll ownership, navigation state, and
+  back/forward behavior.
+- Preserves inline setting information controls as compact native buttons on
+  the owned setting-label line, outside checkbox labels, with accessible
+  naming, pointer/touch and keyboard activation, Escape close/focus return,
+  and responsive/enlarged-zoom alignment.
+- Removes every raw/exact network-address reveal, output, export, lease, and
+  reversible store. Request addresses are used only ephemerally for trusted
+  proxy processing, IPv4/IPv6 normalization, keyed/versioned opaque identity
+  derivation, and enforcement.
+- Migrates prior reversible address records and reveal leases away while
+  preserving required opaque-network, moderation, integrity, and audit
+  records across SQLite and MariaDB.
+- Adds **Manual Network Bans** under shared Setup/Admin Network Protection.
+  It defaults Disabled, is Installation-Owner-only, is excluded from broad
+  bulk operations, and never bans automatically.
+- Requires source-backed context selection, recent authentication, reason,
+  privacy/NAT warning, affected-account identity preview, bounded duration or
+  Permanent, deliberate confirmation, idempotent server enforcement,
+  affected-session reconciliation, self-lockout protection, and an
+  authenticated idempotent removal flow.
+- Shows owner-only, privacy-bounded context and ban status without implying
+  that a network identifies a person or household. Non-owner menu, URL, API,
+  altered-role, stale-session, and forged-request access fails closed.
+- Permanently requires populated pixel inspection of materially affected Admin
+  destinations across desktop, tablet where applicable, narrow/mobile, and
+  enlarged zoom, including focused headings, selected navigation, inline help,
+  grouping, clipping, overlap, horizontal overflow, sticky actions, dirty/error
+  states, and browser/default focus artifacts.
+
+Technical reference: Post-Build 000052 Admin Focus, Opaque Network Moderation,
+Visual Verification, and Public Release Reconciliation, 2026-07-30.
+
+</details>
+
+## Clearer Settings order, community defaults, and operational labels
+
+CoreChat now makes moderation policy easier to find, restores original-style
+fresh-install access through an explicit preset, and clarifies several
+administrative labels without changing saved upgrades or runtime limits.
+
+<details>
+<summary>More about this change</summary>
+
+- Keeps Settings Overview first, then places Moderation, Privacy & Security
+  before Branding and Moderation and Trust before Network Protection through
+  one shared Setup/Admin registry order.
+- Adds **Open Community (Original-style)** as the fresh-install-only default:
+  Open self-registration, immediately Trusted ordinary accounts, Disabled
+  optional outside-content confirmation, no guests, and mandatory security
+  unchanged.
+- Preserves every existing installation's saved policy, trust, grants,
+  requests, and history. Deliberate Approval still permits ordinary chat while
+  protected features await Administrator approval.
+- Renames diagnostic screenshot retention and three capacity warning
+  thresholds in plain language without changing their identifiers, values,
+  validation, calculations, or runtime behavior.
+
+Technical reference: Post-Build 000052 Settings Terminology Clarification
+Before Public Release, 2026-07-31.
 
 </details>

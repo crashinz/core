@@ -8,39 +8,64 @@ $pdo = db();
 
 try {
     network_privacy_require_owner($pdo, (int)$me['id']);
+    security_require_recent_authentication_or_json();
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $currentOpaque = network_privacy_observe($pdo, network_privacy_client_ip());
         json_out([
-            'policy' => network_privacy_policy_projection($pdo, (int)$me['id']),
-            'currentNetworkIdentifier' => $currentOpaque,
+            'transportPolicy' => network_privacy_policy_projection($pdo, (int)$me['id']),
+            'manualBanPolicy' => network_moderation_policy_projection($pdo, (int)$me['id']),
+            'contexts' => network_moderation_contexts_projection($pdo, (int)$me['id']),
+            'bans' => network_moderation_bans_projection($pdo, (int)$me['id']),
         ]);
     }
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         json_out(['error' => 'Unsupported method'], 405);
     }
-    security_require_recent_authentication_or_json();
     $body = input_json();
     $action = (string)($body['action'] ?? '');
-    if ($action === 'update_policy') {
+    if ($action === 'update_transport_policy') {
         json_out([
             'ok' => true,
-            'policy' => network_privacy_update_policy($pdo, (int)$me['id'], $body),
+            'transportPolicy' => network_privacy_update_policy($pdo, (int)$me['id'], $body),
         ]);
     }
-    if ($action === 'reveal') {
+    if ($action === 'preview_manual_ban') {
         json_out([
             'ok' => true,
-            'reveal' => network_privacy_reveal(
+            'preview' => network_moderation_preview_ban(
                 $pdo,
                 (int)$me['id'],
-                trim((string)($body['opaqueId'] ?? '')),
+                (string)($body['contextId'] ?? ''),
                 (string)($body['reason'] ?? ''),
-                (int)($body['durationMinutes'] ?? NETWORK_PRIVACY_DEFAULT_REVEAL_MINUTES)
+                $body['durationMinutes'] ?? null,
+                !empty($body['permanent'])
             ),
         ]);
     }
-    if ($action === 'hide') {
-        json_out(['ok' => true] + network_privacy_hide($pdo, (int)$me['id']));
+    if ($action === 'apply_manual_ban') {
+        json_out([
+            'ok' => true,
+            'application' => network_moderation_apply_ban(
+                $pdo,
+                (int)$me['id'],
+                (string)($body['previewId'] ?? ''),
+                (string)($body['impactSha256'] ?? ''),
+                (string)($body['requestId'] ?? ''),
+                !empty($body['confirmed'])
+            ),
+        ]);
+    }
+    if ($action === 'remove_manual_ban') {
+        json_out([
+            'ok' => true,
+            'removal' => network_moderation_remove_ban(
+                $pdo,
+                (int)$me['id'],
+                (string)($body['banId'] ?? ''),
+                (string)($body['reason'] ?? ''),
+                (string)($body['requestId'] ?? ''),
+                !empty($body['confirmed'])
+            ),
+        ]);
     }
     json_out(['error' => 'Unknown action'], 400);
 } catch (NetworkPrivacyException $error) {

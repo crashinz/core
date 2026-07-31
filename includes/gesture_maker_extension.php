@@ -66,7 +66,7 @@ function gesture_maker_extension_render_editor(array $view): void {
           <div class="gesture-editor-field"><span>Current revision</span><output id="gesture-current-version">New</output><small>Stale saves fail without partial replacement.</small></div>
         </div>
         <div class="gesture-editor-media">
-          <label id="gesture-package-input-row"><strong>Import AGST package</strong><input id="gesture-package" type="file" accept=".agst,application/zip"><small>Canonical v1 and source-backed legacy toc/meta packages are validated on Save.</small></label>
+          <label id="gesture-package-input-row"><strong>Import AGST package</strong><input id="gesture-package" type="file" accept=".agst,application/zip"><small>Current and supported legacy packages are validated when you save.</small></label>
           <label id="gesture-animation-input-row"><strong>Animation GIF</strong><input id="gesture-animation" type="file" accept="image/gif,.gif"><small>Required for Create unless an AGST package is selected.</small></label>
           <label><strong>Static poster</strong><input id="gesture-poster" type="file" accept="image/gif,image/png,image/jpeg,image/webp"><small>Optional safe fallback/inspection image.</small></label>
           <label id="gesture-audio-input-row"><strong>Sound MP3</strong><input id="gesture-audio" type="file" accept="audio/mpeg,.mp3"><small>Optional; sound never autoplays in this editor.</small></label>

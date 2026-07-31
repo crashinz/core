@@ -18,6 +18,8 @@ const MODERATION_SAFETY_STAFF_CAPABILITIES = [
     'warn', 'temporarily-restrict', 'remove-from-room', 'suspend-account',
     'review-reports', 'view-moderation-history',
     'undo-eligible-restriction', 'manage-evidence',
+    'view-runtime-issues', 'manage-runtime-issues',
+    'export-runtime-issues', 'manage-runtime-evidence',
 ];
 const MODERATION_SAFETY_MUTE_DURATIONS = ['until-unmute', '1-hour', '24-hours'];
 const MODERATION_SAFETY_MUTE_SCOPES = [

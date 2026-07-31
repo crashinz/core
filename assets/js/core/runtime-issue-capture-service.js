@@ -60,8 +60,10 @@ export class RuntimeIssueCaptureService {
   #reportTimes = [];
   #destroyed = false;
   #submitting = false;
+  #collectionMode = 'errors-only';
+  #policyPromise = null;
 
-  constructor({ endpoint = '/api/runtime_issues.php', csrfToken = '', diagnostics = null, fetchImpl = globalThis.fetch?.bind(globalThis), globalObject = globalThis, documentObject = globalThis.document, buildId = '000045' } = {}) {
+  constructor({ endpoint = '/api/runtime_issues.php', csrfToken = '', diagnostics = null, fetchImpl = globalThis.fetch?.bind(globalThis), globalObject = globalThis, documentObject = globalThis.document, buildId = '000052' } = {}) {
     if (typeof fetchImpl !== 'function') throw new TypeError('RuntimeIssueCaptureService requires fetch().');
     this.#endpoint = endpoint;
     this.#csrfToken = csrfToken;
@@ -69,11 +71,12 @@ export class RuntimeIssueCaptureService {
     this.#fetch = fetchImpl;
     this.#global = globalObject;
     this.#document = documentObject;
-    this.#buildId = safeString(buildId, 96) || '000045';
+    this.#buildId = safeString(buildId, 96) || '000052';
   }
 
   start() {
     if (this.#destroyed || this.#listeners.length) return this;
+    this.#policyPromise = this.#refreshPolicy();
     const onError = event => {
       const error = event?.error || new Error(safeString(event?.message || 'Browser error'));
       this.capture(error, { category: 'browser', component: 'window-error' });
@@ -105,7 +108,9 @@ export class RuntimeIssueCaptureService {
 
   async capture(error, context = {}, evidence = {}) {
     if (this.#destroyed || this.#submitting) return null;
+    await this.#policyPromise;
     const identity = errorIdentity(error, context);
+    if (!this.#modeAllows(identity.severity)) return null;
     const key = `${identity.category}|${identity.component}|${identity.error_code}|${identity.message}`;
     const now = Date.now();
     if ((this.#recent.get(key) || 0) > now - DUPLICATE_BACKOFF_MS) return null;
@@ -195,6 +200,32 @@ export class RuntimeIssueCaptureService {
     }
   }
 
+  #modeAllows(severity) {
+    if (this.#collectionMode === 'off') return false;
+    if (this.#collectionMode === 'errors-only') return severity === 'error' || severity === 'critical';
+    if (this.#collectionMode === 'errors-and-warnings') return severity !== 'info';
+    return this.#collectionMode === 'verbose';
+  }
+
+  async #refreshPolicy() {
+    try {
+      const separator = this.#endpoint.includes('?') ? '&' : '?';
+      const response = await this.#fetch(`${this.#endpoint}${separator}action=config`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      const contentType = String(response.headers?.get?.('content-type') || '');
+      if (!response.ok || !contentType.includes('application/json')) return;
+      const result = await response.json();
+      const mode = result?.collection?.effectiveMode;
+      if (['off', 'errors-only', 'errors-and-warnings', 'verbose'].includes(mode)) this.#collectionMode = mode;
+    } catch {
+      // Fail closed to the recommended errors-only default.
+      this.#collectionMode = 'errors-only';
+    }
+  }
+
   async #post(body) {
     const response = await this.#fetch(this.#endpoint, {
       method: 'POST',
@@ -215,4 +246,7 @@ export const runtimeIssueCaptureContract = Object.freeze({
   forbiddenKeyPattern: SENSITIVE_KEY,
   duplicateBackoffMs: DUPLICATE_BACKOFF_MS,
   maxReportsPerMinute: MAX_REPORTS_PER_MINUTE,
+  finiteCollectionModes: Object.freeze(['off', 'errors-only', 'errors-and-warnings', 'verbose']),
+  defaultCollectionMode: 'errors-only',
+  engineeringDiagnosticsIndependent: true,
 });

@@ -4,6 +4,26 @@ require_once __DIR__ . '/../includes/base.php';
 $me = require_staff();
 $pdo = db();
 
+function admin_system_policy_error(Throwable $error): never {
+    if ($error instanceof OperationalCapacityException) {
+        json_out([
+            'ok' => false,
+            'code' => $error->errorCode,
+            'error' => $error->getMessage(),
+            'operationalCapacity' => $error->projection ?: null,
+        ], $error->httpStatus);
+    }
+    if ($error instanceof RuntimeDiagnosticPolicyException) {
+        json_out([
+            'ok' => false,
+            'code' => $error->errorCode,
+            'error' => $error->getMessage(),
+            'runtimeDiagnosticPolicy' => $error->projection ?: null,
+        ], $error->httpStatus);
+    }
+    throw $error;
+}
+
 function admin_settings(PDO $pdo): array {
     $secretKeys = [];
     foreach (settings_registry_definitions() as $definition) {
@@ -31,6 +51,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
     if ($action === 'settings_registry') {
         json_out(['settingsRegistry' => settings_registry_snapshot($pdo, 'admin')]);
+    }
+
+    if ($action === 'system_health') {
+        json_out(['systemHealth' => system_health_projection($pdo)]);
+    }
+
+    if ($action === 'capacity_profile_preview') {
+        if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+        try {
+            json_out(['operationalCapacity' => operational_capacity_projection($pdo), 'impactPreview' => operational_capacity_preview($pdo, (string)($_GET['profile'] ?? ''))]);
+        } catch (Throwable $error) {
+            admin_system_policy_error($error);
+        }
+    }
+
+    if ($action === 'diagnostic_policy') {
+        json_out([
+            'runtimeDiagnosticPolicy' => runtime_diagnostic_policy_projection($pdo),
+            'retention' => runtime_diagnostic_retention_projection($pdo),
+        ]);
     }
 
     if ($action === 'relationship_capacity_impact') {
@@ -156,7 +196,10 @@ if ($action === 'update_settings_registry') {
             'database_compatibility_confirmed' => !empty($body['database_compatibility_confirmed']),
             'expected_database_compatibility_revision' => $body['expected_database_compatibility_revision'] ?? null,
             'moderation_trust_impact_confirmed' => !empty($body['moderation_trust_impact_confirmed']),
+            'network_manual_bans_disable_confirmed' => !empty($body['network_manual_bans_disable_confirmed']),
             'expected_moderation_trust_revision' => $body['expected_moderation_trust_revision'] ?? null,
+            'expected_operational_capacity_revision' => $body['expected_operational_capacity_revision'] ?? null,
+            'expected_runtime_diagnostic_revision' => $body['expected_runtime_diagnostic_revision'] ?? null,
             'request_id' => isset($body['request_id']) ? (string)$body['request_id'] : '',
         ],
         $body['expected_revision'] ?? null,
@@ -175,6 +218,38 @@ if ($action === 'update_settings_registry') {
         'relationshipCapacity' => avatar_relationship_capacity_policy($pdo),
         'danceCapability' => avatar_dance_capability_policy($pdo),
     ]);
+}
+
+if ($action === 'apply_capacity_profile') {
+    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+    try {
+        json_out(operational_capacity_apply_profile(
+            $pdo,
+            (string)($body['profile'] ?? ''),
+            $body['expected_revision'] ?? null,
+            (string)($body['request_id'] ?? ''),
+            !empty($body['confirmed']),
+            (int)$me['id']
+        ));
+    } catch (Throwable $error) {
+        admin_system_policy_error($error);
+    }
+}
+
+if ($action === 'update_diagnostic_policy') {
+    if ((string)$me['role'] !== 'admin') json_out(['error' => 'Administrator required'], 403);
+    try {
+        json_out(runtime_diagnostic_policy_update(
+            $pdo,
+            (string)($body['mode'] ?? ''),
+            $body['expected_revision'] ?? null,
+            (string)($body['request_id'] ?? ''),
+            !empty($body['confirmed']),
+            (int)$me['id']
+        ));
+    } catch (Throwable $error) {
+        admin_system_policy_error($error);
+    }
 }
 
 $legacySettingsActions = [

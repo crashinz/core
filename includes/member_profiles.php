@@ -399,7 +399,7 @@ function member_profiles_apply_legacy_identity_plan(PDO $pdo, array $plan): void
     $columns = array_fill_keys(member_profiles_table_columns($pdo, 'users'), true);
     if (!isset($columns['username'])) {
         throw new MemberProfileException(
-            'The migration did not create the stable Username owner.',
+            'The database update did not create the stable Username setting.',
             'MEMBER_PROFILE_USERNAME_OWNER_MISSING',
             500
         );

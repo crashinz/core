@@ -252,7 +252,7 @@ function retention_lifecycle_policy_projection(PDO $pdo): array
         'safetyHoldsOverrideExpiry' => true,
         'sharedCatalogMediaExpiresWithMessage' => false,
         'accountDeletionAvailable' => false,
-        'accountDeletionOwner' => 'Build 000053',
+        'accountDeletionOwner' => 'not-yet-available',
     ];
 }
 
@@ -795,7 +795,7 @@ function retention_lifecycle_ownership_safeguards(PDO $pdo, int $userId): array
         'ownedRoomCount' => (int)$rooms->fetchColumn(),
         'isInstallationOwner' => moderation_identity_is_owner($pdo, $userId),
         'transferRequiredBeforeFutureDeletion' => true,
-        'futureDeleteAccountOwner' => 'Build 000053',
+        'futureDeleteAccountOwner' => 'not-yet-available',
         'deleteAccountAvailable' => false,
     ];
 }

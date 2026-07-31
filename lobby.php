@@ -257,6 +257,8 @@ $rooms = $roomsStmt->fetchAll();
     </div>
   </form>
 </div>
+<?php endif; ?>
+<?php if ($isInstallationOwner): ?>
 <div class="modal" id="recovery-modal">
   <div class="modal-box password-box">
     <div class="modal-head">
@@ -296,6 +298,10 @@ $rooms = $roomsStmt->fetchAll();
         <div class="admin-nav-label">System</div>
         <button class="admin-nav-item" data-admin-section="settings" type="button">
           <img src="<?= e(app_url('/assets/images/limits.png')) ?>" alt=""> Settings
+        </button>
+        <button class="admin-nav-item" data-admin-section="system-health" type="button">
+          <span class="admin-nav-symbol" aria-hidden="true">H</span> System Health
+          <span class="admin-nav-count" id="admin-health-warning-count" aria-label="0 health warnings">0</span>
         </button>
         <button class="admin-nav-item" data-admin-section="gestures" type="button">
           <span class="admin-nav-symbol" aria-hidden="true">G</span> Gestures
@@ -338,10 +344,10 @@ $rooms = $roomsStmt->fetchAll();
               <strong id="admin-summary-moderation">0</strong>
               <small>Blocks and active ejections</small>
             </button>
-            <button class="admin-summary-card" type="button" data-admin-jump="settings">
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="limits">
               <span>Limits</span>
-              <strong>GIF</strong>
-              <small>Rate, upload, and GIF controls</small>
+              <strong id="admin-summary-limits">Manage</strong>
+              <small>Rates, history, uploads, file sizes, and usage limits</small>
             </button>
             <button class="admin-summary-card" type="button" data-admin-jump="database">
               <span>Database</span>
@@ -355,18 +361,21 @@ $rooms = $roomsStmt->fetchAll();
           <div class="admin-section-title">Manage Users</div>
           <div class="admin-section-sub">Create accounts, reset passwords, and set account roles.</div>
           <?php if ($isInstallationOwner): ?>
-          <div class="admin-panel admin-owner-policy-sections" aria-label="Installation Owner policy sections">
+          <div class="admin-panel admin-owner-policy-sections" id="admin-owner-panel" aria-label="Installation Owner controls">
             <h3>Installation Owner</h3>
-            <ul>
-              <li>Security &amp; Privacy</li>
-              <li>Staff &amp; Capabilities</li>
-              <li>Network &amp; Trusted Proxies</li>
-              <li>Ownership &amp; Recovery</li>
-            </ul>
+            <section id="admin-owner-recovery-panel" aria-labelledby="admin-owner-recovery-title">
+              <h4 id="admin-owner-recovery-title">Lost Access Recovery</h4>
+              <p class="minor">Manage the recovery code for the current Installation Owner account. This does not change ownership or another member's access.</p>
+              <button class="btn" id="recovery-open" type="button">Manage Lost Access Recovery</button>
+            </section>
             <section id="admin-owner-transfer-panel" aria-labelledby="admin-owner-transfer-title">
-              <h4 id="admin-owner-transfer-title">Ownership &amp; Recovery</h4>
+              <h4 id="admin-owner-transfer-title">Ownership Transfer</h4>
               <p class="minor">Only the current Installation Owner may atomically transfer ownership to another Administrator. Both accounts remain Administrators. This does not delete, deactivate, or weaken either account.</p>
               <p class="minor" id="admin-owner-current" aria-live="polite">Loading current ownership...</p>
+              <details class="admin-technical-details">
+                <summary>Technical details</summary>
+                <p class="minor" id="admin-owner-revision">Ownership revision is loading.</p>
+              </details>
               <form id="admin-owner-transfer-form" class="admin-create">
                 <?= csrf_input() ?>
                 <label>New Installation Owner
@@ -389,47 +398,59 @@ $rooms = $roomsStmt->fetchAll();
             </section>
           </div>
           <div class="admin-panel" id="admin-network-privacy-panel">
-            <h3>Network &amp; Trusted Proxies</h3>
-            <p class="minor">HTTPS enforcement is mandatory. Forwarded addresses and protocol are trusted only from the private trusted-proxy list. Saved addresses remain masked.</p>
+            <h3>Network Protection &amp; Trusted Proxies</h3>
+            <p class="minor">HTTPS enforcement is mandatory. Forwarded network and protocol input is trusted only from the private trusted-proxy configuration. The browser exposes only a privacy-bounded masked summary; address configuration remains outside user-facing surfaces.</p>
             <form id="admin-network-policy-form">
               <?= csrf_input() ?>
               <div class="admin-create">
-                <label><input id="admin-network-hsts" type="checkbox"> Deployment has verified HSTS readiness</label>
-                <label><input id="admin-network-exact-enabled" type="checkbox"> Enable owner-only Exact IP Access</label>
-                <label>Default reveal duration (1–60 minutes)
-                  <input id="admin-network-reveal-default" type="number" min="1" max="60" value="5" required>
-                </label>
-                <label>Replace trusted proxy IP/CIDR list
-                  <textarea id="admin-network-trusted-proxies" rows="4" placeholder="One complete IP or CIDR per line"></textarea>
-                </label>
+                <label class="admin-policy-check-row"><input id="admin-network-hsts" type="checkbox"><span>Deployment has verified HSTS readiness</span></label>
+                <p class="minor admin-policy-support">Confirm this only after HTTPS redirection and the HSTS header have been verified for the deployment.</p>
                 <p class="minor" id="admin-network-trusted-proxies-current">No trusted proxies are configured.</p>
-                <button class="btn btn-primary" type="submit">Save Network Policy</button>
+                <button class="btn btn-primary" type="submit">Save HSTS Readiness</button>
                 <div class="admin-form-status" id="admin-network-policy-status" aria-live="polite"></div>
               </div>
             </form>
             <hr>
-            <h4>Exact IP Access</h4>
-            <p class="minor">Ordinary views use opaque identifiers. Reveals require recent authentication, a reason, and a non-extendable lease. Exact addresses are never written to Tool Logs.</p>
-            <div class="admin-create">
-              <label>Opaque network identifier
-                <input id="admin-network-opaque-id" readonly>
+            <h4>Manual Network Bans</h4>
+            <p class="minor">Manual network bans are controlled by the Network Protection setting. They are Disabled by default, available only to the Installation Owner, and are never created automatically. The server derives keyed opaque network identities without retaining, displaying, logging, or exporting an address.</p>
+            <p class="minor admin-network-warning">A network can be shared by many people and accounts. Correlation is uncertain and does not identify a person or household.</p>
+            <form id="admin-network-ban-form" class="admin-create">
+              <label>Selected account, occurrence, or moderation context
+                <select id="admin-network-context" required>
+                  <option value="">Choose an account or activity</option>
+                </select>
               </label>
               <label>Reason
-                <textarea id="admin-network-reveal-reason" maxlength="500" rows="3"></textarea>
+                <textarea id="admin-network-ban-reason" maxlength="500" rows="3" required></textarea>
               </label>
               <label>Duration
-                <input id="admin-network-reveal-minutes" type="number" min="1" max="60" value="5">
+                <select id="admin-network-ban-duration" required>
+                  <option value="60">1 hour</option>
+                  <option value="360">6 hours</option>
+                  <option value="1440">24 hours</option>
+                  <option value="10080">7 days</option>
+                  <option value="43200">30 days</option>
+                  <option value="permanent">Permanent</option>
+                </select>
               </label>
-              <div class="shared-form-actions">
-                <button class="btn btn-danger" id="admin-network-reveal" type="button">Reveal Exact IP</button>
-                <button class="btn" id="admin-network-hide" type="button">Hide now</button>
-              </div>
-              <output id="admin-network-reveal-output" aria-live="assertive">Exact IP hidden.</output>
-            </div>
+              <button class="btn btn-danger" type="submit">Review Affected Accounts</button>
+              <div class="admin-form-status" id="admin-network-ban-status" aria-live="polite"></div>
+              <section id="admin-network-ban-confirmation" class="settings-impact-confirmation" aria-live="assertive" hidden>
+                <h4>Confirm manual network ban</h4>
+                <p id="admin-network-ban-preview"></p>
+                <ul id="admin-network-ban-accounts"></ul>
+                <div class="shared-form-actions">
+                  <button class="btn btn-danger" id="admin-network-ban-confirm" type="button">Confirm Manual Ban</button>
+                  <button class="btn" id="admin-network-ban-cancel" type="button">Cancel</button>
+                </div>
+              </section>
+            </form>
+            <h4>Active and expired bans</h4>
+            <div id="admin-network-bans" class="admin-scroll-list" aria-live="polite"></div>
           </div>
           <div class="admin-panel" id="admin-retention-panel">
-            <h3>Retention and Account-Lifecycle Foundations</h3>
-            <p class="minor">Configure message and resolved-report evidence retention. Open reports and safety holds override expiry. Account deletion is unavailable in Build 000051.</p>
+            <h3>Message &amp; Report Retention</h3>
+            <p class="minor">Choose how long messages and resolved-report evidence are kept. Open reports and safety holds override expiration. This section does not delete member accounts.</p>
             <form id="admin-retention-form" class="admin-create">
               <?= csrf_input() ?>
               <label>Data class
@@ -444,7 +465,7 @@ $rooms = $roomsStmt->fetchAll();
               <label>Retention days
                 <input name="days" type="number" min="1" max="3650" value="30" required>
               </label>
-              <label><input name="keep_forever" type="checkbox"> Keep forever</label>
+              <label class="admin-policy-check-row"><input name="keep_forever" type="checkbox"> Keep forever</label>
               <button class="btn btn-primary" type="submit">Preview Change</button>
               <div class="admin-form-status" id="admin-retention-status" aria-live="polite"></div>
               <section id="admin-retention-confirmation" class="settings-impact-confirmation" aria-live="assertive" hidden>
@@ -458,33 +479,57 @@ $rooms = $roomsStmt->fetchAll();
               </section>
             </form>
             <div id="admin-retention-policies" class="admin-scroll-list" aria-live="polite"></div>
-            <p class="minor">Non-destructive suspension and session revocation remain distinct from future Delete Account execution. Ownership transfer is required before any future irreversible lifecycle action.</p>
+            <p class="minor">Suspending an account or signing it out does not delete it. Installation ownership must be transferred before an account can ever be permanently removed.</p>
           </div>
           <?php endif; ?>
-          <div class="admin-panel">
-            <form class="admin-create" id="admin-create">
+          <div class="admin-panel" id="admin-add-account-panel">
+            <p class="minor">Create a member account and choose its starting role.</p>
+            <form class="admin-create admin-account-create-form" id="admin-create">
               <?= csrf_input() ?>
-              <input name="username" placeholder="Username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.\x2d]{2,31}">
-              <input name="display_name" placeholder="Display name (optional)">
-              <input name="email" type="email" placeholder="Email" required>
-              <input name="password" type="password" placeholder="Password" required>
-              <select name="role">
-                <option value="user">User</option>
-                <option value="moderator">Moderator</option>
-                <option value="guide">Guide</option>
-                <option value="developer">Developer</option>
-                <option value="admin">Admin</option>
-              </select>
-              <button class="btn btn-primary" type="submit">Add User</button>
+              <label class="admin-create-field">
+                <span>Username</span>
+                <input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.\x2d]{2,31}" aria-describedby="admin-create-username-help">
+                <small id="admin-create-username-help">Use 3–32 lowercase letters, numbers, periods, underscores, or hyphens.</small>
+              </label>
+              <label class="admin-create-field">
+                <span>Display name <span class="minor">(optional)</span></span>
+                <input name="display_name" autocomplete="name">
+              </label>
+              <label class="admin-create-field">
+                <span>Email address</span>
+                <input name="email" type="email" autocomplete="email" required>
+              </label>
+              <label class="admin-create-field">
+                <span>Temporary password</span>
+                <input name="password" type="password" autocomplete="new-password" required>
+              </label>
+              <label class="admin-create-field">
+                <span>Starting role</span>
+                <select name="role">
+                  <option value="user">User</option>
+                  <option value="moderator">Moderator</option>
+                  <option value="guide">Guide</option>
+                  <option value="developer">Developer</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </label>
+              <div class="admin-create-actions">
+                <button class="btn btn-primary" type="submit">Add Account</button>
+              </div>
               <div class="admin-form-status" aria-live="polite"></div>
             </form>
           </div>
-          <div class="admin-panel">
+          <div class="admin-panel" id="admin-accounts-panel">
+            <label class="admin-account-search" for="admin-account-search">
+              <span>Search accounts</span>
+              <input id="admin-account-search" type="search" autocomplete="off" aria-controls="admin-users" placeholder="Name, username, email, role, or trust state">
+            </label>
+            <div class="minor admin-account-search-status" id="admin-account-search-status" role="status" aria-live="polite"></div>
             <div class="admin-users admin-scroll-list" id="admin-users"></div>
           </div>
-          <div class="admin-panel">
+          <div class="admin-panel" id="admin-roles-requests-panel">
             <h3>Trusted Review, Capability Requests, and Appeals</h3>
-            <p class="minor">Select all only selects items for review; it never grants a capability. Public reasons are shown to the member. Internal notes remain private.</p>
+            <p class="minor">Selecting a requested capability marks only that item for review; it never grants access by itself. Public reasons are shown to the member. Internal notes remain private.</p>
             <div class="admin-users admin-scroll-list" id="admin-moderation-cases"></div>
           </div>
           <div class="admin-panel">
@@ -502,10 +547,10 @@ $rooms = $roomsStmt->fetchAll();
 
         <section class="admin-section" id="admin-section-settings">
           <div class="admin-section-title">Settings</div>
-          <div class="admin-section-sub">Search and manage installation policy through the shared Setup/Admin registry.</div>
+          <div class="admin-section-sub">Find and manage community settings by category.</div>
           <div class="admin-panel settings-registry-shell" data-settings-scroll-owner tabindex="0" role="region" aria-label="Complete Admin installation settings">
             <div class="settings-registry-heading">
-              <div><h3>Installation Settings</h3><p class="minor">Persistence remains with each authoritative policy owner.</p></div>
+              <div><h3>Installation Settings</h3><p class="minor">Changes are validated and saved together from this screen.</p></div>
               <div class="settings-registry-state" id="lobby-admin-settings-compatibility-state" aria-live="polite">Loading settings…</div>
             </div>
             <div id="lobby-admin-settings-unlock"></div>
@@ -521,12 +566,12 @@ $rooms = $roomsStmt->fetchAll();
               </div>
             </section>
             <div class="settings-registry-toolbar" role="search">
-              <label>Search settings<input id="lobby-admin-settings-search" type="search" autocomplete="off" placeholder="Label, help, category, alias, or setting ID"></label>
-              <label>Filter<select id="lobby-admin-settings-filter"><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="changed">Changed from default</option><option value="original">Original-author compatibility relevant</option></select></label>
+              <label>Search settings<input id="lobby-admin-settings-search" type="search" autocomplete="off" placeholder="Setting name, description, or category"></label>
+              <label>Filter<select id="lobby-admin-settings-filter"><option value="all">All</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="changed">Changed from standard</option><option value="original">Different from original ChatSpace behavior</option></select></label>
             </div>
             <div class="settings-registry-actions">
-              <button class="btn" id="lobby-admin-settings-original-preview" type="button">Review Original-compatible Changes</button>
-              <button class="btn" id="lobby-admin-settings-framework-preview" type="button">Review Framework Defaults</button>
+              <button class="btn" id="lobby-admin-settings-original-preview" type="button">Review Original ChatSpace Values</button>
+              <button class="btn" id="lobby-admin-settings-framework-preview" type="button">Review Recommended Defaults</button>
               <button class="btn btn-danger" id="lobby-admin-settings-reset-optional" type="button">Reset All Optional Settings</button>
             </div>
             <div id="lobby-admin-settings-preset-review" class="settings-preset-review" hidden></div>
@@ -566,24 +611,109 @@ $rooms = $roomsStmt->fetchAll();
                   <button class="btn" id="lobby-admin-moderation-trust-cancel" type="button">Cancel</button>
                 </div>
               </section>
-              <div class="settings-registry-sticky-actions">
-                <span id="lobby-admin-settings-dirty-summary">No unsaved changes</span>
-                <button class="btn btn-primary" id="lobby-admin-settings-save" type="submit" disabled>Save Changes</button>
-                <div class="admin-form-status" aria-live="polite"></div>
-              </div>
             </form>
+            <div id="admin-settings-retention-destination" hidden></div>
+          </div>
+          <div class="settings-registry-sticky-actions">
+            <span id="lobby-admin-settings-dirty-summary">No unsaved changes</span>
+            <button class="btn btn-primary" id="lobby-admin-settings-save" type="submit" form="lobby-admin-settings-registry-form" disabled>Save Changes</button>
+            <div class="admin-form-status" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="admin-section" id="admin-section-system-health">
+          <div class="admin-section-title">System Health</div>
+          <div class="admin-section-sub">Review capacity, hosting features, storage, connection health, diagnostics, and maintenance status.</div>
+          <div class="admin-panel system-health-banner" id="system-health-summary" role="status" aria-live="polite">
+            Loading bounded System Health…
+          </div>
+          <div class="system-health-grid" id="system-health-metrics" aria-label="Operational health metrics"></div>
+          <section id="system-health-network-privacy-destination" class="system-health-network-privacy" aria-labelledby="system-health-network-privacy-title">
+            <h3 id="system-health-network-privacy-title">Network &amp; Privacy</h3>
+          </section>
+
+          <div class="admin-panel">
+            <div class="system-health-section-heading">
+              <div>
+                <h3>Performance &amp; Capacity</h3>
+                <p class="minor">Profile values are measured starting points. Applying one never changes trust, security, privacy, or admission policy.</p>
+              </div>
+              <span class="settings-badge" id="capacity-profile-current">Loading profile…</span>
+            </div>
+            <div class="capacity-profile-controls">
+              <label>Review a measured profile
+                <select id="capacity-profile-select">
+                  <option value="shared-conservative">Shared/Conservative</option>
+                  <option value="standard">Standard</option>
+                  <option value="dedicated-high-capacity">Dedicated/High-Capacity</option>
+                </select>
+              </label>
+              <button class="btn" id="capacity-profile-review" type="button">Review Exact Impact</button>
+            </div>
+            <section class="settings-impact-confirmation" id="capacity-profile-impact" aria-live="assertive" hidden>
+              <h4 id="capacity-profile-impact-title">Capacity profile impact</h4>
+              <p>Review every exact change. Current activity is not terminated; reduced targets appear as health warnings.</p>
+              <ul id="capacity-profile-impact-list"></ul>
+              <div class="shared-form-actions">
+                <button class="btn btn-primary" id="capacity-profile-apply" type="button">Apply Reviewed Profile</button>
+                <button class="btn" id="capacity-profile-cancel" type="button">Cancel</button>
+              </div>
+            </section>
+            <div class="capacity-values-grid" id="capacity-values" aria-label="Current measured capacity values"></div>
+            <div class="admin-form-status" id="capacity-profile-status" role="status" aria-live="polite"></div>
+          </div>
+
+          <div class="admin-panel">
+            <h3>Host &amp; Realtime Capability</h3>
+            <p class="minor">Unknown capability remains unsupported. Polling is the default and permanent fallback.</p>
+            <div class="system-health-capabilities" id="system-health-capabilities"></div>
+          </div>
+
+          <div class="admin-panel">
+            <div class="system-health-section-heading">
+              <div>
+                <h3>Client Diagnostic Collection</h3>
+                <p class="minor">Choose how much browser diagnostic information is collected. Collection remains bounded by the selected mode and retention policy.</p>
+              </div>
+              <span id="diagnostic-verbose-countdown" class="settings-badge" aria-live="polite" hidden></span>
+            </div>
+            <div class="capacity-profile-controls">
+              <label>Collection mode
+                <select id="diagnostic-policy-mode">
+                  <option value="off">Off</option>
+                  <option value="errors-only">Errors only</option>
+                  <option value="errors-and-warnings">Errors and warnings</option>
+                  <option value="verbose">Verbose diagnostics — 60 minutes</option>
+                </select>
+              </label>
+              <button class="btn" id="diagnostic-policy-review" type="button">Review Mode Change</button>
+            </div>
+            <section class="settings-impact-confirmation" id="diagnostic-policy-impact" aria-live="assertive" hidden>
+              <h4>Confirm diagnostic collection change</h4>
+              <p id="diagnostic-policy-impact-copy"></p>
+              <div class="shared-form-actions">
+                <button class="btn btn-primary" id="diagnostic-policy-apply" type="button">Apply Reviewed Mode</button>
+                <button class="btn" id="diagnostic-policy-cancel" type="button">Cancel</button>
+              </div>
+            </section>
+            <div class="diagnostic-retention-summary" id="diagnostic-retention-summary"></div>
+            <div class="shared-form-actions">
+              <button class="btn" id="diagnostic-cleanup-preview" type="button">Review Retention Cleanup</button>
+              <button class="btn btn-danger" id="diagnostic-cleanup-run" type="button" hidden>Run Confirmed Bounded Cleanup</button>
+            </div>
+            <div class="admin-form-status" id="diagnostic-policy-status" role="status" aria-live="polite"></div>
           </div>
         </section>
 
         <section class="admin-section" id="admin-section-gestures">
           <div class="admin-section-title">Gestures</div>
-          <div class="admin-section-sub">Manage shared gesture controls, safe metadata, validated packages, media, and provenance for Server Gestures.</div>
+          <div class="admin-section-sub">Manage Server Gesture titles, text, creator credit, upload information, packages, images, animation, and sound.</div>
           <div class="admin-panel admin-gesture-settings-link">
             <div>
-              <h3>Part 3 and Part 4 capability controls</h3>
-              <p class="minor" id="admin-gesture-feature-summary">Loading shared settings…</p>
+              <h3>Gesture Features</h3>
+              <div class="minor admin-gesture-feature-summary" id="admin-gesture-feature-summary">Loading gesture settings…</div>
             </div>
-            <button class="btn" id="admin-gesture-open-settings" type="button">Open shared gesture settings</button>
+            <button class="btn" id="admin-gesture-open-settings" type="button">Manage Gesture Features</button>
           </div>
           <div class="admin-panel admin-gesture-catalog-panel">
             <div class="admin-gesture-catalog-toolbar" role="search">
@@ -688,7 +818,11 @@ $rooms = $roomsStmt->fetchAll();
           <div class="admin-panel issue-workspace">
             <aside>
               <label>Status <select id="issue-status-filter"><option value="">All</option><option value="new">New</option><option value="confirmed">Confirmed</option><option value="investigating">Investigating</option><option value="fixed-pending-verification">Fixed pending verification</option><option value="resolved">Resolved</option><option value="expected">Expected</option><option value="ignored">Ignored</option><option value="regressed">Regressed</option></select></label>
+              <label>Severity <select id="issue-severity-filter"><option value="">All</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option></select></label>
+              <div id="issue-grouped-totals" class="issue-grouped-totals" aria-live="polite"></div>
               <div id="issue-list" class="issue-list"></div>
+              <div class="gesture-pager" id="issue-pager" aria-label="Runtime issue pages"></div>
+              <div class="minor" id="issue-list-status" role="status" aria-live="polite"></div>
             </aside>
             <article id="issue-detail" class="issue-detail"><p class="minor">Select an issue.</p></article>
           </div>

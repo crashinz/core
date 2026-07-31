@@ -79,6 +79,8 @@ const recoveryModal = document.getElementById('recovery-modal');
 const recoveryCard = document.getElementById('recovery-card');
 const recoveryStatus = document.getElementById('recovery-status');
 const recoveryGenerate = document.getElementById('recovery-generate');
+const recoveryOpen = document.getElementById('recovery-open');
+const recoveryClose = document.getElementById('recovery-close');
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
@@ -732,11 +734,13 @@ async function loadRecoveryStatus() {
 function closeRecoveryModal() {
   recoveryModal?.classList.remove('open');
   setRecoveryStatus('');
+  recoveryOpen?.focus();
 }
 
-document.getElementById('recovery-open')?.addEventListener('click', async () => {
+recoveryOpen?.addEventListener('click', async () => {
   lobbyMenu?.classList.remove('visible');
   recoveryModal?.classList.add('open');
+  recoveryClose?.focus();
   try {
     await loadRecoveryStatus();
   } catch (err) {
@@ -744,8 +748,14 @@ document.getElementById('recovery-open')?.addEventListener('click', async () => 
   }
 });
 
-document.getElementById('recovery-close')?.addEventListener('click', closeRecoveryModal);
+recoveryClose?.addEventListener('click', closeRecoveryModal);
 document.getElementById('recovery-cancel')?.addEventListener('click', closeRecoveryModal);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && recoveryModal?.classList.contains('open')) {
+    event.preventDefault();
+    closeRecoveryModal();
+  }
+});
 
 recoveryGenerate?.addEventListener('click', async () => {
   const recreate = recoveryGenerate.textContent.includes('Recreate');
@@ -765,6 +775,8 @@ recoveryGenerate?.addEventListener('click', async () => {
 
 const adminModal = document.getElementById('admin-modal');
 const adminUsers = document.getElementById('admin-users');
+const adminAccountSearch = document.getElementById('admin-account-search');
+const adminAccountSearchStatus = document.getElementById('admin-account-search-status');
 const adminModerationCases = document.getElementById('admin-moderation-cases');
 const adminModerationUsers = document.getElementById('admin-moderation-users');
 const adminModerationSearch = document.getElementById('admin-moderation-user-search');
@@ -785,10 +797,8 @@ let adminOwnerTransferConfirmation = null;
 let adminInstallationOwner = null;
 const adminOwnerTransferForm = document.getElementById('admin-owner-transfer-form');
 const adminNetworkPolicyForm = document.getElementById('admin-network-policy-form');
-const adminNetworkTrustedProxies = document.getElementById('admin-network-trusted-proxies');
-const adminNetworkRevealOutput = document.getElementById('admin-network-reveal-output');
 let adminNetworkPolicy = null;
-let adminNetworkTrustedProxiesDirty = false;
+let adminNetworkBanPreview = null;
 const adminGestureCatalog = document.getElementById('admin-gesture-catalog');
 const adminGesturePager = document.getElementById('admin-gesture-pager');
 const adminGestureStatus = document.getElementById('admin-gesture-status');
@@ -827,8 +837,233 @@ const adminCounts = {
   linkIcons: document.getElementById('admin-link-icon-count'),
   summaryUsers: document.getElementById('admin-summary-users'),
   summaryModeration: document.getElementById('admin-summary-moderation'),
+  healthWarnings: document.getElementById('admin-health-warning-count'),
 };
 const adminModerationTotals = { blocks: 0, roomEjections: 0, communityEjections: 0 };
+let adminSystemHealth = null;
+let capacityProfileImpact = null;
+let diagnosticPolicyTimer = null;
+let activeManageUsersSection = window.sessionStorage?.getItem(`chatspace.manage-users.section:${document.body.dataset.appBase || '/'}`) || 'accounts';
+
+function applyAdminProgrammaticHeadingFocus(heading) {
+  window.applyProgrammaticHeadingFocus(heading);
+}
+
+function focusAdminOwnedHeading(selector) {
+  window.requestAnimationFrame(() => {
+    const adminBox = document.querySelector('#admin-modal .admin-box');
+    const adminMain = document.querySelector('#admin-modal .admin-main');
+    const heading = document.querySelector(selector);
+    if (adminBox) adminBox.scrollTop = 0;
+    if (adminMain) adminMain.scrollTop = 0;
+    applyAdminProgrammaticHeadingFocus(heading);
+  });
+}
+
+function showManageUsersSection(sectionId, pushHistory = true) {
+  const valid = ['accounts', 'add-account', 'roles-requests', 'account-actions', 'installation-owner'];
+  if (!valid.includes(sectionId)) return false;
+  if (!document.querySelector(`[data-manage-users-panel="${sectionId}"]`)) return false;
+  activeManageUsersSection = sectionId;
+  window.sessionStorage?.setItem(`chatspace.manage-users.section:${document.body.dataset.appBase || '/'}`, sectionId);
+  document.querySelectorAll('[data-manage-users-panel]').forEach(panel => {
+    panel.hidden = panel.dataset.manageUsersPanel !== sectionId;
+  });
+  document.querySelectorAll('[data-manage-users-section]').forEach(control => {
+    const active = control.dataset.manageUsersSection === sectionId;
+    control.classList.toggle('active', active);
+    control.setAttribute('aria-current', active ? 'page' : 'false');
+  });
+  const selector = document.getElementById('admin-manage-users-selector');
+  if (selector) selector.value = sectionId;
+  if (pushHistory) {
+    const url = new URL(window.location.href);
+    url.hash = `manage-users-${sectionId}`;
+    window.history.pushState({ manageUsersSection: sectionId }, '', url);
+  }
+  focusAdminOwnedHeading(`[data-manage-users-panel="${sectionId}"] h3`);
+  return true;
+}
+
+function restoreManageUsersSection(sectionId) {
+  if (showManageUsersSection(sectionId, false)) return true;
+  const url = new URL(window.location.href);
+  url.hash = 'manage-users-accounts';
+  window.history.replaceState({ manageUsersSection: 'accounts' }, '', url);
+  return showManageUsersSection('accounts', false);
+}
+
+const adminExactDestinations = {
+  'moderation-users': {
+    section: 'moderation',
+    fragment: 'actions-users',
+    target: '#admin-moderation-user-search',
+  },
+};
+
+function focusAdminExactDestination(targetSelector) {
+  window.requestAnimationFrame(() => {
+    const adminMain = document.querySelector('#admin-modal .admin-main');
+    const target = document.querySelector(targetSelector);
+    const panel = target?.closest('.admin-panel');
+    const heading = panel?.querySelector('h3');
+    if (adminMain && panel) {
+      const mainRect = adminMain.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      adminMain.scrollTop = Math.max(0, adminMain.scrollTop + panelRect.top - mainRect.top - 12);
+    }
+    applyAdminProgrammaticHeadingFocus(heading);
+  });
+}
+
+function showAdminExactDestination(destinationId, pushHistory = true) {
+  const destination = adminExactDestinations[destinationId];
+  if (!destination || !showAdminSection(destination.section)) return false;
+  if (pushHistory) {
+    const url = new URL(window.location.href);
+    url.hash = destination.fragment;
+    window.history.pushState({ adminDestination: destinationId }, '', url);
+  }
+  focusAdminExactDestination(destination.target);
+  return true;
+}
+
+function restoreAdminLocationFromHash() {
+  const hash = String(window.location.hash || '').replace(/^#/, '');
+  const adminDestination = Object.keys(adminExactDestinations)
+    .find(id => adminExactDestinations[id].fragment === hash);
+  if (adminDestination) return showAdminExactDestination(adminDestination, false);
+  if (!hash.startsWith('manage-users-')) return false;
+  const sectionId = hash.replace(/^manage-users-/, '');
+  if (!showAdminSection('users')) return false;
+  return restoreManageUsersSection(sectionId);
+}
+
+function initializeAdminInformationArchitecture() {
+  const usersSection = document.getElementById('admin-section-users');
+  if (!usersSection || document.getElementById('admin-manage-users-navigation')) return;
+  const navigation = document.createElement('nav');
+  navigation.id = 'admin-manage-users-navigation';
+  navigation.className = 'admin-secondary-navigation';
+  navigation.setAttribute('aria-label', 'Manage Users sections');
+  const selectLabel = document.createElement('label');
+  selectLabel.className = 'admin-secondary-selector-label';
+  selectLabel.textContent = 'Manage Users section';
+  const selector = document.createElement('select');
+  selector.id = 'admin-manage-users-selector';
+  selector.className = 'admin-secondary-selector';
+  selector.setAttribute('aria-label', 'Manage Users section');
+  selectLabel.appendChild(selector);
+  const list = document.createElement('div');
+  list.className = 'admin-secondary-nav-list';
+  const definitions = [
+    ['accounts', 'Accounts'],
+    ['add-account', 'Add Account'],
+    ['roles-requests', 'Roles & Requests'],
+    ['account-actions', 'Account Actions'],
+    ['installation-owner', 'Installation Owner'],
+  ].filter(([id]) => id !== 'installation-owner' || document.getElementById('admin-owner-panel'));
+  for (const [id, label] of definitions) {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = label;
+    selector.appendChild(option);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'admin-secondary-nav-item';
+    button.dataset.manageUsersSection = id;
+    const text = document.createElement('span');
+    text.textContent = label;
+    button.appendChild(text);
+    if (id === 'accounts' || id === 'roles-requests') {
+      const count = document.createElement('span');
+      count.className = 'admin-nav-count';
+      count.dataset.manageUsersCount = id;
+      count.textContent = '0';
+      button.appendChild(count);
+    }
+    button.addEventListener('click', () => showManageUsersSection(id));
+    list.appendChild(button);
+  }
+  selector.addEventListener('change', () => showManageUsersSection(selector.value));
+  navigation.append(selectLabel, list);
+
+  const content = document.createElement('div');
+  content.className = 'admin-secondary-content';
+  const panelDefinitions = [
+    ['accounts', 'Accounts', document.getElementById('admin-accounts-panel')],
+    ['add-account', 'Add Account', document.getElementById('admin-add-account-panel')],
+    ['roles-requests', 'Roles & Requests', document.getElementById('admin-roles-requests-panel')],
+    ['account-actions', 'Account Actions', null],
+    ['installation-owner', 'Installation Owner', document.getElementById('admin-owner-panel')],
+  ].filter(([id]) => id !== 'installation-owner' || document.getElementById('admin-owner-panel'));
+  for (const [id, label, existing] of panelDefinitions) {
+    const panel = document.createElement('section');
+    panel.className = 'admin-secondary-panel';
+    panel.dataset.manageUsersPanel = id;
+    const heading = document.createElement('h3');
+    heading.textContent = label;
+    panel.appendChild(heading);
+    if (existing) panel.appendChild(existing);
+    if (id === 'account-actions') {
+      const copy = document.createElement('p');
+      copy.className = 'minor';
+      copy.textContent = 'Use non-destructive suspension and session revocation when an account needs immediate restriction. Account deletion is not available here.';
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'btn';
+      link.textContent = 'Open Moderation Actions';
+      link.dataset.adminJump = 'moderation';
+      link.dataset.adminDestination = 'moderation-users';
+      panel.append(copy, link);
+    }
+    content.appendChild(panel);
+  }
+
+  const firstContent = usersSection.querySelector('.admin-section-sub')?.nextSibling;
+  usersSection.insertBefore(navigation, firstContent);
+  usersSection.insertBefore(content, navigation.nextSibling);
+
+  const moderationPanel = document.getElementById('admin-moderation-user-search')?.closest('.admin-panel');
+  const moderationSection = document.getElementById('admin-section-moderation');
+  if (moderationPanel && moderationSection) moderationSection.appendChild(moderationPanel);
+  const networkPanel = document.getElementById('admin-network-privacy-panel');
+  const networkDestination = document.getElementById('system-health-network-privacy-destination');
+  if (networkPanel && networkDestination) networkDestination.appendChild(networkPanel);
+  if (!networkPanel && networkDestination) networkDestination.hidden = true;
+  const retentionPanel = document.getElementById('admin-retention-panel');
+  const retentionDestination = document.getElementById('admin-settings-retention-destination');
+  if (retentionPanel && retentionDestination) retentionDestination.appendChild(retentionPanel);
+
+  const syncCounts = () => {
+    const accountTarget = document.querySelector('[data-manage-users-count="accounts"]');
+    const requestTarget = document.querySelector('[data-manage-users-count="roles-requests"]');
+    const accountCount = adminCounts.users?.textContent || '0';
+    const requestCount = String(adminModerationCases?.querySelectorAll('.admin-user-row, [data-case-id]').length || 0);
+    if (accountTarget && accountTarget.textContent !== accountCount) accountTarget.textContent = accountCount;
+    if (requestTarget && requestTarget.textContent !== requestCount) requestTarget.textContent = requestCount;
+  };
+  new MutationObserver(syncCounts).observe(usersSection, { childList: true, subtree: true, characterData: true });
+  syncCounts();
+  if (activeManageUsersSection === 'installation-owner' && !document.getElementById('admin-owner-panel')) activeManageUsersSection = 'accounts';
+  showManageUsersSection(activeManageUsersSection, false);
+}
+
+window.addEventListener('popstate', event => {
+  const hash = String(window.location.hash || '').replace(/^#/, '');
+  const adminDestination = event.state?.adminDestination
+    || Object.keys(adminExactDestinations).find(id => adminExactDestinations[id].fragment === hash);
+  if (adminDestination) {
+    showAdminExactDestination(adminDestination, false);
+    return;
+  }
+  const value = event.state?.manageUsersSection || String(window.location.hash || '').replace(/^#manage-users-/, '');
+  if (value) {
+    showAdminSection('users');
+    restoreManageUsersSection(value);
+  }
+});
+initializeAdminInformationArchitecture();
 
 function setAdminCount(el, value) {
   if (el) el.textContent = String(value);
@@ -856,9 +1091,13 @@ function showAdminSection(id) {
     section.classList.toggle('active', section.id === `admin-section-${id}`);
   });
   document.querySelectorAll('.admin-nav-item[data-admin-section]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.adminSection === id);
+    const selected = btn.dataset.adminSection === id;
+    btn.classList.toggle('active', selected);
+    btn.setAttribute('aria-current', selected ? 'page' : 'false');
   });
+  focusAdminOwnedHeading(`#admin-section-${id} .admin-section-title`);
   if (id === 'gestures') loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture catalog could not be loaded.', 'error'));
+  if (id === 'system-health') loadAdminSystemHealth().catch(error => setSystemHealthStatus(error.message || 'System Health could not be loaded.', 'error'));
   return true;
 }
 
@@ -869,7 +1108,17 @@ document.addEventListener('click', e => {
     return;
   }
   const jump = e.target.closest('[data-admin-jump]');
-  if (jump) showAdminSection(jump.dataset.adminJump);
+  if (jump) {
+    if (jump.dataset.adminDestination) {
+      showAdminExactDestination(jump.dataset.adminDestination);
+      return;
+    }
+    if (!showAdminSection(jump.dataset.adminJump)) return;
+    const settingsView = jump.dataset.settingsView;
+    if (settingsView) {
+      window.requestAnimationFrame(() => adminSettingsRegistryUI?.selectView?.(settingsView));
+    }
+  }
 });
 
 async function adminRequest(body) {
@@ -928,27 +1177,86 @@ function setAdminNetworkStatus(message, type = '') {
 }
 
 function renderAdminNetworkPolicy(data) {
-  adminNetworkPolicy = data.policy || adminNetworkPolicy;
+  adminNetworkPolicy = data.transportPolicy || adminNetworkPolicy;
   if (!adminNetworkPolicy) return;
   const hsts = document.getElementById('admin-network-hsts');
-  const exact = document.getElementById('admin-network-exact-enabled');
-  const defaultMinutes = document.getElementById('admin-network-reveal-default');
-  const revealMinutes = document.getElementById('admin-network-reveal-minutes');
-  const opaque = document.getElementById('admin-network-opaque-id');
   if (hsts) hsts.checked = Boolean(adminNetworkPolicy.hstsDeploymentVerified);
-  if (exact) exact.checked = Boolean(adminNetworkPolicy.exactIpAccessEnabled);
-  if (defaultMinutes) defaultMinutes.value = String(adminNetworkPolicy.defaultRevealMinutes || 5);
-  if (revealMinutes) revealMinutes.value = String(adminNetworkPolicy.defaultRevealMinutes || 5);
-  if (opaque && data.currentNetworkIdentifier) opaque.value = data.currentNetworkIdentifier;
   const current = document.getElementById('admin-network-trusted-proxies-current');
   if (current) {
     const masked = adminNetworkPolicy.trustedProxiesMasked || [];
     current.textContent = masked.length
-      ? `Saved privately: ${masked.join(', ')}. Enter a complete replacement list only when changing it.`
-      : 'No trusted proxies are configured.';
+      ? `${Number(adminNetworkPolicy.trustedProxyCount || masked.length)} private trusted-proxy entr${masked.length === 1 ? 'y' : 'ies'} configured: ${masked.join(', ')}.`
+      : 'No private trusted proxies are configured.';
   }
-  if (adminNetworkTrustedProxies) adminNetworkTrustedProxies.value = '';
-  adminNetworkTrustedProxiesDirty = false;
+
+  const contextSelect = document.getElementById('admin-network-context');
+  if (contextSelect) {
+    const prior = contextSelect.value;
+    contextSelect.replaceChildren(new Option('Choose an account or activity', ''));
+    for (const context of data.contexts || []) {
+      const multiple = context.observedForMultipleAccounts
+        ? ` · ${Number(context.affectedAccountCount)} affected accounts`
+        : ' · one affected account';
+      const option = new Option(
+        `${context.owner} · ${context.context} · ${context.manualBanStatus}${multiple}`,
+        context.id
+      );
+      contextSelect.appendChild(option);
+    }
+    if (Array.from(contextSelect.options).some(option => option.value === prior)) {
+      contextSelect.value = prior;
+    }
+    contextSelect.disabled = !data.manualBanPolicy?.enabled;
+  }
+
+  const list = document.getElementById('admin-network-bans');
+  if (list) {
+    list.replaceChildren();
+    for (const ban of data.bans || []) {
+      const article = document.createElement('article');
+      article.className = 'admin-user-row';
+      const title = document.createElement('strong');
+      title.textContent = `${ban.status} manual ban`;
+      const summary = document.createElement('span');
+      summary.textContent = `${ban.reason} · created by ${ban.creator} at ${ban.createdAt}`
+        + `${ban.expiresAt ? ` · expires ${ban.expiresAt}` : ' · Permanent'}`
+        + ` · ${Number(ban.affectedAccountCount)} affected account${Number(ban.affectedAccountCount) === 1 ? '' : 's'}`;
+      const accounts = document.createElement('small');
+      accounts.textContent = (ban.affectedAccounts || [])
+        .map(account => `${account.displayName}${account.username ? ` (@${account.username})` : ''}`)
+        .join(', ') || 'No retained account identity remains.';
+      article.append(title, summary, accounts);
+      if (ban.status === 'active') {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn btn-danger';
+        remove.textContent = 'Remove Ban';
+        remove.addEventListener('click', async () => {
+          if (!adminSettingsUnlock?.requireUnlocked()) return;
+          const reason = window.prompt('Reason for removing this manual network ban:') || '';
+          if (!reason.trim()) return;
+          if (!window.confirm('Remove this manual network ban after reviewing the reason?')) return;
+          try {
+            await adminNetworkRequest({
+              action: 'remove_manual_ban',
+              banId: ban.id,
+              reason,
+              requestId: crypto.randomUUID(),
+              confirmed: true,
+            });
+            await Promise.all([loadAdminNetworkPolicy(), loadAdminLogs()]);
+          } catch (error) {
+            setAdminNetworkStatus(error.message || 'The manual ban could not be removed.', 'error');
+          }
+        });
+        article.appendChild(remove);
+      }
+      list.appendChild(article);
+    }
+    if (!list.children.length) {
+      list.innerHTML = '<p class="minor">No active or expired manual network bans.</p>';
+    }
+  }
 }
 
 async function loadAdminNetworkPolicy() {
@@ -979,9 +1287,11 @@ function renderAdminRetention(data) {
   const retention = data.retention || {};
   const list = document.getElementById('admin-retention-policies');
   if (list) {
+    const domainSelect = document.querySelector('#admin-retention-form select[name="domain"]');
+    const domainOptions = domainSelect ? Array.from(domainSelect.options) : [];
     list.innerHTML = (retention.policies || []).map(policy => `
       <article class="admin-user-row">
-        <strong>${esc(policy.domain)}</strong>
+        <strong>${esc(domainOptions.find(option => option.value === String(policy.domain))?.textContent || 'Other retained data')}</strong>
         <span>${policy.keepForever ? 'Keep forever' : `${Number(policy.days)} days`}</span>
         <small>Revision ${Number(policy.revision || 1)}</small>
       </article>`).join('');
@@ -1067,68 +1377,95 @@ document.getElementById('admin-retention-cancel')?.addEventListener('click', () 
   document.getElementById('admin-retention-status').textContent = 'Retention change canceled before mutation.';
 });
 
-adminNetworkTrustedProxies?.addEventListener('input', () => {
-  adminNetworkTrustedProxiesDirty = true;
-});
-
 adminNetworkPolicyForm?.addEventListener('submit', async event => {
   event.preventDefault();
   if (!IS_INSTALLATION_OWNER || !adminSettingsUnlock?.requireUnlocked()) return;
   const payload = {
-    action: 'update_policy',
+    action: 'update_transport_policy',
     expectedRevision: Number(adminNetworkPolicy?.revision || 0),
     hstsDeploymentVerified: Boolean(document.getElementById('admin-network-hsts')?.checked),
-    exactIpAccessEnabled: Boolean(document.getElementById('admin-network-exact-enabled')?.checked),
-    defaultRevealMinutes: Number(document.getElementById('admin-network-reveal-default')?.value || 5),
   };
-  if (adminNetworkTrustedProxiesDirty) {
-    payload.trustedProxies = String(adminNetworkTrustedProxies?.value || '')
-      .split(/\r?\n/)
-      .map(value => value.trim())
-      .filter(Boolean);
-  }
   setAdminNetworkStatus('Saving private network policy...', 'working');
   try {
     const data = await adminNetworkRequest(payload);
-    renderAdminNetworkPolicy(data);
-    setAdminNetworkStatus('Network policy saved. Stored proxy values are masked.', 'ok');
+    adminNetworkPolicy = data.transportPolicy || adminNetworkPolicy;
+    await loadAdminNetworkPolicy();
+    setAdminNetworkStatus('HSTS readiness saved. Private proxy values remain outside browser surfaces.', 'ok');
     await loadAdminLogs();
   } catch (error) {
     setAdminNetworkStatus(error.message || 'Network policy could not be saved.', 'error');
   }
 });
 
-document.getElementById('admin-network-reveal')?.addEventListener('click', async () => {
+document.getElementById('admin-network-ban-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
   if (!IS_INSTALLATION_OWNER || !adminSettingsUnlock?.requireUnlocked()) return;
-  const button = document.getElementById('admin-network-reveal');
-  button.disabled = true;
+  const durationValue = document.getElementById('admin-network-ban-duration')?.value || '';
+  const confirmation = document.getElementById('admin-network-ban-confirmation');
+  const status = document.getElementById('admin-network-ban-status');
   try {
     const data = await adminNetworkRequest({
-      action: 'reveal',
-      opaqueId: document.getElementById('admin-network-opaque-id')?.value || '',
-      reason: document.getElementById('admin-network-reveal-reason')?.value || '',
-      durationMinutes: Number(document.getElementById('admin-network-reveal-minutes')?.value || 5),
+      action: 'preview_manual_ban',
+      contextId: document.getElementById('admin-network-context')?.value || '',
+      reason: document.getElementById('admin-network-ban-reason')?.value || '',
+      durationMinutes: durationValue === 'permanent' ? null : Number(durationValue),
+      permanent: durationValue === 'permanent',
     });
-    const reveal = data.reveal || {};
-    adminNetworkRevealOutput.textContent = `${reveal.opaqueId}: ${reveal.exactIp}; hides at ${reveal.expiresAt} UTC. This lease cannot be extended.`;
-    await loadAdminLogs();
+    adminNetworkBanPreview = data.preview;
+    document.getElementById('admin-network-ban-preview').textContent =
+      `${data.preview.contextOwner}. ${Number(data.preview.affectedAccountCount)} affected account`
+      + `${Number(data.preview.affectedAccountCount) === 1 ? '' : 's'}. `
+      + `${data.preview.permanent ? 'Permanent restriction.' : `${Number(data.preview.durationMinutes)} minutes.`} `
+      + data.preview.warning;
+    const accounts = document.getElementById('admin-network-ban-accounts');
+    accounts.replaceChildren();
+    for (const account of data.preview.affectedAccounts || []) {
+      const item = document.createElement('li');
+      item.textContent = `${account.displayName}${account.username ? ` (@${account.username})` : ''} · ${account.role}`;
+      accounts.appendChild(item);
+    }
+    confirmation.hidden = false;
+    status.textContent = 'Review every affected account, the shared-network warning, duration, and reason before confirming.';
+    document.getElementById('admin-network-ban-confirm')?.focus();
   } catch (error) {
-    adminNetworkRevealOutput.textContent = error.message || 'Exact IP could not be revealed.';
+    adminNetworkBanPreview = null;
+    confirmation.hidden = true;
+    status.textContent = error.message || 'The manual-ban impact preview could not be prepared.';
+  }
+});
+
+document.getElementById('admin-network-ban-confirm')?.addEventListener('click', async () => {
+  if (!adminNetworkBanPreview) return;
+  if (!IS_INSTALLATION_OWNER || !adminSettingsUnlock?.requireUnlocked()) return;
+  const button = document.getElementById('admin-network-ban-confirm');
+  button.disabled = true;
+  try {
+    await adminNetworkRequest({
+      action: 'apply_manual_ban',
+      previewId: adminNetworkBanPreview.previewId,
+      impactSha256: adminNetworkBanPreview.impactSha256,
+      requestId: crypto.randomUUID(),
+      confirmed: true,
+    });
+    adminNetworkBanPreview = null;
+    document.getElementById('admin-network-ban-confirmation').hidden = true;
+    document.getElementById('admin-network-ban-reason').value = '';
+    document.getElementById('admin-network-ban-status').textContent =
+      'Manual network ban applied. Matching active sessions were reconciled server-side.';
+    await Promise.all([loadAdminNetworkPolicy(), loadAdminLogs()]);
+  } catch (error) {
+    document.getElementById('admin-network-ban-status').textContent =
+      error.message || 'The manual ban was not applied.';
   } finally {
     button.disabled = false;
   }
 });
 
-document.getElementById('admin-network-hide')?.addEventListener('click', async () => {
-  if (!IS_INSTALLATION_OWNER || !adminSettingsUnlock?.requireUnlocked()) return;
-  try {
-    await adminNetworkRequest({ action: 'hide' });
-    adminNetworkRevealOutput.textContent = 'Exact IP hidden.';
-    document.getElementById('admin-network-reveal-reason').value = '';
-    await loadAdminLogs();
-  } catch (error) {
-    adminNetworkRevealOutput.textContent = error.message || 'Exact IP could not be hidden.';
-  }
+document.getElementById('admin-network-ban-cancel')?.addEventListener('click', () => {
+  adminNetworkBanPreview = null;
+  document.getElementById('admin-network-ban-confirmation').hidden = true;
+  document.getElementById('admin-network-ban-status').textContent =
+    'Manual network ban canceled before mutation.';
 });
 
 async function uploadPrivateSiteBrandingAsset(entry, file) {
@@ -1174,10 +1511,16 @@ async function loadAdminUsers() {
   adminInstallationOwner = data.installationOwner || null;
   if (adminOwnerTransferForm) {
     const current = document.getElementById('admin-owner-current');
+    const revision = document.getElementById('admin-owner-revision');
     if (current) {
       current.textContent = adminInstallationOwner
-        ? `Current Installation Owner: ${adminInstallationOwner.displayName} (@${adminInstallationOwner.username}), revision ${Number(adminInstallationOwner.revision || 1)}.`
+        ? `Current Installation Owner: ${adminInstallationOwner.displayName} (@${adminInstallationOwner.username}).`
         : 'Installation Owner details are unavailable to this account.';
+    }
+    if (revision) {
+      revision.textContent = adminInstallationOwner
+        ? `Ownership revision: ${Number(adminInstallationOwner.revision || 1)}.`
+        : 'Ownership revision is unavailable to this account.';
     }
     const select = adminOwnerTransferForm.elements.new_owner_id;
     const candidates = (data.users || []).filter(user =>
@@ -1193,6 +1536,13 @@ async function loadAdminUsers() {
   (data.users || []).forEach(user => {
     const row = document.createElement('form');
     row.className = 'admin-user-row';
+    row.dataset.accountSearch = [
+      user.display_name,
+      user.username,
+      user.email,
+      user.role,
+      user.trust_state,
+    ].filter(Boolean).join(' ').toLocaleLowerCase();
     row.innerHTML = `<div><strong>${esc(user.display_name)}</strong><div class="minor">@${esc(user.username || '')} | ${esc(user.email)}</div><div class="minor">Trust: ${esc(user.trust_state || 'pending-approval')}</div><div class="admin-created-meta"><span>Created On</span><strong>${adminCreatedOn(user.created_at)}</strong></div></div>
       <select name="role">
         <option value="user">User</option>
@@ -1202,10 +1552,22 @@ async function loadAdminUsers() {
         <option value="admin">Admin</option>
       </select>
       <input name="password" type="password" placeholder="New password">
-      <button class="btn btn-primary" type="submit">Save</button>
-      <button class="btn" type="button" disabled title="Use Moderation Actions for non-destructive suspension. Build 000053 owns Delete Account.">Delete unavailable</button>
+      <div class="admin-user-actions">
+        <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn" type="button" disabled title="Account deletion is not available here. Use Actions for suspension or session revocation.">Delete unavailable</button>
+      </div>
       <div class="admin-row-status" aria-live="polite"></div>`;
     row.querySelector('select').value = user.role || 'user';
+    row.querySelector('select').addEventListener('change', () => {
+      row.dataset.accountSearch = [
+        user.display_name,
+        user.username,
+        user.email,
+        row.elements.role.value,
+        user.trust_state,
+      ].filter(Boolean).join(' ').toLocaleLowerCase();
+      applyAdminAccountSearch();
+    });
     row.addEventListener('submit', async e => {
       e.preventDefault();
       const saveBtn = row.querySelector('button[type="submit"]');
@@ -1224,34 +1586,67 @@ async function loadAdminUsers() {
     });
     adminUsers.appendChild(row);
   });
+  applyAdminAccountSearch();
   if (adminModerationCases) {
     adminModerationCases.innerHTML = '';
     (data.moderationCases || []).forEach(item => {
       const row = document.createElement('form');
-      row.className = 'admin-user-row';
-      const itemControls = (item.items || []).map(part => `
-        <label><input type="checkbox" name="case_item" value="${esc(part.item_key)}"> ${esc(part.item_key)} (${esc(part.status)})</label>
-        <select data-case-item="${esc(part.item_key)}">
-          <option value="">No decision</option>
-          <option value="approved">Approve selected</option>
-          <option value="denied">Deny selected</option>
-          <option value="modified">Modify selected</option>
-          <option value="closed">Close selected</option>
-        </select>`).join('');
-      row.innerHTML = `<div><strong>${esc(item.case_type)} — ${esc(item.display_name || item.username)}</strong>
-          <div class="minor">Reference ${esc(item.public_id)}; ${esc(item.status)}; revision ${Number(item.revision || 1)}</div>
-          ${itemControls}
+      row.className = 'admin-user-row admin-moderation-case-row';
+      const plainLabel = value => String(value || '').split('-').filter(Boolean)
+        .map(word => word.charAt(0).toLocaleUpperCase() + word.slice(1)).join(' ');
+      const caseLabel = plainLabel(item.case_type);
+      const statusLabel = plainLabel(item.status);
+      const itemControls = (item.items || []).map(part => {
+        const itemLabel = plainLabel(part.item_key);
+        return `<div class="admin-case-item">
+          <label class="admin-case-item-choice">
+            <input type="checkbox" name="case_item" value="${esc(part.item_key)}">
+            <span>${esc(itemLabel)} <span class="minor">(${esc(plainLabel(part.status))})</span></span>
+          </label>
+          <label class="admin-create-field">
+            <span>Decision for ${esc(itemLabel)}</span>
+            <select data-case-item="${esc(part.item_key)}">
+              <option value="">No decision</option>
+              <option value="approved">Approve selected</option>
+              <option value="denied">Deny selected</option>
+              <option value="modified">Modify selected</option>
+              <option value="closed">Close selected</option>
+            </select>
+          </label>
+          <details class="admin-technical-details">
+            <summary>Technical details</summary>
+            <div>Capability ID: ${esc(part.item_key)}</div>
+          </details>
+        </div>`;
+      }).join('');
+      row.innerHTML = `<div class="admin-case-summary"><strong>${esc(caseLabel)} — ${esc(item.display_name || item.username)}</strong>
+          <div class="minor">Status: ${esc(statusLabel)}</div>
+          <details class="admin-technical-details">
+            <summary>Technical details</summary>
+            <div>Reference: ${esc(item.public_id)}</div>
+            <div>Revision: ${Number(item.revision || 1)}</div>
+          </details>
         </div>
-        <select name="status">
-          <option value="under-review">Under Review</option>
-          <option value="approved">Approved</option>
-          <option value="denied">Denied</option>
-          <option value="modified">Modified</option>
-          <option value="closed">Closed</option>
-        </select>
-        <input name="public_reason" maxlength="500" placeholder="Public reason">
-        <textarea name="internal_note" maxlength="2000" placeholder="Private internal note"></textarea>
-        <button class="btn btn-primary" type="submit">Record Decision</button>
+        ${itemControls ? `<div class="admin-case-items">${itemControls}</div>` : ''}
+        <label class="admin-create-field">
+          <span>Case status</span>
+          <select name="status">
+            <option value="under-review">Under Review</option>
+            <option value="approved">Approved</option>
+            <option value="denied">Denied</option>
+            <option value="modified">Modified</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
+        <label class="admin-create-field">
+          <span>Reason shown to the member</span>
+          <input name="public_reason" maxlength="500">
+        </label>
+        <label class="admin-create-field admin-case-private-note">
+          <span>Private internal note</span>
+          <textarea name="internal_note" maxlength="2000"></textarea>
+        </label>
+        <div class="admin-create-actions"><button class="btn btn-primary" type="submit">Record Decision</button></div>
         <div class="admin-row-status" aria-live="polite"></div>`;
       row.addEventListener('submit', async event => {
         event.preventDefault();
@@ -1285,6 +1680,27 @@ async function loadAdminUsers() {
     }
   }
 }
+
+function applyAdminAccountSearch() {
+  if (!adminUsers) return;
+  const query = String(adminAccountSearch?.value || '').trim().toLocaleLowerCase();
+  const rows = Array.from(adminUsers.querySelectorAll('.admin-user-row'));
+  let visible = 0;
+  rows.forEach(row => {
+    const matches = query === '' || String(row.dataset.accountSearch || '').includes(query);
+    row.hidden = !matches;
+    if (matches) visible += 1;
+  });
+  if (adminAccountSearchStatus) {
+    adminAccountSearchStatus.textContent = query
+      ? (visible === 0
+          ? 'No accounts match this search.'
+          : `Showing ${visible} of ${rows.length} accounts.`)
+      : `${rows.length} accounts.`;
+  }
+}
+
+adminAccountSearch?.addEventListener('input', applyAdminAccountSearch);
 
 adminOwnerTransferForm?.addEventListener('submit', event => {
   event.preventDefault();
@@ -1361,12 +1777,12 @@ async function loadAdminModerationUsers() {
   adminModerationUsers.innerHTML = '';
   (data.users || []).forEach(target => {
     const row = document.createElement('form');
-    row.className = 'admin-user-row';
+    row.className = 'admin-user-row admin-moderation-user-row';
     row.innerHTML = `<div><strong>${esc(target.display_name || target.username)}</strong><small>@${esc(target.username)}; ${target.online ? 'Online' : 'Offline'}; ${esc(target.trust_state)}</small></div>
-      <select name="action_type"><option value="warn">Warn</option><option value="temporarily-restrict">Temporarily Restrict</option><option value="suspend-account">Suspend Account</option><option value="undo-eligible-restriction">Undo Eligible Restriction</option></select>
-      <select name="duration"><option value="60">1 hour</option><option value="1440">24 hours</option><option value="10080">7 days</option><option value="43200">30 days</option><option value="indefinite">Indefinite suspension</option></select>
-      <input name="public_reason" maxlength="500" placeholder="Required public reason">
-      <textarea name="internal_note" maxlength="2000" placeholder="Optional private internal note"></textarea>
+      <label class="admin-moderation-field"><span>Action</span><select name="action_type"><option value="warn">Warn</option><option value="temporarily-restrict">Temporarily Restrict</option><option value="suspend-account">Suspend Account</option><option value="undo-eligible-restriction">Undo Eligible Restriction</option></select></label>
+      <label class="admin-moderation-field"><span>Duration</span><select name="duration"><option value="60">1 hour</option><option value="1440">24 hours</option><option value="10080">7 days</option><option value="43200">30 days</option><option value="indefinite">Indefinite suspension</option></select></label>
+      <label class="admin-moderation-field admin-moderation-field-wide"><span>Public reason</span><input name="public_reason" maxlength="500" placeholder="Required public reason"></label>
+      <label class="admin-moderation-field admin-moderation-field-wide"><span>Private note</span><textarea name="internal_note" maxlength="2000" placeholder="Optional private internal note"></textarea></label>
       <button class="btn btn-primary" type="submit">Open Moderation Action</button>
       <div class="admin-row-status" aria-live="polite"></div>`;
     row.addEventListener('submit', async event => {
@@ -1430,6 +1846,13 @@ async function loadAdminSettings() {
       container: document.getElementById('lobby-admin-settings-registry'),
       searchInput: document.getElementById('lobby-admin-settings-search'),
       filterInput: document.getElementById('lobby-admin-settings-filter'),
+      categoryNavigation: true,
+      navigationLabel: 'Settings section',
+      sessionKey: `chatspace.admin-settings.section:${document.body.dataset.appBase || '/'}`,
+      onViewChange: view => {
+        const destination = document.getElementById('admin-settings-retention-destination');
+        if (destination) destination.hidden = view !== 'moderation-privacy-security';
+      },
       readOnly: !CAN_ADMIN_SETTINGS_MUTATE,
       locked: !adminSettingsUnlock.isUnlocked(),
       onOperation: handleLobbyAdminSettingsOperation,
@@ -1438,8 +1861,12 @@ async function loadAdminSettings() {
         clearLobbyAdminProfileLimitConfirmation();
         const summary = document.getElementById('lobby-admin-settings-dirty-summary');
         const save = document.getElementById('lobby-admin-settings-save');
-        if (summary) summary.textContent = state.changedCount ? `${state.changedCount} unsaved change${state.changedCount === 1 ? '' : 's'}` : 'No unsaved changes';
-        if (save) save.disabled = !adminSettingsUnlock?.isUnlocked() || state.changedCount === 0;
+        if (summary) {
+          summary.textContent = state.invalidCount
+            ? `${state.changedCount} unsaved change${state.changedCount === 1 ? '' : 's'}; ${state.invalidCount} setting field${state.invalidCount === 1 ? ' needs' : 's need'} attention`
+            : (state.changedCount ? `${state.changedCount} unsaved change${state.changedCount === 1 ? '' : 's'}` : 'No unsaved changes');
+        }
+        if (save) save.disabled = !adminSettingsUnlock?.isUnlocked() || state.changedCount === 0 || !state.valid;
         renderLobbyAdminSettingsCompatibility();
       },
       onEntryChange: (entry, value) => {
@@ -1482,9 +1909,22 @@ function renderAdminGestureFeatureSummary() {
     const total4 = Number(adminSettingsRegistry?.summaries?.gesturePart4TotalCount ?? part4.length);
     const enabledCapabilities = Number(adminSettingsRegistry?.summaries?.gestureCapabilityEffectiveCount ?? capabilities.filter(entry => entry.effectiveValue === true).length);
     const totalCapabilities = Number(adminSettingsRegistry?.summaries?.gestureCapabilityTotalCount ?? capabilities.length);
-    target.textContent = entries.length
-      ? `${enabledCapabilities} of ${totalCapabilities} gesture capabilities effective, ${enabled3} of ${total3} Part 3 presentation features enabled, and ${enabled4} of ${total4} Part 4 package/editor features enabled through the shared registry.`
-      : 'Shared gesture settings are unavailable.';
+    target.replaceChildren();
+    if (entries.length) {
+      const rows = [
+        `Gesture availability: ${enabledCapabilities} of ${totalCapabilities} features enabled`,
+        `Browsing and organization: ${enabled3} of ${total3} features enabled`,
+        `Creation, packages, and media: ${enabled4} of ${total4} features enabled`,
+      ];
+      for (const text of rows) {
+        const row = document.createElement('div');
+        row.className = 'admin-gesture-feature-row';
+        row.textContent = text;
+        target.appendChild(row);
+      }
+    } else {
+      target.textContent = 'Gesture settings are unavailable.';
+    }
   }
   const enabled = adminGestureCatalogEnabled();
   if (adminGestureSearch) adminGestureSearch.disabled = !enabled;
@@ -1503,9 +1943,304 @@ function renderAdminGestureFeatureSummary() {
 
 function setAdminGestureStatus(message, type = '') {
   if (!adminGestureStatus) return;
-  adminGestureStatus.textContent = message || '';
+  adminGestureStatus.replaceChildren();
   adminGestureStatus.className = `minor ${type}`.trim();
+  if (type !== 'error') {
+    adminGestureStatus.textContent = message || '';
+    return;
+  }
+  const copy = document.createElement('span');
+  copy.textContent = 'Server Gestures could not be loaded. Check the connection and try again.';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.className = 'btn';
+  retry.textContent = 'Retry';
+  retry.addEventListener('click', () => {
+    loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture catalog request failed.', 'error'));
+  });
+  const technical = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = 'Technical details';
+  const reason = document.createElement('p');
+  reason.textContent = String(message || 'The request did not complete.');
+  technical.append(summary, reason);
+  adminGestureStatus.append(copy, retry, technical);
 }
+
+function healthElement(tag, className = '', text = '') {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== '') node.textContent = text;
+  return node;
+}
+
+function setSystemHealthStatus(message, type = '') {
+  const status = document.getElementById('system-health-summary');
+  if (!status) return;
+  status.textContent = message || '';
+  status.className = `admin-panel system-health-banner ${type}`.trim();
+}
+
+function formatHealthBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return 'Unavailable';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${Math.round(bytes / 1024)} KiB`;
+  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MiB`;
+  return `${(bytes / 1073741824).toFixed(1)} GiB`;
+}
+
+function renderHealthMetric(label, value, detail = '', state = '') {
+  const card = healthElement('article', `system-health-card ${state}`.trim());
+  card.append(healthElement('span', 'system-health-card-label', label), healthElement('strong', '', String(value)));
+  if (detail) card.appendChild(healthElement('small', '', detail));
+  return card;
+}
+
+function renderAdminSystemHealth() {
+  const health = adminSystemHealth;
+  if (!health) return;
+  for (const id of [
+    'capacity-profile-review',
+    'capacity-profile-apply',
+    'diagnostic-policy-mode',
+    'diagnostic-policy-review',
+    'diagnostic-policy-apply',
+    'diagnostic-cleanup-preview',
+    'diagnostic-cleanup-run',
+  ]) {
+    const control = document.getElementById(id);
+    if (control && !CAN_ADMIN_SETTINGS_MUTATE) control.disabled = true;
+  }
+  const capacity = health.capacity || {};
+  const warnings = Array.isArray(capacity.warnings) ? capacity.warnings : [];
+  setAdminCount(adminCounts.healthWarnings, warnings.length);
+  adminCounts.healthWarnings?.setAttribute('aria-label', `${warnings.length} health warning${warnings.length === 1 ? '' : 's'}`);
+  setSystemHealthStatus(
+    warnings.length
+      ? `${warnings.length} measured capacity warning${warnings.length === 1 ? '' : 's'}; mandatory safety remains enforced.`
+      : 'No measured capacity target is currently exceeded. Mandatory safety remains enforced.',
+    warnings.length ? 'warning' : 'ok'
+  );
+
+  const metrics = document.getElementById('system-health-metrics');
+  if (metrics) {
+    metrics.textContent = '';
+    metrics.append(
+      renderHealthMetric('Active rooms', health.activity?.activeRooms ?? 0, `Target ${capacity.values?.capacity_active_rooms_target ?? '—'}`, capacity.utilization?.activeRooms?.warning ? 'warning' : ''),
+      renderHealthMetric('Active users', health.activity?.activeUsers ?? 0, `Target ${capacity.values?.capacity_active_users_target ?? '—'}`, capacity.utilization?.activeUsers?.warning ? 'warning' : ''),
+      renderHealthMetric('Active participants', health.activity?.activeParticipants ?? 0, `Target ${capacity.values?.capacity_active_participants_target ?? '—'}`, capacity.utilization?.activeParticipants?.warning ? 'warning' : ''),
+      renderHealthMetric('Database', formatHealthBytes(health.storage?.database?.bytes), health.build?.migration?.engine || 'Unknown engine'),
+      renderHealthMetric(
+        'Diagnostic issues',
+        health.diagnostics?.issueCounts?.total ?? 0,
+        `${health.diagnostics?.issueCounts?.unresolved ?? 0} unresolved · ${health.diagnostics?.issueCounts?.recurrences ?? 0} recurrences · ${health.diagnostics?.issueCounts?.regressed ?? 0} regressed · ${health.diagnostics?.issueCounts?.held ?? 0} held`
+      ),
+      renderHealthMetric(
+        'Transport',
+        health.operationalSignals?.activeTransport || 'polling',
+        `${health.operationalSignals?.configuredTransportModeLabel || 'Polling only — Default'} · Polling remains the permanent fallback`
+      )
+    );
+  }
+
+  const currentProfile = document.getElementById('capacity-profile-current');
+  if (currentProfile) currentProfile.textContent = `${capacity.selectedProfileLabel || 'Custom'} · revision ${capacity.revision || 1}`;
+  const values = document.getElementById('capacity-values');
+  if (values) {
+    values.textContent = '';
+    for (const [id, definition] of Object.entries(capacity.definitions || {})) {
+      const card = healthElement('article', 'capacity-value-card');
+      card.append(
+        healthElement('strong', '', definition.label || id),
+        healthElement('span', '', `${capacity.values?.[id] ?? '—'} ${definition.unit || ''}`.trim()),
+        healthElement('small', '', `Measured ${capacity.profiles?.[0]?.values?.[id] ?? '—'} · hard bound ${definition.minimum}–${definition.maximum}`)
+      );
+      values.appendChild(card);
+    }
+  }
+
+  const capabilityRoot = document.getElementById('system-health-capabilities');
+  if (capabilityRoot) {
+    capabilityRoot.textContent = '';
+    const capabilities = health.hostCapabilities || {};
+    const facts = [
+      ['Runtime', `PHP ${capabilities.runtime?.phpVersion || 'unknown'}`],
+      ['Database', `${capabilities.runtime?.database?.engine || 'Unknown'} ${capabilities.runtime?.database?.version || ''}`.trim()],
+      ['HTTPS', capabilities.transportSecurity?.httpsActive ? 'Active' : 'Unavailable'],
+      ['Trusted proxy ownership', capabilities.transportSecurity?.forwardedHeadersSafelyOwned ? 'Safe' : 'Unproven'],
+      ['SSE', capabilities.streaming?.sseEligibilityLabel || 'Unknown'],
+      ['WebSocket/WSS', capabilities.persistentProcess?.wssEligible ? 'Eligible' : 'Unsupported'],
+      ['Configured transport', health.operationalSignals?.configuredTransportModeLabel || 'Polling only — Default'],
+      ['Selected transport', health.operationalSignals?.selectedTransport || 'polling'],
+      ['Disk', capabilities.storage?.disk?.bucket || 'Unknown'],
+      ['Fallback', capabilities.transport?.fallbackReason || 'Polling'],
+    ];
+    for (const [label, value] of facts) {
+      const row = healthElement('div', 'system-health-capability');
+      row.append(healthElement('strong', '', label), healthElement('span', '', value));
+      capabilityRoot.appendChild(row);
+    }
+  }
+
+  renderDiagnosticPolicy(health.diagnostics?.policy || {}, health.maintenance?.runtimeDiagnostics || {});
+}
+
+function renderDiagnosticPolicy(policy, retention) {
+  const select = document.getElementById('diagnostic-policy-mode');
+  if (select) select.value = policy.effectiveMode || 'errors-only';
+  const summary = document.getElementById('diagnostic-retention-summary');
+  if (summary) {
+    const counts = retention.counts || {};
+    summary.textContent = `${counts.routine || 0} routine · ${counts.security || 0} security-relevant · ${counts.holds || 0} holds · ${counts.expired || 0} eligible for bounded cleanup`;
+  }
+  window.clearInterval(diagnosticPolicyTimer);
+  diagnosticPolicyTimer = null;
+  const countdown = document.getElementById('diagnostic-verbose-countdown');
+  if (!countdown) return;
+  if (!policy.verboseActive || !policy.verboseUntil) {
+    countdown.hidden = true;
+    countdown.textContent = '';
+    return;
+  }
+  const render = () => {
+    const remaining = Math.max(0, Math.floor((Date.parse(policy.verboseUntil) - Date.now()) / 1000));
+    countdown.hidden = false;
+    countdown.textContent = `Verbose ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} remaining`;
+    if (remaining <= 0) {
+      window.clearInterval(diagnosticPolicyTimer);
+      diagnosticPolicyTimer = null;
+      loadAdminSystemHealth().catch(() => {});
+    }
+  };
+  render();
+  diagnosticPolicyTimer = window.setInterval(render, 1000);
+}
+
+async function loadAdminSystemHealth() {
+  if (!document.getElementById('admin-section-system-health')) return;
+  const response = await fetch(appUrl('/api/admin_system.php?action=system_health'));
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) throw new Error(data.error || 'System Health could not be loaded.');
+  adminSystemHealth = data.systemHealth;
+  renderAdminSystemHealth();
+}
+
+document.getElementById('capacity-profile-review')?.addEventListener('click', async () => {
+  const status = document.getElementById('capacity-profile-status');
+  try {
+    const profile = document.getElementById('capacity-profile-select')?.value || '';
+    const response = await fetch(appUrl(`/api/admin_system.php?action=capacity_profile_preview&profile=${encodeURIComponent(profile)}`));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) throw new Error(data.error || 'Capacity impact could not be reviewed.');
+    capacityProfileImpact = data.impactPreview;
+    const panel = document.getElementById('capacity-profile-impact');
+    const title = document.getElementById('capacity-profile-impact-title');
+    const list = document.getElementById('capacity-profile-impact-list');
+    if (title) title.textContent = `${capacityProfileImpact.profileLabel} exact impact`;
+    if (list) {
+      list.textContent = '';
+      if (!capacityProfileImpact.changes?.length) list.appendChild(healthElement('li', '', 'All values already match this measured profile.'));
+      for (const change of capacityProfileImpact.changes || []) {
+        list.appendChild(healthElement('li', '', `${change.label}: ${change.currentValue} → ${change.proposedValue}. ${change.impact}`));
+      }
+    }
+    if (panel) panel.hidden = false;
+    if (status) status.textContent = 'Exact impact ready for deliberate review.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Capacity impact could not be reviewed.';
+  }
+});
+
+document.getElementById('capacity-profile-cancel')?.addEventListener('click', () => {
+  capacityProfileImpact = null;
+  const panel = document.getElementById('capacity-profile-impact');
+  if (panel) panel.hidden = true;
+});
+
+document.getElementById('capacity-profile-apply')?.addEventListener('click', async () => {
+  const status = document.getElementById('capacity-profile-status');
+  if (!capacityProfileImpact) return;
+  try {
+    const result = await adminSystemRequest({
+      action: 'apply_capacity_profile',
+      profile: capacityProfileImpact.profileId,
+      expected_revision: capacityProfileImpact.expectedRevision,
+      request_id: settingsRegistryRequestId(),
+      confirmed: 1,
+    });
+    capacityProfileImpact = null;
+    document.getElementById('capacity-profile-impact').hidden = true;
+    if (status) status.textContent = result.idempotent ? 'Profile was already applied.' : 'Measured capacity profile applied.';
+    await Promise.all([loadAdminSystemHealth(), loadAdminSettings(), loadAdminLogs()]);
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Capacity profile could not be applied.';
+  }
+});
+
+document.getElementById('diagnostic-policy-review')?.addEventListener('click', () => {
+  const selected = document.getElementById('diagnostic-policy-mode')?.value || 'errors-only';
+  const copy = document.getElementById('diagnostic-policy-impact-copy');
+  if (copy) {
+    copy.textContent = selected === 'verbose'
+      ? 'Verbose diagnostics lasts exactly 60 minutes and then returns to the immediately preceding finite mode. Repeated requests do not extend the lease.'
+      : selected === 'off'
+        ? 'Off stops new optional client collection. It does not delete retained evidence or disable security, Tool Logs, local Developer Tools, or required automated checks.'
+        : `Apply ${selected.replaceAll('-', ' ')} with bounded sampling, redaction, secure storage, and retention.`;
+  }
+  const panel = document.getElementById('diagnostic-policy-impact');
+  if (panel) panel.hidden = false;
+});
+
+document.getElementById('diagnostic-policy-cancel')?.addEventListener('click', () => {
+  const panel = document.getElementById('diagnostic-policy-impact');
+  if (panel) panel.hidden = true;
+});
+
+document.getElementById('diagnostic-policy-apply')?.addEventListener('click', async () => {
+  const status = document.getElementById('diagnostic-policy-status');
+  try {
+    const result = await adminSystemRequest({
+      action: 'update_diagnostic_policy',
+      mode: document.getElementById('diagnostic-policy-mode')?.value || 'errors-only',
+      expected_revision: adminSystemHealth?.diagnostics?.policy?.revision,
+      request_id: settingsRegistryRequestId(),
+      confirmed: 1,
+    });
+    document.getElementById('diagnostic-policy-impact').hidden = true;
+    if (status) status.textContent = result.idempotent ? 'Diagnostic mode was already effective.' : 'Diagnostic collection mode updated.';
+    await Promise.all([loadAdminSystemHealth(), loadAdminSettings(), loadAdminLogs()]);
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Diagnostic policy could not be updated.';
+  }
+});
+
+document.getElementById('diagnostic-cleanup-preview')?.addEventListener('click', async () => {
+  const status = document.getElementById('diagnostic-policy-status');
+  try {
+    const response = await fetch(appUrl('/api/runtime_issues.php?action=retention'));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) throw new Error(data.error || 'Retention impact could not be reviewed.');
+    const preview = data.impactPreview || {};
+    if (status) status.textContent = `${preview.eligibleIssueCount || 0} issue records are eligible; the next bounded batch is at most ${preview.nextBatchMaximum || 0}. Holds and investigations remain preserved.`;
+    const run = document.getElementById('diagnostic-cleanup-run');
+    if (run) run.hidden = false;
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Retention impact could not be reviewed.';
+  }
+});
+
+document.getElementById('diagnostic-cleanup-run')?.addEventListener('click', async () => {
+  const status = document.getElementById('diagnostic-policy-status');
+  try {
+    const result = await adminIssuePost({ action: 'cleanup', confirmed: 1 });
+    if (status) status.textContent = `Bounded cleanup passed: scanned ${result.scanned || 0}, cleaned ${result.deleted || 0}.`;
+    document.getElementById('diagnostic-cleanup-run').hidden = true;
+    await Promise.all([loadAdminSystemHealth(), loadAdminIssues(), loadAdminLogs()]);
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Bounded cleanup failed.';
+  }
+});
 
 function hasDirtyAdminGestures() {
   return adminGestureState.dirtyRows.size > 0;
@@ -1589,15 +2324,35 @@ function adminGestureEditorCell(item, field, label, multiline = false) {
 function adminGesturePackageCell(item) {
   const media = Object.keys(item.package?.media || {});
   const cell = adminGestureCell('cell', '', 'admin-gesture-package', 'Package');
+  const packageStatus = String(item.package_status || item.package?.status || 'unknown').toLowerCase();
   const status = document.createElement('strong');
-  status.textContent = `${item.package_status || item.package?.status || 'unknown'} · v${Number(item.package_version || item.package?.version || 0)} · generation ${Number(item.package_generation || item.package?.generation || 0)}`;
-  const compatibility = document.createElement('span');
-  compatibility.textContent = `${item.package?.compatibility || (item.legacy_metadata ? 'legacy' : 'native')} · ${media.length ? media.join(', ') : 'no media summary'}`;
+  status.textContent = ({
+    valid: 'Ready',
+    missing: 'Package information unavailable',
+    invalid: 'Needs review',
+    'legacy-unverified': 'Not yet verified',
+  })[packageStatus] || 'Needs review';
+  const contents = document.createElement('span');
+  contents.textContent = media.length
+    ? `Includes ${media.map(name => name.replaceAll('_', ' ')).join(', ')}`
+    : 'No media summary available.';
   const original = document.createElement('span');
-  original.textContent = `Original package: ${item.original_filename || 'unknown'}`;
+  original.textContent = `Package file: ${item.original_filename || 'Unavailable'}`;
+  const technical = document.createElement('details');
+  const technicalSummary = document.createElement('summary');
+  technicalSummary.textContent = 'Technical details';
+  const technicalStatus = document.createElement('span');
+  technicalStatus.textContent = `Internal status: ${packageStatus}`;
+  const technicalVersion = document.createElement('span');
+  technicalVersion.textContent = `Package version: ${Number(item.package_version || item.package?.version || 0)}`;
+  const technicalGeneration = document.createElement('span');
+  technicalGeneration.textContent = `Package generation: ${Number(item.package_generation || item.package?.generation || 0)}`;
+  const compatibility = document.createElement('span');
+  compatibility.textContent = `Compatibility: ${item.package?.compatibility || (item.legacy_metadata ? 'legacy' : 'native')}`;
   const identity = document.createElement('span');
   identity.textContent = `Stable ID: ${item.public_id || 'unknown'}`;
-  cell.append(status, compatibility, original, identity);
+  technical.append(technicalSummary, technicalStatus, technicalVersion, technicalGeneration, compatibility, identity);
+  cell.append(status, contents, original, technical);
   return cell;
 }
 
@@ -1645,7 +2400,7 @@ async function saveAdminGestureRow(row, item, button) {
     row.classList.remove('dirty', 'conflict');
     row.classList.add('success');
     row.dataset.resultState = 'success';
-    setAdminGestureRowResult(row, 'Saved. Publication, ownership, and upload provenance were unchanged.', 'success');
+    setAdminGestureRowResult(row, 'Saved. Creator credit and upload information were unchanged.', 'success');
     adminGestureChannel?.postMessage({ type: 'gesture-saved', gesturePublicId: item.public_id });
     setAdminGestureStatus('Server Gesture metadata saved without changing publication or ownership.', 'ok');
   } catch (error) {
@@ -1702,7 +2457,7 @@ function renderAdminGestureCatalog(data) {
     row.dataset.resultState = '';
     const uploaded = adminGestureCell(
       'cell',
-      `Uploaded by ${item.uploaded_by || 'unknown'} · ${adminCreatedOnText(item.last_uploaded_at)}`,
+      `${item.uploaded_by || 'Unknown uploader'} · ${adminCreatedOnText(item.last_uploaded_at)}`,
       'admin-gesture-uploaded',
       'Uploaded by'
     );
@@ -1789,6 +2544,11 @@ async function loadAdminGestures({ allowDiscard = false, reason = 'Refreshing th
   if (!adminGestureCatalog || !adminSettingsRegistry) return false;
   if (!allowDiscard && !confirmAdminGestureDiscard(reason)) return false;
   renderAdminGestureFeatureSummary();
+  const limitsSummary = document.getElementById('admin-summary-limits');
+  if (limitsSummary) {
+    const limitCount = adminSettingsRegistryUI.entries.filter(entry => adminSettingsRegistryUI.isLimitEntry(entry)).length;
+    limitsSummary.textContent = `${limitCount} limits`;
+  }
   if (!adminGestureCatalogEnabled()) {
     if (hasDirtyAdminGestures()) {
       clearAdminGestureDirtyState();
@@ -1994,7 +2754,12 @@ function setCanonicalAdminStatus(message, type = '') {
 async function adminIssueRequest(path, options = {}) {
   const response = await fetch(appUrl(path), { credentials: 'same-origin', ...options });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.error) throw new Error(data.error || 'Runtime issue request failed.');
+  if (!response.ok || data.error) {
+    const error = new Error(data.error || 'Runtime issue request failed.');
+    error.data = data;
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -2006,7 +2771,7 @@ function adminIssuePost(body) {
   });
 }
 
-async function loadAdminIssues() {
+async function legacyLoadAdminIssues() {
   const filterInput = document.getElementById('issue-status-filter');
   const list = document.getElementById('issue-list');
   const badge = document.getElementById('issue-count');
@@ -2029,7 +2794,7 @@ async function loadAdminIssues() {
   if (!list.children.length) list.innerHTML = '<p class="minor">No matching issues.</p>';
 }
 
-async function loadAdminIssueDetail(issueId) {
+async function legacyLoadAdminIssueDetail(issueId) {
   const data = await adminIssueRequest(`/api/runtime_issues.php?action=detail&issue_id=${encodeURIComponent(issueId)}`);
   const issue = data.issue;
   const detail = document.getElementById('issue-detail');
@@ -2096,7 +2861,326 @@ async function loadAdminIssueDetail(issueId) {
   });
 }
 
-document.getElementById('issue-status-filter')?.addEventListener('change', loadAdminIssues);
+let adminIssuePage = 1;
+let adminIssueCapabilities = null;
+let adminIssueSelectedId = 0;
+
+function issueOperationId(prefix) {
+  return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+}
+
+function issueDownloadArtifact(artifact, filename) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function issueSetListStatus(message, type = '') {
+  const status = document.getElementById('issue-list-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.className = `minor ${type}`.trim();
+}
+
+async function loadAdminIssues() {
+  const statusInput = document.getElementById('issue-status-filter');
+  const severityInput = document.getElementById('issue-severity-filter');
+  const list = document.getElementById('issue-list');
+  const badge = document.getElementById('issue-count');
+  const pager = document.getElementById('issue-pager');
+  const totals = document.getElementById('issue-grouped-totals');
+  if (!statusInput || !severityInput || !list || !badge || !pager || !totals) return;
+  list.replaceChildren();
+  pager.replaceChildren();
+  issueSetListStatus('Loading runtime issues...', 'working');
+  try {
+    if (!adminIssueCapabilities) {
+      const config = await adminIssueRequest('/api/runtime_issues.php?action=config');
+      adminIssueCapabilities = config.capabilities || {};
+    }
+    const params = new URLSearchParams({
+      action: 'list',
+      page: String(adminIssuePage),
+      per_page: '25',
+    });
+    if (statusInput.value) params.set('status', statusInput.value);
+    if (severityInput.value) params.set('severity', severityInput.value);
+    const data = await adminIssueRequest(`/api/runtime_issues.php?${params.toString()}`);
+    const issueCount = Number(data.totals?.all ?? data.total ?? 0);
+    badge.textContent = String(issueCount);
+    badge.setAttribute('aria-label', `${issueCount} issue${issueCount === 1 ? '' : 's'}`);
+    totals.replaceChildren();
+    for (const [label, value] of [
+      ['All', data.totals?.all || 0],
+      ['New', data.totals?.byStatus?.new || 0],
+      ['Investigating', data.totals?.byStatus?.investigating || 0],
+      ['Regressed', data.totals?.byStatus?.regressed || 0],
+      ['Critical', data.totals?.bySeverity?.critical || 0],
+    ]) {
+      const item = document.createElement('span');
+      item.textContent = `${label}: ${value}`;
+      totals.appendChild(item);
+    }
+    for (const issue of data.issues || []) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'issue-list-item';
+      button.classList.toggle('active', issue.id === adminIssueSelectedId);
+      button.innerHTML = `<strong>${esc(issue.title)}</strong><span>${esc(issue.component)} · ${esc(issue.status)}</span><small>${issue.occurrenceCount} occurrence${issue.occurrenceCount === 1 ? '' : 's'} · ${issue.recurrenceCount} recurrence${issue.recurrenceCount === 1 ? '' : 's'}</small>`;
+      button.addEventListener('click', () => loadAdminIssueDetail(issue.id));
+      list.appendChild(button);
+    }
+    if (!list.children.length) {
+      const empty = document.createElement('p');
+      empty.className = 'minor';
+      empty.textContent = 'No runtime issues match the selected filters.';
+      list.appendChild(empty);
+    }
+    const previous = document.createElement('button');
+    previous.type = 'button';
+    previous.className = 'btn';
+    previous.textContent = 'Previous';
+    previous.disabled = Number(data.page || 1) <= 1;
+    previous.addEventListener('click', () => {
+      adminIssuePage = Math.max(1, adminIssuePage - 1);
+      loadAdminIssues();
+    });
+    const page = document.createElement('span');
+    page.textContent = `Page ${data.page || 1} of ${data.pageCount || 1}`;
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'btn';
+    next.textContent = 'Next';
+    next.disabled = Number(data.page || 1) >= Number(data.pageCount || 1);
+    next.addEventListener('click', () => {
+      adminIssuePage += 1;
+      loadAdminIssues();
+    });
+    pager.append(previous, page, next);
+    issueSetListStatus(`${data.total || 0} matching issue${Number(data.total || 0) === 1 ? '' : 's'}.`, 'ok');
+  } catch (error) {
+    issueSetListStatus(error.message || 'Runtime issues could not be loaded.', 'error');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn';
+    retry.textContent = 'Retry';
+    retry.addEventListener('click', loadAdminIssues);
+    list.appendChild(retry);
+  }
+}
+
+async function issuePreviewAndExport(issueId, kind, output) {
+  const result = await adminIssueRequest(`/api/runtime_issues.php?action=export_preview&issue_id=${encodeURIComponent(issueId)}&kind=${encodeURIComponent(kind)}`);
+  const preview = result.preview;
+  output.hidden = false;
+  output.textContent = `Includes:\n- ${(preview.includes || []).join('\n- ')}\n\nExcludes:\n- ${(preview.excludes || []).join('\n- ')}`;
+  return preview;
+}
+
+async function issueExportReviewed(issueId, kind, preview) {
+  const result = await adminIssuePost({
+    action: 'export',
+    issue_id: issueId,
+    kind,
+    request_id: issueOperationId(kind),
+    preview_token: preview.previewToken,
+  });
+  const suffix = kind === 'support-bundle' ? 'support-bundle' : 'hosted-pending-handoff';
+  issueDownloadArtifact(result.artifact, `chatspace-issue-${issueId}-${suffix}.json`);
+  return result;
+}
+
+async function loadAdminIssueDetail(issueId) {
+  const detail = document.getElementById('issue-detail');
+  if (!detail) return;
+  detail.innerHTML = '<p class="minor">Loading issue details...</p>';
+  try {
+    const data = await adminIssueRequest(`/api/runtime_issues.php?action=detail&issue_id=${encodeURIComponent(issueId)}`);
+    const issue = data.issue;
+    adminIssueSelectedId = issue.id;
+    const confirmedCopy = issue.status === 'confirmed'
+      ? '<p class="issue-acknowledgement">Confirmed means this issue has been acknowledged; it does not mean the issue is fixed.</p>'
+      : '';
+    detail.innerHTML = `
+      <header><div><span class="issue-severity severity-${esc(issue.severity)}">${esc(issue.severity)}</span><h2>${esc(issue.title)}</h2></div><code>${esc(issue.fingerprint)}</code></header>
+      ${confirmedCopy}
+      <dl class="issue-summary-grid">
+        <dt>Component</dt><dd>${esc(issue.component)}</dd>
+        <dt>Code</dt><dd>${esc(issue.errorCode)}</dd>
+        <dt>State</dt><dd>${esc(issue.status)}</dd>
+        <dt>First seen</dt><dd>${esc(issue.firstSeenAt)}</dd>
+        <dt>Last seen</dt><dd>${esc(issue.lastSeenAt)}</dd>
+        <dt>Occurrences</dt><dd>${issue.occurrenceCount}</dd>
+        <dt>Recurrences</dt><dd>${issue.recurrenceCount} across ${issue.recurrenceGeneration} generation${issue.recurrenceGeneration === 1 ? '' : 's'}</dd>
+      </dl>
+      <form id="issue-status-form" class="shared-form compact-form">
+        <label>State <select name="status">${(data.statusCatalog || []).map(item => `<option value="${esc(item.id)}"${item.id === issue.status ? ' selected' : ''}>${esc(item.label)}</option>`).join('')}</select></label>
+        <label>Reason <input name="reason" maxlength="512"></label>
+        <label>Verification reference <input name="verification_reference" maxlength="191"></label>
+        <button class="btn btn-primary" type="submit">Update State</button>
+      </form>
+      <section class="issue-retention"><h3>Evidence Retention</h3><p id="issue-retention-summary"></p><div class="shared-form-actions" id="issue-retention-actions"></div></section>
+      <section><h3>Privacy-safe Exports</h3><div class="shared-form-actions"><button class="btn" id="issue-support-preview" type="button">Preview Support Bundle</button><button class="btn" id="issue-support-export" type="button" disabled>Export Support Bundle</button><button class="btn" id="issue-handoff-preview" type="button">Preview Hosted-pending Handoff</button><button class="btn" id="issue-handoff-export" type="button" disabled>Export Hosted-pending Handoff</button></div><pre id="issue-export-preview" hidden></pre></section>
+      <section><h3>Occurrences and Context</h3><div id="issue-occurrences"></div></section>
+      <section><h3>Resolution History</h3><div id="issue-history"></div></section>
+      <section><h3>Censored Screenshots</h3><div id="issue-screenshots" class="issue-screenshots"></div></section>
+      <section class="issue-danger-zone"><h3>Delete Diagnostic Evidence</h3><p>Issue identity, aggregate counts, minimal fingerprint, state, and history are preserved.</p><button class="btn btn-danger" id="issue-delete-preview" type="button">Review Exact Impact</button><div id="issue-delete-confirmation" class="settings-impact-confirmation" hidden></div></section>`;
+
+    const occurrences = detail.querySelector('#issue-occurrences');
+    for (const occurrence of data.occurrences || []) {
+      const panel = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = `${occurrence.createdAt} · occurrence ${occurrence.id}`;
+      const context = document.createElement('dl');
+      context.className = 'issue-summary-grid';
+      const pairs = [
+        ['Server context', JSON.stringify(occurrence.context || {})],
+        ['Client build hint', occurrence.clientBuildHint || 'Not supplied'],
+        ['Client request correlation', occurrence.clientRequestCorrelation || 'Not supplied'],
+        [
+          'Privacy-bounded network context',
+          occurrence.networkContext
+            ? `${occurrence.networkContext.owner}. Address retained or displayed: no. ${occurrence.networkContext.notice}`
+            : 'Not available',
+        ],
+      ];
+      for (const [label, value] of pairs) {
+        const dt = document.createElement('dt');
+        const dd = document.createElement('dd');
+        dt.textContent = label;
+        dd.textContent = value;
+        context.append(dt, dd);
+      }
+      const evidence = document.createElement('pre');
+      evidence.textContent = JSON.stringify(occurrence.evidence || {}, null, 2);
+      panel.append(summary, context, evidence);
+      occurrences.appendChild(panel);
+    }
+    if (!occurrences.children.length) occurrences.innerHTML = '<p class="minor">Detailed occurrence evidence has been removed; aggregate counts remain.</p>';
+
+    detail.querySelector('#issue-history').innerHTML = (data.history || []).map(row => `<div class="issue-history-row"><strong>${esc(row.fromStatus || 'created')} → ${esc(row.toStatus)}</strong><span>${esc(row.actorName)} · ${esc(row.createdAt)}</span><p>${esc(row.reason || row.verificationReference || '')}</p></div>`).join('') || '<p class="minor">No state changes.</p>';
+    const screenshots = detail.querySelector('#issue-screenshots');
+    for (const screenshot of data.screenshots || []) {
+      const figure = document.createElement('figure');
+      figure.innerHTML = `<img src="${esc(appUrl(`/api/runtime_issues.php?action=screenshot&id=${encodeURIComponent(screenshot.publicId)}`))}" alt="Locally censored diagnostic schematic"><figcaption>${screenshot.width}×${screenshot.height} · ${screenshot.byteSize} bytes · ${esc(screenshot.createdAt)}</figcaption><button class="btn btn-danger" type="button">Delete Screenshot</button>`;
+      figure.querySelector('button').addEventListener('click', async () => {
+        await adminIssuePost({ action: 'delete_screenshot', id: screenshot.publicId });
+        await loadAdminIssueDetail(issueId);
+      });
+      screenshots.appendChild(figure);
+    }
+    if (!screenshots.children.length) screenshots.innerHTML = '<p class="minor">No censored screenshots are retained.</p>';
+
+    detail.querySelector('#issue-status-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      try {
+        await adminIssuePost({
+          action: 'update_status',
+          issue_id: issueId,
+          status: form.elements.status.value,
+          reason: form.elements.reason.value,
+          verification_reference: form.elements.verification_reference.value,
+          expected_revision: issue.revision,
+        });
+        await Promise.all([loadAdminIssues(), loadAdminIssueDetail(issueId)]);
+        setCanonicalAdminStatus('Issue state updated.', 'ok');
+      } catch (error) {
+        setCanonicalAdminStatus(error.message, 'error');
+      }
+    });
+
+    const retentionSummary = detail.querySelector('#issue-retention-summary');
+    const retention = data.retention || {};
+    retentionSummary.textContent = retention.holdActive
+      ? `Safety hold active${retention.holdReason ? `: ${retention.holdReason}` : '.'}`
+      : `Retention class: ${retention.class || 'standard'}. No safety hold is active.`;
+    const retentionActions = detail.querySelector('#issue-retention-actions');
+    if (adminIssueCapabilities?.evidence) {
+      const reason = document.createElement('input');
+      reason.placeholder = retention.holdActive ? 'Reason for releasing hold' : 'Reason for safety hold';
+      reason.maxLength = 500;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = retention.holdActive ? 'btn' : 'btn btn-danger';
+      toggle.textContent = retention.holdActive ? 'Release Hold' : 'Apply Safety Hold';
+      toggle.addEventListener('click', async () => {
+        await adminIssuePost({ action: 'set_retention_hold', issue_id: issueId, active: !retention.holdActive, reason: reason.value, expected_revision: issue.revision });
+        await loadAdminIssueDetail(issueId);
+      });
+      retentionActions.append(reason, toggle);
+    }
+
+    const exportPreview = detail.querySelector('#issue-export-preview');
+    for (const [kind, previewId, exportId] of [
+      ['support-bundle', '#issue-support-preview', '#issue-support-export'],
+      ['hosted-pending-handoff', '#issue-handoff-preview', '#issue-handoff-export'],
+    ]) {
+      let preview = null;
+      const previewButton = detail.querySelector(previewId);
+      const exportButton = detail.querySelector(exportId);
+      previewButton.addEventListener('click', async () => {
+        preview = await issuePreviewAndExport(issueId, kind, exportPreview);
+        exportButton.disabled = false;
+      });
+      exportButton.addEventListener('click', async () => {
+        if (!preview) return;
+        await issueExportReviewed(issueId, kind, preview);
+        preview = null;
+        exportButton.disabled = true;
+      });
+    }
+
+    detail.querySelector('#issue-delete-preview').addEventListener('click', async () => {
+      const result = await adminIssueRequest(`/api/runtime_issues.php?action=deletion_preview&issue_id=${encodeURIComponent(issueId)}`);
+      const preview = result.preview;
+      const confirmation = detail.querySelector('#issue-delete-confirmation');
+      confirmation.replaceChildren();
+      confirmation.hidden = false;
+      const copy = document.createElement('p');
+      copy.textContent = preview.eligible
+        ? `This removes ${preview.impact.occurrences} detailed occurrences and ${preview.impact.screenshots} screenshots while preserving issue identity, aggregate counts, minimal fingerprint, state, and history.`
+        : 'Evidence cannot be deleted while a safety hold or active investigation preserves it.';
+      confirmation.appendChild(copy);
+      if (preview.eligible) {
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.className = 'btn btn-danger';
+        confirm.textContent = 'Confirm Evidence Deletion';
+        confirm.addEventListener('click', async () => {
+          await adminIssuePost({
+            action: 'delete_evidence',
+            issue_id: issueId,
+            expected_revision: preview.revision,
+            fingerprint: preview.fingerprint,
+            request_id: issueOperationId('evidence-delete'),
+            confirmation_id: preview.confirmationId,
+            confirmed: 1,
+          });
+          await Promise.all([loadAdminIssues(), loadAdminIssueDetail(issueId)]);
+        });
+        confirmation.appendChild(confirm);
+      }
+    });
+    await loadAdminIssues();
+  } catch (error) {
+    detail.innerHTML = '<p class="error-text">Issue details could not be loaded.</p><button class="btn" type="button">Retry</button>';
+    detail.querySelector('button')?.addEventListener('click', () => loadAdminIssueDetail(issueId));
+    setCanonicalAdminStatus(error.message || 'Issue details could not be loaded.', 'error');
+  }
+}
+
+document.getElementById('issue-status-filter')?.addEventListener('change', () => {
+  adminIssuePage = 1;
+  loadAdminIssues();
+});
+document.getElementById('issue-severity-filter')?.addEventListener('change', () => {
+  adminIssuePage = 1;
+  loadAdminIssues();
+});
 
 async function loadAdminDashboard() {
   await Promise.all([
@@ -2111,13 +3195,14 @@ async function loadAdminDashboard() {
     loadAdminIssues(),
     loadAdminNetworkPolicy(),
     loadAdminRetention(),
+    loadAdminSystemHealth(),
   ]);
 }
 
 async function openCanonicalAdmin() {
   lobbyMenu?.classList.remove('visible');
   adminModal.classList.add('open');
-  showAdminSection('overview');
+  if (!restoreAdminLocationFromHash()) showAdminSection('overview');
   await loadAdminDashboard();
 }
 
@@ -2218,7 +3303,7 @@ document.getElementById('admin-create')?.addEventListener('submit', async e => {
 });
 
 function lobbyAdminCompatibilityLabel(state) {
-  return ({ 'original-compatible': 'Original-author compatible', 'framework-default': 'Framework default', custom: 'Custom' })[state] || 'Custom';
+  return ({ 'original-compatible': 'Original ChatSpace values', 'framework-default': 'Recommended defaults', custom: 'Custom values' })[state] || 'Custom values';
 }
 
 function renderLobbyAdminSettingsCompatibility() {
@@ -2238,8 +3323,9 @@ function syncLobbyAdminSettingsMutationLocks() {
   }
   const save = document.getElementById('lobby-admin-settings-save');
   const changed = Object.keys(adminSettingsRegistryUI?.changedValues?.() || {}).length;
+  const valid = adminSettingsRegistryUI?.getState?.().valid !== false;
   if (save) {
-    save.disabled = !unlocked || changed === 0;
+    save.disabled = !unlocked || changed === 0 || !valid;
     adminSettingsRegistryUI?.applyControlLockSemantics(save);
   }
   document.querySelectorAll('#lobby-admin-settings-preset-review [data-settings-mutation]').forEach(control => {
@@ -2353,8 +3439,8 @@ function lobbyAdminSettingsFailureMessage(error, fallback) {
 function lobbyAdminSettingsSuccessMessage(result, operation, details) {
   if (result.idempotent || Number(result.changedSettingCount || 0) === 0) return 'No settings needed to be changed.';
   if (operation === 'apply_preset') return details.preset === 'original-compatible'
-    ? 'Original-author compatible settings applied.'
-    : 'Framework default settings applied.';
+    ? 'Original ChatSpace values applied.'
+    : 'Recommended defaults applied.';
   if (operation === 'reset_all_optional') return 'All optional settings reset to defaults.';
   if (operation === 'reset_category') {
     const label = adminSettingsRegistry?.categories?.find(category => category.id === details.category_id)?.label || 'Category';
@@ -2377,12 +3463,12 @@ function lobbyAdminSettingsSuccessMessage(result, operation, details) {
   const gestureIds = ids.filter(id => id.startsWith('gesture_part3_'));
   if (gestureIds.length > 1 && gestureIds.length === ids.length) {
     const enabled = Object.values(details.values || {}).some(Boolean);
-    return `All Part 3 gesture features ${enabled ? 'enabled' : 'disabled'}.`;
+    return `All browsing and organization features ${enabled ? 'enabled' : 'disabled'}.`;
   }
   const packageIds = ids.filter(id => id.startsWith('gesture_part4_'));
   if (packageIds.length > 1 && packageIds.length === ids.length) {
     const enabled = Object.values(details.values || {}).some(Boolean);
-    return `All Part 4 Gesture Maker and package features ${enabled ? 'enabled' : 'disabled'}.`;
+    return `All creation, package, and media features ${enabled ? 'enabled' : 'disabled'}.`;
   }
   const capabilityIds = ids.filter(id => [
     'allow_gestures',
@@ -2425,6 +3511,27 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
   if (touchesModerationTrust && details.expected_moderation_trust_revision === undefined) {
     details.expected_moderation_trust_revision = Number(
       adminSettingsRegistryUI?.entryMap?.get(moderationTrustId)?.ownerRevision ?? 0
+    );
+  }
+  const operationalCapacityIds = new Set(
+    (adminSettingsRegistry?.entries || [])
+      .filter(entry => entry.owner === 'operational_capacity_policy' && entry.type === 'number')
+      .map(entry => entry.id)
+  );
+  const touchesOperationalCapacity = Object.keys(details.values || {}).some(id => operationalCapacityIds.has(id))
+    || (operation === 'reset_setting' && operationalCapacityIds.has(details.setting_id));
+  if (touchesOperationalCapacity && details.expected_operational_capacity_revision === undefined) {
+    const firstId = [...operationalCapacityIds][0];
+    details.expected_operational_capacity_revision = Number(
+      adminSettingsRegistryUI?.entryMap?.get(firstId)?.ownerRevision ?? 0
+    );
+  }
+  const diagnosticPolicyId = 'runtime_diagnostic_collection_mode';
+  const touchesDiagnosticPolicy = Object.prototype.hasOwnProperty.call(details.values || {}, diagnosticPolicyId)
+    || (operation === 'reset_setting' && details.setting_id === diagnosticPolicyId);
+  if (touchesDiagnosticPolicy && details.expected_runtime_diagnostic_revision === undefined) {
+    details.expected_runtime_diagnostic_revision = Number(
+      adminSettingsRegistryUI?.entryMap?.get(diagnosticPolicyId)?.ownerRevision ?? 0
     );
   }
   if (['reset_subsection', 'reset_category', 'reset_all_optional', 'apply_preset'].includes(operation)) details.confirmed = 1;
@@ -2477,6 +3584,19 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
         error.data.moderationTrustPolicy || {}
       );
       return null;
+    }
+    if (error?.data?.code === 'NETWORK_MANUAL_BANS_DISABLE_CONFIRMATION_REQUIRED'
+        && !details.network_manual_bans_disable_confirmed) {
+      const activeCount = Number(error.data.networkModerationPolicy?.activeBanCount || 0);
+      const confirmed = window.confirm(
+        `Disabling Manual Network Bans stops enforcement for ${activeCount} active ban`
+        + `${activeCount === 1 ? '' : 's'}. Review and confirm this impact.`
+      );
+      if (!confirmed) return null;
+      return mutateLobbyAdminSettings(operation, {
+        ...details,
+        network_manual_bans_disable_confirmed: 1,
+      });
     }
     throw error;
   }
@@ -2650,7 +3770,7 @@ function showLobbyAdminPresetReview(preset) {
   apply.className = 'btn btn-primary';
   apply.dataset.settingsMutation = 'preset';
   apply.disabled = !adminSettingsUnlock?.isUnlocked();
-  apply.textContent = preset === 'original-compatible' ? 'Apply Original-compatible Preset' : 'Restore Framework Defaults';
+  apply.textContent = preset === 'original-compatible' ? 'Apply Original ChatSpace Values' : 'Restore Recommended Defaults';
   apply.addEventListener('click', async () => {
     apply.disabled = true;
     try {

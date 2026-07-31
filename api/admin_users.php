@@ -120,7 +120,7 @@ $userId = (int)($body['id'] ?? 0);
 if (!$userId) json_out(['error' => 'User required'], 400);
 if ($action === 'delete') {
     json_out([
-        'error' => 'Direct member deletion is disabled. Use non-destructive suspension when necessary. Build 000053 is the sole Delete Account owner.',
+        'error' => 'Direct member deletion is unavailable. Use non-destructive suspension when necessary.',
         'code' => 'BUILD_000053_DELETE_ACCOUNT_REQUIRED',
     ], 409);
 }

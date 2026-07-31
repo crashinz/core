@@ -113,12 +113,17 @@ function moderation_identity_staff_capability_defaults(): array
             'warn', 'temporarily-restrict', 'remove-from-room',
             'suspend-account', 'review-reports', 'view-moderation-history',
             'undo-eligible-restriction', 'manage-evidence', 'server-policy',
+            'view-runtime-issues', 'manage-runtime-issues',
+            'export-runtime-issues', 'manage-runtime-evidence',
         ],
         'moderator' => [
             'warn', 'temporarily-restrict', 'remove-from-room',
             'review-reports', 'view-moderation-history',
         ],
-        'developer' => [],
+        'developer' => [
+            'view-runtime-issues', 'manage-runtime-issues',
+            'export-runtime-issues',
+        ],
         'guide' => [],
         'user' => [],
     ];
@@ -127,6 +132,12 @@ function moderation_identity_staff_capability_defaults(): array
 function moderation_identity_setup_presets(): array
 {
     return [
+        'open-community' => [
+            'label' => 'Open Community (Original-style)',
+            'registrationMode' => 'open',
+            'outsideConfirmationMode' => 'disabled',
+            'newUserTrust' => 'trusted',
+        ],
         'private' => [
             'label' => 'Private',
             'registrationMode' => 'invitation-only',
@@ -181,6 +192,69 @@ function moderation_identity_preset_registry_values(string $preset): array
         MODERATION_IDENTITY_REGISTRATION_MODE_SETTING => $definition['registrationMode'],
         MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING => $definition['outsideConfirmationMode'],
     ];
+}
+
+function moderation_identity_detect_fresh_default_context(PDO $pdo): bool
+{
+    try {
+        if (function_exists('database_migration_table_exists')
+            && database_migration_table_exists($pdo, 'core_migration_attempts')) {
+            $attempt = $pdo->query(
+                "SELECT source_variant, backup_public_id
+                 FROM core_migration_attempts
+                 WHERE status IN ('active','recovering')
+                 ORDER BY started_at DESC
+                 LIMIT 1"
+            )->fetch(PDO::FETCH_ASSOC);
+            if (is_array($attempt)) {
+                $users = database_migration_table_exists($pdo, 'users')
+                    ? (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn()
+                    : 0;
+                return ($attempt['backup_public_id'] ?? null) === null && $users === 0;
+            }
+        }
+        return moderation_trust_detect_new_install($pdo);
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+function moderation_identity_apply_open_community_fresh_default(PDO $pdo, ?bool $freshInstall = null): void
+{
+    $freshInstall ??= moderation_identity_detect_fresh_default_context($pdo);
+    if (!$freshInstall) return;
+
+    $preset = app_setting($pdo, MODERATION_IDENTITY_SETUP_PRESET_SETTING, "\0");
+    $registration = app_setting($pdo, MODERATION_IDENTITY_REGISTRATION_MODE_SETTING, "\0");
+    $outside = app_setting($pdo, MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING, "\0");
+    if ($preset !== 'small-trusted' || $registration !== 'approval' || $outside !== 'public-only') return;
+
+    set_app_setting($pdo, MODERATION_IDENTITY_SETUP_PRESET_SETTING, 'open-community');
+    set_app_setting($pdo, MODERATION_IDENTITY_REGISTRATION_MODE_SETTING, 'open');
+    set_app_setting($pdo, MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING, 'disabled');
+}
+
+function moderation_identity_open_community_default_valid(PDO $pdo): bool
+{
+    $valid = array_key_exists(
+        app_setting($pdo, MODERATION_IDENTITY_SETUP_PRESET_SETTING, ''),
+        moderation_identity_setup_presets()
+    )
+        && in_array(
+            app_setting($pdo, MODERATION_IDENTITY_REGISTRATION_MODE_SETTING, ''),
+            MODERATION_IDENTITY_REGISTRATION_MODES,
+            true
+        )
+        && in_array(
+            app_setting($pdo, MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING, ''),
+            MODERATION_ACCOUNT_OUTSIDE_MODES,
+            true
+        );
+    if (!$valid) return false;
+    if (!moderation_identity_detect_fresh_default_context($pdo)) return true;
+    return app_setting($pdo, MODERATION_IDENTITY_SETUP_PRESET_SETTING, '') === 'open-community'
+        && app_setting($pdo, MODERATION_IDENTITY_REGISTRATION_MODE_SETTING, '') === 'open'
+        && app_setting($pdo, MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING, '') === 'disabled';
 }
 
 function moderation_identity_schema_statements(PDO $pdo): array
@@ -703,7 +777,7 @@ function moderation_identity_registration_policy(PDO $pdo): array
         'invitationRequired' => $effectiveMode === 'invitation-only',
         'administratorCreatedOnly' => $effectiveMode === 'administrator-created-only',
         'guestsAllowed' => false,
-        'newUserTrust' => !empty($master['effectiveEnabled']) ? 'pending-approval' : 'trusted',
+        'newUserTrust' => $effectiveMode === 'open' ? 'trusted' : 'pending-approval',
         'safeBuiltInAvatar' => 'preset:Default',
     ];
 }

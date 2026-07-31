@@ -7,8 +7,9 @@ const CHATSPACE_LEGACY_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
 const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
     '2026-07-23-build-000048-part-1',
     '2026-07-24-build-000048-part-3',
+    '2026-07-27-build-000051-part-7',
 ];
-const CHATSPACE_SCHEMA_VERSION = '2026-07-27-build-000051-part-7';
+const CHATSPACE_SCHEMA_VERSION = '2026-07-31-post-build-000052-settings-terminology';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 function chatspace_application_version(): string {
@@ -44,6 +45,12 @@ require_once __DIR__ . '/moderation_account_workflows.php';
 require_once __DIR__ . '/moderation_safety.php';
 require_once __DIR__ . '/message_protection.php';
 require_once __DIR__ . '/retention_lifecycle.php';
+require_once __DIR__ . '/network_moderation.php';
+require_once __DIR__ . '/operational_capacity.php';
+require_once __DIR__ . '/runtime_diagnostic_policy.php';
+require_once __DIR__ . '/host_capabilities.php';
+require_once __DIR__ . '/transport_policy.php';
+require_once __DIR__ . '/system_health.php';
 require_once __DIR__ . '/settings_registry.php';
 require_once __DIR__ . '/runtime_issue_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
@@ -1489,7 +1496,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], first_party_extension_setting_defaults(), private_site_branding_setting_defaults(), avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), settings_registry_setting_defaults());
+    ], first_party_extension_setting_defaults(), private_site_branding_setting_defaults(), avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), transport_policy_setting_defaults(), settings_registry_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -1813,6 +1820,30 @@ function require_user(): array {
             ], 401);
         }
         redirect_to('/login.php?session=revoked');
+    }
+    if (function_exists('network_moderation_observe_request_if_due')
+        && database_migration_table_exists(db(), 'network_manual_bans')) {
+        try {
+            network_moderation_assert_request_allowed(
+                db(),
+                (int)$user['id'],
+                network_privacy_client_ip()
+            );
+            network_moderation_observe_request_if_due(db(), (int)$user['id']);
+        } catch (NetworkPrivacyException $networkRestriction) {
+            security_destroy_session();
+            $isApi = str_contains(
+                str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '')),
+                '/api/'
+            );
+            if ($isApi) {
+                json_out([
+                    'error' => $networkRestriction->getMessage(),
+                    'code' => $networkRestriction->errorCode,
+                ], $networkRestriction->httpStatus);
+            }
+            redirect_to('/login.php?network=restricted');
+        }
     }
     return $user;
 }

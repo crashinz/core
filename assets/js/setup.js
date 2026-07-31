@@ -127,7 +127,7 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
     document.getElementById('setup-settings-framework'),
     document.getElementById('setup-settings-reset-optional'),
   ].filter(Boolean);
-  const stateLabel = state => ({ 'original-compatible': 'Original-author compatible', 'framework-default': 'Framework default', custom: 'Custom' })[state] || 'Custom';
+  const stateLabel = state => ({ 'original-compatible': 'Original-author compatible', 'framework-default': 'Recommended default', custom: 'Custom' })[state] || 'Custom';
   let setupSettingsUI;
   const setupSettingsUnlock = new window.SettingsUnlockController({
     mount: document.getElementById('setup-settings-unlock'),
@@ -179,9 +179,9 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
         const enabling = Object.values(details.values || {}).some(Boolean);
         const ids = Object.keys(details.values || {});
         const label = ids.length && ids.every(id => id.startsWith('gesture_part3_'))
-          ? 'Part 3 gesture features'
+          ? 'gesture browsing and organization features'
           : (ids.length && ids.every(id => id.startsWith('gesture_part4_'))
-            ? 'Part 4 Gesture Maker and package features'
+            ? 'gesture creation, package, and media features'
             : (ids.length && ids.every(id => [
               'allow_gestures',
               'allow_server_gestures',
@@ -215,7 +215,7 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
     const changes = setupSettingsUI.presetChanges(preset);
     const message = preset === 'original-compatible'
       ? 'Original-author compatible settings applied.'
-      : 'Framework default settings applied.';
+      : 'Recommended default settings applied.';
     applyDraftValues(Object.fromEntries(changes.map(change => [change.entry.id, change.to])), message);
   };
   document.getElementById('setup-settings-original')?.addEventListener('click', () => applySetupPreset('original-compatible'));

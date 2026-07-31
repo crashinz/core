@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-07-28-001-post-build-000051-profile-identity';
+const CORE_MIGRATION_REQUIRED_ID = '2026-07-31-001-post-build-000052-settings-terminology';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -406,7 +406,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => '46327E5E8BF2011BECF852CA900BD41C04124318E7033D7C98ACC4B8AFFF1C7A',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-07-28-001-post-build-000051-profile-identity',
             'title' => 'Post-Build 000051 profile identity and privacy',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -425,6 +425,83 @@ function database_migrations_manifest(): array
                 'database_migration_validate_post_build_000051_profile_identity',
             ],
             'expected_checksum' => 'EDB589B6A27AFC6E54AC21102DD9DC636DF743C0E72AED38924B5C603DE47B8F',
+        ],
+        [
+            'id' => '2026-07-28-002-build-000052-operational-capacity-health',
+            'title' => 'Build 000052 operational capacity and diagnostic health',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000052_operational_capacity_health',
+            'validate' => 'database_migration_validate_build_000052_operational_capacity_health',
+            'source_functions' => [
+                'operational_capacity_schema_statements',
+                'operational_capacity_detect_fresh_install',
+                'operational_capacity_install',
+                'operational_capacity_schema_valid',
+                'runtime_diagnostic_policy_schema_statements',
+                'runtime_diagnostic_policy_install',
+                'runtime_diagnostic_policy_schema_valid',
+                'database_migration_apply_build_000052_operational_capacity_health',
+                'database_migration_validate_build_000052_operational_capacity_health',
+            ],
+            'expected_checksum' => '3A50B36451B4F890106D0DD81C05F05C7E0CE08C939C6CE73DC04029B7006E36',
+        ],
+        [
+            'id' => '2026-07-28-003-post-build-000052-runtime-issue-lifecycle',
+            'title' => 'Post-Build 000052 runtime issue lifecycle',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_post_build_000052_runtime_issue_lifecycle',
+            'validate' => 'database_migration_validate_post_build_000052_runtime_issue_lifecycle',
+            'source_functions' => [
+                'runtime_issue_lifecycle_column_definitions',
+                'runtime_issue_lifecycle_schema_statements',
+                'runtime_issue_install_lifecycle_schema',
+                'runtime_issue_lifecycle_schema_valid',
+                'moderation_safety_project_default_staff_grants',
+                'database_migration_apply_post_build_000052_runtime_issue_lifecycle',
+                'database_migration_validate_post_build_000052_runtime_issue_lifecycle',
+            ],
+            'expected_checksum' => 'BD80E6FAF827C5D8AA4D479BE7180F8201F1B01F490DD18182F9753702439465',
+        ],
+        [
+            'id' => '2026-07-30-001-post-build-000052-opaque-network-moderation',
+            'title' => 'Post-Build 000052 opaque-network moderation',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_post_build_000052_opaque_network_moderation',
+            'validate' => 'database_migration_validate_post_build_000052_opaque_network_moderation',
+            'source_functions' => [
+                'network_moderation_schema_statements',
+                'network_moderation_columns',
+                'network_moderation_retire_reversible_schema',
+                'network_moderation_install_schema',
+                'network_moderation_backfill_contexts',
+                'network_moderation_schema_valid',
+                'database_migration_apply_post_build_000052_opaque_network_moderation',
+                'database_migration_validate_post_build_000052_opaque_network_moderation',
+            ],
+            'expected_checksum' => '5E45D2345679165F840CF2B62B41090135072A7C3DDFDD17D9B79694CE42E131',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Post-Build 000052 Settings terminology and fresh community default',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_post_build_000052_settings_terminology',
+            'validate' => 'database_migration_validate_post_build_000052_settings_terminology',
+            'source_functions' => [
+                'moderation_identity_detect_fresh_default_context',
+                'moderation_identity_apply_open_community_fresh_default',
+                'moderation_identity_open_community_default_valid',
+                'database_migration_apply_post_build_000052_settings_terminology',
+                'database_migration_validate_post_build_000052_settings_terminology',
+            ],
+            'expected_checksum' => '86DBA4C25A7B0B9C2F460E96ABDACF937E5AF8840A82F69BD7590BBE93FF86AF',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -1333,6 +1410,71 @@ function database_migration_validate_post_build_000051_profile_identity(PDO $pdo
     return member_profiles_validate_public_identity_schema($pdo);
 }
 
+function database_migration_apply_build_000052_operational_capacity_health(PDO $pdo): void
+{
+    operational_capacity_install($pdo, operational_capacity_detect_fresh_install($pdo));
+    runtime_diagnostic_policy_install($pdo);
+}
+
+function database_migration_validate_build_000052_operational_capacity_health(PDO $pdo): bool
+{
+    return operational_capacity_schema_valid($pdo)
+        && runtime_diagnostic_policy_schema_valid($pdo);
+}
+
+function database_migration_apply_post_build_000052_runtime_issue_lifecycle(PDO $pdo): void
+{
+    runtime_issue_install_lifecycle_schema($pdo);
+    moderation_safety_project_default_staff_grants($pdo);
+}
+
+function database_migration_validate_post_build_000052_runtime_issue_lifecycle(PDO $pdo): bool
+{
+    if (!runtime_issue_lifecycle_schema_valid($pdo)) return false;
+    $defaults = moderation_identity_staff_capability_defaults();
+    $runtimeCapabilities = [
+        'view-runtime-issues',
+        'manage-runtime-issues',
+        'export-runtime-issues',
+        'manage-runtime-evidence',
+    ];
+    $statement = $pdo->query("SELECT id, role FROM users WHERE role IN ('admin','developer')");
+    $grant = $pdo->prepare(
+        'SELECT 1 FROM user_staff_capability_grants WHERE user_id=? AND capability_id=? LIMIT 1'
+    );
+    foreach ($statement->fetchAll() as $user) {
+        foreach (($defaults[(string)$user['role']] ?? []) as $capabilityId) {
+            if (!in_array((string)$capabilityId, $runtimeCapabilities, true)) continue;
+            $grant->execute([(int)$user['id'], $capabilityId]);
+            if (!$grant->fetchColumn()) return false;
+        }
+    }
+    return true;
+}
+
+function database_migration_apply_post_build_000052_opaque_network_moderation(PDO $pdo): void
+{
+    network_moderation_retire_reversible_schema($pdo);
+    network_moderation_install_schema($pdo);
+    network_moderation_backfill_contexts($pdo);
+    network_privacy_policy(true);
+}
+
+function database_migration_validate_post_build_000052_opaque_network_moderation(PDO $pdo): bool
+{
+    return network_moderation_schema_valid($pdo);
+}
+
+function database_migration_apply_post_build_000052_settings_terminology(PDO $pdo): void
+{
+    moderation_identity_apply_open_community_fresh_default($pdo);
+}
+
+function database_migration_validate_post_build_000052_settings_terminology(PDO $pdo): bool
+{
+    return moderation_identity_open_community_default_valid($pdo);
+}
+
 function database_migrations_bootstrap_control_tables(PDO $pdo): void
 {
     if (db_driver($pdo) === 'mysql') {
@@ -1758,7 +1900,7 @@ function database_migration_mariadb_assert_supported_inventory(array $inventory)
     foreach (['views', 'triggers', 'routines', 'events'] as $type) {
         if ((int)($objects[$type] ?? -1) !== 0) {
             throw new CoreMigrationException(
-                'Repository-owned MariaDB backup cannot yet reproduce detected ' . $type . '; migration is blocked before mutation.',
+                'The MariaDB backup process cannot safely reproduce detected ' . $type . '; the update is blocked before mutation.',
                 'MARIADB_BACKUP_UNSUPPORTED_OBJECT',
                 503
             );
@@ -3214,6 +3356,11 @@ function database_migrations_run(
             );
         }
         database_migration_create_attempt_row($pdo, $state, $variant, $actorUserId, $backup);
+        unset(
+            $state['owner_token_hash'],
+            $state['actor_user_id'],
+            $state['started_at']
+        );
         if ($backup !== null) database_migration_record_backup($pdo, $backup);
         $state = database_migration_set_phase($pdo, $state, 'migration-preflight-complete');
         foreach (database_migrations_manifest() as $migration) {
@@ -3238,6 +3385,8 @@ function database_migrations_run(
             throw new CoreMigrationException('Final schema and ledger verification did not reach current state.', 'MIGRATION_FINAL_VERIFICATION_FAILED', 500);
         }
         if ($actorUserId !== null) {
+            $resultCounts = array_count_values(array_values($results));
+            ksort($resultCounts, SORT_STRING);
             log_tool(
                 $pdo,
                 $actorUserId,
@@ -3249,7 +3398,9 @@ function database_migrations_run(
                     'from_variant' => $variant['id'],
                     'to_schema_version' => CHATSPACE_SCHEMA_VERSION,
                     'backup_public_id' => $backup['public_id'] ?? null,
-                    'results' => $results,
+                    'migration_count' => count($results),
+                    'result_counts' => $resultCounts,
+                    'terminal_migration_id' => array_key_last($results),
                 ])
             );
         }

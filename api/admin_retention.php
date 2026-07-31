@@ -69,7 +69,7 @@ try {
     }
     if ($action === 'delete_account') {
         throw new RetentionLifecycleException(
-            'Delete Account is unavailable in Build 000051. Build 000053 is the sole owner.',
+            'Delete Account is unavailable. Use non-destructive suspension when necessary.',
             'BUILD_000053_DELETE_ACCOUNT_REQUIRED',
             409
         );

@@ -11,7 +11,7 @@ function public_room_version_attribution_definition(): array {
         'destination' => "Chat Room \u{2192} Sidebar version line",
         'required' => true,
         'editable' => true,
-        'owner' => 'Build 000050 Private Site Branding Extension',
+        'owner' => 'Private Site Branding',
     ];
 }
 

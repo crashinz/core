@@ -9,6 +9,7 @@ function settings_registry_setting_defaults(): array {
 
 function settings_registry_categories(): array {
     return [
+        ['id' => 'moderation-privacy-security', 'label' => 'Moderation, Privacy & Security', 'order' => 4],
         ['id' => 'private-site-branding', 'label' => 'Branding', 'order' => 5],
         ['id' => 'general-appearance', 'label' => 'General & Appearance', 'order' => 10],
         ['id' => 'avatars-presence', 'label' => 'Avatars & Presence', 'order' => 20],
@@ -16,7 +17,6 @@ function settings_registry_categories(): array {
         ['id' => 'chat-messaging', 'label' => 'Chat & Messaging', 'order' => 40],
         ['id' => 'voice-media-players', 'label' => 'Voice, Media & Players', 'order' => 50],
         ['id' => 'rooms-games', 'label' => 'Rooms & Games', 'order' => 60],
-        ['id' => 'moderation-privacy-security', 'label' => 'Moderation, Privacy & Security', 'order' => 70],
         ['id' => 'system', 'label' => 'System', 'order' => 75],
         ['id' => 'errors-diagnostics', 'label' => 'Errors & Diagnostics', 'order' => 80],
         ['id' => 'advanced-compatibility', 'label' => 'Advanced & Compatibility', 'order' => 90],
@@ -39,6 +39,7 @@ function settings_registry_entry(array $entry): array {
         'type' => 'string',
         'defaultValue' => '',
         'allowedValues' => null,
+        'allowedValueLabels' => null,
         'minimum' => null,
         'maximum' => null,
         'step' => null,
@@ -65,6 +66,7 @@ function settings_registry_entry(array $entry): array {
         'fixedReason' => '',
         'bulkGroup' => null,
         'extensionId' => null,
+        'installedFeature' => null,
         'previewPage' => '',
         'previewField' => '',
         'previewPath' => '',
@@ -73,6 +75,8 @@ function settings_registry_entry(array $entry): array {
         'allowsOverride' => false,
         'requiredNonBlank' => false,
         'resetLabel' => 'Reset',
+        'unit' => '',
+        'limitGroup' => '',
     ], $entry);
 }
 
@@ -89,7 +93,7 @@ function settings_registry_definitions(): array {
             'categoryId' => 'moderation-privacy-security',
             'subsectionId' => 'moderation-trust',
             'subsectionLabel' => 'Moderation and Trust',
-            'subsectionOrder' => 5,
+            'subsectionOrder' => 1,
             'label' => 'Enable Moderation and Trust',
             'description' => 'Enable optional trust, capability, request, invitation, approval, and outside-content confirmation workflows.',
             'helpText' => 'Disabling preserves stored policy, requests, history, cases, evidence, mutes, blocks, restrictions, suspensions, message protection, retention, integrity, and Tool Logs. Mandatory safety remains active.',
@@ -109,7 +113,33 @@ function settings_registry_definitions(): array {
             'differsFromOriginalByDefault' => true,
             'staleWriteOwner' => MODERATION_TRUST_REVISION_SETTING,
             'toolLogBehavior' => 'bounded-moderation-trust-transition',
-            'resetLabel' => 'Restore Provenance Default',
+            'resetLabel' => 'Restore Recommended Default',
+        ]),
+        settings_registry_entry([
+            'id' => NETWORK_MODERATION_SETTING,
+            'settingKey' => NETWORK_MODERATION_SETTING,
+            'owner' => 'network_privacy_manual_bans',
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'network-protection',
+            'subsectionLabel' => 'Network Protection',
+            'subsectionOrder' => 5,
+            'label' => 'Manual Network Bans',
+            'description' => 'Allow the Installation Owner to apply deliberate restrictions to a keyed opaque network identity selected from an account, occurrence, or moderation context.',
+            'helpText' => 'Disabled by default. A shared network can affect many people and accounts. Addresses are never entered, retained, displayed, logged, or exported, and bans are never automatic.',
+            'aliases' => ['opaque network restriction', 'manual network moderation'],
+            'type' => 'boolean',
+            'defaultValue' => false,
+            'order' => 1,
+            'controlClass' => 'configurable-required',
+            'optional' => false,
+            'safeToReset' => false,
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+            'authorization' => 'installation-owner-and-recent-authentication',
+            'staleWriteOwner' => NETWORK_MODERATION_REVISION_SETTING,
+            'toolLogBehavior' => 'owner-only-manual-network-ban-policy-update',
+            'resetLabel' => 'Not available for broad reset',
         ]),
         settings_registry_entry([
             'id' => MODERATION_IDENTITY_SETUP_PRESET_SETTING,
@@ -118,14 +148,21 @@ function settings_registry_definitions(): array {
             'categoryId' => 'moderation-privacy-security',
             'subsectionId' => 'moderation-trust',
             'subsectionLabel' => 'Moderation and Trust',
-            'subsectionOrder' => 5,
+            'subsectionOrder' => 1,
             'label' => 'Community trust preset',
-            'description' => 'Choose Private, Small Trusted, Public, or explicitly reviewed Custom values.',
-            'helpText' => 'Presets populate reviewable values and never skip the final Setup or Admin review.',
-            'aliases' => ['private community', 'small trusted', 'public community', 'custom trust'],
+            'description' => 'Choose Open Community, Private, Small Trusted, Public, or explicitly reviewed Custom values.',
+            'helpText' => 'Open Community matches original-style access for a fresh installation: people may register and become Trusted immediately, guests remain unavailable, and mandatory security remains active. Presets populate reviewable values and never skip the final Setup or Admin review.',
+            'aliases' => ['open community', 'original style', 'private community', 'small trusted', 'public community', 'custom trust'],
             'type' => 'select',
-            'defaultValue' => 'small-trusted',
-            'allowedValues' => ['private', 'small-trusted', 'public', 'custom'],
+            'defaultValue' => 'open-community',
+            'allowedValues' => ['open-community', 'private', 'small-trusted', 'public', 'custom'],
+            'allowedValueLabels' => [
+                'open-community' => 'Open Community (Original-style)',
+                'private' => 'Private',
+                'small-trusted' => 'Small Trusted',
+                'public' => 'Public',
+                'custom' => 'Custom',
+            ],
             'order' => 2,
             'controlClass' => 'optional-core-subordinate',
             'optional' => true,
@@ -141,13 +178,13 @@ function settings_registry_definitions(): array {
             'categoryId' => 'moderation-privacy-security',
             'subsectionId' => 'moderation-trust',
             'subsectionLabel' => 'Moderation and Trust',
-            'subsectionOrder' => 5,
+            'subsectionOrder' => 1,
             'label' => 'Registration mode',
-            'description' => 'Choose Open, Administrator approval, Invitation only, or Administrator-created only.',
-            'helpText' => 'Guests are never permitted. When the parent is disabled on an upgrade, legacy-compatible Open registration is effective without discarding this stored value.',
+            'description' => 'Choose Open, Approval, Invitation only, or Administrator-created only. Approval lets people register and use ordinary chat immediately; protected features remain unavailable until an Administrator approves the account.',
+            'helpText' => 'Guests are never permitted. Open makes new ordinary accounts Trusted immediately. Approval makes them Pending Approval without blocking ordinary chat. When the parent is disabled on an upgrade, legacy-compatible Open registration is effective without discarding the stored value.',
             'aliases' => ['open registration', 'approval', 'invitation only', 'admin created'],
             'type' => 'select',
-            'defaultValue' => 'approval',
+            'defaultValue' => 'open',
             'allowedValues' => MODERATION_IDENTITY_REGISTRATION_MODES,
             'order' => 3,
             'controlClass' => 'optional-core-subordinate',
@@ -164,13 +201,13 @@ function settings_registry_definitions(): array {
             'categoryId' => 'moderation-privacy-security',
             'subsectionId' => 'moderation-trust',
             'subsectionLabel' => 'Moderation and Trust',
-            'subsectionOrder' => 5,
+            'subsectionOrder' => 1,
             'label' => 'Outside-Content Confirmations',
             'description' => 'Choose confirmation for every upload/import, public sharing only, reminders, or Disabled.',
             'helpText' => 'Terms, trust, capabilities, validation, security, reporting, and moderation remain enforced in every mode.',
             'aliases' => ['upload confirmation', 'import permission', 'outside content reminder'],
             'type' => 'select',
-            'defaultValue' => 'public-only',
+            'defaultValue' => 'disabled',
             'allowedValues' => MODERATION_ACCOUNT_OUTSIDE_MODES,
             'order' => 4,
             'controlClass' => 'optional-core-subordinate',
@@ -188,7 +225,7 @@ function settings_registry_definitions(): array {
             'categoryId' => 'moderation-privacy-security',
             'subsectionId' => 'moderation-trust',
             'subsectionLabel' => 'Moderation and Trust',
-            'subsectionOrder' => 5,
+            'subsectionOrder' => 1,
             'label' => 'Avatar delivery mode',
             'description' => 'Keep server-stored delivery or choose an implemented built-in/generated-only policy.',
             'helpText' => 'The future P2P mode remains unavailable and server-denied until its named implementation and certification owner completes.',
@@ -211,7 +248,7 @@ function settings_registry_definitions(): array {
             'categoryId' => 'moderation-privacy-security',
             'subsectionId' => 'moderation-trust',
             'subsectionLabel' => 'Moderation and Trust',
-            'subsectionOrder' => 5,
+            'subsectionOrder' => 1,
             'label' => 'Gesture delivery mode',
             'description' => 'Keep server-stored personal/community delivery or choose built-in-only.',
             'helpText' => 'The future P2P personal mode remains unavailable and server-denied until its named implementation and certification owner completes.',
@@ -257,12 +294,12 @@ function settings_registry_definitions(): array {
             'owner' => 'first_party_extensions',
             'extensionId' => 'gesture-maker',
             'categoryId' => 'advanced-compatibility',
-            'subsectionId' => 'first-party-extensions',
-            'subsectionLabel' => 'First-Party Extensions',
+            'subsectionId' => 'gesture-maker',
+            'subsectionLabel' => 'Gesture Maker',
             'subsectionOrder' => 5,
             'label' => 'Gesture Maker',
-            'description' => 'Enable the trusted repository-owned Gesture Maker presentation extension.',
-            'helpText' => 'Disabling removes Create/Edit Gesture presentation and subscriptions while mandatory gesture identity, authorization, history, package validation, protected delivery, privacy, moderation, and security remain active.',
+            'description' => 'Show the Gesture Maker tools for creating and editing personal gestures.',
+            'helpText' => 'Disabling hides the editing tools while existing gestures, history, package validation, privacy, moderation, and security protections remain active.',
             'aliases' => ['gesture editor extension', 'create edit gesture'],
             'type' => 'boolean',
             'defaultValue' => true,
@@ -273,13 +310,18 @@ function settings_registry_definitions(): array {
             'adminVisible' => true,
             'bulkOperations' => ['setting'],
             'toolLogBehavior' => 'bounded-extension-lifecycle',
+            'installedFeature' => [
+                'manageLabel' => 'Manage Gesture Maker',
+                'manageView' => 'advanced-compatibility',
+                'order' => 20,
+            ],
         ]),
         settings_registry_entry([
             'id' => 'role_colors_mode', 'settingKey' => 'role_colors_mode',
             'owner' => 'role_color_policy', 'categoryId' => 'general-appearance',
             'subsectionId' => 'role-colors', 'subsectionLabel' => 'Username Role Colors',
             'label' => 'Username role colors',
-            'description' => 'Choose the framework palette, turn role colors off, or use a custom accessible palette.',
+            'description' => 'Choose the standard palette, turn role colors off, or use a custom accessible palette.',
             'helpText' => 'Color presentation never grants or changes a role.',
             'aliases' => ['name colors', 'role palette'], 'type' => 'select',
             'defaultValue' => 'enabled', 'allowedValues' => ['enabled', 'disabled', 'custom'],
@@ -320,6 +362,8 @@ function settings_registry_definitions(): array {
             'setupVisible' => true,
             'adminVisible' => true,
             'toolLogBehavior' => 'bounded-profile-limit-operation',
+            'unit' => 'characters',
+            'limitGroup' => 'Profile Limits',
         ]);
         $profileLimitOrder += 10;
     }
@@ -381,6 +425,24 @@ function settings_registry_definitions(): array {
                 default => 1,
             },
             'order' => $order,
+            'unit' => match (true) {
+                str_ends_with($id, '_mb') => 'MB',
+                str_ends_with($id, '_px') => 'pixels',
+                str_contains($id, 'minutes') => 'minutes',
+                str_contains($id, 'attempt') => 'attempts',
+                $id === 'room_chat_history_limit' => 'messages',
+                $id === 'gesture_upload_limit' => 'gestures',
+                str_ends_with($id, '_per_second') => 'per second',
+                $id === 'age_gate_min_age' => 'years',
+                default => '',
+            },
+            'limitGroup' => match (true) {
+                in_array($id, ['chat_posts_per_second', 'room_chat_history_limit', 'avatar_movements_per_second', 'participant_idle_timeout_minutes'], true) => 'Chat & Presence',
+                in_array($id, ['avatar_max_size_mb', 'avatar_upload_max_width_px', 'avatar_upload_max_height_px', 'avatar_display_max_px', 'webcam_display_max_width_px', 'webcam_display_max_height_px'], true) => 'Avatar & Webcam Sizes',
+                in_array($id, ['gesture_upload_limit', 'room_image_max_size_mb', 'room_video_max_size_mb'], true) => 'Room & Media Uploads',
+                str_starts_with($id, 'auth_') => 'Account Protection',
+                default => '',
+            },
         ]);
     }
 
@@ -399,6 +461,7 @@ function settings_registry_definitions(): array {
         'maximum' => AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_MAX, 'step' => 1,
         'order' => 10, 'setupVisible' => true,
         'originalRelevant' => true, 'originalValueAvailable' => false,
+        'unit' => 'members', 'limitGroup' => 'Avatar Relationships',
     ]);
 
     foreach (avatar_dance_capability_registry() as $dance) {
@@ -434,8 +497,8 @@ function settings_registry_definitions(): array {
             'label' => (string)$capability['label'],
             'description' => (string)$capability['description'],
             'helpText' => $master
-                ? 'This is the server-authoritative parent gate. Turning it off preserves subordinate stored values and historical canonical text.'
-                : 'Effective only while Allow gestures is enabled. The stored value is preserved when the parent is off.',
+                ? 'Turning this off hides gesture features while preserving their saved choices and existing gesture content.'
+                : 'This choice takes effect only while Allow gestures is enabled. Its saved value is preserved when gestures are off.',
             'aliases' => ['gesture capability', 'gesture permission', $master ? 'master gestures' : 'gesture subordinate'],
             'type' => 'boolean',
             'defaultValue' => true,
@@ -454,7 +517,7 @@ function settings_registry_definitions(): array {
     }
 
     $gesturePart3Features = [
-        ['gesture_part3_enhanced_picker', 'Enhanced gesture picker', 'Use the Part 3 catalog picker presentation instead of the earlier combined gesture list.', 10],
+        ['gesture_part3_enhanced_picker', 'Enhanced gesture picker', 'Use separate, organized gesture catalogs instead of the earlier combined gesture list.', 10],
         ['gesture_part3_gifs_tab', 'GIFs tab', 'Show the existing GIF search as a dedicated picker tab.', 20],
         ['gesture_part3_server_tab', 'Server Gestures tab', 'Show public gestures from other accounts in a dedicated picker tab.', 30],
         ['gesture_part3_personal_tab', 'Personal Gestures tab', 'Show the signed-in account’s public and private gestures in a dedicated picker tab.', 40],
@@ -472,9 +535,9 @@ function settings_registry_definitions(): array {
         $definitions[] = settings_registry_entry([
             'id' => $id, 'settingKey' => $id, 'owner' => 'gesture_part3_presentation_policy',
             'categoryId' => 'chat-messaging', 'subsectionId' => 'gesture-part3',
-            'subsectionLabel' => 'Gesture Presentation & Catalog', 'label' => $label,
+            'subsectionLabel' => 'Browsing and Organization', 'label' => $label,
             'description' => $description,
-            'helpText' => 'This is a Part 3 presentation capability, not the Part 5 server-authoritative Allow gestures boundary.',
+            'helpText' => 'This changes how gesture catalogs and actions are presented. The main Allow gestures setting still controls availability.',
             'aliases' => ['gesture picker', 'gesture presentation', 'gesture catalog'],
             'type' => 'boolean', 'defaultValue' => true, 'order' => $order,
             'controlClass' => 'optional', 'optional' => true,
@@ -492,18 +555,18 @@ function settings_registry_definitions(): array {
         ['gesture_part4_user_package_import', 'User AGST package import', 'Allow validated AGST packages to be used as a source in the Gesture Maker and legacy picker adapter.', 20],
         ['gesture_part4_user_package_download', 'User gesture-package download', 'Allow protected package export for owners and policy-authorized Server Gestures.', 30],
         ['gesture_part4_animation_media', 'Gesture animation media', 'Allow validated GIF animation media in new or edited gesture packages.', 40],
-        ['gesture_part4_audio_media', 'Gesture audio media', 'Allow validated MP3 sound media with explicit playback and Part 3 preference suppression.', 50],
-        ['gesture_part4_legacy_agst', 'Legacy AGST compatibility', 'Allow source-backed toc.json and meta.json packages to be validated and normalized by the canonical package owner.', 60],
-        ['gesture_part4_admin_package_inspection', 'Admin gesture-package inspection', 'Allow authorized Admin users to inspect bounded package, provenance, and media-role summaries.', 70],
+        ['gesture_part4_audio_media', 'Gesture audio media', 'Allow validated MP3 sound media with explicit playback and the member sound preference.', 50],
+        ['gesture_part4_legacy_agst', 'Legacy AGST compatibility', 'Allow supported toc.json and meta.json packages to be validated and normalized during import.', 60],
+        ['gesture_part4_admin_package_inspection', 'Admin gesture-package inspection', 'Allow authorized Administrators to inspect package, creator, upload, and media summaries.', 70],
         ['gesture_part4_admin_media_replacement', 'Admin gesture media replacement', 'Allow authorized Admin users to open the shared editor for validated Server Gesture replacement.', 80],
     ];
     foreach ($gesturePart4Features as [$id, $label, $description, $order]) {
         $definitions[] = settings_registry_entry([
             'id' => $id, 'settingKey' => $id, 'owner' => 'gesture_part4_package_policy',
             'categoryId' => 'chat-messaging', 'subsectionId' => 'gesture-part4',
-            'subsectionLabel' => 'Gesture Maker, Packages & Media', 'label' => $label,
+            'subsectionLabel' => 'Creation, Packages, and Media', 'label' => $label,
             'description' => $description,
-            'helpText' => 'This optional Part 4 capability never disables mandatory archive safety, authorization, privacy, validation, atomicity, or the future Part 5 master Allow gestures boundary.',
+            'helpText' => 'Disabling this feature preserves archive safety, authorization, privacy, validation, and saved gesture data.',
             'aliases' => ['gesture maker', 'gesture editor', 'AGST', 'gesture package', 'gesture media'],
             'type' => 'boolean', 'defaultValue' => true, 'order' => $order,
             'controlClass' => 'optional', 'optional' => true,
@@ -597,11 +660,12 @@ function settings_registry_definitions(): array {
         settings_registry_entry([
             'id' => 'diagnostic_screenshot_retention_days', 'settingKey' => 'diagnostic_screenshot_retention_days',
             'categoryId' => 'errors-diagnostics', 'subsectionId' => 'diagnostic-screenshots',
-            'subsectionLabel' => 'Diagnostic Screenshots', 'label' => 'Unresolved retention days',
-            'description' => 'Retention period for unresolved locally censored diagnostic screenshots.',
-            'helpText' => 'Enabled screenshots require 1-365 days; disabled screenshots allow 0-365.',
+            'subsectionLabel' => 'Diagnostic Screenshots', 'label' => 'Diagnostic screenshot retention',
+            'description' => 'Number of days to keep locally censored screenshots for unresolved diagnostic issues.',
+            'helpText' => 'Diagnostic screenshots are Disabled by default. Enabled requires 1-365 days; 0 is permitted only while screenshots are Disabled.',
             'aliases' => ['screenshot retention'], 'type' => 'number',
             'defaultValue' => 0, 'minimum' => 0, 'maximum' => 365, 'step' => 1, 'order' => 20,
+            'unit' => 'days', 'limitGroup' => 'Diagnostics',
             'setupVisible' => true,
             'originalRelevant' => true, 'originalValueAvailable' => true, 'originalValue' => 0,
             'bulkOperations' => ['setting', 'subsection', 'category', 'preset'],
@@ -622,7 +686,7 @@ function settings_registry_definitions(): array {
         settings_registry_entry([
             'id' => 'mandatory.compatibility-concurrency-integrity', 'settingKey' => null,
             'owner' => 'database_policy', 'categoryId' => 'advanced-compatibility',
-            'subsectionId' => 'mandatory-runtime-invariants', 'subsectionLabel' => 'Mandatory Runtime Invariants',
+            'subsectionId' => 'mandatory-runtime-invariants', 'subsectionLabel' => 'System Safeguards',
             'label' => 'Compatibility, concurrency, and data integrity',
             'description' => 'Database portability, stale-version rejection, atomic updates, and authoritative data-integrity rules remain enforced.',
             'helpText' => 'These runtime invariants are mandatory and cannot be disabled by a preset or reset.',
@@ -633,6 +697,120 @@ function settings_registry_definitions(): array {
             'authorization' => 'not-mutable', 'staleWriteOwner' => null, 'toolLogBehavior' => 'not-mutable',
         ]),
     ]);
+
+    $capacityDefinitions = operational_capacity_definitions();
+    $capacityDefaults = operational_capacity_profiles()['shared-conservative']['values'];
+    $capacityEntries = [
+        settings_registry_entry([
+            'id' => OPERATIONAL_CAPACITY_PROFILE_SETTING,
+            'settingKey' => OPERATIONAL_CAPACITY_PROFILE_SETTING,
+            'owner' => 'operational_capacity_policy',
+            'categoryId' => 'system',
+            'subsectionId' => 'performance-capacity',
+            'subsectionLabel' => 'Performance & Capacity',
+            'subsectionOrder' => 5,
+            'label' => 'Capacity profile',
+            'description' => 'Shared/Conservative, Standard, Dedicated/High-Capacity, or explicit Custom values.',
+            'helpText' => 'Profiles require a separate exact-impact review and deliberate apply action. Individual value edits produce Custom.',
+            'aliases' => ['shared conservative', 'standard capacity', 'dedicated high capacity', 'custom capacity'],
+            'type' => 'profile-review',
+            'defaultValue' => 'shared-conservative',
+            'order' => 1,
+            'controlClass' => 'configurable-required',
+            'safeToReset' => false,
+            'bulkOperations' => [],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'staleWriteOwner' => OPERATIONAL_CAPACITY_REVISION_SETTING,
+            'toolLogBehavior' => 'dedicated-capacity-profile-review-apply',
+        ]),
+    ];
+    $capacityOrder = 10;
+    foreach ($capacityDefinitions as $id => $definition) {
+        $capacityEntries[] = settings_registry_entry([
+            'id' => $id,
+            'settingKey' => $id,
+            'owner' => 'operational_capacity_policy',
+            'categoryId' => 'system',
+            'subsectionId' => 'performance-capacity',
+            'subsectionLabel' => 'Performance & Capacity',
+            'subsectionOrder' => 5,
+            'label' => $definition['label'],
+            'description' => $definition['description'],
+            'helpText' => 'Measured recommendation with a certified hard bound. This does not weaken a mandatory safety or security policy.',
+            'aliases' => ['capacity', 'performance', $definition['unit']],
+            'type' => 'number',
+            'defaultValue' => $capacityDefaults[$id],
+            'minimum' => $definition['minimum'],
+            'maximum' => $definition['maximum'],
+            'step' => 1,
+            'order' => $capacityOrder,
+            'controlClass' => 'configurable-required',
+            'safeToReset' => true,
+            'bulkOperations' => ['setting'],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'staleWriteOwner' => OPERATIONAL_CAPACITY_REVISION_SETTING,
+            'toolLogBehavior' => 'bounded-capacity-custom-update',
+            'unit' => (string)$definition['unit'],
+            'limitGroup' => 'Community Capacity',
+        ]);
+        $capacityOrder += 10;
+    }
+    $capacityEntries[] = settings_registry_entry([
+        'id' => RUNTIME_DIAGNOSTIC_MODE_SETTING,
+        'settingKey' => RUNTIME_DIAGNOSTIC_MODE_SETTING,
+        'owner' => 'runtime_diagnostic_policy',
+        'categoryId' => 'errors-diagnostics',
+        'subsectionId' => 'client-diagnostic-collection',
+        'subsectionLabel' => 'Client Diagnostic Collection',
+        'subsectionOrder' => 5,
+        'label' => 'Client diagnostic collection',
+        'description' => 'Choose Off, Errors only, Errors and warnings, or a temporary 60-minute Verbose lease.',
+        'helpText' => 'Errors only is recommended. This selector never disables security logging, Tool Logs, local Developer Tools, or canonical verification observability.',
+        'aliases' => ['diagnostic mode', 'verbose diagnostics', 'errors only'],
+        'type' => 'select',
+        'defaultValue' => 'errors-only',
+        'allowedValues' => RUNTIME_DIAGNOSTIC_MODES,
+        'order' => 1,
+        'controlClass' => 'optional-core',
+        'optional' => true,
+        'safeToReset' => true,
+        'bulkOperations' => ['setting'],
+        'setupVisible' => true,
+        'adminVisible' => true,
+        'staleWriteOwner' => RUNTIME_DIAGNOSTIC_REVISION_SETTING,
+        'toolLogBehavior' => 'bounded-diagnostic-mode-transition',
+    ]);
+    $capacityEntries[] = settings_registry_entry([
+        'id' => REALTIME_TRANSPORT_MODE_SETTING,
+        'settingKey' => REALTIME_TRANSPORT_MODE_SETTING,
+        'owner' => 'transport_policy',
+        'categoryId' => 'system',
+        'subsectionId' => 'performance-capacity',
+        'subsectionLabel' => 'Performance & Capacity',
+        'subsectionOrder' => 5,
+        'label' => 'Room event transport',
+        'description' => 'Choose mandatory Polling or Automatic best available. Automatic tries proven WSS, then proven SSE, then Polling.',
+        'helpText' => 'Polling remains the permanent fallback. Optional transports never own event truth, weaken authorization, or imply end-to-end encryption.',
+        'aliases' => ['polling only', 'automatic best available', 'server sent events', 'websocket', 'wss', 'sse'],
+        'type' => 'select',
+        'defaultValue' => 'polling-only',
+        'allowedValues' => REALTIME_TRANSPORT_MODES,
+        'allowedValueLabels' => [
+            'polling-only' => 'Polling only — Default',
+            'automatic-best' => 'Automatic best available',
+        ],
+        'order' => 90,
+        'controlClass' => 'optional-core',
+        'optional' => true,
+        'safeToReset' => true,
+        'bulkOperations' => ['setting'],
+        'setupVisible' => true,
+        'adminVisible' => true,
+        'toolLogBehavior' => 'bounded-transport-policy-update',
+    ]);
+    $definitions = array_merge($definitions, $capacityEntries);
 
     return $definitions;
 }
@@ -649,6 +827,13 @@ function settings_registry_revision(PDO $pdo): int {
 
 function settings_registry_current_value(PDO $pdo, array $definition, array $context): mixed {
     $id = (string)$definition['id'];
+    if ($definition['owner'] === 'operational_capacity_policy') {
+        if ($id === OPERATIONAL_CAPACITY_PROFILE_SETTING) return (string)$context['operationalCapacity']['selectedProfile'];
+        return (int)$context['operationalCapacity']['values'][$id];
+    }
+    if ($definition['owner'] === 'runtime_diagnostic_policy') {
+        return (string)$context['runtimeDiagnosticPolicy']['effectiveMode'];
+    }
     if ($definition['type'] === 'fixed') return true;
     if ($definition['owner'] === 'database_compatibility_policy') {
         return !empty($context['databaseCompatibility']['enabled']);
@@ -697,6 +882,41 @@ function settings_registry_values_equal(mixed $left, mixed $right, string $type)
     };
 }
 
+function settings_registry_installed_feature_projection(array $entries, array $statuses): array {
+    $statusById = [];
+    foreach ($statuses as $status) {
+        $extensionId = (string)($status['id'] ?? '');
+        if ($extensionId !== '') $statusById[$extensionId] = $status;
+    }
+
+    $features = [];
+    foreach ($entries as $entry) {
+        $presentation = $entry['installedFeature'] ?? null;
+        if (!is_array($presentation)) continue;
+        $extensionId = (string)($entry['extensionId'] ?? '');
+        $status = $statusById[$extensionId] ?? null;
+        if ($extensionId === '' || !is_array($status)) continue;
+        $effectiveEnabled = (string)($status['state'] ?? '') === 'enabled'
+            && !empty($entry['effectiveValue']);
+        $features[] = [
+            'id' => $extensionId,
+            'name' => (string)($status['name'] ?? $entry['label'] ?? $extensionId),
+            'effectiveEnabled' => $effectiveEnabled,
+            'status' => $effectiveEnabled ? 'Enabled' : 'Disabled',
+            'manageLabel' => (string)($presentation['manageLabel'] ?? 'Manage'),
+            'manageView' => (string)($presentation['manageView'] ?? $entry['categoryId'] ?? ''),
+            'manageSettingId' => (string)$entry['id'],
+            'order' => (int)($presentation['order'] ?? 100),
+        ];
+    }
+    usort(
+        $features,
+        static fn(array $left, array $right): int => [$left['order'], $left['name']]
+            <=> [$right['order'], $right['name']]
+    );
+    return $features;
+}
+
 function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array {
     $surface = $surface === 'setup' ? 'setup' : 'admin';
     $context = [
@@ -708,6 +928,15 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         'gestureCapabilities' => gesture_capability_policy($pdo),
         'databaseCompatibility' => database_compatibility_policy_status(),
         'moderationTrust' => moderation_trust_policy($pdo),
+        'operationalCapacity' => operational_capacity_projection($pdo),
+        'runtimeDiagnosticPolicy' => runtime_diagnostic_policy_projection($pdo),
+        'networkModeration' => [
+            'enabled' => network_moderation_enabled($pdo),
+            'revision' => max(
+                1,
+                (int)app_setting($pdo, NETWORK_MODERATION_REVISION_SETTING, '1')
+            ),
+        ],
     ];
     $entries = [];
     foreach (settings_registry_definitions() as $definition) {
@@ -718,6 +947,9 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         $entry['ownerRevision'] = match ($definition['owner']) {
             'database_compatibility_policy' => (int)$context['databaseCompatibility']['revision'],
             'moderation_trust_policy' => (int)$context['moderationTrust']['revision'],
+            'operational_capacity_policy' => (int)$context['operationalCapacity']['revision'],
+            'runtime_diagnostic_policy' => (int)$context['runtimeDiagnosticPolicy']['revision'],
+            'network_privacy_manual_bans' => (int)$context['networkModeration']['revision'],
             default => null,
         };
         $entry['provenanceDefaultValue'] = $definition['owner'] === 'moderation_trust_policy'
@@ -785,6 +1017,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
     $gestureCapabilityEntries = array_values(array_filter($visibleEntries, static fn(array $entry): bool => $entry['bulkGroup'] === 'gesture-capability'));
     $enabledGestureCapabilities = count(array_filter($gestureCapabilityEntries, static fn(array $entry): bool => $entry['enabled'] === true));
     $effectiveGestureCapabilities = count(array_filter($gestureCapabilityEntries, static fn(array $entry): bool => $entry['effectiveValue'] === true));
+    $firstPartyExtensionStatuses = first_party_extension_statuses($pdo);
 
     return [
         'schemaId' => 'chatspace.settings-registry',
@@ -813,13 +1046,13 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         'compatibility' => [
             'state' => $compatibilityState,
             'labels' => [
-                'original-compatible' => 'Original-author compatible',
-                'framework-default' => 'Framework default',
-                'custom' => 'Custom',
+                'original-compatible' => 'Original ChatSpace values',
+                'framework-default' => 'Recommended defaults',
+                'custom' => 'Custom values',
             ],
             'unavoidableDifferences' => [
                 'Mandatory security, privacy, authorization, validation, moderation, compatibility, concurrency, and data-integrity safeguards remain enforced.',
-                'The certified multi-member relationship architecture is preserved because the original source has no safe equivalent configuration value.',
+                'Multi-member avatar relationships remain supported because the original ChatSpace behavior has no equivalent setting.',
             ],
             'originalEvidence' => 'Source comparison against upstream/main at 1b1b9b750c2b508a75e0fb88c8cb57c3bd349e25.',
             'adminAccessPathPolicy' => 'Both intentional Admin access paths are preserved. Original-author mode does not hide or disable the later in-room entry point without a separate owner decision.',
@@ -833,9 +1066,19 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
             ],
             'relationship' => 'One canonical lobby-owned Admin menu with two intentional launch locations. The in-room launch is non-destructive and does not remove the administrator from the active room.',
         ],
-        'firstPartyExtensions' => first_party_extension_statuses($pdo),
+        'installedFeatures' => settings_registry_installed_feature_projection(
+            $entries,
+            $firstPartyExtensionStatuses
+        ),
+        'firstPartyExtensions' => $firstPartyExtensionStatuses,
         'databaseCompatibilityPolicy' => database_compatibility_policy_public_status(),
         'moderationTrustPolicy' => $context['moderationTrust'],
+        'operationalCapacity' => $context['operationalCapacity'],
+        'runtimeDiagnosticPolicy' => $context['runtimeDiagnosticPolicy'],
+        'networkModerationPolicy' => $context['networkModeration'] + [
+            'automaticBanning' => false,
+            'addressEntryOrDisplay' => false,
+        ],
     ];
 }
 
@@ -1032,6 +1275,11 @@ function settings_registry_update(
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
             return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_STALE', 'error' => 'Settings changed. Refresh and try again.', 'revision' => $actualRevision, 'http_status' => 409];
         }
+        $networkModerationChanged = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool =>
+                ($definitionMap[$id]['owner'] ?? '') === 'network_privacy_manual_bans'
+        ));
         $profileLimitTargets = [];
         foreach ($changedIds as $id) {
             if (($definitionMap[$id]['owner'] ?? '') === 'member_profile_limits') {
@@ -1136,6 +1384,47 @@ function settings_registry_update(
                 ];
             }
         }
+        $operationalCapacityChanged = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool =>
+                ($definitionMap[$id]['owner'] ?? '') === 'operational_capacity_policy'
+                && $id !== OPERATIONAL_CAPACITY_PROFILE_SETTING
+        ));
+        $operationalCapacityExpectedRevision = null;
+        if ($operationalCapacityChanged) {
+            $operationalCapacityExpectedRevision = $source === 'setup'
+                ? (int)($entryMap[$operationalCapacityChanged[0]]['ownerRevision'] ?? 0)
+                : filter_var($request['expected_operational_capacity_revision'] ?? null, FILTER_VALIDATE_INT);
+            if ($operationalCapacityExpectedRevision === false || (int)$operationalCapacityExpectedRevision < 1) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'CAPACITY_REVISION_REQUIRED',
+                    'error' => 'A current operational-capacity revision is required.',
+                    'http_status' => 400,
+                ];
+            }
+        }
+        $runtimeDiagnosticChanged = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool =>
+                ($definitionMap[$id]['owner'] ?? '') === 'runtime_diagnostic_policy'
+        ));
+        $runtimeDiagnosticExpectedRevision = null;
+        if ($runtimeDiagnosticChanged) {
+            $runtimeDiagnosticExpectedRevision = $source === 'setup'
+                ? (int)($entryMap[$runtimeDiagnosticChanged[0]]['ownerRevision'] ?? 0)
+                : filter_var($request['expected_runtime_diagnostic_revision'] ?? null, FILTER_VALIDATE_INT);
+            if ($runtimeDiagnosticExpectedRevision === false || (int)$runtimeDiagnosticExpectedRevision < 1) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'DIAGNOSTIC_REVISION_REQUIRED',
+                    'error' => 'A current runtime-diagnostic revision is required.',
+                    'http_status' => 400,
+                ];
+            }
+        }
         if (!$changedIds) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
             return ['ok' => true, 'idempotent' => true, 'revision' => $actualRevision, 'changedSettingCount' => 0, 'stoppedActiveCapabilityCount' => 0, 'registry' => settings_registry_snapshot($pdo, $source === 'setup' ? 'setup' : 'admin')];
@@ -1165,7 +1454,13 @@ function settings_registry_update(
             $days = (int)$effective['diagnostic_screenshot_retention_days'];
             if ($days < 1 || $days > 365) {
                 if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
-                return ['ok' => false, 'code' => 'DIAGNOSTIC_SCREENSHOT_RETENTION_REQUIRED', 'error' => 'Enabled screenshots require a retention period from 1 to 365 days.', 'http_status' => 400];
+                return [
+                    'ok' => false,
+                    'code' => 'DIAGNOSTIC_SCREENSHOT_RETENTION_REVIEW_REQUIRED',
+                    'error' => 'Enabling diagnostic screenshots proposes 30 days. Review that value and save both settings together.',
+                    'proposedRetentionDays' => 30,
+                    'http_status' => 409,
+                ];
             }
         }
         $roleInput = [];
@@ -1202,6 +1497,25 @@ function settings_registry_update(
 
         $stopped = 0;
         $changedMap = array_fill_keys($changedIds, true);
+        if ($networkModerationChanged) {
+            try {
+                network_moderation_set_enabled_locked(
+                    $pdo,
+                    $actorUserId,
+                    !empty($target[$networkModerationChanged[0]]),
+                    !empty($request['network_manual_bans_disable_confirmed'])
+                );
+            } catch (NetworkPrivacyException $networkError) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => $networkError->errorCode,
+                    'error' => $networkError->getMessage(),
+                    'networkModerationPolicy' => $networkError->projection,
+                    'http_status' => $networkError->httpStatus,
+                ];
+            }
+        }
         $gestureCapabilityChanged = array_values(array_filter(
             $changedIds,
             static fn(string $id): bool => gesture_capability_definition($id) !== null
@@ -1237,6 +1551,44 @@ function settings_registry_update(
                     'error' => $policyError->getMessage(),
                     'moderationTrustPolicy' => $policyError->projection,
                     'http_status' => $policyError->httpStatus,
+                ];
+            }
+        }
+        if ($operationalCapacityChanged) {
+            $capacityValues = [];
+            foreach ($operationalCapacityChanged as $id) $capacityValues[$id] = $target[$id];
+            try {
+                operational_capacity_apply_custom_values_locked(
+                    $pdo,
+                    $capacityValues,
+                    (int)$operationalCapacityExpectedRevision
+                );
+            } catch (OperationalCapacityException $capacityError) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => $capacityError->errorCode,
+                    'error' => $capacityError->getMessage(),
+                    'operationalCapacity' => $capacityError->projection,
+                    'http_status' => $capacityError->httpStatus,
+                ];
+            }
+        }
+        if ($runtimeDiagnosticChanged) {
+            try {
+                runtime_diagnostic_policy_apply_mode_locked(
+                    $pdo,
+                    (string)$target[$runtimeDiagnosticChanged[0]],
+                    (int)$runtimeDiagnosticExpectedRevision
+                );
+            } catch (RuntimeDiagnosticPolicyException $diagnosticError) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => $diagnosticError->errorCode,
+                    'error' => $diagnosticError->getMessage(),
+                    'runtimeDiagnosticPolicy' => $diagnosticError->projection,
+                    'http_status' => $diagnosticError->httpStatus,
                 ];
             }
         }
@@ -1310,6 +1662,9 @@ function settings_registry_update(
             )),
             $databaseCompatibilityChanged,
             $moderationTrustChanged,
+            $operationalCapacityChanged,
+            $runtimeDiagnosticChanged,
+            $networkModerationChanged,
             array_keys(role_color_setting_defaults()),
             array_map(static fn(array $capability): string => (string)$capability['id'], gesture_capability_registry()),
             array_map(static fn(array $dance): string => 'avatar_dance.' . $dance['id'], avatar_dance_capability_registry())
@@ -1370,6 +1725,22 @@ function settings_registry_update(
             $detail .= ' Moderation and Trust='
                 . (!empty($policy['effectiveEnabled']) ? 'enabled' : 'disabled')
                 . '; policy-revision=' . (int)$policy['revision'] . '.';
+        }
+        if ($operationalCapacityChanged) {
+            $capacityPolicy = operational_capacity_projection($pdo);
+            $detail .= ' Operational capacity=custom; policy-revision='
+                . (int)$capacityPolicy['revision'] . '; measured bounds enforced.';
+        }
+        if ($runtimeDiagnosticChanged) {
+            $diagnosticPolicy = runtime_diagnostic_policy_projection($pdo);
+            $detail .= ' Diagnostic collection=' . (string)$diagnosticPolicy['effectiveMode']
+                . '; policy-revision=' . (int)$diagnosticPolicy['revision']
+                . '; no diagnostic payload logged.';
+        }
+        if ($networkModerationChanged) {
+            $detail .= ' Manual Network Bans='
+                . (network_moderation_enabled($pdo) ? 'enabled' : 'disabled')
+                . '; owner-only; no address display or storage.';
         }
         if ($databaseBackedChangedIds) {
             log_tool($pdo, $actorUserId > 0 ? $actorUserId : null, $source === 'setup' ? 'setup_settings_registry_update' : 'admin_settings_registry_update', null, null, $detail);

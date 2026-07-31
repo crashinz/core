@@ -26,6 +26,59 @@ function database_update_require_admin(PDO $pdo): array
     return $actor;
 }
 
+function database_update_public_message(string $message): string
+{
+    $replacements = [
+        '/\b(?:Post-)?Build\s+\d{6}\b/i' => 'this release',
+        '/\b(?:Part|Checkpoint)\s+\d+\b/i' => 'this update',
+        '/\bOptional[- ]Core\b/i' => 'optional features',
+        '/\bmandatory[- ]core\b/i' => 'required features',
+        '/\brepository[- ]owned\b/i' => 'application-managed',
+        '/\bsource[- ]backed\b/i' => 'verified',
+        '/\bcanonical\s+(?:prompt|package owner)\b/i' => 'release verification',
+        '/\brequirements transfer\b/i' => 'release planning',
+        '/\b(?:implementation|verification|framework)\s+owner\b/i' => 'application component',
+        '/\bshared registry\b/i' => 'settings catalog',
+        '/\bprovenance\b/i' => 'source information',
+        '/\bmigrations\b/i' => 'database updates',
+        '/\bmigration\b/i' => 'database update',
+    ];
+    foreach ($replacements as $pattern => $replacement) {
+        $message = preg_replace($pattern, $replacement, $message) ?? $message;
+    }
+    $message = preg_replace('/\s+/', ' ', $message) ?? $message;
+    return trim($message);
+}
+
+function database_update_public_migration_title(string $title): string
+{
+    $title = database_update_public_message($title);
+    $title = preg_replace('/\bthis release\b/i', '', $title) ?? $title;
+    $title = preg_replace('/\bcanonical\b/i', 'supported', $title) ?? $title;
+    $title = preg_replace('/\bfoundations\b/i', 'settings', $title) ?? $title;
+    $title = preg_replace('/\s+/', ' ', $title) ?? $title;
+    $title = trim($title, " \t\n\r\0\x0B-–—:");
+    return $title !== '' ? ucfirst($title) : 'Application data and settings update';
+}
+
+function database_update_public_state_label(?string $state, string $fallback): string
+{
+    $state = trim((string)$state);
+    if ($state === '') return $fallback;
+    $state = str_replace(['_', '-'], ' ', $state);
+    $state = database_update_public_message($state);
+    $state = preg_replace('/\s+/', ' ', $state) ?? $state;
+    return ucfirst(trim($state));
+}
+
+function database_update_public_variant_label(array $variant): string
+{
+    $id = (string)($variant['id'] ?? '');
+    if ($id === 'empty' || $id === 'bundled-seed') return 'New installation database';
+    if (empty($variant['recognized'])) return 'Unrecognized database structure';
+    return 'Supported earlier database structure';
+}
+
 function database_update_admin_login_candidate(PDO $pdo, string $login): ?array
 {
     $identifierColumns = [];
@@ -95,7 +148,7 @@ if ($requestMethod === 'POST') {
                 (string)($_POST['request_public_id'] ?? '')
             );
             $notice = !empty($result['no_op'])
-                ? 'The database was already current. No migration ran.'
+                ? 'The database was already current. No database update ran.'
                 : 'The protected recovery set and database update completed successfully.';
         } elseif ($action === 'prepare') {
             $actor = database_update_require_admin($pdo);
@@ -167,7 +220,7 @@ if ($requestMethod === 'POST') {
             throw new CoreMigrationException('Unknown database-update action.', 'MIGRATION_ACTION_UNKNOWN', 400);
         }
     } catch (Throwable $caught) {
-        $error = $caught->getMessage();
+        $error = database_update_public_message($caught->getMessage());
         http_response_code($caught instanceof CoreMigrationException ? $caught->httpStatus : 500);
     }
 }
@@ -239,8 +292,8 @@ if ($installedRelease === null) {
         . (string)($recoveryStatus['installed_release_error_code'] ?? 'INSTALLED_RELEASE_UNAVAILABLE') . '.';
 }
 if (empty($status['backup_readiness']['ok'])) {
-    $prepareBlockers[] = (string)($status['backup_readiness']['message']
-        ?? 'Private database backup storage is not ready.');
+    $prepareBlockers[] = database_update_public_message((string)($status['backup_readiness']['message']
+        ?? 'Private database backup storage is not ready.'));
 }
 $automaticUpdateBlockers = [];
 if ($installedRelease === null) {
@@ -248,20 +301,20 @@ if ($installedRelease === null) {
         . (string)($recoveryStatus['installed_release_error_code'] ?? 'INSTALLED_RELEASE_UNAVAILABLE') . '.';
 }
 if (!$status['release_complete']) {
-    $automaticUpdateBlockers[] = 'The ordered migration package is incomplete.';
+    $automaticUpdateBlockers[] = 'The ordered database update package is incomplete.';
 }
 if ($updateStateBlocked) {
     $automaticUpdateBlockers[] = match ((string)$status['kind']) {
-        'newer' => 'The database contains a newer or unknown applied migration.',
+        'newer' => 'The database contains a newer or unknown applied update.',
         'unknown' => 'The database is not an exact source-proven supported predecessor.',
-        'incomplete-release' => 'The installed migration release is incomplete.',
-        'inconsistent' => 'The migration ledger and database schema are inconsistent.',
+        'incomplete-release' => 'The installed database update package is incomplete.',
+        'inconsistent' => 'The database update record and database structure are inconsistent.',
         default => 'The database state is not eligible for automatic update.',
     };
 }
 if (empty($status['backup_readiness']['ok'])) {
-    $automaticUpdateBlockers[] = (string)($status['backup_readiness']['message']
-        ?? 'Private database backup storage is not ready.');
+    $automaticUpdateBlockers[] = database_update_public_message((string)($status['backup_readiness']['message']
+        ?? 'Private database backup storage is not ready.'));
 }
 if ($recoveryPairUnavailable) {
     $automaticUpdateBlockers[] = 'The active private recovery-set record is incomplete or unavailable.';
@@ -320,23 +373,29 @@ $updateActionLabel = $status['kind'] === 'failed'
       <dl class="settings-summary">
         <dt>Application release</dt><dd><?= e((string)($installedRelease['release_id'] ?? 'Unverified')) ?></dd>
         <dt>Application inventory</dt><dd><?= $installedRelease === null
-          ? e((string)($recoveryStatus['installed_release_error_code'] ?? 'Unavailable'))
+          ? 'Unavailable'
           : (int)$installedRelease['file_count'] . ' verified files' ?></dd>
         <dt>Database engine</dt><dd><?= e(strtoupper((string)$status['engine'])) ?></dd>
         <dt>Detected version</dt><dd><?= e((string)($status['stored_schema_version'] ?: 'Legacy unversioned database')) ?></dd>
         <dt>Required version</dt><dd><?= e((string)$status['required_schema_version']) ?></dd>
-        <dt>Detected variant</dt><dd><?= e((string)$status['variant']['id']) ?></dd>
-        <dt>Pending migrations</dt><dd><?= (int)$status['pending_count'] ?></dd>
-        <dt>Migration package</dt><dd><?= $status['release_complete'] ? 'Complete' : 'Blocked' ?></dd>
+        <dt>Detected database state</dt><dd><?= e(database_update_public_variant_label((array)$status['variant'])) ?></dd>
+        <dt>Pending database updates</dt><dd><?= (int)$status['pending_count'] ?></dd>
+        <dt>Database update package</dt><dd><?= $status['release_complete'] ? 'Complete' : 'Blocked' ?></dd>
         <dt>Exclusive lock</dt><dd><?= e((string)$status['lock_status']) ?></dd>
         <dt>Backup readiness</dt><dd><?= !empty($status['backup_readiness']['ok']) ? 'Ready' : 'Blocked' ?></dd>
         <dt>Backup transport</dt><dd><?= e($backupMethodLabel) ?></dd>
-        <dt>Attempt state</dt><dd><?= e((string)($status['migration_state']['phase'] ?? 'No prior attempt')) ?></dd>
-        <dt>Recovery phase</dt><dd><?= e((string)$recoveryStatus['phase']) ?></dd>
+        <dt>Attempt state</dt><dd><?= e(database_update_public_state_label(
+          isset($status['migration_state']['phase']) ? (string)$status['migration_state']['phase'] : null,
+          'No prior attempt'
+        )) ?></dd>
+        <dt>Recovery state</dt><dd><?= e(database_update_public_state_label(
+          isset($recoveryStatus['phase']) ? (string)$recoveryStatus['phase'] : null,
+          'No active recovery'
+        )) ?></dd>
         <dt>Compatibility enforcement</dt><dd><?= !empty($compatibilityPolicy['enabled']) ? 'Enabled' : 'Disabled' ?> (default: Disabled)</dd>
         <dt>Compatibility policy state</dt><dd><?= !empty($compatibilityPolicy['valid'])
           ? (!empty($compatibilityPolicy['initialized']) ? 'Valid revision ' . (int)$compatibilityPolicy['revision'] : 'Uninitialized; safely Disabled')
-          : 'Invalid; safely Disabled (' . e((string)$compatibilityPolicy['diagnosticCode']) . ')' ?></dd>
+          : 'Invalid; safely Disabled' ?></dd>
         <dt>Paired recovery set</dt><dd><?= $recoverySet === null
           ? e((string)($recoveryStatus['recovery_set_error_code'] ?? 'Not prepared'))
           : e((string)$recoverySet['recovery_set_id']) ?></dd>
@@ -356,7 +415,7 @@ $updateActionLabel = $status['kind'] === 'failed'
         <h2>Ordered update</h2>
         <ol>
           <?php foreach ($status['pending'] as $migration): ?>
-            <li><code><?= e((string)$migration['id']) ?></code> — <?= e((string)$migration['title']) ?></li>
+            <li><?= e(database_update_public_migration_title((string)$migration['title'])) ?></li>
           <?php endforeach; ?>
         </ol>
       <?php endif; ?>
@@ -365,7 +424,7 @@ $updateActionLabel = $status['kind'] === 'failed'
         <div class="error" role="alert">
           <strong>Update preflight is blocked.</strong>
           <ul>
-            <?php foreach ($status['defects'] as $defect): ?><li><?= e((string)$defect) ?></li><?php endforeach; ?>
+            <?php foreach ($status['defects'] as $defect): ?><li><?= e(database_update_public_message((string)$defect)) ?></li><?php endforeach; ?>
           </ul>
         </div>
       <?php endif; ?>
@@ -374,14 +433,13 @@ $updateActionLabel = $status['kind'] === 'failed'
         <div class="error" role="alert">
           <?= $status['kind'] === 'newer'
             ? 'This database is newer than these application files. Automatic downgrade is prohibited; install compatible application files.'
-            : 'This database state is not recognized as a safe forward migration source. No automatic mutation is allowed.' ?>
+            : 'This database state is not recognized as a safe update starting point. No automatic change is allowed.' ?>
         </div>
       <?php endif; ?>
 
       <?php if ($status['kind'] === 'failed'): ?>
         <div class="error" role="alert">
-          The prior migration failed safely and remains in protected recovery state.
-          Error code: <code><?= e((string)($status['migration_state']['error_code'] ?? 'MIGRATION_FAILED')) ?></code>.
+          The prior database update failed safely and remains in protected recovery state.
           <?= $hasVerifiedRecoveryBackup
             ? 'Its private backup will be revalidated before any continuation.'
             : 'No verified backup is attached; a new private backup is required before any retry.' ?>
@@ -389,7 +447,7 @@ $updateActionLabel = $status['kind'] === 'failed'
       <?php endif; ?>
 
       <?php if (empty($status['backup_readiness']['ok'])): ?>
-        <div class="error" role="alert"><?= e((string)($status['backup_readiness']['message'] ?? 'Private backup storage is not ready.')) ?></div>
+        <div class="error" role="alert"><?= e(database_update_public_message((string)($status['backup_readiness']['message'] ?? 'Private backup storage is not ready.'))) ?></div>
       <?php endif; ?>
 
       <?php if (!$recent): ?>
@@ -406,13 +464,13 @@ $updateActionLabel = $status['kind'] === 'failed'
         <div class="settings-warning" id="database-compatibility-policy-status" role="status">
           <strong>Enforce database/release compatibility before runtime: <?= !empty($compatibilityPolicy['enabled']) ? 'Enabled' : 'Disabled' ?></strong>
           <p>
-            Enabled preserves proactive release, schema, manifest, maintenance, backup, migration, locking, and recovery
+            Enabled preserves proactive release, schema, manifest, maintenance, backup, database update, locking, and recovery
             enforcement. Disabled attempts ordinary runtime without the proactive compatibility blocker; it never
             claims compatibility, auto-migrates, or disables active recovery maintenance or unrelated security.
           </p>
           <?php if (empty($compatibilityPolicy['valid'])): ?>
-            <p>The private policy record is invalid or unreadable and therefore resolves to Disabled. Diagnostic code:
-              <code><?= e((string)$compatibilityPolicy['diagnosticCode']) ?></code>. No storage path or private content is exposed.</p>
+            <p>The private policy record is invalid or unreadable and therefore resolves to Disabled.
+              Protected diagnostic details are available to the Installation Owner. No storage path or private content is exposed.</p>
           <?php endif; ?>
         </div>
         <form class="form-grid" method="post">
@@ -474,7 +532,7 @@ $updateActionLabel = $status['kind'] === 'failed'
           </form>
         <?php elseif ($status['kind'] === 'active'): ?>
           <div class="settings-warning">
-            The prior migration attempt still has durable active state. Recovery never breaks ownership because of
+            The prior database update attempt still has durable active state. Recovery never breaks ownership because of
             elapsed time alone. This action succeeds only if both the process lock and database lock prove that the
             recorded owner is absent and the exact attempt identity still matches.
           </div>
@@ -507,8 +565,7 @@ $updateActionLabel = $status['kind'] === 'failed'
         <?php elseif ($recoveryPairUnavailable): ?>
           <div class="error" role="alert">
             The active paired recovery set is incomplete, altered, cross-installation, corrupt, or unavailable.
-            No update or restore mutation is allowed. Error code:
-            <code><?= e((string)($recoveryStatus['recovery_set_error_code'] ?? 'RECOVERY_SET_UNAVAILABLE')) ?></code>.
+            No update or restore change is allowed.
             Restore the exact private recovery-set components from protected storage or follow the bounded hosting-owner recovery record.
           </div>
         <?php elseif ($interruptedRecovery): ?>
@@ -550,9 +607,9 @@ $updateActionLabel = $status['kind'] === 'failed'
           <div class="settings-warning">
             <?= $preparedMaintenance
               ? ($applicationFilesChangedAfterPrepare
-                  ? 'The deployable application release changed after preparation. This action revalidates the paired recovery set, applies any pending migration exactly once, and releases maintenance only after the uploaded release and database are compatible.'
+                  ? 'The deployable application release changed after preparation. This action revalidates the paired recovery set, applies each pending database update exactly once, and releases maintenance only after the uploaded release and database are compatible.'
                   : 'The paired recovery set is prepared. Overwrite only the deployable application files, then reopen this page. You may exit prepared maintenance safely while the application and database remain unchanged.')
-              : 'This action first creates and independently verifies a private database backup, then applies every pending core migration in order. MariaDB backups stream directly into private server-side storage; the browser never downloads or re-uploads them.' ?>
+              : 'This action first creates and independently verifies a private database backup, then applies every pending database update in order. MariaDB backups stream directly into private server-side storage; the browser never downloads or re-uploads them.' ?>
           </div>
           <?php if (!$preparedMaintenance || $applicationFilesChangedAfterPrepare): ?>
             <form class="form-grid" method="post">

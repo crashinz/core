@@ -16,9 +16,7 @@ function account_projection(PDO $pdo, array $user): array
     $role = (string)($user['role'] ?? 'user');
     $moderation = moderation_account_full_projection($pdo, (int)$user['id']);
     $authorization = $moderation['authorization'];
-    $capabilities = ['room_chat', 'community_chat', 'private_messages', 'avatar', 'relationships', 'voice', 'webcam', 'games'];
-    if (in_array($role, ['admin', 'developer'], true)) $capabilities[] = 'diagnostic_issues';
-    if ($role === 'admin') $capabilities[] = 'community_administration';
+    $runtimeIssueCapabilities = runtime_issue_capability_projection($pdo, (int)$user['id']);
     return [
         'profile' => $profile,
         'security' => [
@@ -52,6 +50,10 @@ function account_projection(PDO $pdo, array $user): array
             'restrictionExpiresAt' => $authorization['restrictionExpiresAt'],
         ],
         'moderation' => $moderation,
+        'runtimeIssues' => [
+            'capabilities' => $runtimeIssueCapabilities,
+            'roleNameIsNotAuthorization' => true,
+        ],
     ];
 }
 

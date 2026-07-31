@@ -421,7 +421,7 @@ function setup_sqlite_validate_current(PDO $pdo): array {
         || $users !== 0
         || $admins !== 0) {
         throw new CoreMigrationException(
-            'SQLite Setup migration did not produce the complete current clean-install schema.',
+            'SQLite setup did not produce the complete current clean-install schema.',
             'SETUP_SQLITE_FINAL_VALIDATION_FAILED',
             500
         );
@@ -786,7 +786,7 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
         if (!is_array($registryValues)) {
             $registryValues = [];
             foreach (settings_registry_snapshot(db(), 'setup')['visibleEntries'] as $entry) {
-                if (!in_array($entry['type'], ['asset', 'fixed', 'secret'], true)) $registryValues[$entry['id']] = $entry['currentValue'];
+                if (!in_array($entry['type'], ['asset', 'fixed', 'profile-review', 'secret'], true)) $registryValues[$entry['id']] = $entry['currentValue'];
             }
         }
         $communityName = trim((string)($registryValues['community_name'] ?? ''));
@@ -992,8 +992,8 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
           <script id="setup-settings-registry-data" type="application/json"><?= json_encode($setupSettingsRegistry, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
           <div class="setup-branding-fields settings-registry-setup" data-settings-scroll-owner tabindex="0" role="region" aria-label="Complete Setup installation settings">
             <div class="settings-registry-heading">
-              <div><h2>Installation Settings</h2><p class="minor">Setup and Admin use the same setting IDs, categories, defaults, validation, and authoritative owners.</p></div>
-              <div class="settings-registry-state" id="setup-settings-compatibility-state" aria-live="polite">Framework default</div>
+              <div><h2>Installation Settings</h2><p class="minor">Setup and Admin use the same settings, categories, defaults, and validation.</p></div>
+              <div class="settings-registry-state" id="setup-settings-compatibility-state" aria-live="polite">Recommended default</div>
             </div>
             <div id="setup-settings-unlock"></div>
             <section class="branding-license-authority" aria-labelledby="setup-branding-license-title">
@@ -1013,7 +1013,7 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
             </div>
             <div class="shared-form-actions">
               <button class="btn" id="setup-settings-original" type="button">Use Original-compatible Values</button>
-              <button class="btn" id="setup-settings-framework" type="button">Use Framework Defaults</button>
+              <button class="btn" id="setup-settings-framework" type="button">Use Recommended Defaults</button>
               <button class="btn btn-danger" id="setup-settings-reset-optional" type="button">Reset All Optional Settings</button>
             </div>
             <div id="setup-settings-registry" class="settings-registry"></div>

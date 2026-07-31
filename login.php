@@ -15,13 +15,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$login, $login, $login]);
         $user = $stmt->fetch();
         if ($user && password_verify($password, $user['password_hash'])) {
-            auth_rate_clear_identifier($pdo, 'login', $login);
-            authenticate_user((int)$user['id']);
-            redirect_to('/lobby.php');
+            try {
+                if (function_exists('network_moderation_observe_request')
+                    && database_migration_table_exists($pdo, 'network_manual_bans')) {
+                    network_moderation_observe_request(
+                        $pdo,
+                        (int)$user['id'],
+                        'authentication',
+                        'authentication:account:' . (int)$user['id'] . ':day:' . gmdate('Y-m-d'),
+                        'Authentication for selected account #' . (int)$user['id']
+                    );
+                    network_moderation_assert_request_allowed(
+                        $pdo,
+                        (int)$user['id'],
+                        network_privacy_client_ip()
+                    );
+                }
+                auth_rate_clear_identifier($pdo, 'login', $login);
+                authenticate_user((int)$user['id']);
+                redirect_to('/lobby.php');
+            } catch (NetworkPrivacyException) {
+                $error = 'Access from this network is restricted by an Installation Owner moderation action.';
+            }
         }
-        auth_rate_record_failure($pdo, 'login', $login);
-        $afterFailure = auth_rate_limit_status($pdo, 'login', $login);
-        $error = !$afterFailure['allowed'] ? $afterFailure['message'] : 'Login or password was not right.';
+        if ($error === '') {
+            auth_rate_record_failure($pdo, 'login', $login);
+            $afterFailure = auth_rate_limit_status($pdo, 'login', $login);
+            $error = !$afterFailure['allowed'] ? $afterFailure['message'] : 'Login or password was not right.';
+        }
     }
 }
 ?>

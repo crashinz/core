@@ -2,15 +2,14 @@
 declare(strict_types=1);
 
 /**
- * Build 000051 HTTPS, trusted-proxy, opaque-network-identity, and exact-IP
- * privacy owner.
+ * HTTPS, trusted-proxy, and keyed opaque-network-identity privacy owner.
  *
  * The private policy mirror is intentionally available before database
  * initialization so transport and forwarded-header decisions fail closed.
  * Raw network addresses never enter ordinary settings, projections, or logs.
  */
 
-const NETWORK_PRIVACY_POLICY_VERSION = 1;
+const NETWORK_PRIVACY_POLICY_VERSION = 2;
 const NETWORK_PRIVACY_DEFAULT_REVEAL_MINUTES = 5;
 const NETWORK_PRIVACY_MIN_REVEAL_MINUTES = 1;
 const NETWORK_PRIVACY_MAX_REVEAL_MINUTES = 60;
@@ -36,18 +35,16 @@ function network_privacy_policy_path(): string
 
 function network_privacy_default_policy(): array
 {
+    $opaqueKey = base64_encode(random_bytes(32));
     return [
         'version' => NETWORK_PRIVACY_POLICY_VERSION,
         'revision' => 1,
         'httpsEnforced' => true,
         'hstsDeploymentVerified' => false,
-        'exactIpAccessEnabled' => false,
-        'reasonRequired' => true,
-        'defaultRevealMinutes' => NETWORK_PRIVACY_DEFAULT_REVEAL_MINUTES,
         'trustedProxies' => [],
         'testHosts' => [],
-        'opaqueHmacKey' => base64_encode(random_bytes(32)),
-        'addressEncryptionKey' => base64_encode(random_bytes(32)),
+        'activeOpaqueKeyVersion' => 1,
+        'opaqueKeys' => ['1' => $opaqueKey],
         'updatedAt' => gmdate('Y-m-d H:i:s'),
     ];
 }
@@ -142,18 +139,29 @@ function network_privacy_policy_normalize(array $candidate): array
         $host = strtolower(trim((string)$host));
         if ($host !== '' && preg_match('/^[a-z0-9.-]+$/', $host)) $testHosts[$host] = true;
     }
-    $minutes = (int)($candidate['defaultRevealMinutes'] ?? NETWORK_PRIVACY_DEFAULT_REVEAL_MINUTES);
-    if ($minutes < NETWORK_PRIVACY_MIN_REVEAL_MINUTES || $minutes > NETWORK_PRIVACY_MAX_REVEAL_MINUTES) {
-        throw new NetworkPrivacyException(
-            'Exact-IP reveal duration must be from 1 through 60 minutes.',
-            'NETWORK_REVEAL_DURATION_INVALID',
-            422
-        );
+    $opaqueKeys = is_array($candidate['opaqueKeys'] ?? null)
+        ? $candidate['opaqueKeys']
+        : [];
+    if (!$opaqueKeys && network_privacy_validate_private_key($candidate['opaqueHmacKey'] ?? null)) {
+        $opaqueKeys = ['1' => (string)$candidate['opaqueHmacKey']];
     }
-    if (!network_privacy_validate_private_key($candidate['opaqueHmacKey'] ?? null)
-        || !network_privacy_validate_private_key($candidate['addressEncryptionKey'] ?? null)) {
+    $normalizedKeys = [];
+    foreach ($opaqueKeys as $version => $encoded) {
+        $version = filter_var($version, FILTER_VALIDATE_INT);
+        if ($version === false || (int)$version < 1 || !network_privacy_validate_private_key($encoded)) {
+            throw new NetworkPrivacyException(
+                'The private opaque-network key authority is invalid.',
+                'NETWORK_PRIVATE_KEY_INVALID',
+                503
+            );
+        }
+        $normalizedKeys[(string)(int)$version] = (string)$encoded;
+    }
+    ksort($normalizedKeys, SORT_NUMERIC);
+    $activeVersion = (int)($candidate['activeOpaqueKeyVersion'] ?? array_key_last($normalizedKeys) ?? 0);
+    if (!$normalizedKeys || !isset($normalizedKeys[(string)$activeVersion])) {
         throw new NetworkPrivacyException(
-            'The private network key authority is invalid.',
+            'The private opaque-network key authority is invalid.',
             'NETWORK_PRIVATE_KEY_INVALID',
             503
         );
@@ -163,13 +171,10 @@ function network_privacy_policy_normalize(array $candidate): array
         'revision' => max(1, (int)($candidate['revision'] ?? 1)),
         'httpsEnforced' => true,
         'hstsDeploymentVerified' => (bool)($candidate['hstsDeploymentVerified'] ?? false),
-        'exactIpAccessEnabled' => (bool)($candidate['exactIpAccessEnabled'] ?? false),
-        'reasonRequired' => true,
-        'defaultRevealMinutes' => $minutes,
         'trustedProxies' => array_keys($trusted),
         'testHosts' => array_keys($testHosts),
-        'opaqueHmacKey' => (string)$candidate['opaqueHmacKey'],
-        'addressEncryptionKey' => (string)$candidate['addressEncryptionKey'],
+        'activeOpaqueKeyVersion' => $activeVersion,
+        'opaqueKeys' => $normalizedKeys,
         'updatedAt' => (string)($candidate['updatedAt'] ?? gmdate('Y-m-d H:i:s')),
     ];
 }
@@ -212,6 +217,11 @@ function network_privacy_policy(bool $refresh = false): array
         );
     }
     $policy = network_privacy_policy_normalize($decoded);
+    if ($policy != $decoded) {
+        $policy['revision'] = max((int)$policy['revision'], (int)($decoded['revision'] ?? 1)) + 1;
+        $policy['updatedAt'] = gmdate('Y-m-d H:i:s');
+        return network_privacy_write_policy($policy);
+    }
     $GLOBALS['CHATSPACE_NETWORK_PRIVACY_POLICY'] = $policy;
     return $policy;
 }
@@ -342,70 +352,37 @@ function network_privacy_client_ip(): string
     return network_privacy_request_context()['clientIp'];
 }
 
-function network_privacy_opaque_identifier(string $ip): string
+function network_privacy_opaque_identifier_for_version(string $ip, int $version): string
 {
     $normalized = network_privacy_normalize_ip($ip);
     if ($normalized === null) {
         throw new NetworkPrivacyException('The network address is invalid.', 'NETWORK_ADDRESS_INVALID', 422);
     }
-    $key = base64_decode(network_privacy_policy()['opaqueHmacKey'], true);
+    $policy = network_privacy_policy();
+    $key = base64_decode((string)($policy['opaqueKeys'][(string)$version] ?? ''), true);
     if (!is_string($key) || strlen($key) !== 32) {
         throw new NetworkPrivacyException('The network identity key is unavailable.', 'NETWORK_PRIVATE_KEY_INVALID', 503);
     }
-    return 'Network ' . strtoupper(substr(hash_hmac('sha256', $normalized, $key), 0, 12));
+    $digest = strtoupper(substr(hash_hmac('sha256', $normalized, $key), 0, 12));
+    return $version === 1 ? 'Network ' . $digest : 'Network v' . $version . ' ' . $digest;
 }
 
-function network_privacy_encrypt_address(string $ip): array
+function network_privacy_opaque_identifier(string $ip): string
 {
-    $normalized = network_privacy_normalize_ip($ip);
-    if ($normalized === null) {
-        throw new NetworkPrivacyException('The network address is invalid.', 'NETWORK_ADDRESS_INVALID', 422);
-    }
-    $key = base64_decode(network_privacy_policy()['addressEncryptionKey'], true);
-    $nonce = random_bytes(12);
-    $tag = '';
-    $ciphertext = openssl_encrypt(
-        $normalized,
-        'aes-256-gcm',
-        $key,
-        OPENSSL_RAW_DATA,
-        $nonce,
-        $tag,
-        'chatspace-network-address-v1'
+    $policy = network_privacy_policy();
+    return network_privacy_opaque_identifier_for_version(
+        $ip,
+        (int)$policy['activeOpaqueKeyVersion']
     );
-    if (!is_string($ciphertext) || strlen($tag) !== 16) {
-        throw new NetworkPrivacyException('The network address could not be protected.', 'NETWORK_ENCRYPTION_FAILED', 503);
-    }
-    return [
-        'ciphertext' => base64_encode($ciphertext),
-        'nonce' => base64_encode($nonce),
-        'tag' => base64_encode($tag),
-    ];
 }
 
-function network_privacy_decrypt_address(array $row): string
+function network_privacy_opaque_identifier_candidates(string $ip): array
 {
-    $key = base64_decode(network_privacy_policy()['addressEncryptionKey'], true);
-    $ciphertext = base64_decode((string)($row['address_ciphertext'] ?? ''), true);
-    $nonce = base64_decode((string)($row['address_nonce_b64'] ?? ''), true);
-    $tag = base64_decode((string)($row['address_tag_b64'] ?? ''), true);
-    if (!is_string($key) || !is_string($ciphertext) || !is_string($nonce) || !is_string($tag)) {
-        throw new NetworkPrivacyException('The protected network address is invalid.', 'NETWORK_DECRYPTION_FAILED', 503);
+    $candidates = [];
+    foreach (array_keys(network_privacy_policy()['opaqueKeys']) as $version) {
+        $candidates[] = network_privacy_opaque_identifier_for_version($ip, (int)$version);
     }
-    $plaintext = openssl_decrypt(
-        $ciphertext,
-        'aes-256-gcm',
-        $key,
-        OPENSSL_RAW_DATA,
-        $nonce,
-        $tag,
-        'chatspace-network-address-v1'
-    );
-    $normalized = is_string($plaintext) ? network_privacy_normalize_ip($plaintext) : null;
-    if ($normalized === null) {
-        throw new NetworkPrivacyException('The protected network address failed integrity validation.', 'NETWORK_DECRYPTION_FAILED', 503);
-    }
-    return $normalized;
+    return array_values(array_unique($candidates));
 }
 
 function network_privacy_schema_statements(PDO $pdo): array
@@ -523,13 +500,13 @@ function network_privacy_policy_projection(PDO $pdo, int $ownerUserId): array
         'revision' => $policy['revision'],
         'httpsEnforced' => true,
         'hstsDeploymentVerified' => $policy['hstsDeploymentVerified'],
-        'exactIpAccessEnabled' => $policy['exactIpAccessEnabled'],
-        'reasonRequired' => true,
-        'defaultRevealMinutes' => $policy['defaultRevealMinutes'],
         'trustedProxyCount' => count($policy['trustedProxies']),
         'trustedProxiesMasked' => array_map('network_privacy_mask_cidr', $policy['trustedProxies']),
         'trustedProxyValuesStoredPrivately' => true,
-        'ordinaryViewsUseOpaqueIdentifiers' => true,
+        'activeOpaqueKeyVersion' => (int)$policy['activeOpaqueKeyVersion'],
+        'retainedOpaqueKeyVersions' => array_map('intval', array_keys($policy['opaqueKeys'])),
+        'browserVisibleAddresses' => false,
+        'reversibleAddressStorage' => false,
     ];
 }
 
@@ -561,7 +538,6 @@ function network_privacy_record_event(
         null,
         null,
         trim(implode('; ', array_filter([
-            $opaqueId,
             $reasonHash === null ? null : 'reason-sha256:' . $reasonHash,
             isset($safeDetail['durationMinutes']) ? 'duration-minutes:' . $safeDetail['durationMinutes'] : null,
             isset($safeDetail['revision']) ? 'revision:' . $safeDetail['revision'] : null,
@@ -573,6 +549,13 @@ function network_privacy_update_policy(PDO $pdo, int $ownerUserId, array $input)
 {
     network_privacy_require_owner($pdo, $ownerUserId);
     security_require_recent_authentication();
+    if (array_key_exists('trustedProxies', $input)) {
+        throw new NetworkPrivacyException(
+            'Trusted-proxy address configuration is not accepted through a browser-facing route.',
+            'NETWORK_TRUSTED_PROXY_BROWSER_MUTATION_PROHIBITED',
+            422
+        );
+    }
     $policy = network_privacy_policy(true);
     if ((int)($input['expectedRevision'] ?? 0) !== (int)$policy['revision']) {
         throw new NetworkPrivacyException(
@@ -585,20 +568,12 @@ function network_privacy_update_policy(PDO $pdo, int $ownerUserId, array $input)
     $candidate = $policy;
     $candidate['revision'] = $policy['revision'] + 1;
     $candidate['hstsDeploymentVerified'] = (bool)($input['hstsDeploymentVerified'] ?? false);
-    $candidate['exactIpAccessEnabled'] = (bool)($input['exactIpAccessEnabled'] ?? false);
-    $candidate['defaultRevealMinutes'] = (int)($input['defaultRevealMinutes'] ?? NETWORK_PRIVACY_DEFAULT_REVEAL_MINUTES);
-    if (array_key_exists('trustedProxies', $input)) {
-        if (!is_array($input['trustedProxies'])) {
-            throw new NetworkPrivacyException('Trusted proxies must be a list.', 'NETWORK_TRUSTED_PROXY_INVALID', 422);
-        }
-        $candidate['trustedProxies'] = $input['trustedProxies'];
-    }
     $candidate['updatedAt'] = gmdate('Y-m-d H:i:s');
     $stored = network_privacy_write_policy($candidate);
     set_app_setting($pdo, 'network_https_enforced', '1');
     set_app_setting($pdo, 'network_hsts_deployment_verified', $stored['hstsDeploymentVerified'] ? '1' : '0');
-    set_app_setting($pdo, 'network_exact_ip_access_enabled', $stored['exactIpAccessEnabled'] ? '1' : '0');
-    set_app_setting($pdo, 'network_exact_ip_reveal_minutes', (string)$stored['defaultRevealMinutes']);
+    set_app_setting($pdo, 'network_exact_ip_access_enabled', '0');
+    set_app_setting($pdo, 'network_exact_ip_reveal_minutes', (string)NETWORK_PRIVACY_DEFAULT_REVEAL_MINUTES);
     set_app_setting($pdo, 'network_trusted_proxy_count', (string)count($stored['trustedProxies']));
     network_privacy_record_event($pdo, $ownerUserId, 'policy_update', null, null, [
         'revision' => $stored['revision'],
@@ -610,130 +585,12 @@ function network_privacy_update_policy(PDO $pdo, int $ownerUserId, array $input)
 
 function network_privacy_observe(PDO $pdo, string $ip): string
 {
-    $normalized = network_privacy_normalize_ip($ip);
-    if ($normalized === null) {
-        throw new NetworkPrivacyException('The network address is invalid.', 'NETWORK_ADDRESS_INVALID', 422);
-    }
-    $opaqueId = network_privacy_opaque_identifier($normalized);
-    $existing = $pdo->prepare('SELECT opaque_id FROM network_observations WHERE opaque_id=? LIMIT 1');
-    $existing->execute([$opaqueId]);
-    if ($existing->fetchColumn() !== false) {
-        $pdo->prepare(
-            'UPDATE network_observations SET last_seen_at=CURRENT_TIMESTAMP,revision=revision+1 WHERE opaque_id=?'
-        )->execute([$opaqueId]);
-        return $opaqueId;
-    }
-    $encrypted = network_privacy_encrypt_address($normalized);
-    $pdo->prepare(
-        'INSERT INTO network_observations
-         (opaque_id,address_ciphertext,address_nonce_b64,address_tag_b64,key_version)
-         VALUES (?,?,?,?,1)'
-    )->execute([$opaqueId, $encrypted['ciphertext'], $encrypted['nonce'], $encrypted['tag']]);
-    return $opaqueId;
-}
-
-function network_privacy_session_hash(): string
-{
-    return strtoupper(hash('sha256', session_id() !== '' ? session_id() : 'no-session'));
-}
-
-function network_privacy_reveal(
-    PDO $pdo,
-    int $ownerUserId,
-    string $opaqueId,
-    string $reason,
-    int $durationMinutes
-): array {
-    network_privacy_require_owner($pdo, $ownerUserId);
-    security_require_recent_authentication();
-    $policy = network_privacy_policy(true);
-    if (!$policy['exactIpAccessEnabled']) {
+    if (!function_exists('network_moderation_observe')) {
         throw new NetworkPrivacyException(
-            'Exact IP Access is disabled.',
-            'NETWORK_EXACT_IP_ACCESS_DISABLED',
-            403
+            'Opaque-network observation is unavailable during schema initialization.',
+            'NETWORK_OPAQUE_OBSERVATION_UNAVAILABLE',
+            503
         );
     }
-    $reason = trim($reason);
-    if ($reason === '' || mb_strlen($reason) > 500) {
-        throw new NetworkPrivacyException(
-            'A reason of 1 through 500 characters is required.',
-            'NETWORK_REVEAL_REASON_REQUIRED',
-            422
-        );
-    }
-    if ($durationMinutes < NETWORK_PRIVACY_MIN_REVEAL_MINUTES
-        || $durationMinutes > NETWORK_PRIVACY_MAX_REVEAL_MINUTES) {
-        throw new NetworkPrivacyException(
-            'Exact-IP reveal duration must be from 1 through 60 minutes.',
-            'NETWORK_REVEAL_DURATION_INVALID',
-            422
-        );
-    }
-    $row = $pdo->prepare('SELECT * FROM network_observations WHERE opaque_id=? LIMIT 1');
-    $row->execute([$opaqueId]);
-    $observation = $row->fetch();
-    if (!is_array($observation)) {
-        throw new NetworkPrivacyException('The opaque network identity was not found.', 'NETWORK_IDENTITY_NOT_FOUND', 404);
-    }
-    $sessionHash = network_privacy_session_hash();
-    $lease = $pdo->prepare('SELECT * FROM network_reveal_leases WHERE owner_user_id=? LIMIT 1');
-    $lease->execute([$ownerUserId]);
-    $active = $lease->fetch();
-    $now = time();
-    if (is_array($active) && strtotime((string)$active['expires_at'] . ' UTC') > $now) {
-        if (!hash_equals((string)$active['opaque_id'], $opaqueId)
-            || !hash_equals((string)$active['session_hash'], $sessionHash)) {
-            throw new NetworkPrivacyException(
-                'Hide the active exact-IP reveal before opening another.',
-                'NETWORK_REVEAL_LEASE_ACTIVE',
-                409,
-                ['expiresAt' => $active['expires_at']]
-            );
-        }
-        return [
-            'opaqueId' => $opaqueId,
-            'exactIp' => network_privacy_decrypt_address($observation),
-            'expiresAt' => (string)$active['expires_at'],
-            'nonExtendable' => true,
-            'idempotentReplay' => true,
-        ];
-    }
-    $pdo->prepare('DELETE FROM network_reveal_leases WHERE owner_user_id=?')->execute([$ownerUserId]);
-    $expiresAt = gmdate('Y-m-d H:i:s', $now + ($durationMinutes * 60));
-    $pdo->prepare(
-        'INSERT INTO network_reveal_leases
-         (owner_user_id,opaque_id,session_hash,reason_hash,expires_at)
-         VALUES (?,?,?,?,?)'
-    )->execute([$ownerUserId, $opaqueId, $sessionHash, strtoupper(hash('sha256', $reason)), $expiresAt]);
-    network_privacy_record_event($pdo, $ownerUserId, 'exact_ip_reveal', $opaqueId, $reason, [
-        'durationMinutes' => $durationMinutes,
-        'result' => 'revealed',
-    ]);
-    return [
-        'opaqueId' => $opaqueId,
-        'exactIp' => network_privacy_decrypt_address($observation),
-        'expiresAt' => $expiresAt,
-        'nonExtendable' => true,
-        'idempotentReplay' => false,
-    ];
-}
-
-function network_privacy_hide(PDO $pdo, int $ownerUserId): array
-{
-    network_privacy_require_owner($pdo, $ownerUserId);
-    security_require_recent_authentication();
-    $statement = $pdo->prepare('SELECT opaque_id FROM network_reveal_leases WHERE owner_user_id=? LIMIT 1');
-    $statement->execute([$ownerUserId]);
-    $opaqueId = $statement->fetchColumn();
-    $pdo->prepare('DELETE FROM network_reveal_leases WHERE owner_user_id=?')->execute([$ownerUserId]);
-    network_privacy_record_event(
-        $pdo,
-        $ownerUserId,
-        'exact_ip_hide',
-        $opaqueId === false ? null : (string)$opaqueId,
-        null,
-        ['result' => 'hidden']
-    );
-    return ['hidden' => true];
+    return network_moderation_observe($pdo, $ip);
 }
