@@ -381,6 +381,12 @@ function private_site_branding_utility_links(PDO $pdo): array {
             'primary' => false,
         ];
     }
+    $links[] = [
+        'id' => 'third-party-notices',
+        'label' => 'Third-Party Notices',
+        'path' => '/changelog.php?document=third-party-notices',
+        'primary' => false,
+    ];
     return $links;
 }
 
@@ -456,6 +462,7 @@ function private_site_branding_inline_markdown(string $text): string {
             $browserRoutes = [
                 'LICENSE.md' => '/license.php',
                 'MODIFICATIONS.md' => '/changelog.php',
+                'THIRD_PARTY_NOTICES.md' => '/changelog.php?document=third-party-notices',
             ];
             $allowedLocal = ['README.md', 'AUTHORS.md'];
             if (isset($browserRoutes[$target])) {

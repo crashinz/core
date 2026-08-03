@@ -9,6 +9,10 @@ $roomKey = trim((string)($_GET['id'] ?? ''));
 $back = $return === 'room' && $roomKey !== '' ? app_url('/chatroom.php?id=' . rawurlencode($roomKey)) : app_url('/lobby.php');
 $assetVersion = static fn(string $path): string => app_url($path) . '?v=' . rawurlencode((string)(is_file(__DIR__ . $path) ? filemtime(__DIR__ . $path) : time()));
 $roleColors = role_color_settings($pdo);
+$voiceWebcamPolicy = optional_core_voice_webcam_policy($pdo);
+$voiceTransmissionAvailable = !empty($voiceWebcamPolicy['transmissionModes']['enabled']);
+$webcamAudienceAvailable = !empty($voiceWebcamPolicy['selectiveWebcamAudience']['enabled']);
+$voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
 ?>
 <!doctype html>
 <html lang="en">
@@ -26,13 +30,14 @@ $roleColors = role_color_settings($pdo);
   </header>
   <nav class="shared-tabs" aria-label="Account sections">
     <button class="active" data-account-tab="profile" type="button">Public Profile</button>
-    <button data-account-tab="security" type="button">Security</button>
+    <button data-account-tab="security" type="button">Security &amp; Privacy</button>
     <button data-account-tab="private-chat" type="button">Private Chat Protection</button>
+    <button data-account-tab="voice-webcam" type="button"<?= $voiceWebcamAvailable ? '' : ' hidden' ?>>Voice &amp; Webcam</button>
     <button data-account-tab="status" type="button">Account Status</button>
     <button data-account-tab="requests" type="button">Requests &amp; Notices</button>
     <button data-account-tab="safety" type="button">Safety</button>
   </nav>
-  <div class="shared-status" id="account-page-status" role="status"></div>
+  <div class="shared-status" id="account-page-status" role="status" tabindex="-1"></div>
   <section class="shared-panel active" data-account-panel="profile">
     <h2>Public Profile</h2>
     <p class="minor">This information is visible to authenticated community members who can open your profile. Private login, recovery, authentication, security, moderation, IP-address, and device information is never part of the public profile.</p>
@@ -90,6 +95,31 @@ $roleColors = role_color_settings($pdo);
     <h2>Lost Access Recovery</h2>
     <div class="account-recovery-card" id="account-recovery-card">Checking recovery status…</div>
     <button class="btn" id="account-recovery-generate" type="button">Create Recovery Code</button>
+    <section class="account-delete-card" id="account-delete-card" aria-labelledby="account-delete-heading">
+      <h2 id="account-delete-heading">Delete Account</h2>
+      <div class="account-delete-warning" role="note">
+        <strong>This permanently deletes your active account.</strong>
+        <p>Your login, recovery, private profile, personal settings, sessions, and unshared personal media are removed or anonymized. Required chat, moderation, safety, audit, and shared-history records remain under <strong>[Deleted User]</strong>. This cannot be undone.</p>
+      </div>
+      <div id="account-delete-readiness" class="account-recovery-card" aria-live="polite">Checking account ownership and room responsibilities…</div>
+      <div id="account-delete-owned-rooms" class="admin-scroll-list" aria-live="polite"></div>
+      <form id="account-delete-form" class="shared-form compact-form" novalidate>
+        <label id="account-delete-successor-label" hidden>Transfer all rooms I own to
+          <select name="room_successor_user_id" aria-describedby="account-delete-successor-help">
+            <option value="">Choose an eligible account</option>
+          </select>
+        </label>
+        <p class="minor" id="account-delete-successor-help" hidden>Room history stays intact. The selected account becomes the owner of every room listed above.</p>
+        <label>Current password
+          <input name="current_password" type="password" required autocomplete="current-password">
+        </label>
+        <label>Type <strong>DELETE</strong> exactly
+          <input name="confirmation" required autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="account-delete-confirmation-help">
+        </label>
+        <p class="minor" id="account-delete-confirmation-help">This confirmation is case-sensitive.</p>
+        <button class="btn account-delete-submit" id="account-delete-submit" type="submit" disabled>Permanently Delete My Account</button>
+      </form>
+    </section>
   </section>
   <section class="shared-panel" data-account-panel="private-chat">
     <h2>Private Chat Protection</h2>
@@ -107,6 +137,56 @@ $roleColors = role_color_settings($pdo);
     <p class="minor">This is separate from your password and Lost Access recovery code. It is generated and encrypted in this browser. CoreChat never receives the phrase.</p>
     <output id="account-private-chat-recovery-output" class="account-recovery-card" aria-live="assertive">Recovery phrase hidden.</output>
     <p class="minor" id="account-private-chat-recovery-state">Checking recovery configuration…</p>
+  </section>
+  <section class="shared-panel" data-account-panel="voice-webcam"<?= $voiceWebcamAvailable ? '' : ' hidden' ?>>
+    <div class="account-preference-heading">
+      <h2>Voice &amp; Webcam</h2>
+      <button class="settings-entry-info" type="button" data-account-info="voice-webcam-overview" title="More information about Voice &amp; Webcam" aria-label="More information about Voice &amp; Webcam" aria-controls="account-voice-webcam-overview-help" aria-expanded="false"><span class="settings-entry-info-glyph" aria-hidden="true">i</span></button>
+    </div>
+    <div class="settings-entry-help-panel account-preference-help" id="account-voice-webcam-overview-help" tabindex="-1" hidden>
+      <p>Installation policy controls which personal options are available. A hidden option keeps its saved value and returns unchanged if an administrator enables it again.</p>
+    </div>
+    <p class="minor">Choose how you transmit voice and who can see your webcam.</p>
+    <form id="account-voice-webcam-form" class="shared-form">
+      <fieldset id="account-transmission-mode-fields"<?= $voiceTransmissionAvailable ? '' : ' hidden' ?>>
+        <legend class="account-preference-legend"><span>Voice transmission</span><button class="settings-entry-info" type="button" data-account-info="voice-transmission" title="More information about Voice transmission" aria-label="More information about Voice transmission" aria-controls="account-transmission-help" aria-expanded="false"><span class="settings-entry-info-glyph" aria-hidden="true">i</span></button></legend>
+        <div class="settings-entry-help-panel account-preference-help" id="account-transmission-help" tabindex="-1" hidden>
+          <p>Your saved mode and muted-on-join choice remain unchanged while this option is unavailable. The hold key is private to this browser, works while the page is focused, and uses the existing live-voice mute controls.</p>
+        </div>
+        <label>Transmission mode
+          <select name="transmission_mode">
+            <option value="voice-activation">Voice activation</option>
+            <option value="push-to-talk">Push to talk</option>
+            <option value="push-to-mute">Push to mute</option>
+          </select>
+        </label>
+        <label class="account-preference-checkbox-row">
+          <input name="always_muted_on_join" type="checkbox" value="1">
+          <span><strong>Always muted on join</strong></span>
+        </label>
+        <label>Device-local hold key
+          <span class="account-binding-row"><input name="transmission_binding" readonly value="Unassigned"><button class="btn" id="account-binding-set" type="button">Set key</button><button class="btn" id="account-binding-clear" type="button">Clear</button></span>
+        </label>
+      </fieldset>
+      <fieldset id="account-webcam-audience-fields"<?= $webcamAudienceAvailable ? '' : ' hidden' ?>>
+        <legend class="account-preference-legend"><span>Webcam audience</span><button class="settings-entry-info" type="button" data-account-info="webcam-audience" title="More information about Webcam audience" aria-label="More information about Webcam audience" aria-controls="account-webcam-audience-help" aria-expanded="false"><span class="settings-entry-info-glyph" aria-hidden="true">i</span></button></legend>
+        <div class="settings-entry-help-panel account-preference-help" id="account-webcam-audience-help" tabindex="-1" hidden>
+          <p>This choice limits live webcam-track delivery. People outside the selected audience see your saved avatar instead. Your choice remains saved while this option is unavailable.</p>
+        </div>
+        <label>Who can see my webcam?
+          <select name="webcam_audience_mode">
+            <option value="everyone">Everyone in the room</option>
+            <option value="private-voice">Members of my current private voice chat</option>
+            <option value="selected">Only selected people</option>
+            <option value="nobody">Nobody — local preview only</option>
+          </select>
+        </label>
+      </fieldset>
+      <div class="shared-form-actions">
+        <button class="btn btn-primary" type="submit">Save Voice &amp; Webcam</button>
+        <button class="btn" id="account-voice-webcam-reset" type="button">Restore Saved Values</button>
+      </div>
+    </form>
   </section>
   <section class="shared-panel" data-account-panel="status">
     <h2>Account Status</h2>

@@ -18,7 +18,7 @@ export class AvatarVisibilityService {
 
     #entries = [];
 
-    #exactTargets = new Set();
+    #exactTargets = new Map();
 
     #userTargets = new Set();
 
@@ -61,6 +61,10 @@ export class AvatarVisibilityService {
                 targetUserId: Number(entry.targetUserId),
                 displayName: String(entry.displayName || "User"),
                 scope: String(entry.scope),
+                avatarIdentity: entry.scope === EXACT_SCOPE
+                    && /^[a-f0-9]{64}$/.test(String(entry.avatarIdentity || ""))
+                    ? String(entry.avatarIdentity)
+                    : null,
                 notice: String(entry.notice || "")
             }))
             : [];
@@ -70,7 +74,13 @@ export class AvatarVisibilityService {
         this.#version = version;
         this.#configured = true;
         this.#entries = entries;
-        this.#exactTargets = new Set(entries.filter(entry => entry.scope === EXACT_SCOPE).map(entry => entry.targetUserId));
+        this.#exactTargets = new Map();
+        entries.filter(entry => entry.scope === EXACT_SCOPE && entry.avatarIdentity)
+            .forEach(entry => {
+                const identities = this.#exactTargets.get(entry.targetUserId) || new Set();
+                identities.add(entry.avatarIdentity);
+                this.#exactTargets.set(entry.targetUserId, identities);
+            });
         this.#userTargets = new Set(entries.filter(entry => entry.scope === USER_SCOPE).map(entry => entry.targetUserId));
         this.#changeCount += 1;
         this.#context?.onChange?.({ reason, version, entryCount: entries.length });
@@ -98,8 +108,12 @@ export class AvatarVisibilityService {
             return Object.freeze({ hidden: false, exact: false, user: false, scope: null, notice: null });
         }
         const user = this.isUserHidden(userId);
-        const exact = this.isExactHidden(userId);
-        const serverHidden = !this.#configured && Boolean(subject?.avatar_hidden);
+        const identity = String(subject?.p2p_avatar?.identity || subject?.avatar_identity || "");
+        const identityAvailable = /^[a-f0-9]{64}$/.test(identity);
+        const exact = identityAvailable
+            ? this.#exactTargets.get(userId)?.has(identity) === true
+            : this.isExactHidden(userId);
+        const serverHidden = Boolean(subject?.avatar_hidden);
         const scope = user ? USER_SCOPE : exact ? EXACT_SCOPE : serverHidden
             ? String(subject?.avatar_hidden_scope || EXACT_SCOPE) : null;
         const hidden = Boolean(scope);

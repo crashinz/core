@@ -75,7 +75,7 @@ $rooms = $roomsStmt->fetchAll();
   <title><?= e(branded_page_title('Lobby', $pdo, 'lobby')) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
 </head>
-<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
+<body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-user-id="<?= (int)$user['id'] ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="picker-shell">
   <section class="picker-main">
     <div class="topbar">
@@ -174,6 +174,27 @@ $rooms = $roomsStmt->fetchAll();
     <?php endif; ?>
   </section>
 </main>
+<button class="transfers-shell-button" id="transfers-button" type="button" aria-controls="transfers-tray" aria-expanded="false">Transfers <span id="transfers-count" aria-hidden="true">0</span></button>
+<aside class="transfers-tray" id="transfers-tray" aria-labelledby="transfers-tray-title" hidden>
+  <div class="transfers-tray-head"><strong id="transfers-tray-title">Transfers</strong><button id="transfers-tray-close" type="button" aria-label="Close Transfers">&times;</button></div>
+  <p class="minor">Direct transfers continue in the background until their fixed deadline when the required local state remains available.</p>
+  <section class="p2p-transfer-status-drawer" id="p2p-transfer-status-drawer" aria-label="Direct transfer status" aria-live="polite"></section>
+</aside>
+<div class="modal" id="p2p-transfer-offer-modal" role="dialog" aria-modal="true" aria-labelledby="p2p-transfer-offer-title" aria-hidden="true">
+  <div class="modal-box p2p-transfer-box">
+    <div class="modal-head"><strong id="p2p-transfer-offer-title" tabindex="-1">Incoming transfer</strong></div>
+    <dl class="p2p-transfer-offer-facts" id="p2p-transfer-offer-facts"></dl>
+    <p class="p2p-transfer-warning" id="p2p-transfer-offer-warning" role="note"></p>
+    <div class="p2p-transfer-preview" id="p2p-transfer-offer-preview" role="status" aria-live="polite" hidden></div>
+    <label class="p2p-transfer-direct-disk" id="p2p-transfer-direct-disk-wrap" hidden>
+      <input id="p2p-transfer-direct-disk" type="checkbox">
+      <span><strong>Download directly to this device</strong><br><small>This P2P-only option requires this tab to remain open and cannot resume after refresh, browser closure, or crash.</small></span>
+    </label>
+    <div class="shared-form-actions"><button class="btn" id="p2p-transfer-preview-request" type="button" hidden>Request safe preview</button><button class="btn btn-primary" id="p2p-transfer-accept" type="button">Accept</button><button class="btn" id="p2p-transfer-decline" type="button">Decline</button></div>
+    <div class="admin-form-status" id="p2p-transfer-offer-status" role="status" aria-live="polite"></div>
+  </div>
+</div>
+<script type="application/json" id="lobby-p2p-policy"><?= json_encode(p2p_transfer_policy($pdo), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
 <div class="modal" id="lobby-room-edit-modal">
   <form class="modal-box" id="lobby-room-edit-form" enctype="multipart/form-data">
     <?= csrf_input() ?>
@@ -306,6 +327,9 @@ $rooms = $roomsStmt->fetchAll();
         <button class="admin-nav-item" data-admin-section="gestures" type="button">
           <span class="admin-nav-symbol" aria-hidden="true">G</span> Gestures
           <span class="admin-nav-count" id="admin-gesture-count">0</span>
+        </button>
+        <button class="admin-nav-item" data-admin-section="storage" type="button">
+          <span class="admin-nav-symbol" aria-hidden="true">S</span> Storage Management
         </button>
         <button class="admin-nav-item" data-admin-section="database" type="button">
           <img src="<?= e(app_url('/assets/images/sql-server.png')) ?>" alt=""> Database
@@ -558,6 +582,7 @@ $rooms = $roomsStmt->fetchAll();
               <div class="branding-license-actions">
                 <a class="btn btn-primary branding-license-link" href="<?= e(app_url('/license.php')) ?>" id="admin-branding-license-title">View original License</a>
                 <a class="btn branding-license-link" href="<?= e(app_url('/changelog.php')) ?>">View exe's Changelog</a>
+                <a class="btn branding-license-link" href="<?= e(app_url('/changelog.php?document=third-party-notices')) ?>">Third-Party Notices</a>
               </div>
               <div class="branding-license-reminder-card">
                 <h4>Branding and License Reminder</h4>
@@ -723,6 +748,66 @@ $rooms = $roomsStmt->fetchAll();
             <div class="admin-gesture-catalog" id="admin-gesture-catalog" role="table" aria-label="Server Gesture metadata and package catalog"></div>
             <div class="gesture-pager" id="admin-gesture-pager" aria-label="Admin gesture catalog pages"></div>
             <div class="minor" id="admin-gesture-status" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="admin-section" id="admin-section-storage">
+          <div class="admin-section-title">Storage Management</div>
+          <div class="admin-section-sub">Review authenticated server files, their references, retention, risk classification, and cleanup state.</div>
+          <div class="admin-panel admin-file-review-start">
+            <h3>File Review Session</h3>
+            <p class="minor">A review session lasts a fixed 60 minutes and ends immediately on logout, role loss, session revocation, or security change. Every file action is recorded separately with the original reason.</p>
+            <label>Review reason<textarea id="admin-file-review-reason" maxlength="500" rows="2" placeholder="Describe the abuse, safety, community-rule, or legal review purpose"></textarea></label>
+            <button class="btn btn-primary" id="admin-file-review-start" type="button">Start 60-minute Review Session</button>
+            <div class="minor" id="admin-file-review-status" role="status" aria-live="polite">No active File Review Session.</div>
+          </div>
+          <div class="admin-panel admin-storage-panel">
+            <section id="admin-storage-action-confirmation" class="settings-impact-confirmation" aria-labelledby="admin-storage-action-confirmation-title" hidden>
+              <strong id="admin-storage-action-confirmation-title">Confirm stored-file action</strong>
+              <p id="admin-storage-action-confirmation-message"></p>
+              <label id="admin-storage-action-confirmation-reason-wrap">Quarantine reason<textarea id="admin-storage-action-confirmation-reason" maxlength="500" rows="2" placeholder="Describe the specific safety or policy reason"></textarea></label>
+              <div class="shared-form-actions">
+                <button class="btn btn-danger" id="admin-storage-action-confirm" type="button">Confirm</button>
+                <button class="btn" id="admin-storage-action-cancel" type="button">Cancel</button>
+              </div>
+              <div class="admin-form-status" id="admin-storage-action-confirmation-status" role="status" aria-live="polite"></div>
+            </section>
+            <div class="admin-storage-usage" id="admin-storage-usage" aria-label="Server file allowance usage"></div>
+            <div class="admin-storage-toolbar" role="search">
+              <label>Section<select id="admin-storage-section">
+                <option value="chat-attachments">Chat Attachments</option>
+                <option value="voice-notes">Voice Notes</option>
+                <option value="avatars">Avatars</option>
+                <option value="gestures">Gestures</option>
+                <option value="legacy">Legacy/Unclassified</option>
+                <option value="cleanup-needed">Cleanup Needed</option>
+              </select></label>
+              <label>Search<input id="admin-storage-search" type="search" maxlength="180" placeholder="Name, extension, detected type, status, or risk"></label>
+              <label>Sort<select id="admin-storage-sort">
+                <option value="date">Date</option><option value="name">Name</option><option value="extension">Extension</option>
+                <option value="detected-type">Detected type</option><option value="size">Size</option><option value="expiry">Expiration</option>
+                <option value="status">Status</option><option value="risk">Risk</option><option value="category">Category</option>
+                <option value="channel">Channel</option><option value="uploader">Uploader</option><option value="pinned">Pinned</option><option value="references">References</option>
+              </select></label>
+              <label>Direction<select id="admin-storage-direction"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
+            </div>
+            <div class="admin-storage-filters" aria-label="Storage filters">
+              <label>Extension<input id="admin-storage-extension" type="search" maxlength="32"></label>
+              <label>Detected type<input id="admin-storage-detected-type" type="search" maxlength="100"></label>
+              <label>Uploader<input id="admin-storage-uploader" type="search" maxlength="120"></label>
+              <label>Status<select id="admin-storage-state"><option value="">Any</option><option value="active">Active</option><option value="expired">Expired</option><option value="missing">Missing</option><option value="quarantined">Quarantined</option><option value="deleted">Deleted</option></select></label>
+              <label>Pinned<select id="admin-storage-pinned"><option value="">Any</option><option value="1">Pinned</option><option value="0">Not pinned</option></select></label>
+              <label>References<select id="admin-storage-references"><option value="">Any</option><option value="referenced">Referenced</option><option value="unreferenced">Unreferenced</option></select></label>
+            </div>
+            <div class="admin-storage-bulk" aria-label="Bulk file actions">
+              <button class="btn" id="admin-storage-select-all" type="button">Select page</button>
+              <label>Bulk action<select id="admin-storage-bulk-action"><option value="">Choose action</option><option value="pin">Pin</option><option value="unpin">Unpin</option><option value="quarantine">Quarantine</option><option value="delete">Delete</option></select></label>
+              <label>Quarantine reason<input id="admin-storage-bulk-reason" maxlength="500" placeholder="Required only for quarantine"></label>
+              <button class="btn btn-primary" id="admin-storage-bulk-apply" type="button">Apply to selected</button>
+            </div>
+            <div id="admin-storage-list" class="admin-storage-list" role="table" aria-label="Server file storage records"></div>
+            <div class="admin-actions"><button class="btn" id="admin-storage-prev" type="button">Previous</button><span id="admin-storage-page">Page 1</span><button class="btn" id="admin-storage-next" type="button">Next</button></div>
+            <div class="admin-form-status" id="admin-storage-status" role="status" aria-live="polite"></div>
           </div>
         </section>
 

@@ -342,7 +342,6 @@ function operational_capacity_projection(PDO $pdo): array
             'uploadDownloadConcurrency' => 'No safe adjustable bound established; mandatory existing limits remain.',
             'voiceParticipation' => 'Recommendation deferred to the named voice-quality audit.',
             'floodProtection' => 'No adjustable recommendation is available; existing protection remains active.',
-            'persistentWebSocketProcess' => 'Unsupported unless the deployment and host capability checks confirm a compatible service.',
         ],
     ];
 }

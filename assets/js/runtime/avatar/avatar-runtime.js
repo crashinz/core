@@ -133,6 +133,12 @@ import {
 
 import {
 
+    P2PAvatarService
+
+} from "./services/p2p-avatar-service.js";
+
+import {
+
     AvatarTransitionService
 
 } from "./services/avatar-transition-service.js";
@@ -201,6 +207,8 @@ export class AvatarRuntime extends CoreModule {
     #displayPolicy = null;
 
     #visibility = null;
+
+    #p2pAvatar = null;
 
     /**
      * Relationship runtime component.
@@ -317,6 +325,12 @@ export class AvatarRuntime extends CoreModule {
     get visibility() {
 
         return this.#visibility;
+
+    }
+
+    get p2pAvatar() {
+
+        return this.#p2pAvatar;
 
     }
 
@@ -484,6 +498,9 @@ export class AvatarRuntime extends CoreModule {
             visibility:
                 this.#visibility?.getDiagnostics() ?? null,
 
+            p2pAvatar:
+                this.#p2pAvatar?.getDiagnostics() ?? null,
+
             relationships:
                 this.#relationships?.getDiagnostics() ?? null,
 
@@ -541,6 +558,8 @@ export class AvatarRuntime extends CoreModule {
         this.#createDisplayPolicy();
 
         this.#createVisibility();
+
+        this.#createP2PAvatar();
 
         this.#createRelationships();
 
@@ -616,6 +635,8 @@ export class AvatarRuntime extends CoreModule {
         this.#order?.destroy();
 
         this.#relationships?.destroy();
+
+        this.#p2pAvatar?.destroy();
 
         this.#displayPolicy?.destroy();
 
@@ -718,6 +739,17 @@ export class AvatarRuntime extends CoreModule {
             );
 
         this.#visibility.initialize();
+
+    }
+
+    #createP2PAvatar() {
+
+        this.#p2pAvatar =
+            new P2PAvatarService(
+                this
+            );
+
+        this.#p2pAvatar.initialize();
 
     }
 

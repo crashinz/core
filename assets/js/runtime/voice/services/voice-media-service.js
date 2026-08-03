@@ -152,6 +152,8 @@ export class VoiceMediaService {
 
     #voiceParticipants = [];
 
+    #voiceContext = Object.freeze({ type: "room", publicId: null });
+
     #lastStatusSignature = "";
 
     #signalFetchCursor = 0;
@@ -261,6 +263,7 @@ export class VoiceMediaService {
         this.#clearRecoveryTimers();
         this.#devices.destroy();
         this.#voiceParticipants = [];
+        this.#voiceContext = Object.freeze({ type: "room", publicId: null });
         this.#lastStatusSignature = "";
         this.#signalFetchCursor = 0;
         this.#signalInbox.clear();
@@ -350,6 +353,12 @@ export class VoiceMediaService {
 
     }
 
+    clientEpoch() {
+
+        return this.#clientEpoch;
+
+    }
+
     /**
      * Returns current voice state for presentation callbacks.
      *
@@ -370,6 +379,9 @@ export class VoiceMediaService {
 
             speaking:
                 this.#speaking,
+
+            voiceContext:
+                this.#voiceContext,
 
             selectedOutputDeviceId:
                 this.#devices.selectedOutputDeviceId
@@ -416,6 +428,28 @@ export class VoiceMediaService {
     //--------------------------------------------------
     // Public Voice Workflow
     //--------------------------------------------------
+
+    setVoiceContext(context = {}) {
+
+        const type = context?.type === "private-voice" ? "private-voice" : "room";
+        const publicId = type === "private-voice" ? String(context?.publicId || "") : null;
+
+        if (type === "private-voice" && !publicId) {
+            throw new Error("A private voice chat identifier is required.");
+        }
+        if (this.#lifecycle.isJoined()) {
+            throw new Error("Leave the current voice context before switching.");
+        }
+
+        this.#voiceContext = Object.freeze({ type, publicId });
+        this.#voiceParticipants = [];
+        this.#signalFetchCursor = 0;
+        this.#signalInbox.clear();
+        this.#terminalSignalIds.clear();
+        this.renderCurrentVoiceList();
+        return this.#voiceContext;
+
+    }
 
     /**
      * Populates selectable voice input/output devices through host callbacks.
@@ -647,6 +681,49 @@ export class VoiceMediaService {
     //--------------------------------------------------
     // Public Media / Peer Workflow
     //--------------------------------------------------
+
+    /**
+     * Persists a bounded non-track media signal through this service's single
+     * participant/session client epoch and poll owner.
+     */
+    sendExternalSignal(media, toId, type, data) {
+
+        if (this.#lifecycle.isDestroyed()) {
+            return Promise.resolve(Object.freeze({ status: "destroyed" }));
+        }
+
+        const recipientId = Number(toId);
+        if (media !== "avatar"
+            || !recipientId
+            || recipientId === this.#localParticipantId()
+            || !["offer", "answer", "ice"].includes(String(type || ""))
+            || !data
+            || typeof data !== "object") {
+            return Promise.reject(new Error("Invalid external media signal."));
+        }
+
+        return this.#context?.apiPost?.(
+            "/api/media_signal.php",
+            {
+                action: "signal",
+                media,
+                session_id: this.#config()?.sessionId,
+                participant_id: this.#config()?.myParticipantId,
+                client_epoch: this.#clientEpoch,
+                to_id: recipientId,
+                join_token: this.#config()?.myJoinToken,
+                type,
+                data
+            }
+        ) ?? Promise.reject(new Error("Media signaling is unavailable."));
+
+    }
+
+    getClientEpoch() {
+
+        return this.#clientEpoch;
+
+    }
 
     /**
      * Starts or restarts media signaling polling.
@@ -1402,6 +1479,15 @@ export class VoiceMediaService {
                     data.client_epoch === this.#clientEpoch
                 );
 
+            if (data?.voice_context) {
+
+                this.#voiceContext = Object.freeze({
+                    type: data.voice_context.type === "private-voice" ? "private-voice" : "room",
+                    publicId: data.voice_context.public_id || null
+                });
+
+            }
+
             this.#renderVoiceList(
                 data?.voice_participants || []
             );
@@ -1841,7 +1927,8 @@ export class VoiceMediaService {
 
             });
 
-            this.#muted = false;
+            this.#muted = Boolean(this.#context?.initialMuted?.());
+            if (audioTrack) audioTrack.enabled = !this.#muted;
             this.#deafened = false;
             this.#speaking = false;
             this.#recordLifecycleTransition(
@@ -1867,7 +1954,9 @@ export class VoiceMediaService {
                     session_id: this.#config()?.sessionId,
                     participant_id: this.#config()?.myParticipantId,
                     client_epoch: this.#clientEpoch,
-                    join_token: this.#config()?.myJoinToken
+                    join_token: this.#config()?.myJoinToken,
+                    voice_context: this.#voiceContext.type,
+                    private_voice_chat_id: this.#voiceContext.publicId
                 }
             );
 
@@ -2690,7 +2779,7 @@ export class VoiceMediaService {
 
     }
 
-    #localMediaTracks() {
+    #localMediaTracks(remoteParticipantId = null) {
 
         const webcamStream =
             this.#webcamStream();
@@ -2699,15 +2788,17 @@ export class VoiceMediaService {
 
             ...(this.#voiceStream ? this.#voiceStream.getAudioTracks() : []),
 
-            ...(webcamStream ? webcamStream.getVideoTracks() : [])
+            ...(webcamStream && (remoteParticipantId === null || this.#context?.shouldSendWebcamTo?.(remoteParticipantId) !== false)
+                ? webcamStream.getVideoTracks()
+                : [])
 
         ].filter(track => track.readyState !== "ended");
 
     }
 
-    #localMediaTrackByKind(kind) {
+    #localMediaTrackByKind(kind, remoteParticipantId = null) {
 
-        return this.#localMediaTracks().find(track =>
+        return this.#localMediaTracks(remoteParticipantId).find(track =>
             track.kind === kind
         ) || null;
 
@@ -2825,6 +2916,9 @@ export class VoiceMediaService {
         const transceivers =
             pc.__voiceTransceivers || null;
 
+        const remoteParticipantId =
+            Number(pc.__voiceRemoteParticipantId);
+
         if (!transceivers) {
 
             throw new VoiceNegotiationError(
@@ -2840,13 +2934,13 @@ export class VoiceMediaService {
             await this.#syncTransceiverTrack(
                 pc,
                 "audio",
-                this.#localMediaTrackByKind("audio")
+                this.#localMediaTrackByKind("audio", remoteParticipantId)
             );
 
             await this.#syncTransceiverTrack(
                 pc,
                 "video",
-                this.#localMediaTrackByKind("video")
+                this.#localMediaTrackByKind("video", remoteParticipantId)
             );
 
             return;
@@ -2854,7 +2948,7 @@ export class VoiceMediaService {
         }
 
         const desired =
-            this.#localMediaTracks();
+            this.#localMediaTracks(remoteParticipantId);
 
         for (const track of desired) {
 
@@ -5708,7 +5802,7 @@ export class VoiceMediaService {
                     "signal",
 
                 media:
-                    this.#signalMedia(),
+                    this.#signalMedia(toId),
 
                 session_id:
                     this.#config()?.sessionId,
@@ -6122,6 +6216,17 @@ export class VoiceMediaService {
         if (!from || from === Number(this.#config()?.myParticipantId)) {
 
             return SIGNAL_OUTCOME.CONSUMED;
+
+        }
+
+        if (signal.media === "avatar") {
+
+            const handled =
+                await this.#context?.handleAvatarSignal?.(signal);
+
+            return handled === true
+                ? SIGNAL_OUTCOME.CONSUMED
+                : SIGNAL_OUTCOME.TERMINAL_INVALID;
 
         }
 
@@ -6643,9 +6748,12 @@ export class VoiceMediaService {
 
     }
 
-    #signalMedia() {
+    #signalMedia(remoteParticipantId = null) {
 
-        return this.#webcamStream() ? "webcam" : "voice";
+        return this.#webcamStream()
+            && (remoteParticipantId === null || this.#context?.shouldSendWebcamTo?.(remoteParticipantId) !== false)
+            ? "webcam"
+            : "voice";
 
     }
 

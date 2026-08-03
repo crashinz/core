@@ -58,6 +58,7 @@ let runtimeRequestClient = null;
 let runtimeIssueCaptureService = null;
 let gesturePresentation = null;
 let gestureCatalogController = null;
+let p2pTransferService = null;
 let gestureCatalogBroadcastChannel = null;
 let GestureCatalogControllerClass = null;
 const messageProtectionPending = new Set();
@@ -65,6 +66,8 @@ const messageProtectionContextCache = new Map();
 const runtimeRequestAbortController = new AbortController();
 function stopRoomForDocumentExit(reason) {
   roomExitInProgress = true;
+  avatarRuntime?.p2pAvatar?.clearAll(reason);
+  p2pTransferService?.destroy(reason);
   chatRuntime?.poll?.stop();
   if (chatRuntimeCore?.state === 'started') chatRuntimeCore.stop();
   runtimeRequestAbortController.abort(reason);
@@ -123,6 +126,18 @@ const voiceSideSection = document.getElementById('voice-side-section');
 const voiceTitleEl = document.getElementById('voice-title');
 const voiceListEl = document.getElementById('voice-list');
 const voiceCountLabel = document.getElementById('voice-count-label');
+const voiceTransmissionHold = document.getElementById('voice-transmission-hold');
+const voiceTransmissionStatus = document.getElementById('voice-transmission-status');
+const privateVoiceOpen = document.getElementById('private-voice-open');
+const privateVoiceModal = document.getElementById('private-voice-modal');
+const privateVoiceContent = document.getElementById('private-voice-content');
+const privateVoiceStatus = document.getElementById('private-voice-status');
+const privateVoicePolicyNote = document.getElementById('private-voice-policy-note');
+const webcamAudienceModal = document.getElementById('webcam-audience-modal');
+const webcamAudienceForm = document.getElementById('webcam-audience-form');
+const webcamAudiencePeople = document.getElementById('webcam-audience-people');
+const webcamAudiencePersonList = document.getElementById('webcam-audience-person-list');
+const webcamAudienceStatus = document.getElementById('webcam-audience-status');
 const ctxMenu = document.getElementById('ctx-menu');
 const ctxInteract = document.getElementById('ctx-interact');
 const ctxLapDance = document.getElementById('ctx-lap-dance');
@@ -149,6 +164,26 @@ const gestureDeleteConfirm = document.getElementById('gesture-delete-confirm');
 const emojiGrid = document.getElementById('emoji-grid');
 const attachMenu = document.getElementById('attach-menu');
 const chatFileInput = document.getElementById('chat-file-input');
+const sharedAttachmentsModal = document.getElementById('shared-attachments-modal');
+const sharedAttachmentsList = document.getElementById('shared-attachments-list');
+const p2pTransferComposeModal = document.getElementById('p2p-transfer-compose-modal');
+const p2pTransferComposeForm = document.getElementById('p2p-transfer-compose-form');
+const p2pTransferOfferModal = document.getElementById('p2p-transfer-offer-modal');
+const p2pTransferStatusDrawer = document.getElementById('p2p-transfer-status-drawer');
+const transfersButton = document.getElementById('transfers-button');
+const transfersTray = document.getElementById('transfers-tray');
+const transfersTrayClose = document.getElementById('transfers-tray-close');
+const transfersCount = document.getElementById('transfers-count');
+let p2pTransferTargetParticipantId = null;
+let p2pTransferIncomingOffer = null;
+let p2pTransferPreviewUrl = null;
+let p2pTransferSelectedFiles = [];
+let p2pTransferPreparedAvatar = null;
+let p2pTransferOfferStorageReady = false;
+let sharedAttachmentsView = 'room';
+let transferModalReturnFocus = null;
+let transferOfferReturnFocus = null;
+const transferGestureCatalog = new Map();
 const replyDraftEl = document.getElementById('reply-draft');
 const replyDraftAuthorEl = document.getElementById('reply-draft-author');
 const replyDraftPreviewEl = document.getElementById('reply-draft-preview');
@@ -178,6 +213,7 @@ const ctxWebcamReceive = document.getElementById('ctx-webcam-receive');
 const ctxAvatarVisibility = document.getElementById('ctx-avatar-visibility');
 const ctxAvatarUserVisibility = document.getElementById('ctx-avatar-user-visibility');
 const ctxGestureSenderVisibility = document.getElementById('ctx-gesture-sender-visibility');
+const ctxSendFileGesture = document.getElementById('ctx-send-file-gesture');
 const ctxAuras = document.getElementById('ctx-auras');
 const ctxOrientationWrap = document.getElementById('ctx-orientation-wrap');
 const ctxOrientation = document.getElementById('ctx-orientation');
@@ -248,6 +284,10 @@ let webcamStream = null;
 let webcamIntent = false;
 let webcamAcquisitionState = 'idle';
 let webcamOperationGeneration = 0;
+let confirmedWebcamAudience = null;
+let webcamAudienceDecision = null;
+let webcamAudienceReturnFocus = null;
+let privateVoiceReturnFocus = null;
 const pendingRemoteVideoStreams = new Map();
 const AVATAR_STAGE_SIZE = 150;
 const blockedUserIds = new Set();
@@ -289,7 +329,7 @@ const EMOJI_OPTIONS = [
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
@@ -304,6 +344,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/core/runtime-issue-capture-service.js')),
     import(appUrl('/assets/js/runtime/gesture/gesture-presentation-service.js')),
     import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js')),
+    import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js')),
   ]);
 
   if (!runtimeDiagnosticsInstallation) {
@@ -360,6 +401,7 @@ async function initializeAvatarRuntime() {
     },
   });
   GestureCatalogControllerClass = GestureCatalogController;
+  p2pTransferService = new P2PTransferService();
 
   chatRuntimeCore = new Core();
   chatRuntimeCore.registerService('runtime-diagnostics', runtimeDiagnostics);
@@ -390,6 +432,8 @@ async function initializeAvatarRuntime() {
   configureAvatarDragController();
   configureAvatarAura();
   configureAvatarVisibility();
+  configureP2PAvatarRuntime();
+  configureP2PTransferRuntime();
   configureParticipantActionCatalog();
   configureChatMessageRenderer();
   configureChatPrivateChats();
@@ -653,7 +697,11 @@ function configureAvatarAura() {
 function configureAvatarVisibility() {
   avatarRuntime?.visibility?.configure({
     mutate(body) {
-      return apiPost('/api/avatar_visibility_preferences.php', body);
+      return apiPost('/api/avatar_visibility_preferences.php', {
+        ...body,
+        session_id: cfg?.sessionId,
+        join_token: cfg?.myJoinToken,
+      });
     },
     onMutationResult(result) {
       applyRevealedAvatarSources(result?.revealedAvatars || []);
@@ -695,6 +743,15 @@ function configureParticipantActionCatalog() {
     getWebcamPolicy: participant => webcamViewerPolicyFor(participant),
     isBlocked: isUserBlocked,
     webcamAllowed: webcamUseAllowed,
+    getTransferPolicy: () => ({
+      effectiveEnabled: Boolean(
+        cfg?.p2pTransferPolicy?.effectiveEnabled
+        || (cfg?.serverMediaPolicy?.serverAttachmentsEnabled && ['server-only', 'both'].includes(cfg?.serverMediaPolicy?.fileMode))
+        || ['server-only', 'both'].includes(cfg?.serverMediaPolicy?.sendGestureMode)
+      ),
+      filesEnabled: Boolean(cfg?.p2pTransferPolicy?.filesEnabled || (cfg?.serverMediaPolicy?.serverAttachmentsEnabled && ['server-only', 'both'].includes(cfg?.serverMediaPolicy?.fileMode))),
+      sendGestureEnabled: Boolean(cfg?.p2pTransferPolicy?.sendGestureEnabled || ['server-only', 'both'].includes(cfg?.serverMediaPolicy?.sendGestureMode)),
+    }),
     getAvatarInteractionActions(participant) {
       return avatarRuntime?.dances?.participantActions(participant) || [];
     },
@@ -729,6 +786,110 @@ function configureChatMessageRenderer() {
     openParticipantActionMenu: openAvatarContextMenu,
     openMemberProfile,
     applyReaction,
+  });
+}
+
+function configureP2PTransferRuntime() {
+  p2pTransferService?.configure({
+    window,
+    setInterval: window.setInterval.bind(window),
+    clearInterval: window.clearInterval.bind(window),
+    getConfig: () => cfg,
+    getPolicy: () => cfg?.p2pTransferPolicy || {},
+    getClientEpoch: () => voiceRuntime?.media?.getClientEpoch?.() || '',
+    apiPost,
+    apiGet(url) {
+      return runtimeRequestClient.getJson(url, {
+        operation: 'p2p-transfer-poll',
+        endpointCategory: 'p2p-transfer',
+        cache: 'no-store',
+      });
+    },
+    async confirmDirectToDisk(offer) {
+      if (!document.getElementById('p2p-transfer-direct-disk')?.checked) return false;
+      await p2pTransferService.prepareDirectToDisk(offer);
+      return true;
+    },
+    onReselectRequired(offer) {
+      renderP2PTransferStatus({offer, state: 'resume-source-required', detail: 'Choose the exact original file or folder again.'});
+      openTransfersTray();
+    },
+    onIncomingOffer: openIncomingTransferOffer,
+    onPreview: renderIncomingTransferPreview,
+    onStatus: renderP2PTransferStatus,
+    onReceived: receiveP2PTransfer,
+  });
+}
+
+function configureP2PAvatarRuntime() {
+  avatarRuntime?.p2pAvatar?.configure({
+    window,
+    fetch(url, options = {}) {
+      return window.fetch(appUrl(url), options);
+    },
+    getConfig: () => cfg,
+    sendSignal(media, participantId, type, data) {
+      return voiceRuntime?.media?.sendExternalSignal(media, participantId, type, data);
+    },
+    authorizeSource(authorization) {
+      return apiPost('/api/p2p_avatar.php', {
+        action: 'authorize_source',
+        session_id: cfg?.sessionId,
+        participant_id: cfg?.myParticipantId,
+        join_token: cfg?.myJoinToken,
+        authorization,
+      });
+    },
+    refreshAuthorization(targetParticipantId) {
+      return apiPost('/api/p2p_avatar.php', {
+        action: 'authorize_viewer',
+        session_id: cfg?.sessionId,
+        participant_id: cfg?.myParticipantId,
+        join_token: cfg?.myJoinToken,
+        target_participant_id: Number(targetParticipantId),
+      });
+    },
+    onAuthorization(participantId, projection) {
+      const person = participants.get(Number(participantId));
+      if (!person) return;
+      participants.update(Number(participantId), {
+        p2p_avatar: projection,
+        avatar_delivery: 'p2p-prefetch',
+      });
+    },
+    onAvatarReady(participantId, objectUrl, identity) {
+      const person = participants.get(Number(participantId));
+      if (!person || String(person?.p2p_avatar?.identity || '') !== String(identity)) return false;
+      participants.update(Number(participantId), {
+        avatar_path: null,
+        avatar_url: objectUrl,
+        p2p_avatar_object_identity: identity,
+        avatar_version: Date.now(),
+      });
+      renderParticipant(person, { animateJoin: false });
+      renderActiveChat();
+      return true;
+    },
+    onAvatarCleared(participantId, identity, reason) {
+      const person = participants.get(Number(participantId));
+      if (!person || String(person.p2p_avatar_object_identity || '') !== String(identity)) return;
+      participants.update(Number(participantId), {
+        avatar_path: null,
+        avatar_url: null,
+        p2p_avatar_object_identity: null,
+        avatar_version: Date.now(),
+      });
+      if (!roomExitInProgress && reason !== 'participant-removed' && reason !== 'service-destroyed') {
+        renderParticipant(person, { animateJoin: false });
+        renderActiveChat();
+      }
+    },
+    isHidden: participant => avatarVisibilityFor(participant).hidden,
+    isBlocked: participant => isUserBlocked(participant?.user_id),
+    recordLifecycle(entry = {}) {
+      recordRuntimeDiagnostic('avatarP2P', entry.event || 'p2p-avatar-lifecycle', entry);
+    },
+    warn: warnRuntimeRequest,
   });
 }
 
@@ -1374,49 +1535,226 @@ async function sendProtectedTextMessage(content, chatKey) {
   return message;
 }
 
+const MESSAGE_PROTECTION_MODE_LABELS = Object.freeze({
+  standard: 'Standard',
+  'server-encrypted': 'Encrypted on this server',
+  'e2ee-private': 'End-to-end encrypted',
+});
+const messageProtectionDialogState = {
+  busy: false,
+  chatKey: null,
+  conversation: null,
+  policy: null,
+  returnFocus: null,
+};
+
+function messageProtectionModeLabel(mode) {
+  return MESSAGE_PROTECTION_MODE_LABELS[String(mode || '')] || 'Unknown';
+}
+
+function messageProtectionDialogElements() {
+  const modal = document.getElementById('message-protection-dialog');
+  return {
+    modal,
+    form: document.getElementById('message-protection-form'),
+    choices: document.getElementById('message-protection-choices'),
+    availability: document.getElementById('message-protection-availability'),
+    note: document.getElementById('message-protection-note'),
+    impact: document.getElementById('message-protection-impact'),
+    confirmation: document.getElementById('message-protection-e2ee-confirmation'),
+    confirmationInput: document.getElementById('message-protection-e2ee-confirm'),
+    status: document.getElementById('message-protection-status'),
+    cancel: document.getElementById('message-protection-cancel'),
+    submit: document.getElementById('message-protection-submit'),
+  };
+}
+
+function messageProtectionSetDialogStatus(message = '', state = '') {
+  const status = messageProtectionDialogElements().status;
+  if (!status) return;
+  status.textContent = message;
+  status.className = `admin-form-status${state ? ` ${state}` : ''}`;
+}
+
+function messageProtectionSelectedMode() {
+  return document.querySelector('input[name="message_protection_mode"]:checked')?.value || '';
+}
+
+function syncMessageProtectionDialog() {
+  const elements = messageProtectionDialogElements();
+  if (!elements.form || !messageProtectionDialogState.policy) return;
+  const requested = messageProtectionSelectedMode();
+  const e2eeSelected = requested === 'e2ee-private';
+  elements.confirmation.hidden = !e2eeSelected;
+  elements.confirmationInput.required = e2eeSelected;
+  if (!e2eeSelected) elements.confirmationInput.checked = false;
+
+  const current = String(messageProtectionDialogState.policy.mode || 'standard');
+  if (requested === 'e2ee-private') {
+    elements.impact.textContent = 'End-to-end encryption applies to new messages. Earlier messages keep their existing protection.';
+  } else if (current === 'e2ee-private') {
+    elements.impact.textContent = 'New messages will use the selected server-readable protection. Earlier end-to-end encrypted messages remain unchanged.';
+  } else if (current === 'server-encrypted' && requested === 'standard') {
+    elements.impact.textContent = 'Eligible earlier messages are changed only through the existing verified conversion. Their protection remains truthful throughout.';
+  } else {
+    elements.impact.textContent = 'Earlier messages keep their existing protection unless the existing verified conversion applies.';
+  }
+
+  const valid = requested !== ''
+    && requested !== current
+    && elements.note.value.trim() !== ''
+    && (!e2eeSelected || elements.confirmationInput.checked);
+  elements.submit.disabled = messageProtectionDialogState.busy || !valid;
+  elements.cancel.disabled = messageProtectionDialogState.busy;
+  elements.choices.disabled = messageProtectionDialogState.busy;
+  elements.note.disabled = messageProtectionDialogState.busy;
+}
+
+function closeMessageProtectionDialog({ restoreFocus = true } = {}) {
+  if (messageProtectionDialogState.busy) return;
+  const elements = messageProtectionDialogElements();
+  elements.modal?.classList.remove('open');
+  elements.modal?.setAttribute('aria-hidden', 'true');
+  elements.form?.reset();
+  messageProtectionSetDialogStatus();
+  const returnFocus = messageProtectionDialogState.returnFocus;
+  messageProtectionDialogState.chatKey = null;
+  messageProtectionDialogState.conversation = null;
+  messageProtectionDialogState.policy = null;
+  messageProtectionDialogState.returnFocus = null;
+  if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+}
+
 async function changeMessageProtectionMode() {
   const chatKey = activeChatKey();
   const conversation = messageProtectionConversation(chatKey);
   if (!conversation) return;
   const current = await messageProtectionFetchContext(conversation, '', true);
   const policy = current.conversation?.policy;
-  if (!policy) throw new Error('Message-protection policy is unavailable.');
-  const requested = String(prompt(
-    `Current mode: ${policy.mode}\nEnter standard, server-encrypted, or e2ee-private:`,
-    policy.mode
-  ) || '').trim();
-  if (!requested || requested === policy.mode) return;
-  const explanation = String(prompt(
-    'Explain why this mode is changing. Old content keeps its truthful per-message protection state until verified conversion completes:',
-    ''
-  ) || '').trim();
-  if (!explanation) return;
-  const warning = requested === 'e2ee-private'
-    ? 'The server and staff cannot recover E2EE history. Losing every trusted device and the exact Private Chat Recovery Phrase can make history unrecoverable.'
-    : 'Changing to a server-readable mode does not silently decrypt E2EE history. Existing rows retain their truthful per-message mode.';
-  if (!confirm(`${warning}\n\nContinue with this explicit mode change?`)) return;
-  let result = await apiPost('/api/message_protection.php', {
-    action: 'request_transition',
-    requestId: crypto.randomUUID(),
-    conversationKind: conversation.kind,
-    conversationKey: conversation.key,
-    toMode: requested,
-    explanation,
-    confirmed: true,
-    expectedRevision: Number(policy.revision),
+  if (!policy) throw new Error('Message protection is unavailable for this conversation.');
+
+  const elements = messageProtectionDialogElements();
+  messageProtectionDialogState.busy = false;
+  messageProtectionDialogState.chatKey = chatKey;
+  messageProtectionDialogState.conversation = conversation;
+  messageProtectionDialogState.policy = policy;
+  messageProtectionDialogState.returnFocus = document.activeElement;
+  elements.form.reset();
+  elements.note.value = '';
+  elements.availability.hidden = true;
+  elements.availability.textContent = '';
+  elements.form.querySelectorAll('input[name="message_protection_mode"]').forEach(input => {
+    input.disabled = false;
+    input.checked = input.value === policy.mode;
   });
-  let transition = result.transition;
-  while (['preparing', 'migrating', 'validating', 'interrupted'].includes(transition?.status)) {
-    result = await apiPost('/api/message_protection.php', {
-      action: 'continue_transition',
-      requestId: transition.requestId,
-      batchSize: 100,
-    });
-    transition = result.conversation?.transition;
+  const e2eeChoice = elements.form.querySelector('input[name="message_protection_mode"][value="e2ee-private"]');
+  if (!['dm', 'link'].includes(conversation.kind)) {
+    e2eeChoice.disabled = true;
+    elements.availability.hidden = false;
+    elements.availability.textContent = 'End-to-end encryption is available only for direct and private relationship conversations.';
   }
-  const refreshed = await messageProtectionFetchContext(conversation, '', true);
-  messageProtectionUpdatePolicy(refreshed.conversation?.policy);
-  alert(`Message protection is now ${refreshed.conversation?.policy?.mode || requested}.`);
+  messageProtectionSetDialogStatus();
+  elements.modal.classList.add('open');
+  elements.modal.setAttribute('aria-hidden', 'false');
+  syncMessageProtectionDialog();
+  const selected = elements.form.querySelector('input[name="message_protection_mode"]:checked');
+  (selected || elements.form.querySelector('input[name="message_protection_mode"]:not(:disabled)'))?.focus({ preventScroll: true });
+}
+
+async function submitMessageProtectionChange(event) {
+  event.preventDefault();
+  if (messageProtectionDialogState.busy) return;
+  const elements = messageProtectionDialogElements();
+  const conversation = messageProtectionDialogState.conversation;
+  const policy = messageProtectionDialogState.policy;
+  const requested = messageProtectionSelectedMode();
+  const explanation = elements.note.value.trim();
+  if (!conversation || !policy || requested === '' || requested === policy.mode || explanation === '') {
+    messageProtectionSetDialogStatus('Choose a different protection option and enter a private note.', 'error');
+    elements.status.focus({ preventScroll: true });
+    return;
+  }
+  if (requested === 'e2ee-private' && !elements.confirmationInput.checked) {
+    messageProtectionSetDialogStatus('Confirm the End-to-End Encryption statement to continue.', 'error');
+    elements.confirmationInput.focus({ preventScroll: true });
+    return;
+  }
+
+  messageProtectionDialogState.busy = true;
+  messageProtectionSetDialogStatus('Changing message protection…', 'working');
+  syncMessageProtectionDialog();
+  try {
+    let result = await apiPost('/api/message_protection.php', {
+      action: 'request_transition',
+      requestId: crypto.randomUUID(),
+      conversationKind: conversation.kind,
+      conversationKey: conversation.key,
+      toMode: requested,
+      explanation,
+      confirmed: true,
+      expectedRevision: Number(policy.revision),
+    });
+    let transition = result.transition;
+    while (['preparing', 'migrating', 'validating', 'interrupted'].includes(transition?.status)) {
+      result = await apiPost('/api/message_protection.php', {
+        action: 'continue_transition',
+        requestId: transition.requestId,
+        batchSize: 100,
+      });
+      transition = result.conversation?.transition;
+    }
+    const refreshed = await messageProtectionFetchContext(conversation, '', true);
+    messageProtectionUpdatePolicy(refreshed.conversation?.policy);
+    messageProtectionDialogState.busy = false;
+    closeMessageProtectionDialog({ restoreFocus: true });
+  } catch (error) {
+    messageProtectionDialogState.busy = false;
+    messageProtectionSetDialogStatus(error?.message || 'Message protection could not change.', 'error');
+    syncMessageProtectionDialog();
+    elements.status.focus({ preventScroll: true });
+  }
+}
+
+function messageProtectionChatKeyForConversation(kind, key) {
+  if (kind === 'room' || kind === 'community') return kind;
+  if (kind === 'dm') {
+    const users = String(key || '').split(':').slice(1).map(Number);
+    const peer = users.find(userId => userId > 0 && userId !== Number(cfg?.myUserId || 0));
+    return peer ? `dm:${peer}` : null;
+  }
+  if (kind === 'link') {
+    const tabs = [...document.querySelectorAll('[data-chat-tab^="link:"]')];
+    const tab = tabs.find(candidate => messageProtectionConversation(candidate.dataset.chatTab)?.key === key);
+    return tab?.dataset.chatTab || null;
+  }
+  return null;
+}
+
+function handleMessageProtectionChangeEvent(event) {
+  if (event?.type !== 'message_protection_change') return false;
+  const payload = event.payload || {};
+  const kind = String(payload.conversationKind || '');
+  const key = String(payload.conversationKey || '');
+  const mode = String(payload.mode || '');
+  if (!kind || !key || !MESSAGE_PROTECTION_MODE_LABELS[mode]) return true;
+  const prefix = `${kind}:${key}:`;
+  [...messageProtectionContextCache.keys()].forEach(cacheKey => {
+    if (cacheKey.startsWith(prefix)) messageProtectionContextCache.delete(cacheKey);
+  });
+  const chatKey = messageProtectionChatKeyForConversation(kind, key);
+  if (chatKey) {
+    addMessageToChannel({
+      id: `message-protection-change-${kind}-${event.id || Date.now()}`,
+      system: true,
+      message_type: 'system',
+      content: `Message protection changed to ${messageProtectionModeLabel(mode)}.`,
+      sent_at: payload.changedAt || new Date().toISOString(),
+    }, chatKey, true);
+  }
+  messageProtectionFetchContext({ kind, key }, '', true)
+    .then(context => messageProtectionUpdatePolicy(context.conversation?.policy))
+    .catch(warnRuntimeRequest);
+  return true;
 }
 
 function syncMessageProtectionControl() {
@@ -1441,11 +1779,41 @@ function syncMessageProtectionControl() {
   }
   const policy = messageProtectionPolicyFor(activeChatKey());
   button.hidden = !policy;
-  button.textContent = policy ? `Protection: ${policy.mode}` : 'Protection';
+  button.textContent = policy ? `Protection: ${messageProtectionModeLabel(policy.mode)}` : 'Protection';
   button.setAttribute('aria-label', policy
-    ? `Change message protection. Current mode ${policy.mode}.`
+    ? `Change message protection. Current mode ${messageProtectionModeLabel(policy.mode)}.`
     : 'Message protection unavailable.');
 }
+
+const messageProtectionDialog = messageProtectionDialogElements();
+messageProtectionDialog.form?.addEventListener('submit', submitMessageProtectionChange);
+messageProtectionDialog.cancel?.addEventListener('click', () => closeMessageProtectionDialog());
+messageProtectionDialog.form?.addEventListener('change', syncMessageProtectionDialog);
+messageProtectionDialog.note?.addEventListener('input', () => {
+  if (!messageProtectionDialogState.busy) messageProtectionSetDialogStatus();
+  syncMessageProtectionDialog();
+});
+messageProtectionDialog.modal?.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    if (!messageProtectionDialogState.busy) closeMessageProtectionDialog();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = [...messageProtectionDialog.modal.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter(element => !element.hidden && !element.closest('[hidden]') && element.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
 
 function configureChatMediaSend() {
   chatRuntime?.mediaSend?.configure({
@@ -1592,10 +1960,14 @@ function configureRoomEventRouter() {
         localCaptureAuthoritative: localCaptureActive,
       });
 
-      const nextAvatarPath = payload.avatar_path ?? person.avatar_path;
-      const nextAvatarUrl = payload.avatar_url ?? person.avatar_url;
+      const p2pProjection = Number(payload.participant_id) !== Number(cfg.myParticipantId)
+        && ['p2p-prefetch', 'built-in-generated-fallback'].includes(String(payload.avatar_delivery || ''));
+      const nextAvatarPath = p2pProjection ? null : (payload.avatar_path ?? person.avatar_path);
+      const nextAvatarUrl = p2pProjection ? null : (payload.avatar_url ?? person.avatar_url);
       const avatarSourceChanged = nextAvatarPath !== person.avatar_path
-        || nextAvatarUrl !== person.avatar_url;
+        || nextAvatarUrl !== person.avatar_url
+        || (p2pProjection
+          && String(payload?.p2p_avatar?.identity || '') !== String(person?.p2p_avatar?.identity || ''));
       const previousDimensions = avatarRenderedDimensions(person);
       const currentSizeVersion = Number(person.avatar_size_version || 1);
       const incomingSizeVersion = Number(payload.avatar_size_version || currentSizeVersion);
@@ -1633,6 +2005,11 @@ function configureRoomEventRouter() {
       participants.update(payload.participant_id, {
         avatar_path: nextAvatarPath,
         avatar_url: nextAvatarUrl,
+        ...(p2pProjection ? {
+          p2p_avatar: payload.p2p_avatar || null,
+          avatar_delivery: payload.avatar_delivery,
+          p2p_avatar_object_identity: null,
+        } : {}),
         avatar_orientation: staleOrientationProjection || payload.avatar_orientation === undefined
           ? normalizeAvatarOrientation(person.avatar_orientation)
           : normalizeAvatarOrientation(payload.avatar_orientation),
@@ -1766,6 +2143,8 @@ function configureRoomEventRouter() {
       participants.forEach(person => {
         if (Number(person.user_id) === Number(payload.blocked_user_id) || person.linked_to && Number(participants.get(person.linked_to)?.user_id) === Number(payload.blocked_user_id)) {
           avatarRuntime?.coordinator?.clearBlockedRelationship(person);
+          avatarRuntime?.p2pAvatar?.clearParticipant(person.id, 'blocked');
+          renderParticipant(person, { animateJoin: false });
         }
       });
       renderActiveChat();
@@ -1833,6 +2212,45 @@ function configureVoiceRuntime() {
     storage: window.localStorage,
     onChange: reconcileWebcamViewerPolicy,
   });
+  voiceRuntime?.privateVoice?.configure({
+    getPolicy: () => cfg?.voiceWebcamPolicy || {},
+    getConfig: () => cfg,
+    getJson(path) {
+      return runtimeRequestClient.getJson(path, {
+        operation: 'private-voice-snapshot',
+        endpointCategory: 'voice-signaling',
+      });
+    },
+    apiPost,
+    setTimeout: window.setTimeout.bind(window),
+    clearTimeout: window.clearTimeout.bind(window),
+    onSnapshot(snapshot) {
+      renderPrivateVoiceSnapshot(snapshot);
+      const activeId = String(snapshot?.activeChat?.id || '');
+      const current = voiceRuntime?.media?.getState?.()?.voiceContext || {};
+      if (!activeId && current.type === 'private-voice') {
+        selectVoiceContext({ type: 'room', publicId: null }).catch(warnRuntimeRequest);
+      }
+      if (confirmedWebcamAudience?.mode === 'private-voice') {
+        const nextHash = (snapshot?.activeChat?.members || []).map(member => Number(member.userId))
+          .filter(userId => userId !== Number(cfg?.myUserId)).sort((a, b) => a - b).join(':');
+        if (nextHash !== confirmedWebcamAudience.contextHash && (webcamIntent || webcamStream)) {
+          disableLocalWebcam('private-voice-audience-changed').catch(warnRuntimeRequest);
+        }
+      }
+    },
+    onError: warnRuntimeRequest,
+  });
+  voiceRuntime?.transmissionModes?.configure({
+    window,
+    document,
+    storage: window.localStorage,
+    holdControl: voiceTransmissionHold,
+    statusControl: voiceTransmissionStatus,
+    getMedia: () => voiceRuntime?.media,
+    getPolicy: () => cfg?.voiceWebcamPolicy || {},
+    getPreferences: () => cfg?.voiceWebcamPreferences || {},
+  });
   voiceRuntime?.media?.configure({
     window,
     navigator,
@@ -1845,6 +2263,8 @@ function configureVoiceRuntime() {
     getConfig: () => cfg,
     getParticipants: () => participants,
     getWebcamStream: () => webcamStream,
+    shouldSendWebcamTo: webcamAudienceAllowsParticipant,
+    initialMuted: () => voiceRuntime?.transmissionModes?.initialMuted?.() || false,
     shouldReceiveRemoteWebcam(participantId) {
       const person = participants.get(Number(participantId));
       return voiceRuntime?.viewerPolicy?.effectiveFor(person)?.receive !== false;
@@ -1896,6 +2316,9 @@ function configureVoiceRuntime() {
         operation: 'poll-media-signals',
         endpointCategory: 'voice-signaling',
       });
+    },
+    handleAvatarSignal(signal) {
+      return avatarRuntime?.p2pAvatar?.handleSignal(signal) || false;
     },
     recordVoiceSignalDiagnostic(entry) {
       recordRuntimeDiagnostic(
@@ -2105,9 +2528,11 @@ function configureChatPoll() {
       });
     },
     handleRoomEvent(event) {
+      if (handleMessageProtectionChangeEvent(event)) return;
       roomRuntime?.events?.routeRoomEvent(event);
     },
     handleCommunityEvent(event) {
+      if (handleMessageProtectionChangeEvent(event)) return;
       roomRuntime?.events?.routeCommunityEvent(event);
     },
     handleProjection(data) {
@@ -2134,6 +2559,13 @@ function configureChatPoll() {
         activeAdapter: String(state.activeAdapter || 'polling'),
         fallbackAdapter: String(state.fallbackAdapter || 'polling'),
         reason: String(state.reason || '').slice(0, 240),
+      });
+    },
+    onExpectedRenewal(state = {}) {
+      recordRuntimeDiagnostic('requests', 'room-event-transport-renewed', {
+        activeAdapter: 'sse',
+        expected: true,
+        retryDelay: Number(state.retryDelay || 0),
       });
     },
   });
@@ -2327,6 +2759,7 @@ function avatarUrl(p) {
   if (!p) return cfg.avatarPresets.Default;
   if (avatarVisibilityFor(p).hidden) return '';
   if (isUserBlocked(p.user_id)) return appUrl('/assets/images/baghead.png');
+  if (p.avatar_url?.startsWith('blob:')) return p.avatar_url;
   if (p.avatar_url && !p.avatar_url.startsWith('data:')) {
     const url = mediaUrl(p.avatar_url);
     return `${url}${url.includes('?') ? '&' : '?'}v=${p.avatar_version || 0}`;
@@ -3020,6 +3453,7 @@ function renderParticipant(p, options = {}) {
     });
   }
   if (options.animateJoin) runAvatarPixelEffect(merged, 'in');
+  avatarRuntime?.p2pAvatar?.reconcileParticipant(merged);
   renderPeople();
   renderLinkTabs();
 }
@@ -3034,6 +3468,7 @@ function removeParticipant(participantId, options = {}) {
   const id = Number(participantId);
   const person = participants.get(id);
   if (!person) return Promise.resolve();
+  avatarRuntime?.p2pAvatar?.clearParticipant(id, 'participant-removed');
   avatarRuntime?.coordinator?.invalidatePendingLinkChoice('participant-removed', [id]);
   participants.clearParticipantTimers(id);
   pendingRemoteVideoStreams.delete(id);
@@ -3635,7 +4070,14 @@ function clearUnread(chatKey) {
 }
 
 function switchChat(chatKey) {
-  chatNavigation().switchChat(chatKey);
+  const switched = chatNavigation().switchChat(chatKey);
+  const conversation = messageProtectionConversation(chatKey);
+  if (conversation && ['dm', 'link'].includes(conversation.kind)) {
+    messageProtectionFetchContext(conversation, '', true)
+      .then(context => messageProtectionUpdatePolicy(context.conversation?.policy))
+      .catch(warnRuntimeRequest);
+  }
+  return switched;
 }
 
 document.querySelectorAll('.chat-tab[data-chat-tab]').forEach(tab => {
@@ -4651,6 +5093,7 @@ document.querySelectorAll('[data-room-navigation="utility"]').forEach(link => {
 });
 document.getElementById('logout-link')?.addEventListener('click', async e => {
   e.preventDefault();
+  await p2pTransferService?.explicitLogout?.().catch(() => {});
   await leaveRoomWithLocalExit(null, () => {
     document.getElementById('logout-form')?.requestSubmit();
   });
@@ -5190,6 +5633,9 @@ function syncParticipantActionMenu(participant, isOwn = false) {
   syncParticipantActionButton(ctxLapBounce, actions.get('avatar.lap-bounce'));
   syncParticipantActionButton(document.getElementById('ctx-block'), block, !isOwn && !block?.active);
   syncParticipantActionButton(document.getElementById('ctx-unblock'), block, !isOwn && Boolean(block?.active));
+  syncParticipantActionButton(ctxSendFileGesture, actions.get('transfer.send-file-or-gesture'), !isOwn);
+  const transferDivider = document.getElementById('ctx-transfer-divider');
+  if (transferDivider) transferDivider.style.display = !isOwn && actions.get('transfer.send-file-or-gesture')?.applicable !== false ? 'block' : 'none';
 }
 
 function closeContextMenu(options = {}) {
@@ -6481,6 +6927,16 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (webcamAudienceModal?.classList.contains('open')) {
+      e.preventDefault();
+      closeWebcamAudienceChooser(false);
+      return;
+    }
+    if (privateVoiceModal?.classList.contains('open')) {
+      e.preventDefault();
+      closePrivateVoiceModal();
+      return;
+    }
     if (!document.getElementById('gesture-action-menu')?.hidden) return;
     const restoreAvatarFocus = ctxMenu.classList.contains('visible');
     closeFloatingShells(['game', ...(restoreAvatarFocus ? ['context'] : [])]);
@@ -7007,7 +7463,974 @@ async function setBlockState(participant, blocked) {
     join_token: cfg.myJoinToken,
     target_participant_id: participant.id,
   });
+  if (!blocked) renderParticipant(participant, { animateJoin: false });
 }
+
+function setTransferComposeStatus(message, type = '') {
+  const status = document.getElementById('p2p-transfer-compose-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.className = `admin-form-status ${type}`.trim();
+}
+
+function transferPolicyAllowsServer(kind) {
+  const policy = cfg?.serverMediaPolicy || {};
+  if (kind === 'avatar') return false;
+  if (kind === 'gesture') return ['server-only', 'both'].includes(policy.sendGestureMode);
+  return policy.serverAttachmentsEnabled && ['server-only', 'both'].includes(policy.fileMode);
+}
+
+function transferPolicyAllowsP2P(kind) {
+  const policy = cfg?.p2pTransferPolicy || {};
+  return kind === 'gesture' ? policy.sendGestureEnabled !== false : policy.filesEnabled !== false;
+}
+
+function syncTransferComposeChoices() {
+  const kindControls = [...(p2pTransferComposeForm?.querySelectorAll('[name="transfer_kind"]') || [])];
+  for (const control of kindControls) {
+    const available = transferPolicyAllowsP2P(control.value) || transferPolicyAllowsServer(control.value);
+    control.disabled = !available;
+    if (control.closest('label')) control.closest('label').hidden = !available;
+  }
+  let kind = p2pTransferComposeForm?.elements?.transfer_kind?.value || 'file';
+  const selectedKind = kindControls.find(control => control.value === kind);
+  if (!selectedKind || selectedKind.disabled) {
+    const nextKind = kindControls.find(control => !control.disabled);
+    if (nextKind) {
+      nextKind.checked = true;
+      kind = nextKind.value;
+    }
+  }
+  const fileWrap = document.getElementById('p2p-transfer-file-wrap');
+  const gestureWrap = document.getElementById('p2p-transfer-gesture-wrap');
+  const avatarWrap = document.getElementById('p2p-transfer-avatar-wrap');
+  if (fileWrap) fileWrap.hidden = kind !== 'file';
+  if (gestureWrap) gestureWrap.hidden = kind !== 'gesture';
+  if (avatarWrap) avatarWrap.hidden = kind !== 'avatar';
+  p2pTransferComposeForm?.querySelectorAll('[name="transfer_delivery"]').forEach(control => {
+    const available = control.value === 'p2p' ? transferPolicyAllowsP2P(kind) : transferPolicyAllowsServer(kind);
+    control.disabled = !available;
+    if (control.closest('label')) control.closest('label').hidden = !available;
+  });
+  const selected = p2pTransferComposeForm?.querySelector('[name="transfer_delivery"]:checked');
+  if (selected?.disabled) p2pTransferComposeForm?.querySelector('[name="transfer_delivery"]:not(:disabled)')?.click();
+  const delivery = p2pTransferComposeForm?.elements?.transfer_delivery?.value || 'p2p';
+  const warning = document.getElementById('p2p-transfer-warning');
+  const notice = document.getElementById('p2p-server-upload-notice');
+  if (warning) warning.textContent = delivery === 'p2p'
+    ? (cfg?.p2pTransferPolicy?.directWarning || 'Peer-to-peer transfer: CoreChat will attempt a direct connection to this participant. Your public IP address may be visible to them.')
+    : 'Server delivery stores an authenticated copy for the intended conversation and applies community retention and review policy.';
+  if (notice) notice.hidden = delivery !== 'server';
+}
+
+async function loadTransferGestures() {
+  const select = document.getElementById('p2p-transfer-gesture');
+  if (!select || select.dataset.loaded === '1') return;
+  const query = new URLSearchParams({session_id: cfg.sessionId, join_token: cfg.myJoinToken, page: '1', q: ''});
+  const data = await runtimeRequestClient.getJson(`/api/gestures.php?${query}`, {
+    operation: 'load-transfer-gestures',
+    endpointCategory: 'gestures',
+  });
+  transferGestureCatalog.clear();
+  for (const gesture of data.gestures || []) {
+    transferGestureCatalog.set(String(gesture.public_id || gesture.id), gesture);
+    const option = document.createElement('option');
+    option.value = String(gesture.public_id || gesture.id);
+    option.textContent = `${gesture.title || gesture.name || 'Gesture'}${gesture.mine ? ' — Yours' : ''}`;
+    select.appendChild(option);
+  }
+  select.dataset.loaded = '1';
+}
+
+function blobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('Gesture media could not be prepared.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function gestureTransferFile(gesture) {
+  const fetchMedia = async url => {
+    if (!url) return null;
+    const response = await fetch(appUrl(url), {credentials: 'same-origin', cache: 'no-store'});
+    if (!response.ok) throw new Error('Gesture media could not be prepared for direct transfer.');
+    return blobAsDataUrl(await response.blob());
+  };
+  const payload = {
+    schema: 'corechat.direct-gesture.v1',
+    title: gesture.title || gesture.name || 'Gesture',
+    text: gesture.text || '',
+    creatorCredit: gesture.creator_credit || '',
+    animation: await fetchMedia(gesture.gif_url || gesture.gif_path),
+    poster: await fetchMedia(gesture.poster_url || gesture.poster_path),
+    audio: await fetchMedia(gesture.audio_url || gesture.audio_path),
+    sourceContentSha256: gesture.content_sha256 || '',
+  };
+  const safe = String(payload.title).replace(/[^A-Za-z0-9._ -]+/g, '').trim().slice(0, 80) || 'Gesture';
+  return new File([JSON.stringify(payload)], `${safe}.corechat-gesture.json`, {type: 'application/vnd.corechat.gesture+json'});
+}
+
+function renderTransferManifest() {
+  const manifest = document.getElementById('p2p-transfer-manifest');
+  if (!manifest) return;
+  manifest.textContent = '';
+  for (const item of p2pTransferSelectedFiles) {
+    const row = document.createElement('div');
+    const name = document.createElement('span');
+    const size = document.createElement('span');
+    name.textContent = item.relativePath || item.file?.name || 'Unnamed file';
+    size.textContent = formatBytes(Number(item.file?.size || 0));
+    row.append(name, size);
+    manifest.appendChild(row);
+  }
+  if (!p2pTransferSelectedFiles.length) {
+    const empty = document.createElement('p');
+    empty.className = 'minor';
+    empty.textContent = 'No files selected.';
+    manifest.appendChild(empty);
+  }
+}
+
+function setTransferSelectedFiles(items) {
+  const selected = Array.from(items || []).filter(item => item?.file instanceof File);
+  if (selected.length > 20) throw new Error('Choose between 1 and 20 files.');
+  p2pTransferSelectedFiles = selected;
+  renderTransferManifest();
+  setTransferComposeStatus(selected.length ? `${selected.length} file${selected.length === 1 ? '' : 's'} selected.` : '');
+}
+
+async function transferFilesFromHandle(handle, parent = '') {
+  if (!handle) throw new Error('This dropped item is not available to the browser.');
+  if (handle.kind === 'file') {
+    const file = await handle.getFile();
+    return [{file, handle, relativePath: parent ? `${parent}/${file.name}` : file.name}];
+  }
+  if (handle.kind !== 'directory') throw new Error('Only files and folders can be transferred.');
+  const prefix = parent ? `${parent}/${handle.name}` : handle.name;
+  const result = [];
+  for await (const child of handle.values()) {
+    result.push(...await transferFilesFromHandle(child, prefix));
+    if (result.length > 20) throw new Error('A folder selection may contain at most 20 files.');
+  }
+  return result;
+}
+
+function legacyEntryFile(entry) {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+async function legacyDirectoryChildren(entry) {
+  const reader = entry.createReader();
+  const children = [];
+  while (true) {
+    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) break;
+    children.push(...batch);
+  }
+  return children;
+}
+
+async function transferFilesFromLegacyEntry(entry, parent = '') {
+  if (entry.isFile) {
+    const file = await legacyEntryFile(entry);
+    return [{file, handle: null, relativePath: parent ? `${parent}/${file.name}` : file.name}];
+  }
+  if (!entry.isDirectory) throw new Error('Only regular files and folders can be transferred.');
+  const prefix = parent ? `${parent}/${entry.name}` : entry.name;
+  const result = [];
+  for (const child of await legacyDirectoryChildren(entry)) {
+    result.push(...await transferFilesFromLegacyEntry(child, prefix));
+    if (result.length > 20) throw new Error('A folder selection may contain at most 20 files.');
+  }
+  return result;
+}
+
+async function transferFilesFromDrop(dataTransfer) {
+  const items = Array.from(dataTransfer?.items || []).filter(item => item.kind === 'file');
+  const selected = [];
+  for (const item of items) {
+    if (typeof item.getAsFileSystemHandle === 'function') {
+      const handle = await item.getAsFileSystemHandle();
+      selected.push(...await transferFilesFromHandle(handle));
+    } else if (typeof item.webkitGetAsEntry === 'function') {
+      const entry = item.webkitGetAsEntry();
+      if (entry) selected.push(...await transferFilesFromLegacyEntry(entry));
+    } else {
+      const file = item.getAsFile();
+      if (file) selected.push({file, handle: null, relativePath: file.name});
+    }
+    if (selected.length > 20) throw new Error('Choose between 1 and 20 files.');
+  }
+  return selected;
+}
+
+async function openP2PTransferCompose(participant, returnFocus = null) {
+  if (!participant || Number(participant.id) === Number(cfg?.myParticipantId)) return;
+  p2pTransferTargetParticipantId = Number(participant.id);
+  transferModalReturnFocus = returnFocus || document.activeElement;
+  document.getElementById('p2p-transfer-recipient-name').textContent = displayNameFor(participant) || 'participant';
+  p2pTransferComposeForm?.reset();
+  p2pTransferSelectedFiles = [];
+  p2pTransferPreparedAvatar = null;
+  const avatarInput = document.getElementById('p2p-transfer-avatar');
+  if (avatarInput) avatarInput.value = '';
+  renderTransferManifest();
+  setTransferComposeStatus('');
+  syncTransferComposeChoices();
+  p2pTransferComposeModal?.classList.add('open');
+  p2pTransferComposeModal?.setAttribute('aria-hidden', 'false');
+  const composeBox = p2pTransferComposeModal?.querySelector('.p2p-transfer-box');
+  if (composeBox) {
+    composeBox.scrollTop = 0;
+    composeBox.scrollLeft = 0;
+  }
+  await loadTransferGestures().catch(error => setTransferComposeStatus(error.message, 'error'));
+  p2pTransferComposeForm?.querySelector('input:checked')?.focus();
+}
+
+function closeP2PTransferCompose(restoreFocus = true) {
+  p2pTransferComposeModal?.classList.remove('open');
+  p2pTransferComposeModal?.setAttribute('aria-hidden', 'true');
+  p2pTransferTargetParticipantId = null;
+  if (restoreFocus && transferModalReturnFocus?.isConnected) transferModalReturnFocus.focus();
+  transferModalReturnFocus = null;
+}
+
+function transferOfferFact(term, value) {
+  const fragment = document.createDocumentFragment();
+  fragment.append(document.createElement('dt'));
+  fragment.lastChild.textContent = term;
+  const dd = document.createElement('dd');
+  dd.textContent = value;
+  fragment.appendChild(dd);
+  return fragment;
+}
+
+function clearIncomingTransferPreview() {
+  if (p2pTransferPreviewUrl) URL.revokeObjectURL(p2pTransferPreviewUrl);
+  p2pTransferPreviewUrl = null;
+  const preview = document.getElementById('p2p-transfer-offer-preview');
+  if (!preview) return;
+  preview.replaceChildren();
+  preview.hidden = true;
+}
+
+function renderIncomingTransferPreview(result = {}) {
+  const preview = document.getElementById('p2p-transfer-offer-preview');
+  if (!preview || !p2pTransferIncomingOffer || String(result.offer?.id || '') !== String(p2pTransferIncomingOffer.id || '')) return;
+  clearIncomingTransferPreview();
+  const heading = document.createElement('strong');
+  heading.textContent = 'Safe preview';
+  preview.appendChild(heading);
+  if (result.kind === 'image' && result.blob instanceof Blob) {
+    p2pTransferPreviewUrl = URL.createObjectURL(result.blob);
+    const image = document.createElement('img');
+    image.className = 'p2p-transfer-preview-image';
+    image.src = p2pTransferPreviewUrl;
+    image.alt = result.text ? `Safe preview: ${result.text}` : 'Safe transfer preview';
+    preview.appendChild(image);
+  } else {
+    const text = document.createElement('p');
+    text.textContent = String(result.text || 'No visual preview is available. Review the transfer details before accepting.');
+    preview.appendChild(text);
+  }
+  preview.hidden = false;
+  const previewRequest = document.getElementById('p2p-transfer-preview-request');
+  if (previewRequest) {
+    previewRequest.hidden = true;
+    previewRequest.disabled = false;
+    previewRequest.textContent = 'Request safe preview';
+  }
+  const status = document.getElementById('p2p-transfer-offer-status');
+  if (status) status.textContent = 'Safe preview is ready. Accept or decline remains separate.';
+}
+
+async function openIncomingTransferOffer(offer) {
+  p2pTransferIncomingOffer = offer;
+  p2pTransferOfferStorageReady = false;
+  clearIncomingTransferPreview();
+  transferOfferReturnFocus = document.activeElement;
+  const facts = document.getElementById('p2p-transfer-offer-facts');
+  if (facts) {
+    facts.textContent = '';
+    const manifestNames = Array.isArray(offer.manifest?.files)
+      ? offer.manifest.files.map(file => file.safeName || 'Unnamed file').join(', ')
+      : (offer.safeName || 'Unnamed file');
+    facts.append(
+      transferOfferFact('Sender', offer.sender?.name || 'Participant'),
+      transferOfferFact('Transfer', offer.kind === 'avatar' ? 'Avatar' : (offer.kind === 'gesture' ? 'Gesture' : 'File')),
+      transferOfferFact(offer.kind === 'avatar' ? 'Avatar' : (offer.fileCount > 1 ? 'Files' : 'File'), manifestNames),
+      transferOfferFact('Count', String(Number(offer.fileCount || 1))),
+      transferOfferFact('Size', formatBytes(Number(offer.size || 0))),
+      transferOfferFact('Declared type', offer.declaredMime || 'application/octet-stream'),
+      transferOfferFact('Detected category', offer.detectedType || 'other'),
+      transferOfferFact('Preview', offer.previewAvailable ? 'Available after explicit request' : 'Metadata only'),
+      transferOfferFact('Delivery', offer.deliveryMethod === 'relay-only' ? 'Relay-only' : 'Direct first'),
+      transferOfferFact('Risk', offer.riskClass || 'Cannot be inspected'),
+      transferOfferFact('Safety', offer.riskDetail || 'Not scanned for malware')
+    );
+    if (offer.archive?.encrypted) facts.append(transferOfferFact('Archive', 'Encrypted archive — contents cannot be inspected.'));
+    else if (offer.archive?.activeContent || offer.archive?.suspiciousPaths || offer.archive?.extremeRatio) {
+      facts.append(transferOfferFact('Archive warning', 'Contains active content, suspicious paths, or an extreme compression ratio.'));
+    }
+  }
+  const warning = document.getElementById('p2p-transfer-offer-warning');
+  if (warning) warning.textContent = offer.warning || '';
+  const status = document.getElementById('p2p-transfer-offer-status');
+  if (status) status.textContent = 'Checking browser storage for this transfer…';
+  const directWrap = document.getElementById('p2p-transfer-direct-disk-wrap');
+  const directChoice = document.getElementById('p2p-transfer-direct-disk');
+  if (directWrap) directWrap.hidden = true;
+  if (directChoice) directChoice.checked = false;
+  const accept = document.getElementById('p2p-transfer-accept');
+  const previewRequest = document.getElementById('p2p-transfer-preview-request');
+  if (previewRequest) {
+    previewRequest.hidden = !offer.previewAvailable;
+    previewRequest.disabled = false;
+    previewRequest.textContent = 'Request safe preview';
+  }
+  if (accept) accept.disabled = true;
+  p2pTransferOfferModal?.classList.add('open');
+  p2pTransferOfferModal?.setAttribute('aria-hidden', 'false');
+  const offerBox = p2pTransferOfferModal?.querySelector('.p2p-transfer-box');
+  if (offerBox) {
+    offerBox.scrollTop = 0;
+    offerBox.scrollLeft = 0;
+  }
+  const offerTitle = document.getElementById('p2p-transfer-offer-title');
+  if (offerTitle) offerTitle.textContent = offer.kind === 'avatar' ? 'Incoming Avatar' : 'Incoming transfer';
+  document.getElementById('p2p-transfer-offer-title')?.focus({preventScroll: true});
+  try {
+    const capabilities = await p2pTransferService.storageCapabilities(offer);
+    if (capabilities.mode === 'direct') {
+      if (directWrap) directWrap.hidden = false;
+      if (status) status.textContent = Number(offer.fileCount || 1) > 1
+        ? 'This batch needs supported browser storage to create its local ZIP. This is not a server quota.'
+        : 'Browser storage is unavailable or lacks capacity. Select the non-resumable direct-to-device option to continue.';
+    } else if (status) {
+      status.textContent = `Accept only if you know and expect ${Number(offer.fileCount || 1) === 1 ? 'this file' : 'these files'}.`;
+    }
+    p2pTransferOfferStorageReady = true;
+    if (accept) accept.disabled = false;
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Browser storage could not be checked.';
+  }
+}
+
+function closeIncomingTransferOffer(restoreFocus = true) {
+  p2pTransferOfferModal?.classList.remove('open');
+  p2pTransferOfferModal?.setAttribute('aria-hidden', 'true');
+  p2pTransferIncomingOffer = null;
+  p2pTransferOfferStorageReady = false;
+  clearIncomingTransferPreview();
+  if (restoreFocus && transferOfferReturnFocus?.isConnected) transferOfferReturnFocus.focus();
+  transferOfferReturnFocus = null;
+}
+
+function handleTransferModalKeydown(modal, event, onEscape) {
+  if (!modal?.classList.contains('open')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    onEscape?.();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = [...modal.querySelectorAll('button:not([disabled]), a[href]:not([aria-disabled="true"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter(element => !element.hidden && !element.closest('[hidden]') && element.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+const TRANSFER_TERMINAL_STATES = new Set(['completed', 'failed', 'declined', 'cancelled', 'expired']);
+
+function refreshTransfersCount() {
+  const active = [...(p2pTransferStatusDrawer?.children || [])]
+    .filter(row => row.dataset.terminal !== 'true').length;
+  if (transfersCount) transfersCount.textContent = String(active);
+  if (transfersButton) transfersButton.setAttribute('aria-label', `Transfers, ${active} active or resumable`);
+}
+
+function openTransfersTray() {
+  if (!transfersTray) return;
+  transfersTray.hidden = false;
+  transfersButton?.setAttribute('aria-expanded', 'true');
+}
+
+function closeTransfersTray(restoreFocus = true) {
+  if (!transfersTray) return;
+  transfersTray.hidden = true;
+  transfersButton?.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) transfersButton?.focus();
+}
+
+function transferControl(label, action, options = {}) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = options.danger ? 'btn btn-danger btn-small' : 'btn btn-small';
+  button.textContent = label;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      await action();
+    } catch (error) {
+      renderP2PTransferStatus({offer: options.offer, state: options.state || 'failed', detail: error.message || 'The transfer action failed.'});
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
+function renderP2PTransferStatus({offer, state, detail, progress}) {
+  if (!p2pTransferStatusDrawer || !offer) return;
+  p2pTransferStatusDrawer.hidden = false;
+  const effectiveState = state || offer.status || 'unknown';
+  const terminal = TRANSFER_TERMINAL_STATES.has(effectiveState) || TRANSFER_TERMINAL_STATES.has(offer.status);
+  let row = p2pTransferStatusDrawer.querySelector(`[data-transfer-id="${CSS.escape(offer.id)}"]`);
+  if (!row) {
+    row = document.createElement('article');
+    row.dataset.transferId = offer.id;
+    row.innerHTML = '<strong class="p2p-transfer-primary"></strong><span class="p2p-transfer-detail"></span><progress class="p2p-transfer-progress" max="100" value="0" hidden></progress><div class="p2p-transfer-controls"></div>';
+    p2pTransferStatusDrawer.appendChild(row);
+  }
+  row.dataset.terminal = terminal ? 'true' : 'false';
+  row.className = `p2p-transfer-status state-${effectiveState}`;
+  row.querySelector('.p2p-transfer-primary').textContent = `${offer.safeName || 'Transfer'} — ${offer.actorIsSender ? `to ${offer.recipient?.name || 'participant'}` : `from ${offer.sender?.name || 'participant'}`}`;
+  row.querySelector('.p2p-transfer-detail').textContent = `${offer.finalStatus || effectiveState}${detail ? ` · ${detail}` : ''}`;
+  const progressBar = row.querySelector('.p2p-transfer-progress');
+  if (progress && Number.isFinite(Number(progress.aggregatePercent))) {
+    progressBar.hidden = false;
+    progressBar.value = Math.max(0, Math.min(100, Number(progress.aggregatePercent)));
+    progressBar.setAttribute('aria-label', `${Math.round(progressBar.value)} percent transferred`);
+  } else {
+    progressBar.hidden = true;
+    progressBar.value = 0;
+  }
+  const controls = row.querySelector('.p2p-transfer-controls');
+  controls.textContent = '';
+  const offerOptions = {offer, state: effectiveState};
+  if (['transferring', 'direct', 'relayed', 'resuming'].includes(effectiveState)) {
+    controls.appendChild(transferControl(Number(offer.fileCount || 1) > 1 ? 'Pause All' : 'Pause', () => p2pTransferService.pauseAll(offer.id, true), offerOptions));
+  }
+  if (effectiveState === 'paused') {
+    controls.appendChild(transferControl(Number(offer.fileCount || 1) > 1 ? 'Resume All' : 'Resume', () => p2pTransferService.pauseAll(offer.id, false), offerOptions));
+  }
+  if (['resumable', 'resume-wait', 'connecting'].includes(effectiveState)) {
+    controls.appendChild(transferControl('Resume Transfer', () => p2pTransferService.resumeTransfer(offer.id), offerOptions));
+  }
+  if (effectiveState === 'resume-source-required') {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = Number(offer.fileCount || 1) > 1;
+    input.className = 'hidden-file-input';
+    if ((offer.manifest?.files || []).some(file => String(file.safeName || '').includes('/'))) input.setAttribute('webkitdirectory', '');
+    const choose = document.createElement('button');
+    choose.type = 'button';
+    choose.className = 'btn btn-small';
+    choose.textContent = 'Choose Original Files';
+    choose.addEventListener('click', () => input.click());
+    input.addEventListener('change', async () => {
+      choose.disabled = true;
+      try {
+        await p2pTransferService.reselectSources(offer.id, input.files);
+      } catch (error) {
+        renderP2PTransferStatus({offer, state: 'resume-source-required', detail: error.message || 'The original files did not match.'});
+      } finally {
+        choose.disabled = false;
+      }
+    });
+    controls.append(choose, input);
+  }
+  if (!terminal && Number(offer.fileCount || 1) > 1 && ['transferring', 'paused', 'resuming'].includes(effectiveState)) {
+    controls.appendChild(transferControl('Cancel Current', () => p2pTransferService.cancel(offer.id, 'current'), {...offerOptions, danger: true}));
+  }
+  if (!terminal) {
+    controls.appendChild(transferControl(Number(offer.fileCount || 1) > 1 ? 'Cancel Batch' : 'Cancel Transfer', () => p2pTransferService.cancel(offer.id, 'batch'), {...offerOptions, danger: true}));
+  } else {
+    controls.appendChild(transferControl('Dismiss', async () => {
+      row.remove();
+      if (!p2pTransferStatusDrawer.children.length) p2pTransferStatusDrawer.hidden = true;
+      refreshTransfersCount();
+    }, offerOptions));
+  }
+  refreshTransfersCount();
+}
+
+function appendP2PTransferReportActions(offer, blob, name, row) {
+  if (!row || row.querySelector('[data-transfer-report]')) return;
+  const reveal = document.createElement('button');
+  reveal.type = 'button';
+  reveal.className = 'btn btn-small';
+  reveal.dataset.transferReport = '';
+  reveal.textContent = 'Report transfer';
+  const form = document.createElement('form');
+  form.className = 'p2p-transfer-report-form';
+  form.hidden = true;
+  const label = document.createElement('label');
+  label.textContent = 'Report reason';
+  const reason = document.createElement('textarea');
+  reason.required = true;
+  reason.minLength = 8;
+  reason.maxLength = 2000;
+  reason.rows = 3;
+  label.appendChild(reason);
+  const actions = document.createElement('div');
+  actions.className = 'shared-form-actions';
+  const metadataOnly = document.createElement('button');
+  metadataOnly.type = 'submit';
+  metadataOnly.className = 'btn';
+  metadataOnly.textContent = 'Report metadata only';
+  const submitFile = document.createElement('button');
+  submitFile.type = 'button';
+  submitFile.className = 'btn';
+  submitFile.textContent = 'Report and submit received file';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn';
+  cancel.textContent = 'Cancel';
+  const status = document.createElement('p');
+  status.className = 'minor';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  actions.append(metadataOnly, submitFile, cancel);
+  form.append(label, actions, status);
+  reveal.addEventListener('click', () => {
+    form.hidden = false;
+    reveal.hidden = true;
+    reason.focus();
+  });
+  cancel.addEventListener('click', () => {
+    form.hidden = true;
+    reveal.hidden = false;
+    reveal.focus();
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!reason.reportValidity()) return;
+    metadataOnly.disabled = true;
+    submitFile.disabled = true;
+    status.textContent = 'Submitting privacy-safe transfer metadata…';
+    try {
+      const result = await p2pTransferService.report(offer.id, reason.value.trim());
+      status.textContent = `Report ${result.reportReference || ''} received. The transferred file was not submitted.`;
+    } catch (error) {
+      status.textContent = error.message || 'The transfer report could not be submitted.';
+      metadataOnly.disabled = false;
+      submitFile.disabled = false;
+    }
+  });
+  submitFile.addEventListener('click', async () => {
+    if (!reason.reportValidity()) return;
+    metadataOnly.disabled = true;
+    submitFile.disabled = true;
+    status.textContent = 'Submitting the received file as protected moderation evidence…';
+    const data = new FormData();
+    data.append('session_id', cfg.sessionId);
+    data.append('join_token', cfg.myJoinToken);
+    data.append('offer_id', offer.id);
+    data.append('reason', reason.value.trim());
+    data.append('file', blob, name || offer.safeName || 'received-file');
+    try {
+      const result = await apiUpload('/api/p2p_transfer_evidence.php', data);
+      status.textContent = `Report ${result.reportReference || ''} received with the file you chose to submit.`;
+    } catch (error) {
+      status.textContent = error.message || 'The received file could not be submitted as evidence.';
+      metadataOnly.disabled = false;
+      submitFile.disabled = false;
+    }
+  });
+  row.append(reveal, form);
+}
+
+async function receiveP2PTransfer({offer, blob, name, kind, savedDirect = false, release = async () => {}}) {
+  if (kind === 'avatar') {
+    const stableBlob = new Blob([await blob.arrayBuffer()], {type: blob.type || 'application/octet-stream'});
+    await release();
+    const notice = document.createElement('div');
+    notice.className = 'received-avatar-preview';
+    const title = document.createElement('strong');
+    title.textContent = `${offer.sender?.name || 'Participant'} sent an avatar`;
+    const image = document.createElement('img');
+    const url = URL.createObjectURL(stableBlob);
+    image.src = url;
+    image.alt = `Avatar preview from ${offer.sender?.name || 'participant'}`;
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.className = 'btn btn-primary btn-small';
+    apply.textContent = 'Use as my avatar';
+    const status = document.createElement('span');
+    status.className = 'minor';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    apply.addEventListener('click', async () => {
+      apply.disabled = true;
+      status.textContent = 'Applying through the normal avatar checks…';
+      try {
+        const file = new File([stableBlob], name || 'received-avatar', {type: stableBlob.type || 'application/octet-stream'});
+        await applyAvatarFile(file);
+        status.textContent = 'Your avatar was updated.';
+      } catch (error) {
+        apply.disabled = false;
+        status.textContent = error.message || 'The avatar could not be applied.';
+      }
+    });
+    notice.append(title, image, apply, status);
+    appendP2PTransferReportActions(offer, stableBlob, name, notice);
+    p2pTransferStatusDrawer?.appendChild(notice);
+    window.setTimeout(() => URL.revokeObjectURL(url), 30 * 60 * 1000);
+    return;
+  }
+  if (kind === 'gesture') {
+    const stableBlob = new Blob([await blob.arrayBuffer()], {type: blob.type || 'application/octet-stream'});
+    await release();
+    stableBlob.text().then(text => {
+      const gesture = JSON.parse(text);
+      if (gesture?.schema !== 'corechat.direct-gesture.v1') throw new Error('The received gesture package is invalid.');
+      const safeDataImage = value => typeof value === 'string'
+        && /^data:image\/(?:gif|png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(value)
+        && value.length <= 2 * 1024 * 1024;
+      const notice = document.createElement('div');
+      notice.className = 'received-gesture-preview';
+      const title = document.createElement('strong');
+      const gestureTitle = String(gesture.title || 'a gesture').slice(0, 120);
+      title.textContent = `${offer.sender?.name || 'Participant'} sent ${gestureTitle}`;
+      notice.appendChild(title);
+      if (safeDataImage(gesture.animation)) {
+        const image = document.createElement('img');
+        image.src = gesture.animation;
+        image.alt = String(gesture.text || gestureTitle || 'Received gesture').slice(0, 180);
+        notice.appendChild(image);
+      }
+      if (gesture.text) {
+        const caption = document.createElement('p');
+        caption.textContent = String(gesture.text).slice(0, 180);
+        notice.appendChild(caption);
+      }
+      appendP2PTransferReportActions(offer, stableBlob, name, notice);
+      p2pTransferStatusDrawer?.appendChild(notice);
+    }).catch(error => renderP2PTransferStatus({offer, state: 'failed', detail: error.message || 'The received gesture package was invalid.'}));
+    return;
+  }
+  if (savedDirect) {
+    const row = p2pTransferStatusDrawer?.querySelector(`[data-transfer-id="${CSS.escape(offer.id)}"]`);
+    const saved = document.createElement('span');
+    saved.className = 'minor';
+    saved.setAttribute('role', 'status');
+    saved.textContent = `${name || 'The received file'} was saved directly to this device.`;
+    row?.appendChild(saved);
+    appendP2PTransferReportActions(offer, blob, name, row);
+    await release();
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.className = 'btn btn-small';
+  link.href = url;
+  link.download = name || 'download';
+  link.textContent = `Save ${name || 'received file'}`;
+  const row = p2pTransferStatusDrawer?.querySelector(`[data-transfer-id="${CSS.escape(offer.id)}"]`);
+  row?.appendChild(link);
+  appendP2PTransferReportActions(offer, blob, name, row);
+  let released = false;
+  const releaseOutput = async () => {
+    if (released) return;
+    released = true;
+    URL.revokeObjectURL(url);
+    await release();
+  };
+  link.addEventListener('click', () => window.setTimeout(() => void releaseOutput(), 5000), {once: true});
+  window.setTimeout(() => void releaseOutput(), 30 * 60 * 1000);
+}
+
+function setSharedAttachmentsStatus(message, type = '') {
+  const status = document.getElementById('shared-attachments-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.className = `admin-form-status ${type}`.trim();
+}
+
+function jumpToSharedAttachment(asset) {
+  if (!asset.messageId) return;
+  const channel = asset.channel === 'community' ? 'community' : 'room';
+  switchChat(channel);
+  window.requestAnimationFrame(() => {
+    const message = messagesEl.querySelector(`[data-message-id="${Number(asset.messageId)}"]`);
+    message?.scrollIntoView({block: 'center', behavior: 'smooth'});
+    message?.classList.add('message-jump-highlight');
+    window.setTimeout(() => message?.classList.remove('message-jump-highlight'), 1800);
+  });
+}
+
+function renderSharedAttachment(asset) {
+  const row = document.createElement('article');
+  row.className = 'shared-attachment-row';
+  row.setAttribute('role', 'listitem');
+  const title = document.createElement('strong');
+  title.textContent = asset.safeName || 'Attachment';
+  const facts = document.createElement('p');
+  facts.className = 'minor';
+  const age = asset.createdAt || 'date unavailable';
+  facts.textContent = `${asset.detectedMime || 'Unknown type'} · ${formatBytes(Number(asset.size || 0))} · ${asset.uploaderLabel || 'Unknown sender'} · ${age}${asset.pinned ? ' · Pinned' : (asset.expiresAt ? ` · Expires ${asset.expiresAt} UTC` : '')}`;
+  const actions = document.createElement('div');
+  actions.className = 'shared-form-actions';
+  const open = document.createElement('a');
+  open.className = 'btn btn-small';
+  open.href = asset.downloadUrl;
+  open.textContent = 'Open / Download';
+  actions.appendChild(open);
+  if (asset.messageId) {
+    const jump = document.createElement('button');
+    jump.className = 'btn btn-small';
+    jump.type = 'button';
+    jump.textContent = 'Jump to message';
+    jump.addEventListener('click', () => {
+      closeSharedAttachments(false);
+      jumpToSharedAttachment(asset);
+    });
+    actions.appendChild(jump);
+  }
+  if (asset.removeOwnAllowed) {
+    const remove = document.createElement('button');
+    remove.className = 'btn btn-small btn-danger';
+    remove.type = 'button';
+    remove.textContent = 'Remove my upload';
+    remove.addEventListener('click', async () => {
+      remove.disabled = true;
+      try {
+        await apiPost('/api/server_media.php', {action: 'remove-own', id: asset.id});
+        await loadSharedAttachments();
+      } catch (error) {
+        remove.disabled = false;
+        setSharedAttachmentsStatus(error.message || 'The upload could not be removed.', 'error');
+      }
+    });
+    actions.appendChild(remove);
+  }
+  row.append(title, facts, actions);
+  return row;
+}
+
+async function loadSharedAttachments() {
+  if (!sharedAttachmentsList) return;
+  setSharedAttachmentsStatus('Loading shared attachments…', 'working');
+  const query = new URLSearchParams({
+    session_id: cfg.sessionId,
+    join_token: cfg.myJoinToken,
+    view: sharedAttachmentsView,
+    page: '1',
+    page_size: '100',
+  });
+  const data = await runtimeRequestClient.getJson(`/api/server_media.php?${query}`, {
+    operation: 'load-shared-attachments',
+    endpointCategory: 'server-media',
+    cache: 'no-store',
+  });
+  sharedAttachmentsList.textContent = '';
+  for (const asset of data.list?.items || []) sharedAttachmentsList.appendChild(renderSharedAttachment(asset));
+  if (!sharedAttachmentsList.children.length) {
+    const empty = document.createElement('p');
+    empty.className = 'admin-empty';
+    empty.textContent = 'No active server-hosted attachments in this view.';
+    sharedAttachmentsList.appendChild(empty);
+  }
+  setSharedAttachmentsStatus(`${Number(data.list?.total || 0)} active server-hosted attachments. Peer-to-peer and private direct payloads are never listed.`, 'ok');
+}
+
+async function openSharedAttachments() {
+  transferModalReturnFocus = document.activeElement;
+  sharedAttachmentsModal?.classList.add('open');
+  sharedAttachmentsModal?.setAttribute('aria-hidden', 'false');
+  await loadSharedAttachments().catch(error => setSharedAttachmentsStatus(error.message || 'Shared attachments could not be loaded.', 'error'));
+  document.querySelector('[data-shared-attachments-view][aria-current="page"]')?.focus();
+}
+
+function closeSharedAttachments(restoreFocus = true) {
+  sharedAttachmentsModal?.classList.remove('open');
+  sharedAttachmentsModal?.setAttribute('aria-hidden', 'true');
+  if (restoreFocus && transferModalReturnFocus?.isConnected) transferModalReturnFocus.focus();
+  transferModalReturnFocus = null;
+}
+
+p2pTransferComposeForm?.addEventListener('change', event => {
+  if (event.target.matches('[name="transfer_kind"], [name="transfer_delivery"]')) syncTransferComposeChoices();
+  if (event.target.id === 'p2p-transfer-file' || event.target.id === 'p2p-transfer-folder') {
+    try {
+      setTransferSelectedFiles([...event.target.files].map(file => ({
+        file,
+        handle: null,
+        relativePath: file.webkitRelativePath || file.name,
+      })));
+    } catch (error) {
+      setTransferComposeStatus(error.message || 'The selection could not be prepared.', 'error');
+    }
+  }
+});
+
+const p2pTransferDropZone = document.getElementById('p2p-transfer-drop-zone');
+document.getElementById('p2p-transfer-avatar')?.addEventListener('change', () => {
+  p2pTransferPreparedAvatar = null;
+});
+p2pTransferDropZone?.addEventListener('keydown', event => {
+  if (!['Enter', ' '].includes(event.key)) return;
+  event.preventDefault();
+  document.getElementById('p2p-transfer-file')?.click();
+});
+p2pTransferDropZone?.addEventListener('dragover', event => {
+  event.preventDefault();
+  p2pTransferDropZone.classList.add('is-dragover');
+});
+p2pTransferDropZone?.addEventListener('dragleave', () => p2pTransferDropZone.classList.remove('is-dragover'));
+p2pTransferDropZone?.addEventListener('drop', async event => {
+  event.preventDefault();
+  p2pTransferDropZone.classList.remove('is-dragover');
+  try {
+    setTransferComposeStatus('Reading the selected files and folders…', 'working');
+    setTransferSelectedFiles(await transferFilesFromDrop(event.dataTransfer));
+  } catch (error) {
+    setTransferComposeStatus(error.message || 'The dropped selection could not be prepared.', 'error');
+  }
+});
+
+p2pTransferComposeForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const participant = participants.get(Number(p2pTransferTargetParticipantId));
+  if (!participant) return setTransferComposeStatus('That participant is no longer available.', 'error');
+  const kind = p2pTransferComposeForm.elements.transfer_kind.value || 'file';
+  const delivery = p2pTransferComposeForm.elements.transfer_delivery.value || 'p2p';
+  const gesture = transferGestureCatalog.get(document.getElementById('p2p-transfer-gesture')?.value || '');
+  let files = [...p2pTransferSelectedFiles];
+  try {
+    p2pTransferComposeForm.querySelector('button[type="submit"]').disabled = true;
+    setTransferComposeStatus(delivery === 'p2p' ? 'Preparing direct offer…' : 'Sending through authenticated server delivery…', 'working');
+    if (kind === 'gesture') {
+      if (!gesture) throw new Error('Choose a gesture to send.');
+      if (delivery === 'p2p') {
+        const file = await gestureTransferFile(gesture);
+        files = [{file, handle: null, relativePath: file.name}];
+      }
+    } else if (kind === 'avatar') {
+      const selectedAvatar = document.getElementById('p2p-transfer-avatar')?.files?.[0];
+      if (!selectedAvatar) throw new Error('Choose one avatar to send.');
+      if (!window.ChatSpaceAvatar) throw new Error('Avatar preparation is unavailable.');
+      const prepared = p2pTransferPreparedAvatar || await window.ChatSpaceAvatar.prepareAvatarFile(selectedAvatar);
+      p2pTransferPreparedAvatar = prepared;
+      files = [{file: prepared, handle: null, relativePath: prepared.name}];
+    } else if (!files.length) {
+      throw new Error('Choose one or more files to send.');
+    }
+    if (delivery === 'p2p') {
+      await p2pTransferService.createOffer({recipientParticipantId: participant.id, kind, files});
+    } else {
+      const dm = `dm:${participant.user_id}`;
+      if (kind === 'gesture') await chatMediaSend().sendGesture(gesture, dm);
+      else for (const selected of files) await chatMediaSend().sendFile(selected.file, dm);
+    }
+    closeP2PTransferCompose();
+  } catch (error) {
+    setTransferComposeStatus(error.message || 'The transfer could not be started.', 'error');
+  } finally {
+    const submit = p2pTransferComposeForm.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = false;
+  }
+});
+
+document.getElementById('p2p-transfer-compose-close')?.addEventListener('click', () => closeP2PTransferCompose());
+document.getElementById('p2p-transfer-compose-cancel')?.addEventListener('click', () => closeP2PTransferCompose());
+p2pTransferComposeModal?.addEventListener('keydown', event => handleTransferModalKeydown(p2pTransferComposeModal, event, () => closeP2PTransferCompose()));
+p2pTransferComposeModal?.addEventListener('click', event => {
+  if (event.target === p2pTransferComposeModal) closeP2PTransferCompose();
+});
+p2pTransferOfferModal?.addEventListener('keydown', event => handleTransferModalKeydown(p2pTransferOfferModal, event, () => {
+  document.getElementById('p2p-transfer-decline')?.click();
+}));
+document.getElementById('p2p-transfer-accept')?.addEventListener('click', async event => {
+  if (!p2pTransferIncomingOffer || !p2pTransferOfferStorageReady) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await p2pTransferService.respond(p2pTransferIncomingOffer.id, true);
+    closeIncomingTransferOffer();
+  } catch (error) {
+    document.getElementById('p2p-transfer-offer-status').textContent = error.message || 'The transfer could not be accepted.';
+  } finally {
+    button.disabled = false;
+  }
+});
+document.getElementById('p2p-transfer-preview-request')?.addEventListener('click', async event => {
+  if (!p2pTransferIncomingOffer?.previewAvailable) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  event.currentTarget.textContent = 'Requesting preview…';
+  try {
+    await p2pTransferService.requestPreview(p2pTransferIncomingOffer.id);
+    document.getElementById('p2p-transfer-offer-status').textContent = 'The sender is preparing a bounded safe preview. Accept or decline remains separate.';
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = 'Request safe preview';
+    document.getElementById('p2p-transfer-offer-status').textContent = error.message || 'The safe preview could not be requested.';
+  }
+});
+
+transfersButton?.addEventListener('click', () => {
+  if (transfersTray?.hidden) openTransfersTray();
+  else closeTransfersTray();
+});
+transfersTrayClose?.addEventListener('click', () => closeTransfersTray());
+transfersTray?.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeTransfersTray();
+  }
+});
+document.getElementById('p2p-transfer-decline')?.addEventListener('click', async event => {
+  if (!p2pTransferIncomingOffer) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await p2pTransferService.respond(p2pTransferIncomingOffer.id, false);
+    closeIncomingTransferOffer();
+  } catch (error) {
+    document.getElementById('p2p-transfer-offer-status').textContent = error.message || 'The transfer could not be declined.';
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById('show-shared-attachments-btn')?.addEventListener('click', () => {
+  closeAttachMenu();
+  openSharedAttachments();
+});
+document.getElementById('shared-attachments-close')?.addEventListener('click', () => closeSharedAttachments());
+sharedAttachmentsModal?.addEventListener('keydown', event => handleTransferModalKeydown(sharedAttachmentsModal, event, () => closeSharedAttachments()));
+sharedAttachmentsModal?.addEventListener('click', event => {
+  if (event.target === sharedAttachmentsModal) closeSharedAttachments();
+});
+document.querySelectorAll('[data-shared-attachments-view]').forEach(button => button.addEventListener('click', () => {
+  sharedAttachmentsView = button.dataset.sharedAttachmentsView || 'room';
+  document.querySelectorAll('[data-shared-attachments-view]').forEach(candidate => {
+    const selected = candidate === button;
+    candidate.classList.toggle('active', selected);
+    candidate.setAttribute('aria-current', selected ? 'page' : 'false');
+  });
+  loadSharedAttachments().catch(error => setSharedAttachmentsStatus(error.message || 'Shared attachments could not be loaded.', 'error'));
+}));
+
+ctxSendFileGesture?.addEventListener('click', () => {
+  const participant = participants.get(Number(ctxMenuParticipantId));
+  const returnFocus = ctxMenuReturnFocus || document.activeElement;
+  closeContextMenu();
+  openP2PTransferCompose(participant, returnFocus);
+});
 
 document.getElementById('ctx-block').addEventListener('click', () => {
   const p = participants.get(ctxMenuParticipantId);
@@ -7021,9 +8444,8 @@ document.getElementById('ctx-unblock').addEventListener('click', () => {
   setBlockState(p, false).catch(err => showWarning(err.message || 'Could not unblock user.'));
 });
 
-avatarFileInput.addEventListener('change', async () => {
-  const file = avatarFileInput.files && avatarFileInput.files[0];
-  if (!file) return;
+async function applyAvatarFile(file) {
+  if (!file) throw new Error('Choose an avatar image.');
   let preparedFile = file;
   let previewUrl = '';
   const me = participants.get(cfg.myParticipantId);
@@ -7073,9 +8495,20 @@ avatarFileInput.addEventListener('change', async () => {
         reason: 'avatar-upload-rejected',
       });
     }
-    alert(err.message);
+    throw err;
   } finally {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }
+}
+
+avatarFileInput.addEventListener('change', async () => {
+  const file = avatarFileInput.files && avatarFileInput.files[0];
+  if (!file) return;
+  try {
+    await applyAvatarFile(file);
+  } catch (err) {
+    alert(err.message);
+  } finally {
     avatarFileInput.value = '';
   }
 });
@@ -7110,9 +8543,114 @@ function releaseWebcamStream(stream) {
   stream?.getTracks?.().forEach(track => track.stop());
 }
 
+function selectiveWebcamAudienceEnabled() {
+  return Boolean(cfg?.voiceWebcamPolicy?.selectiveWebcamAudience?.enabled);
+}
+
+function renderWebcamAudiencePeople() {
+  if (!webcamAudiencePersonList) return;
+  const people = Array.from(participants.values())
+    .filter(person => Number(person.id) !== Number(cfg?.myParticipantId) && person.online !== false);
+  webcamAudiencePersonList.innerHTML = people.length
+    ? people.map(person => `<label class="settings-checkbox-row"><input type="checkbox" name="recipient_user_ids" value="${Number(person.user_id)}"><span>${esc(displayNameFor(person))}</span></label>`).join('')
+    : '<p class="minor">No other current room members are available.</p>';
+}
+
+function closeWebcamAudienceChooser(confirmed = false) {
+  webcamAudienceModal?.classList.remove('open');
+  const resolve = webcamAudienceDecision;
+  webcamAudienceDecision = null;
+  const returnFocus = webcamAudienceReturnFocus;
+  webcamAudienceReturnFocus = null;
+  resolve?.(confirmed);
+  if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+}
+
+function chooseWebcamAudience() {
+  if (!selectiveWebcamAudienceEnabled()) return Promise.resolve(true);
+  if (webcamAudienceDecision) return Promise.resolve(false);
+  renderWebcamAudiencePeople();
+  const saved = String(cfg?.voiceWebcamPreferences?.webcamAudienceMode || 'everyone');
+  const choice = webcamAudienceForm?.elements.audience_mode;
+  if (choice) choice.value = ['everyone', 'private-voice', 'selected', 'nobody'].includes(saved) ? saved : 'everyone';
+  if (webcamAudiencePeople) webcamAudiencePeople.hidden = choice?.value !== 'selected';
+  if (webcamAudienceStatus) webcamAudienceStatus.textContent = '';
+  webcamAudienceReturnFocus = document.activeElement;
+  webcamAudienceModal?.classList.add('open');
+  window.requestAnimationFrame(() => {
+    const selected = webcamAudienceForm?.querySelector('input[name="audience_mode"]:checked');
+    (selected || document.getElementById('webcam-audience-close'))?.focus({ preventScroll: true });
+  });
+  return new Promise(resolve => { webcamAudienceDecision = resolve; });
+}
+
+function webcamAudienceAllowsParticipant(participantId) {
+  if (!selectiveWebcamAudienceEnabled()) return true;
+  if (!confirmedWebcamAudience) return false;
+  if (confirmedWebcamAudience.mode === 'everyone') return true;
+  if (confirmedWebcamAudience.mode === 'nobody') return false;
+  return confirmedWebcamAudience.participantIds.has(Number(participantId));
+}
+
+async function confirmWebcamAudienceSelection() {
+  const mode = String(webcamAudienceForm?.elements.audience_mode?.value || '');
+  const recipientUserIds = Array.from(webcamAudienceForm?.querySelectorAll('input[name="recipient_user_ids"]:checked') || [])
+    .map(input => Number(input.value)).filter(Boolean);
+  if (mode === 'selected' && !recipientUserIds.length) throw new Error('Select at least one current room member.');
+  const result = await apiPost('/api/media_signal.php', {
+    action: 'webcam_audience_confirm',
+    media: 'webcam',
+    session_id: cfg.sessionId,
+    participant_id: cfg.myParticipantId,
+    join_token: cfg.myJoinToken,
+    client_epoch: voiceRuntime?.media?.clientEpoch?.(),
+    audience_mode: mode,
+    recipient_user_ids: recipientUserIds,
+  });
+  let allowedUserIds = recipientUserIds;
+  if (mode === 'private-voice') {
+    allowedUserIds = (voiceRuntime?.privateVoice?.snapshot?.()?.activeChat?.members || [])
+      .map(member => Number(member.userId)).filter(userId => userId !== Number(cfg.myUserId));
+  }
+  const participantIds = new Set(Array.from(participants.values())
+    .filter(person => allowedUserIds.includes(Number(person.user_id)))
+    .map(person => Number(person.id)));
+  confirmedWebcamAudience = Object.freeze({
+    mode,
+    revision: Number(result?.audience?.revision || 0),
+    participantIds,
+    contextHash: mode === 'private-voice' ? allowedUserIds.slice().sort((a, b) => a - b).join(':') : '',
+  });
+  return true;
+}
+
+webcamAudienceForm?.querySelectorAll('input[name="audience_mode"]').forEach(radio => radio.addEventListener('change', () => {
+  if (webcamAudiencePeople) webcamAudiencePeople.hidden = webcamAudienceForm.elements.audience_mode.value !== 'selected';
+}));
+
+webcamAudienceForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (webcamAudienceStatus) webcamAudienceStatus.textContent = 'Confirming audience...';
+  try {
+    await confirmWebcamAudienceSelection();
+    closeWebcamAudienceChooser(true);
+  } catch (error) {
+    if (webcamAudienceStatus) webcamAudienceStatus.textContent = error?.message || 'Audience could not be confirmed.';
+  }
+});
+
+for (const id of ['webcam-audience-close', 'webcam-audience-cancel']) {
+  document.getElementById(id)?.addEventListener('click', () => closeWebcamAudienceChooser(false));
+}
+
 async function acquireLocalWebcamCapture(constraints, operation = 'enable') {
   if (!webcamUseAllowed()) {
     throw new Error('Webcam use is disabled for this installation.');
+  }
+  if (selectiveWebcamAudienceEnabled()) {
+    confirmedWebcamAudience = null;
+    const confirmed = await chooseWebcamAudience();
+    if (!confirmed) return Object.freeze({ status: 'cancelled', operation, token: null, stream: null });
   }
   const token = beginWebcamOperation(true, operation);
   let stream = null;
@@ -7169,6 +8707,8 @@ function watchLocalWebcamStream(stream, operationToken = null) {
       action: 'webcam_off',
       media: 'webcam',
       session_id: cfg.sessionId,
+      participant_id: cfg.myParticipantId,
+      client_epoch: voiceRuntime?.media?.clientEpoch?.(),
       join_token: cfg.myJoinToken,
     }).catch(() => {});
     applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-track-ended');
@@ -7214,6 +8754,8 @@ async function replaceLocalWebcamCapture(nextStream, operation = 'replace', oper
     action: 'webcam_on',
     media: 'webcam',
     session_id: cfg.sessionId,
+    participant_id: cfg.myParticipantId,
+    client_epoch: voiceRuntime?.media?.clientEpoch?.(),
     join_token: cfg.myJoinToken,
   });
   if (!isCurrentWebcamOperation(token) || webcamStream !== nextStream) {
@@ -7267,12 +8809,15 @@ async function disableLocalWebcam(reason = 'user-disable') {
     })) || [],
   });
   webcamStream = null;
+  confirmedWebcamAudience = null;
   releaseWebcamStream(previousWebcamStream);
   applyWebcamState(cfg.myParticipantId, false, null, reason);
   const persistence = apiPost('/api/media_signal.php', {
     action: 'webcam_off',
     media: 'webcam',
     session_id: cfg.sessionId,
+    participant_id: cfg.myParticipantId,
+    client_epoch: voiceRuntime?.media?.clientEpoch?.(),
     join_token: cfg.myJoinToken,
   });
   const privateNegotiation = !webcamUseAllowed();
@@ -7351,7 +8896,11 @@ ctxToggleWebcam.addEventListener('click', async () => {
       });
       renderParticipant(me);
     }
-    await apiPost('/api/media_signal.php', { action: 'webcam_on', media: 'webcam', session_id: cfg.sessionId, join_token: cfg.myJoinToken });
+    await apiPost('/api/media_signal.php', {
+      action: 'webcam_on', media: 'webcam', session_id: cfg.sessionId,
+      participant_id: cfg.myParticipantId, client_epoch: voiceRuntime?.media?.clientEpoch?.(),
+      join_token: cfg.myJoinToken,
+    });
     if (!isCurrentWebcamOperation(operationToken) || webcamStream !== acquisition.stream) return;
     await connectMediaPeers({
       reason: 'local-webcam-enable',
@@ -8306,8 +9855,130 @@ function updateVoiceToggleButton() {
   const btn = document.getElementById('voice-toggle');
   if (!btn) return;
   const joined = Boolean(voiceRuntime?.media?.isJoined());
-  btn.textContent = joined ? 'Leave Voice' : 'Join Voice';
+  const privateContext = voiceRuntime?.media?.getState?.()?.voiceContext?.type === 'private-voice';
+  btn.textContent = joined
+    ? (privateContext ? 'Leave Private Voice' : 'Leave Voice')
+    : (privateContext ? 'Join Private Voice' : 'Join Voice');
   btn.classList.toggle('active', joined);
+  voiceRuntime?.transmissionModes?.render?.();
+}
+
+function setPrivateVoiceStatus(message, state = '') {
+  if (!privateVoiceStatus) return;
+  privateVoiceStatus.textContent = message || '';
+  privateVoiceStatus.classList.remove('ok', 'error', 'working');
+  if (state) privateVoiceStatus.classList.add(state);
+}
+
+function privateVoiceExpiryLabel(value) {
+  const date = new Date(`${String(value || '').replace(' ', 'T')}Z`);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+}
+
+function privateVoiceMemberList(chat) {
+  const members = Array.isArray(chat?.members) ? chat.members : [];
+  return members.length
+    ? `<ul class="private-voice-members">${members.map(member => `<li>${esc(member.displayName || 'Member')}</li>`).join('')}</ul>`
+    : '<p class="minor">No current members.</p>';
+}
+
+function renderPrivateVoiceSnapshot(snapshot) {
+  if (!privateVoiceContent) return;
+  const policy = cfg?.voiceWebcamPolicy?.privateVoice || snapshot?.policy?.privateVoice || {};
+  const enabled = Boolean(policy.enabled);
+  if (privateVoiceOpen) privateVoiceOpen.hidden = !enabled;
+  if (privateVoicePolicyNote) {
+    privateVoicePolicyNote.textContent = enabled
+      ? `Private calls are limited to ${Number(policy.participantLimit) || 4} participants; 4 is recommended. Invitations and requests expire after 180 seconds.`
+      : 'Private Voice Chats are disabled for this installation.';
+  }
+  if (!enabled) {
+    privateVoiceContent.innerHTML = '<p>Private Voice Chats are unavailable.</p>';
+    return;
+  }
+
+  const active = snapshot?.activeChat || null;
+  const invitations = Array.isArray(snapshot?.invitations) ? snapshot.invitations : [];
+  const requests = Array.isArray(snapshot?.joinRequests) ? snapshot.joinRequests : [];
+  const available = (Array.isArray(snapshot?.availableChats) ? snapshot.availableChats : [])
+    .filter(chat => !active || chat.id !== active.id);
+  const activeMemberIds = new Set((active?.members || []).map(member => Number(member.userId)));
+  const inviteOptions = (cfg?.participants || [])
+    .filter(person => Number(person.user_id) !== Number(cfg?.myUserId) && !activeMemberIds.has(Number(person.user_id)))
+    .map(person => `<option value="${Number(person.user_id)}">${esc(displayNameFor(person))}</option>`)
+    .join('');
+  const sections = [];
+
+  if (active) {
+    sections.push(`<section class="private-voice-panel" data-private-chat-id="${esc(active.id)}">
+      <div class="private-voice-panel-heading"><div><strong>Current private call</strong><span class="minor">${Number(active.memberCount) || 0} of ${Number(active.participantLimit) || 4} members</span></div>
+      <button class="btn btn-primary" type="button" data-private-voice-action="join-audio" data-chat-id="${esc(active.id)}">Join audio</button></div>
+      ${privateVoiceMemberList(active)}
+      ${inviteOptions ? `<label>Invite a room member<select data-private-voice-invitee><option value="">Choose a person</option>${inviteOptions}</select></label><button class="btn" type="button" data-private-voice-action="invite" data-chat-id="${esc(active.id)}">Send invitation</button>` : '<p class="minor">No other eligible room members are available to invite.</p>'}
+      <button class="btn btn-danger" type="button" data-private-voice-action="leave-membership">Leave private call</button>
+    </section>`);
+  } else {
+    sections.push('<section class="private-voice-panel"><div class="private-voice-panel-heading"><strong>Start a private call</strong><button class="btn btn-primary" type="button" data-private-voice-action="create-chat">Create private call</button></div><p class="minor">Creating a call makes you its first member. Other people receive no audio until they are admitted and join audio.</p></section>');
+  }
+
+  if (invitations.length) {
+    sections.push(`<section class="private-voice-panel"><strong>Invitations</strong>${invitations.map(invitation => `<article class="private-voice-request"><span><strong>${esc(invitation.from)}</strong> invited you. Expires ${esc(privateVoiceExpiryLabel(invitation.expiresAt))}.</span><span><button class="btn btn-primary" type="button" data-private-voice-action="accept-invitation" data-id="${esc(invitation.id)}">Accept</button><button class="btn" type="button" data-private-voice-action="reject-invitation" data-id="${esc(invitation.id)}">No</button></span></article>`).join('')}</section>`);
+  }
+  if (requests.length) {
+    sections.push(`<section class="private-voice-panel"><strong>Join requests</strong>${requests.map(request => `<article class="private-voice-request"><span><strong>${esc(request.requesterName)}</strong> asked to join. Expires ${esc(privateVoiceExpiryLabel(request.expiresAt))}.</span><span><button class="btn btn-primary" type="button" data-private-voice-action="approve-request" data-id="${esc(request.id)}">Approve</button><button class="btn" type="button" data-private-voice-action="reject-request" data-id="${esc(request.id)}">No</button></span></article>`).join('')}</section>`);
+  }
+  if (available.length) {
+    sections.push(`<section class="private-voice-panel"><strong>Private calls you may request to join</strong>${available.map(chat => `<article class="private-voice-request"><span>${privateVoiceMemberList(chat)}</span><button class="btn" type="button" data-private-voice-action="request-join" data-chat-id="${esc(chat.id)}">Ask to join</button></article>`).join('')}</section>`);
+  }
+  privateVoiceContent.innerHTML = sections.join('');
+}
+
+async function selectVoiceContext(context) {
+  if (voiceRuntime?.media?.isJoined()) await voiceRuntime.media.leave();
+  voiceRuntime?.media?.setVoiceContext(context);
+  updateVoiceToggleButton();
+}
+
+async function handlePrivateVoiceAction(button) {
+  const action = String(button.dataset.privateVoiceAction || '');
+  const service = voiceRuntime?.privateVoice;
+  if (!service) return;
+  button.disabled = true;
+  setPrivateVoiceStatus('Applying private voice change...', 'working');
+  try {
+    if (action === 'join-audio') {
+      await selectVoiceContext({ type: 'private-voice', publicId: button.dataset.chatId });
+      closePrivateVoiceModal();
+      await openVoiceDeviceModal();
+      setPrivateVoiceStatus('', '');
+      return;
+    }
+    if (action === 'leave-membership') {
+      await selectVoiceContext({ type: 'room', publicId: null });
+      await service.action('leave');
+    } else if (action === 'create-chat') {
+      await service.action('create_chat');
+    } else if (action === 'invite') {
+      const recipient = Number(privateVoiceContent.querySelector('[data-private-voice-invitee]')?.value || 0);
+      if (!recipient) throw new Error('Choose a person to invite.');
+      await service.action('invite', { chat_id: button.dataset.chatId, recipient_user_id: recipient });
+    } else if (action === 'accept-invitation') {
+      await service.action('accept_invitation', { invitation_id: button.dataset.id });
+    } else if (action === 'reject-invitation') {
+      await service.action('reject_invitation', { invitation_id: button.dataset.id });
+    } else if (action === 'request-join') {
+      await service.action('request_join', { chat_id: button.dataset.chatId });
+    } else if (action === 'approve-request') {
+      await service.action('approve_request', { join_request_id: button.dataset.id });
+    } else if (action === 'reject-request') {
+      await service.action('reject_request', { join_request_id: button.dataset.id });
+    }
+    setPrivateVoiceStatus('Private voice updated.', 'ok');
+  } catch (error) {
+    setPrivateVoiceStatus(error?.message || 'Private voice could not be updated.', 'error');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function restartVoicePoll(delay = 0) {
@@ -8419,6 +10090,33 @@ document.getElementById('voice-toggle').addEventListener('click', async () => {
   else await openVoiceDeviceModal();
 });
 
+privateVoiceOpen?.addEventListener('click', async () => {
+  privateVoiceReturnFocus = document.activeElement;
+  privateVoiceModal?.classList.add('open');
+  window.requestAnimationFrame(() => document.getElementById('private-voice-close')?.focus({ preventScroll: true }));
+  setPrivateVoiceStatus('Loading private voice...', 'working');
+  try {
+    await voiceRuntime?.privateVoice?.refresh();
+    setPrivateVoiceStatus('', '');
+  } catch (error) {
+    setPrivateVoiceStatus(error?.message || 'Private voice could not be loaded.', 'error');
+  }
+});
+
+function closePrivateVoiceModal() {
+  privateVoiceModal?.classList.remove('open');
+  const returnFocus = privateVoiceReturnFocus;
+  privateVoiceReturnFocus = null;
+  if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+}
+
+document.getElementById('private-voice-close')?.addEventListener('click', closePrivateVoiceModal);
+
+privateVoiceContent?.addEventListener('click', event => {
+  const button = event.target.closest('[data-private-voice-action]');
+  if (button) handlePrivateVoiceAction(button);
+});
+
 voiceDeviceForm?.addEventListener('submit', async e => {
   e.preventDefault();
   voiceRuntime?.media?.selectDevices({
@@ -8486,6 +10184,18 @@ function renderVoiceList(list, state = voiceRuntime?.media?.getState() || {}) {
   voiceParticipants.forEach(v => {
     const known = participants.get(Number(v.id));
     const person = Object.assign({}, known || {}, v);
+    if (known?.p2p_avatar_object_identity
+        && String(known.p2p_avatar_object_identity) === String(v?.p2p_avatar?.identity || '')) {
+      person.avatar_url = known.avatar_url;
+      person.avatar_path = null;
+      person.p2p_avatar_object_identity = known.p2p_avatar_object_identity;
+    }
+    if (known && v?.p2p_avatar) {
+      participants.update(Number(v.id), {
+        p2p_avatar: v.p2p_avatar,
+        avatar_delivery: v.avatar_delivery,
+      });
+    }
     const own = Number(person.id) === Number(cfg.myParticipantId);
     const muted = own ? mutedSelf : Boolean(person.muted);
     const deafened = own ? deafenedSelf : Boolean(person.deafened);
@@ -8519,6 +10229,14 @@ async function bootRoom() {
     'room-bootstrap'
   );
   cfg = roomConfig;
+  avatarRuntime?.p2pAvatar?.applyPolicy(cfg.p2pAvatarPolicy || {});
+  if (cfg.p2pAvatarPolicy?.effectiveEnabled === true || cfg.p2pTransferPolicy?.effectiveEnabled === true) {
+    voiceRuntime?.media?.startPolling(0);
+  }
+  p2pTransferService?.start();
+  renderPrivateVoiceSnapshot({ policy: cfg.voiceWebcamPolicy });
+  voiceRuntime?.privateVoice?.startPolling(0);
+  voiceRuntime?.transmissionModes?.render?.();
   applyGestureCapabilityProjection(cfg.gestureCapabilities || {}, 'room-bootstrap');
   gesturePresentation?.applyServerProjection(
     cfg.gesturePart3?.preferences || {},

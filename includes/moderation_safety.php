@@ -200,6 +200,18 @@ function moderation_safety_delivery_policy_catalog(): array
     ];
 }
 
+/**
+ * Returns the currently implemented delivery-policy capabilities without
+ * changing the signed Build 000051 migration definition above.
+ */
+function moderation_safety_current_delivery_policy_catalog(): array
+{
+    $catalog = moderation_safety_delivery_policy_catalog();
+    $catalog['avatar']['available']['p2p-plus-built-in-generated'] = true;
+    $catalog['gesture']['available']['p2p-personal-plus-built-in'] = true;
+    return $catalog;
+}
+
 function moderation_safety_install_schema(PDO $pdo): void
 {
     foreach (moderation_safety_schema_statements($pdo) as $statement) $pdo->exec($statement);
@@ -214,7 +226,7 @@ function moderation_safety_install_schema(PDO $pdo): void
 
 function moderation_safety_delivery_policy(PDO $pdo, string $kind): array
 {
-    $definition = moderation_safety_delivery_policy_catalog()[$kind] ?? null;
+    $definition = moderation_safety_current_delivery_policy_catalog()[$kind] ?? null;
     if (!is_array($definition)) {
         throw new ModerationSafetyException('The delivery policy is unknown.', 'DELIVERY_POLICY_UNKNOWN', 404);
     }
@@ -240,8 +252,15 @@ function moderation_safety_schema_valid(PDO $pdo): bool
         if (!database_migration_table_exists($pdo, $table)) return false;
     }
     $catalog = moderation_safety_delivery_policy_catalog();
-    return app_setting($pdo, MODERATION_SAFETY_AVATAR_DELIVERY_SETTING, '') === $catalog['avatar']['default']
-        && app_setting($pdo, MODERATION_SAFETY_GESTURE_DELIVERY_SETTING, '') === $catalog['gesture']['default'];
+    return in_array(
+        app_setting($pdo, MODERATION_SAFETY_AVATAR_DELIVERY_SETTING, ''),
+        $catalog['avatar']['modes'],
+        true
+    ) && in_array(
+        app_setting($pdo, MODERATION_SAFETY_GESTURE_DELIVERY_SETTING, ''),
+        $catalog['gesture']['modes'],
+        true
+    );
 }
 
 function moderation_safety_project_default_staff_grants(PDO $pdo, ?int $onlyUserId = null): void
@@ -543,6 +562,9 @@ function moderation_safety_set_block(PDO $pdo, int $blockerUserId, int $blockedU
             ? 'INSERT IGNORE INTO user_blocks (blocker_user_id,blocked_user_id) VALUES (?,?)'
             : 'INSERT OR IGNORE INTO user_blocks (blocker_user_id,blocked_user_id) VALUES (?,?)';
         $pdo->prepare($sql)->execute([$blockerUserId, $blockedUserId]);
+        if (function_exists('p2p_transfer_terminate_pair')) {
+            p2p_transfer_terminate_pair($pdo, $blockerUserId, $blockedUserId, 'Participant block');
+        }
     } else {
         $pdo->prepare('DELETE FROM user_blocks WHERE blocker_user_id=? AND blocked_user_id=?')
             ->execute([$blockerUserId, $blockedUserId]);
@@ -653,10 +675,10 @@ function moderation_safety_admin_users(PDO $pdo, string $search, string $sort, i
     $offset = ($page - 1) * $perPage;
     $allowedSort = ['name' => 'u.display_name,u.id', 'newest' => 'u.created_at DESC,u.id DESC', 'trust' => 't.trust_state,u.display_name'];
     $order = $allowedSort[$sort] ?? $allowedSort['name'];
-    $where = '';
+    $where = ' WHERE NOT EXISTS (SELECT 1 FROM account_deletions d WHERE d.user_id=u.id)';
     $params = [];
     if ($search !== '') {
-        $where = ' WHERE LOWER(u.username) LIKE ? OR LOWER(u.display_name) LIKE ?';
+        $where .= ' AND (LOWER(u.username) LIKE ? OR LOWER(u.display_name) LIKE ?)';
         $needle = '%' . strtolower($search) . '%';
         $params = [$needle, $needle];
     }

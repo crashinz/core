@@ -303,6 +303,61 @@ function gesture_capability_hydrate_snapshot(PDO $pdo, array $gesture): array
     return $hydrated;
 }
 
+function gesture_capability_empty_media(array $gesture): array
+{
+    foreach (['gif_path', 'gif_url', 'poster_path', 'poster_url', 'audio_path', 'audio_url'] as $key) {
+        $gesture[$key] = null;
+    }
+    return $gesture;
+}
+
+/**
+ * Resolves a P2P-mode personal gesture only from the viewer's own installed
+ * package with the exact validated content hash. Sender media is never used as
+ * an implicit fallback and no payload is uploaded through this projection.
+ */
+function gesture_capability_hydrate_local_match(PDO $pdo, int $viewerUserId, array $gesture): array
+{
+    $hydrated = gesture_capability_empty_media($gesture);
+    $snapshotHash = strtolower(trim((string)($gesture['content_sha256'] ?? '')));
+    if ($viewerUserId < 1 || !preg_match('/^[a-f0-9]{64}$/', $snapshotHash)) return $hydrated;
+
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM gestures WHERE owner_user_id = ? AND deleted_at IS NULL "
+            . "AND package_status = 'valid' AND LOWER(content_sha256) = ? ORDER BY id ASC LIMIT 1"
+        );
+        $stmt->execute([$viewerUserId, $snapshotHash]);
+        $current = $stmt->fetch();
+        if (!$current) return $hydrated;
+        $sourceHash = strtolower(trim((string)($current['content_sha256'] ?? '')));
+        if (!preg_match('/^[a-f0-9]{64}$/', $sourceHash) || !hash_equals($snapshotHash, $sourceHash)) {
+            return $hydrated;
+        }
+
+        $source = $current;
+        $generation = max(1, (int)($current['package_generation'] ?? 1));
+        if (function_exists('gesture_package_media_record')) {
+            $source = gesture_package_media_record($pdo, (string)$current['public_id'], $generation);
+        }
+        $recordHash = strtolower(trim((string)($source['content_sha256'] ?? '')));
+        if (!preg_match('/^[a-f0-9]{64}$/', $recordHash) || !hash_equals($snapshotHash, $recordHash)) {
+            return $hydrated;
+        }
+        if (function_exists('gesture_package_media_url')) {
+            $hydrated['gif_path'] = gesture_package_media_url($source, 'animation', 'message');
+            $hydrated['gif_url'] = $hydrated['gif_path'];
+            $hydrated['poster_path'] = gesture_package_media_url($source, 'poster', 'message');
+            $hydrated['poster_url'] = $hydrated['poster_path'];
+            $hydrated['audio_path'] = gesture_package_media_url($source, 'audio', 'message');
+            $hydrated['audio_url'] = $hydrated['audio_path'];
+        }
+    } catch (Throwable) {
+        return $hydrated;
+    }
+    return $hydrated;
+}
+
 function gesture_capability_project_snapshot(
     PDO $pdo,
     int $viewerUserId,
@@ -330,9 +385,15 @@ function gesture_capability_project_snapshot(
         && !empty($state['preferences']['play_sounds'])
         && ($state['part4']['audio_media'] ?? true) !== false;
 
-    $projected = $animationAllowed || $audioAllowed
-        ? gesture_capability_hydrate_snapshot($pdo, $gesture)
-        : $gesture;
+    $delivery = moderation_safety_delivery_policy($pdo, 'gesture');
+    $localMatchRequired = $scope === 'personal'
+        && (string)$delivery['effectiveMode'] === 'p2p-personal-plus-built-in';
+    $projected = gesture_capability_empty_media($gesture);
+    if ($animationAllowed || $audioAllowed) {
+        $projected = $localMatchRequired
+            ? gesture_capability_hydrate_local_match($pdo, $viewerUserId, $gesture)
+            : gesture_capability_hydrate_snapshot($pdo, $gesture);
+    }
     if (!$animationAllowed) {
         $projected['gif_path'] = null;
         $projected['gif_url'] = null;
@@ -345,6 +406,18 @@ function gesture_capability_project_snapshot(
     }
     $projected['media_projection'] = [
         'scope' => $scope,
+        'deliveryMode' => (string)$delivery['effectiveMode'],
+        'localMatchRequired' => $localMatchRequired,
+        'localMatchFound' => $localMatchRequired && (
+            !empty($projected['gif_path'])
+            || !empty($projected['poster_path'])
+            || !empty($projected['audio_path'])
+        ),
+        'localMatchUnavailable' => $localMatchRequired
+            && $mediaAllowed
+            && empty($projected['gif_path'])
+            && empty($projected['poster_path'])
+            && empty($projected['audio_path']),
         'animationAllowed' => $animationAllowed,
         'audioAllowed' => $audioAllowed,
         'senderMediaHidden' => !empty($state['hiddenSenderUserIds'][$senderUserId]),

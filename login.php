@@ -1,6 +1,9 @@
 <?php
 require_once __DIR__ . '/includes/base.php';
 $error = '';
+$notice = ($_GET['account'] ?? '') === 'deleted'
+    ? 'Your account has been deleted. Required shared history now appears under Deleted User.'
+    : '';
 $pdo = db();
 $branding = private_site_branding_projection($pdo, 'login');
 $brandingUtilityLinks = private_site_branding_utility_links($pdo);
@@ -14,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?) LIMIT 1');
         $stmt->execute([$login, $login, $login]);
         $user = $stmt->fetch();
+        if ($user && account_deletion_is_deleted($pdo, (int)$user['id'])) $user = false;
         if ($user && password_verify($password, $user['password_hash'])) {
             try {
                 if (function_exists('network_moderation_observe_request')
@@ -60,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <a class="auth-logo-link" href="<?= e(app_url('/about.html')) ?>" aria-label="About ChatSpace Community Edition">
       <img class="auth-logo-full <?= $branding['has_custom_logo'] ? 'custom-brand-logo' : '' ?>" src="<?= e(app_url($branding['logo_path'])) ?>" alt="<?= e($branding['effective_name']) ?>">
     </a>
+    <?php if ($notice): ?><div class="success" role="status"><?= e($notice) ?></div><?php endif; ?>
     <?php if ($error): ?><div class="error"><?= e($error) ?></div><?php endif; ?>
     <form class="form-grid" method="post">
       <?= csrf_input() ?>

@@ -562,8 +562,8 @@ function network_moderation_account_projection(PDO $pdo, array $accountIds): arr
     $statement->execute($accountIds);
     return array_map(static fn(array $row): array => [
         'id' => (int)$row['id'],
-        'displayName' => (string)$row['display_name'],
-        'username' => (string)($row['username'] ?? ''),
+        'displayName' => account_deletion_visible_name($pdo, (int)$row['id'], (string)$row['display_name']),
+        'username' => account_deletion_is_deleted($pdo, (int)$row['id']) ? '' : (string)($row['username'] ?? ''),
         'role' => (string)$row['role'],
     ], $statement->fetchAll());
 }
@@ -588,8 +588,11 @@ function network_moderation_contexts_projection(PDO $pdo, int $ownerUserId): arr
     foreach ($rows as $row) {
         $accountIds = network_moderation_account_ids($pdo, (string)$row['opaque_id']);
         $selectedAccount = (int)($row['account_user_id'] ?? 0);
+        $selectedName = $selectedAccount > 0
+            ? account_deletion_visible_name($pdo, $selectedAccount, (string)($row['display_name'] ?? ''))
+            : '';
         $owner = $selectedAccount > 0
-            ? 'Selected account ' . (string)($row['display_name'] ?: '#' . $selectedAccount)
+            ? 'Selected account ' . ($selectedName !== '' ? $selectedName : '#' . $selectedAccount)
             : (string)$row['context_reference'];
         $projection[] = [
             'id' => (string)$row['public_id'],
@@ -598,8 +601,8 @@ function network_moderation_contexts_projection(PDO $pdo, int $ownerUserId): arr
             'context' => (string)$row['context_reference'],
             'selectedAccount' => $selectedAccount > 0 ? [
                 'id' => $selectedAccount,
-                'displayName' => (string)($row['display_name'] ?? ''),
-                'username' => (string)($row['username'] ?? ''),
+                'displayName' => $selectedName,
+                'username' => account_deletion_is_deleted($pdo, $selectedAccount) ? '' : (string)($row['username'] ?? ''),
                 'role' => (string)($row['role'] ?? ''),
             ] : null,
             'firstSeenAt' => (string)$row['first_seen_at'],
@@ -1011,10 +1014,12 @@ function network_moderation_bans_projection(PDO $pdo, int $ownerUserId): array
             'id' => (string)$row['public_id'],
             'status' => (string)$row['status'],
             'reason' => (string)$row['reason'],
-            'creator' => (string)$row['creator_name'],
+            'creator' => account_deletion_visible_name($pdo, (int)$row['creator_user_id'], (string)$row['creator_name']),
             'createdAt' => (string)$row['created_at'],
             'expiresAt' => $row['expires_at'],
-            'removedBy' => $row['remover_name'],
+            'removedBy' => !empty($row['removed_by_user_id'])
+                ? account_deletion_visible_name($pdo, (int)$row['removed_by_user_id'], (string)$row['remover_name'])
+                : null,
             'removalReason' => $row['removal_reason'],
             'removedAt' => $row['removed_at'],
             'affectedAccountCount' => (int)$row['affected_account_count'],

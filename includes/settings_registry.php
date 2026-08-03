@@ -67,6 +67,7 @@ function settings_registry_entry(array $entry): array {
         'bulkGroup' => null,
         'extensionId' => null,
         'installedFeature' => null,
+        'connectionCapability' => null,
         'previewPage' => '',
         'previewField' => '',
         'previewPath' => '',
@@ -227,12 +228,17 @@ function settings_registry_definitions(): array {
             'subsectionLabel' => 'Moderation and Trust',
             'subsectionOrder' => 1,
             'label' => 'Avatar delivery mode',
-            'description' => 'Keep server-stored delivery or choose an implemented built-in/generated-only policy.',
-            'helpText' => 'The future P2P mode remains unavailable and server-denied until its named implementation and certification owner completes.',
+            'description' => 'Choose server-stored avatars, direct P2P avatars with a built-in fallback, or built-in/generated avatars only.',
+            'helpText' => 'Server-stored remains the default. Direct P2P delivery also requires the separately controlled P2P Avatar capability under Voice, Media & Players.',
             'aliases' => ['avatar p2p delivery', 'built in avatars only'],
             'type' => 'select',
             'defaultValue' => 'server-stored',
             'allowedValues' => MODERATION_SAFETY_AVATAR_DELIVERY_MODES,
+            'allowedValueLabels' => [
+                'server-stored' => 'Server-stored',
+                'p2p-plus-built-in-generated' => 'P2P with Built-in Fallback',
+                'built-in-generated-only' => 'Built-in/Generated Only',
+            ],
             'order' => 5,
             'controlClass' => 'optional-core-subordinate',
             'optional' => true,
@@ -250,12 +256,17 @@ function settings_registry_definitions(): array {
             'subsectionLabel' => 'Moderation and Trust',
             'subsectionOrder' => 1,
             'label' => 'Gesture delivery mode',
-            'description' => 'Keep server-stored personal/community delivery or choose built-in-only.',
-            'helpText' => 'The future P2P personal mode remains unavailable and server-denied until its named implementation and certification owner completes.',
+            'description' => 'Keep server-stored personal and community gestures, use exact local matching for personal gestures, or use built-in gestures only.',
+            'helpText' => 'Local Match Only transfers no sender media. Recipients see media only when an installed personal gesture has the exact validated content hash; otherwise the gesture text remains with an unavailable-media notice.',
             'aliases' => ['gesture p2p delivery', 'built in gestures only'],
             'type' => 'select',
             'defaultValue' => 'server-stored-personal-community',
             'allowedValues' => MODERATION_SAFETY_GESTURE_DELIVERY_MODES,
+            'allowedValueLabels' => [
+                'server-stored-personal-community' => 'Server-stored Personal and Community',
+                'p2p-personal-plus-built-in' => 'Local Match Only for Personal Gestures',
+                'built-in-only' => 'Built-in Gestures Only',
+            ],
             'order' => 6,
             'controlClass' => 'optional-core-subordinate',
             'optional' => true,
@@ -263,6 +274,16 @@ function settings_registry_definitions(): array {
             'setupVisible' => true,
             'adminVisible' => true,
             'bulkOperations' => ['setting'],
+            'connectionCapability' => [
+                'id' => 'p2p-gesture-local-match',
+                'name' => 'P2P Gesture Local Match',
+                'manageLabel' => 'Manage gesture delivery',
+                'manageView' => 'moderation-privacy-security',
+                'order' => 70,
+                'effectiveWhen' => [
+                    MODERATION_SAFETY_GESTURE_DELIVERY_SETTING => 'p2p-personal-plus-built-in',
+                ],
+            ],
         ]),
         settings_registry_entry([
             'id' => 'database_release_compatibility_enforcement',
@@ -581,6 +602,23 @@ function settings_registry_definitions(): array {
 
     $definitions = array_merge($definitions, [
         settings_registry_entry([
+            'id' => 'ordinary_room_voice', 'settingKey' => null,
+            'owner' => 'voice_media_service', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'voice-capabilities', 'subsectionLabel' => 'Voice & Webcam Capabilities',
+            'subsectionOrder' => 1, 'label' => 'Ordinary room voice',
+            'description' => 'Use ordinary room voice with the existing room-wide join, mute, and device controls.',
+            'helpText' => 'This established room capability remains available and is not changed by the new optional private-call or transmission-mode controls.',
+            'aliases' => ['room voice', 'ordinary voice'], 'type' => 'fixed',
+            'defaultValue' => true, 'order' => 1, 'controlClass' => 'mandatory-fixed',
+            'mandatory' => true, 'setupVisible' => true, 'adminVisible' => true,
+            'bulkOperations' => [], 'fixedReason' => 'Ordinary room voice remains available through its established room controls.',
+            'connectionCapability' => [
+                'id' => 'ordinary-room-voice',
+                'name' => 'Ordinary room voice', 'manageLabel' => 'View voice settings',
+                'manageView' => 'voice-media-players', 'order' => 10,
+            ],
+        ]),
+        settings_registry_entry([
             'id' => 'allow_webcam_use', 'settingKey' => 'allow_webcam_use',
             'owner' => 'webcam_policy', 'categoryId' => 'voice-media-players',
             'subsectionId' => 'webcam-capability', 'subsectionLabel' => 'Webcam Capability',
@@ -593,6 +631,381 @@ function settings_registry_definitions(): array {
             'originalRelevant' => true, 'originalValueAvailable' => true,
             'originalValue' => true,
             'bulkOperations' => ['setting', 'subsection', 'category', 'preset'],
+            'connectionCapability' => [
+                'id' => 'ordinary-room-webcam',
+                'name' => 'Ordinary room webcam', 'manageLabel' => 'Manage webcam',
+                'manageView' => 'voice-media-players', 'order' => 20,
+            ],
+        ]),
+        settings_registry_entry([
+            'id' => PRIVATE_VOICE_ENABLED_SETTING, 'settingKey' => PRIVATE_VOICE_ENABLED_SETTING,
+            'owner' => 'private_voice_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'private-voice', 'subsectionLabel' => 'Private Voice Chats',
+            'subsectionOrder' => 10, 'label' => 'Private Voice Chats',
+            'description' => 'Allow members to create invitation- and request-based private voice calls inside a room.',
+            'helpText' => 'Disabled by default. Membership is server-authorized, calls are limited to approved members, and no voice recording is created.',
+            'aliases' => ['private voice', 'private call'], 'type' => 'boolean',
+            'defaultValue' => false, 'order' => 10, 'controlClass' => 'optional-core-parent',
+            'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+            'bulkOperations' => ['setting'], 'toolLogBehavior' => 'bounded-private-voice-policy-update',
+            'connectionCapability' => [
+                'id' => 'private-voice-chats',
+                'name' => 'Private Voice Chats', 'manageLabel' => 'Manage private voice',
+                'manageView' => 'voice-media-players', 'order' => 30,
+            ],
+        ]),
+        settings_registry_entry([
+            'id' => PRIVATE_VOICE_PARTICIPANT_LIMIT_SETTING,
+            'settingKey' => PRIVATE_VOICE_PARTICIPANT_LIMIT_SETTING,
+            'owner' => 'private_voice_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'private-voice', 'subsectionLabel' => 'Private Voice Chats',
+            'subsectionOrder' => 10, 'label' => 'Private voice participant limit',
+            'description' => 'Maximum number of members in one private voice chat.',
+            'helpText' => 'Four is recommended. Each additional member increases mesh upload and device work. The current evidence-supported ceiling is four until the media audit proves a higher value.',
+            'aliases' => ['private call size', 'voice mesh limit'], 'type' => 'number',
+            'defaultValue' => PRIVATE_VOICE_RECOMMENDED_PARTICIPANTS,
+            'minimum' => 2, 'maximum' => PRIVATE_VOICE_SUPPORTED_CEILING, 'step' => 1,
+            'order' => 20, 'controlClass' => 'optional-core-subordinate', 'optional' => true,
+            'dependencies' => [PRIVATE_VOICE_ENABLED_SETTING], 'setupVisible' => true,
+            'adminVisible' => true, 'bulkOperations' => ['setting'],
+            'toolLogBehavior' => 'bounded-private-voice-policy-update', 'unit' => 'participants',
+            'limitGroup' => 'Private Voice Chats',
+        ]),
+        settings_registry_entry([
+            'id' => VOICE_TRANSMISSION_MODES_ENABLED_SETTING,
+            'settingKey' => VOICE_TRANSMISSION_MODES_ENABLED_SETTING,
+            'owner' => 'voice_transmission_mode_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'transmission-modes', 'subsectionLabel' => 'Voice Transmission Modes',
+            'subsectionOrder' => 20, 'label' => 'Additional voice transmission modes',
+            'description' => 'Allow members to choose Push to talk, Push to mute, and an always-muted join preference.',
+            'helpText' => 'Disabled by default. Ordinary voice activation remains unchanged. Disabling preserves each member’s saved preference and device-local key binding.',
+            'aliases' => ['push to talk', 'push to mute', 'always muted'], 'type' => 'boolean',
+            'defaultValue' => false, 'order' => 10, 'controlClass' => 'optional-core-parent',
+            'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+            'bulkOperations' => ['setting'], 'toolLogBehavior' => 'bounded-voice-mode-policy-update',
+            'connectionCapability' => [
+                'id' => 'voice-transmission-modes',
+                'name' => 'Voice transmission modes', 'manageLabel' => 'Manage transmission modes',
+                'manageView' => 'voice-media-players', 'order' => 40,
+            ],
+        ]),
+        settings_registry_entry([
+            'id' => SELECTIVE_WEBCAM_AUDIENCE_ENABLED_SETTING,
+            'settingKey' => SELECTIVE_WEBCAM_AUDIENCE_ENABLED_SETTING,
+            'owner' => 'webcam_audience_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'webcam-audience', 'subsectionLabel' => 'Webcam Audience',
+            'subsectionOrder' => 30, 'label' => 'Selective Webcam Audience',
+            'description' => 'Allow webcam senders to limit live delivery to a private voice chat, selected people, or local preview only.',
+            'helpText' => 'Disabled by default. Unselected people receive no live webcam track and continue to see the sender’s saved avatar.',
+            'aliases' => ['webcam audience', 'selected webcam viewers'], 'type' => 'boolean',
+            'defaultValue' => false, 'order' => 10, 'controlClass' => 'optional-core-parent',
+            'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+            'bulkOperations' => ['setting'], 'toolLogBehavior' => 'bounded-webcam-audience-policy-update',
+            'connectionCapability' => [
+                'id' => 'selective-webcam-audience',
+                'name' => 'Selective Webcam Audience', 'manageLabel' => 'Manage webcam audience',
+                'manageView' => 'voice-media-players', 'order' => 50,
+            ],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_AVATAR_ENABLED_SETTING, 'settingKey' => P2P_AVATAR_ENABLED_SETTING,
+            'owner' => 'p2p_avatar_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-avatar', 'subsectionLabel' => 'P2P Avatar',
+            'subsectionOrder' => 40, 'label' => 'P2P Avatar',
+            'description' => 'Allow authenticated room members to receive current avatars directly from another active member when the P2P avatar delivery mode is selected.',
+            'helpText' => 'Disabled by default. Received avatar bytes stay in session memory only, hidden avatars are never requested, and the built-in avatar remains visible until retrieval succeeds.',
+            'aliases' => ['direct avatar', 'peer avatar', 'avatar synchronization'],
+            'type' => 'boolean', 'defaultValue' => false, 'order' => 10,
+            'controlClass' => 'optional-core-parent', 'optional' => true,
+            'setupVisible' => true, 'adminVisible' => true,
+            'bulkOperations' => ['setting'], 'toolLogBehavior' => 'bounded-p2p-avatar-policy-update',
+            'connectionCapability' => [
+                'id' => 'p2p-avatar', 'name' => 'P2P Avatar',
+                'manageLabel' => 'Manage P2P Avatar',
+                'manageView' => 'voice-media-players', 'order' => 60,
+                'effectiveWhen' => [
+                    MODERATION_SAFETY_AVATAR_DELIVERY_SETTING => 'p2p-plus-built-in-generated',
+                ],
+            ],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_AVATAR_STUN_URLS_SETTING, 'settingKey' => P2P_AVATAR_STUN_URLS_SETTING,
+            'owner' => 'p2p_transport_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-connections', 'subsectionLabel' => 'P2P Connections',
+            'subsectionOrder' => 50, 'label' => 'STUN servers',
+            'description' => 'Connection-discovery servers used by enabled P2P capabilities.',
+            'helpText' => 'Cloudflare STUN is configured by default. Enter comma-separated stun: or stuns: URLs to replace it or add more, and use Reset to restore the Cloudflare default.',
+            'aliases' => ['direct connection servers'], 'type' => 'string',
+            'defaultValue' => P2P_TRANSPORT_CLOUDFLARE_STUN, 'order' => 10, 'controlClass' => 'optional-core-subordinate',
+            'optional' => true,
+            'setupVisible' => true, 'adminVisible' => true, 'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_AVATAR_TURN_ENABLED_SETTING, 'settingKey' => P2P_AVATAR_TURN_ENABLED_SETTING,
+            'owner' => 'p2p_transport_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-connections', 'subsectionLabel' => 'P2P Connections',
+            'subsectionOrder' => 50, 'label' => 'Allow configured TURN fallback',
+            'description' => 'Allow encrypted P2P packets to use only the configured relay when a direct connection fails.',
+            'helpText' => 'Disabled by default. Direct connectivity is attempted first. A relayed connection is not described as direct.',
+            'aliases' => ['P2P relay fallback'], 'type' => 'boolean',
+            'defaultValue' => false, 'order' => 20, 'controlClass' => 'optional-core-subordinate',
+            'optional' => true,
+            'setupVisible' => true, 'adminVisible' => true, 'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_AVATAR_TURN_ACKNOWLEDGED_SETTING, 'settingKey' => P2P_AVATAR_TURN_ACKNOWLEDGED_SETTING,
+            'owner' => 'p2p_transport_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-connections', 'subsectionLabel' => 'P2P Connections',
+            'subsectionOrder' => 50, 'label' => 'Acknowledge relay privacy warning',
+            'description' => 'I understand that encrypted P2P packets may pass through the configured relay when a direct connection fails.',
+            'helpText' => 'This acknowledgement is required before TURN fallback can be enabled.',
+            'aliases' => ['relay warning'], 'type' => 'boolean',
+            'defaultValue' => false, 'order' => 30, 'controlClass' => 'optional-core-subordinate',
+            'optional' => true, 'dependencies' => [P2P_AVATAR_TURN_ENABLED_SETTING],
+            'setupVisible' => true, 'adminVisible' => true, 'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_AVATAR_TURN_URLS_SETTING, 'settingKey' => P2P_AVATAR_TURN_URLS_SETTING,
+            'owner' => 'p2p_transport_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-connections', 'subsectionLabel' => 'P2P Connections',
+            'subsectionOrder' => 50, 'label' => 'TURN relay servers',
+            'description' => 'Administrator-configured TURN relay URLs used only after direct connectivity fails.',
+            'helpText' => 'Enter comma-separated turn: or turns: URLs. Missing or invalid relay configuration fails closed.',
+            'aliases' => ['relay servers'], 'type' => 'string', 'defaultValue' => '',
+            'order' => 40, 'controlClass' => 'optional-core-subordinate', 'optional' => true,
+            'dependencies' => [P2P_AVATAR_TURN_ENABLED_SETTING],
+            'setupVisible' => true, 'adminVisible' => true, 'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_AVATAR_TURN_USERNAME_SETTING, 'settingKey' => P2P_AVATAR_TURN_USERNAME_SETTING,
+            'owner' => 'p2p_transport_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-connections', 'subsectionLabel' => 'P2P Connections',
+            'subsectionOrder' => 50, 'label' => 'TURN username',
+            'description' => 'Username issued by the configured relay provider.',
+            'helpText' => 'Use the provider-supplied static username. There is no provider sign-in inside CoreChat.',
+            'aliases' => ['relay username'], 'type' => 'string', 'defaultValue' => '',
+            'order' => 50, 'controlClass' => 'optional-core-subordinate', 'optional' => true,
+            'dependencies' => [P2P_AVATAR_TURN_ENABLED_SETTING],
+            'setupVisible' => true, 'adminVisible' => true, 'bulkOperations' => ['setting'],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_AVATAR_TURN_CREDENTIAL_SETTING, 'settingKey' => P2P_AVATAR_TURN_CREDENTIAL_SETTING,
+            'owner' => 'p2p_transport_policy', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-connections', 'subsectionLabel' => 'P2P Connections',
+            'subsectionOrder' => 50, 'label' => 'TURN credential',
+            'description' => 'Private credential issued by the configured relay provider.',
+            'helpText' => 'Stored credentials are never returned by Setup/Admin or written to Tool Logs. The server retains a future-compatible boundary for short-lived provider credentials.',
+            'aliases' => ['relay credential'], 'type' => 'secret', 'defaultValue' => '',
+            'order' => 60, 'controlClass' => 'optional-core-subordinate', 'optional' => true,
+            'dependencies' => [P2P_AVATAR_TURN_ENABLED_SETTING],
+            'setupVisible' => true, 'adminVisible' => true, 'bulkOperations' => [],
+            'safeToReset' => false, 'secret' => true,
+        ]),
+        settings_registry_entry([
+            'id' => P2P_TRANSFER_FILES_ENABLED_SETTING, 'settingKey' => P2P_TRANSFER_FILES_ENABLED_SETTING,
+            'owner' => 'p2p_transfer', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'file-delivery', 'subsectionLabel' => 'File & Gesture Delivery',
+            'subsectionOrder' => 60, 'label' => 'Direct file sharing',
+            'description' => 'Allow trusted members with permission to offer files directly to another participant.',
+            'helpText' => 'Enabled by default. Recipients must accept. CoreChat stores signaling and privacy-safe status only, never the peer-to-peer payload.',
+            'aliases' => ['P2P files', 'direct files'], 'type' => 'boolean',
+            'defaultValue' => true, 'order' => 10, 'controlClass' => 'optional-core-parent',
+            'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+            'connectionCapability' => [
+                'id' => 'p2p-direct-files', 'name' => 'Direct file sharing',
+                'manageLabel' => 'Manage file delivery', 'manageView' => 'voice-media-players', 'order' => 80,
+            ],
+        ]),
+        settings_registry_entry([
+            'id' => P2P_TRANSFER_SEND_GESTURE_ENABLED_SETTING, 'settingKey' => P2P_TRANSFER_SEND_GESTURE_ENABLED_SETTING,
+            'owner' => 'p2p_transfer', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'file-delivery', 'subsectionLabel' => 'File & Gesture Delivery',
+            'subsectionOrder' => 60, 'label' => 'Send Gesture directly',
+            'description' => 'Allow a trusted member to deliberately offer a gesture package to another participant.',
+            'helpText' => 'Enabled by default. Ordinary room gestures and Local Match Only behavior remain unchanged.',
+            'aliases' => ['P2P Send Gesture'], 'type' => 'boolean',
+            'defaultValue' => true, 'order' => 20, 'controlClass' => 'optional-core-parent',
+            'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+            'bulkOperations' => ['setting'],
+            'connectionCapability' => [
+                'id' => 'p2p-send-gesture', 'name' => 'Direct Send Gesture',
+                'manageLabel' => 'Manage gesture delivery', 'manageView' => 'voice-media-players', 'order' => 90,
+            ],
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_FILE_MODE, 'settingKey' => SERVER_MEDIA_FILE_MODE,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'file-delivery', 'subsectionLabel' => 'File & Gesture Delivery',
+            'subsectionOrder' => 60, 'label' => 'File delivery mode',
+            'description' => 'Choose which delivery methods members may select for new file transfers.',
+            'helpText' => 'Both keeps peer-to-peer selected by default. A failed peer-to-peer attempt is never uploaded automatically.',
+            'type' => 'select', 'defaultValue' => 'p2p-only',
+            'allowedValues' => ['server-only','p2p-only','both','neither'],
+            'allowedValueLabels' => [
+                'server-only' => 'Server only', 'p2p-only' => 'P2P only',
+                'both' => 'Both', 'neither' => 'Neither',
+            ],
+            'order' => 30, 'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_GESTURE_MODE, 'settingKey' => SERVER_MEDIA_GESTURE_MODE,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'file-delivery', 'subsectionLabel' => 'File & Gesture Delivery',
+            'subsectionOrder' => 60, 'label' => 'Send Gesture delivery mode',
+            'description' => 'Choose which methods members may select for an explicit Send Gesture offer.',
+            'helpText' => 'This does not change ordinary room gesture delivery or Local Match Only.',
+            'type' => 'select', 'defaultValue' => 'both',
+            'allowedValues' => ['server-only','p2p-only','both','neither'],
+            'allowedValueLabels' => [
+                'server-only' => 'Server only', 'p2p-only' => 'P2P only',
+                'both' => 'Both', 'neither' => 'Neither',
+            ],
+            'order' => 40, 'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_ATTACHMENTS_ENABLED, 'settingKey' => SERVER_MEDIA_ATTACHMENTS_ENABLED,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-storage', 'subsectionLabel' => 'Server File Storage',
+            'subsectionOrder' => 70, 'label' => 'Server chat attachments',
+            'description' => 'Allow authenticated chat attachments to be stored temporarily by this community.',
+            'helpText' => 'Disabled by default. Files use authenticated delivery and expire after the configured retention unless pinned.',
+            'type' => 'boolean', 'defaultValue' => false, 'order' => 10,
+            'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_VOICE_NOTES_ENABLED, 'settingKey' => SERVER_MEDIA_VOICE_NOTES_ENABLED,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-storage', 'subsectionLabel' => 'Server File Storage',
+            'subsectionOrder' => 70, 'label' => 'Server voice notes',
+            'description' => 'Allow voice notes to be stored temporarily by this community.',
+            'helpText' => 'Disabled by default and controlled independently from chat attachments.',
+            'type' => 'boolean', 'defaultValue' => false, 'order' => 20,
+            'optional' => true, 'setupVisible' => true, 'adminVisible' => true,
+        ]),
+        settings_registry_entry([
+            'id' => P2P_TRANSFER_MAX_FILE_MB_SETTING, 'settingKey' => P2P_TRANSFER_MAX_FILE_MB_SETTING,
+            'owner' => 'p2p_transfer', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'file-delivery', 'subsectionLabel' => 'File & Gesture Delivery',
+            'subsectionOrder' => 60, 'label' => 'Direct transfer size limit',
+            'description' => 'Largest file a member may offer directly.', 'type' => 'number',
+            'defaultValue' => 100, 'minimum' => 1, 'maximum' => 2048, 'step' => 1,
+            'unit' => 'MB', 'limitGroup' => 'Room & Media Uploads',
+            'order' => 50, 'optional' => true,
+        ]),
+        settings_registry_entry([
+            'id' => P2P_TRANSFER_MAX_CONCURRENT_SETTING, 'settingKey' => P2P_TRANSFER_MAX_CONCURRENT_SETTING,
+            'owner' => 'p2p_transfer', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'file-delivery', 'subsectionLabel' => 'File & Gesture Delivery',
+            'subsectionOrder' => 60, 'label' => 'Concurrent direct transfers',
+            'description' => 'Maximum active direct transfers per sender.', 'type' => 'number',
+            'defaultValue' => 2, 'minimum' => 1, 'maximum' => 8, 'step' => 1,
+            'unit' => 'transfers', 'limitGroup' => 'Room & Media Uploads',
+            'order' => 60, 'optional' => true,
+        ]),
+        settings_registry_entry([
+            'id' => P2P_TRANSFER_HOURLY_OFFERS_SETTING, 'settingKey' => P2P_TRANSFER_HOURLY_OFFERS_SETTING,
+            'owner' => 'p2p_transfer', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'file-delivery', 'subsectionLabel' => 'File & Gesture Delivery',
+            'subsectionOrder' => 60, 'label' => 'Direct offers per hour',
+            'description' => 'Maximum direct file or gesture offers per sender in one rolling hour.',
+            'type' => 'number', 'defaultValue' => 20, 'minimum' => 1, 'maximum' => 200,
+            'step' => 1, 'unit' => 'offers per hour',
+            'limitGroup' => 'Room & Media Uploads', 'order' => 70, 'optional' => true,
+        ]),
+        settings_registry_entry([
+            'id' => 'file_transfer_source_version', 'settingKey' => null,
+            'owner' => 'p2p_transfer', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'p2p-connections', 'subsectionLabel' => 'P2P Connections',
+            'subsectionOrder' => 50, 'label' => 'File Transfer Source & Version',
+            'description' => 'Pinned transfer source review and CoreChat adaptation information.',
+            'helpText' => 'Reviewing upstream changes is manual and informational. CoreChat never downloads or applies upstream changes automatically.',
+            'type' => 'file-transfer-provenance', 'defaultValue' => '', 'order' => 70,
+            'controlClass' => 'read-only-provenance', 'optional' => false,
+            'safeToReset' => false, 'bulkOperations' => [], 'setupVisible' => false,
+            'adminVisible' => true, 'authorization' => 'administrator-and-recent-authentication',
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_IMAGE_MAX_MB, 'settingKey' => SERVER_MEDIA_IMAGE_MAX_MB,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Image size limit',
+            'description' => 'Largest server-stored image attachment.', 'type' => 'number',
+            'defaultValue' => 10, 'minimum' => 1, 'maximum' => 100, 'step' => 1, 'unit' => 'MB', 'order' => 10,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_DOCUMENT_MAX_MB, 'settingKey' => SERVER_MEDIA_DOCUMENT_MAX_MB,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Document size limit',
+            'description' => 'Largest server-stored document or archive attachment.', 'type' => 'number',
+            'defaultValue' => 20, 'minimum' => 1, 'maximum' => 500, 'step' => 1, 'unit' => 'MB', 'order' => 20,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_VOICE_MAX_MB, 'settingKey' => SERVER_MEDIA_VOICE_MAX_MB,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Voice note size limit',
+            'description' => 'Largest server-stored voice note.', 'type' => 'number',
+            'defaultValue' => 10, 'minimum' => 1, 'maximum' => 100, 'step' => 1, 'unit' => 'MB', 'order' => 30,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_USER_DAILY_MB, 'settingKey' => SERVER_MEDIA_USER_DAILY_MB,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Per-user 24-hour allowance',
+            'description' => 'Server-stored attachment bytes one member may add in a rolling 24 hours.', 'type' => 'number',
+            'defaultValue' => 100, 'minimum' => 1, 'maximum' => 10240, 'step' => 1, 'unit' => 'MB', 'order' => 40,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_INSTALLATION_STORAGE_MB, 'settingKey' => SERVER_MEDIA_INSTALLATION_STORAGE_MB,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Installation storage allowance',
+            'description' => 'Combined stored attachments and preview derivatives.', 'type' => 'number',
+            'defaultValue' => 2048, 'minimum' => 100, 'maximum' => 1048576, 'step' => 1, 'unit' => 'MB', 'order' => 50,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_MONTHLY_DELIVERY_MB, 'settingKey' => SERVER_MEDIA_MONTHLY_DELIVERY_MB,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Monthly delivery allowance',
+            'description' => 'Authenticated server-file bytes delivered each calendar month.', 'type' => 'number',
+            'defaultValue' => 5120, 'minimum' => 100, 'maximum' => 10485760, 'step' => 1, 'unit' => 'MB', 'order' => 60,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_WARNING_LOW_PERCENT, 'settingKey' => SERVER_MEDIA_WARNING_LOW_PERCENT,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'First allowance warning',
+            'description' => 'Show the first storage or delivery warning at this percentage.', 'type' => 'number',
+            'defaultValue' => 75, 'minimum' => 1, 'maximum' => 98, 'step' => 1, 'unit' => '%', 'order' => 70,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_WARNING_HIGH_PERCENT, 'settingKey' => SERVER_MEDIA_WARNING_HIGH_PERCENT,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Second allowance warning',
+            'description' => 'Show the urgent storage or delivery warning at this percentage.', 'type' => 'number',
+            'defaultValue' => 90, 'minimum' => 2, 'maximum' => 99, 'step' => 1, 'unit' => '%', 'order' => 80,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_HARD_STOP_PERCENT, 'settingKey' => SERVER_MEDIA_HARD_STOP_PERCENT,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-limits', 'subsectionLabel' => 'Server File Limits',
+            'subsectionOrder' => 80, 'label' => 'Allowance hard stop',
+            'description' => 'Reject new server storage or delivery at this percentage.', 'type' => 'number',
+            'defaultValue' => 100, 'minimum' => 3, 'maximum' => 100, 'step' => 1, 'unit' => '%', 'order' => 90,
+        ]),
+        settings_registry_entry([
+            'id' => SERVER_MEDIA_RETENTION_HOURS, 'settingKey' => SERVER_MEDIA_RETENTION_HOURS,
+            'owner' => 'server_media', 'categoryId' => 'voice-media-players',
+            'subsectionId' => 'server-file-storage', 'subsectionLabel' => 'Server File Storage',
+            'subsectionOrder' => 70, 'label' => 'Temporary file retention',
+            'description' => 'Hours to keep new unpinned chat attachments and voice notes.',
+            'helpText' => 'The recommended value is exactly 24 hours. Existing grandfathered files keep their prior policy.',
+            'type' => 'number', 'defaultValue' => 24, 'minimum' => 1, 'maximum' => 8760,
+            'step' => 1, 'unit' => 'hours', 'order' => 30,
         ]),
         settings_registry_entry([
             'id' => 'gif_default_provider', 'settingKey' => 'gif_default_provider',
@@ -791,9 +1204,9 @@ function settings_registry_definitions(): array {
         'subsectionLabel' => 'Performance & Capacity',
         'subsectionOrder' => 5,
         'label' => 'Room event transport',
-        'description' => 'Choose mandatory Polling or Automatic best available. Automatic tries proven WSS, then proven SSE, then Polling.',
+        'description' => 'Choose mandatory Polling or Automatic best available. Automatic uses proven realtime updates when available and otherwise uses Polling.',
         'helpText' => 'Polling remains the permanent fallback. Optional transports never own event truth, weaken authorization, or imply end-to-end encryption.',
-        'aliases' => ['polling only', 'automatic best available', 'server sent events', 'websocket', 'wss', 'sse'],
+        'aliases' => ['polling only', 'automatic best available', 'realtime updates', 'server sent events', 'sse'],
         'type' => 'select',
         'defaultValue' => 'polling-only',
         'allowedValues' => REALTIME_TRANSPORT_MODES,
@@ -900,7 +1313,7 @@ function settings_registry_installed_feature_projection(array $entries, array $s
             && !empty($entry['effectiveValue']);
         $features[] = [
             'id' => $extensionId,
-            'name' => (string)($status['name'] ?? $entry['label'] ?? $extensionId),
+            'name' => (string)($entry['label'] ?? $status['name'] ?? $extensionId),
             'effectiveEnabled' => $effectiveEnabled,
             'status' => $effectiveEnabled ? 'Enabled' : 'Disabled',
             'manageLabel' => (string)($presentation['manageLabel'] ?? 'Manage'),
@@ -915,6 +1328,43 @@ function settings_registry_installed_feature_projection(array $entries, array $s
             <=> [$right['order'], $right['name']]
     );
     return $features;
+}
+
+function settings_registry_connection_capability_projection(array $entries): array {
+    $capabilities = [];
+    $values = [];
+    foreach ($entries as $entry) $values[(string)($entry['id'] ?? '')] = $entry['effectiveValue'] ?? null;
+    foreach ($entries as $entry) {
+        $presentation = $entry['connectionCapability'] ?? null;
+        if (!is_array($presentation)) continue;
+        $settingId = (string)($entry['id'] ?? '');
+        $capabilityId = (string)($presentation['id'] ?? $settingId);
+        if ($settingId === '' || $capabilityId === '') continue;
+        if (isset($capabilities[$capabilityId])) {
+            if ((string)$capabilities[$capabilityId]['manageSettingId'] !== $settingId) {
+                throw new LogicException("Connection capability {$capabilityId} has more than one authoritative setting owner.");
+            }
+            continue;
+        }
+        $enabled = !empty($entry['effectiveValue']);
+        foreach ((array)($presentation['effectiveWhen'] ?? []) as $requiredId => $requiredValue) {
+            if (($values[(string)$requiredId] ?? null) !== $requiredValue) $enabled = false;
+        }
+        $capabilities[$capabilityId] = [
+            'id' => $capabilityId,
+            'name' => (string)($presentation['name'] ?? $entry['label'] ?? $capabilityId),
+            'effectiveEnabled' => $enabled,
+            'status' => $enabled ? 'Enabled' : 'Disabled',
+            'manageLabel' => (string)($presentation['manageLabel'] ?? 'Manage'),
+            'manageView' => (string)($presentation['manageView'] ?? $entry['categoryId'] ?? ''),
+            'manageSettingId' => $settingId,
+            'effectiveWhen' => (array)($presentation['effectiveWhen'] ?? []),
+            'order' => (int)($presentation['order'] ?? 100),
+        ];
+    }
+    $capabilities = array_values($capabilities);
+    usort($capabilities, static fn(array $left, array $right): int => [$left['order'], $left['name']] <=> [$right['order'], $right['name']]);
+    return $capabilities;
 }
 
 function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array {
@@ -1070,6 +1520,12 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
             $entries,
             $firstPartyExtensionStatuses
         ),
+        'connectionCapabilities' => settings_registry_connection_capability_projection($entries),
+        'p2pAvatarPolicy' => p2p_avatar_policy($pdo),
+        'p2pTransportPolicy' => p2p_transport_policy($pdo),
+        'p2pTransferPolicy' => p2p_transfer_policy($pdo),
+        'serverMediaPolicy' => server_media_policy($pdo),
+        'fileTransferProvenance' => p2p_transfer_provenance($pdo, $surface === 'admin'),
         'firstPartyExtensions' => $firstPartyExtensionStatuses,
         'databaseCompatibilityPolicy' => database_compatibility_policy_public_status(),
         'moderationTrustPolicy' => $context['moderationTrust'],
@@ -1089,6 +1545,7 @@ function settings_registry_validate_value(
     array $context = []
 ): array {
     $type = (string)$definition['type'];
+    if ($type === 'file-transfer-provenance') return ['ok' => false, 'code' => 'SETTING_READ_ONLY', 'error' => 'File transfer source information is read-only.', 'http_status' => 400];
     if ($type === 'fixed') return ['ok' => false, 'code' => 'SETTING_MANDATORY', 'error' => 'Mandatory safeguards cannot be changed.', 'http_status' => 400];
     if ($type === 'asset') {
         if ($source !== 'setup' && empty($context['validated_asset_upload'])) {
@@ -1254,6 +1711,28 @@ function settings_registry_update(
                     return $presetValidation;
                 }
                 $target[$presetId] = $presetValidation['value'];
+            }
+        }
+        $serverMediaThresholdIds = [
+            SERVER_MEDIA_WARNING_LOW_PERCENT,
+            SERVER_MEDIA_WARNING_HIGH_PERCENT,
+            SERVER_MEDIA_HARD_STOP_PERCENT,
+        ];
+        if (array_intersect($serverMediaThresholdIds, array_keys($target))) {
+            $threshold = static function(string $id) use ($target, $entryMap): int {
+                return (int)($target[$id] ?? $entryMap[$id]['currentValue'] ?? 0);
+            };
+            $low = $threshold(SERVER_MEDIA_WARNING_LOW_PERCENT);
+            $high = $threshold(SERVER_MEDIA_WARNING_HIGH_PERCENT);
+            $hard = $threshold(SERVER_MEDIA_HARD_STOP_PERCENT);
+            if (!($low < $high && $high < $hard)) {
+                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'ok' => false,
+                    'code' => 'SERVER_MEDIA_THRESHOLDS_INVALID',
+                    'error' => 'Set the first warning below the second warning, and the second warning below the hard stop.',
+                    'http_status' => 422,
+                ];
             }
         }
         $changedIds = [];
@@ -1434,8 +1913,8 @@ function settings_registry_update(
         foreach ($entryMap as $id => $entry) $effective[$id] = $entry['currentValue'];
         foreach ($target as $id => $value) $effective[$id] = $value;
         $deliveryAvailability = [
-            MODERATION_SAFETY_AVATAR_DELIVERY_SETTING => moderation_safety_delivery_policy_catalog()['avatar']['available'],
-            MODERATION_SAFETY_GESTURE_DELIVERY_SETTING => moderation_safety_delivery_policy_catalog()['gesture']['available'],
+            MODERATION_SAFETY_AVATAR_DELIVERY_SETTING => moderation_safety_current_delivery_policy_catalog()['avatar']['available'],
+            MODERATION_SAFETY_GESTURE_DELIVERY_SETTING => moderation_safety_current_delivery_policy_catalog()['gesture']['available'],
         ];
         foreach ($deliveryAvailability as $settingId => $availableModes) {
             if (!isset($target[$settingId])) continue;
@@ -1450,6 +1929,17 @@ function settings_registry_update(
                 ];
             }
         }
+        if (isset($target[MODERATION_SAFETY_AVATAR_DELIVERY_SETTING])
+            && (string)$target[MODERATION_SAFETY_AVATAR_DELIVERY_SETTING] === 'p2p-plus-built-in-generated'
+            && empty($effective[P2P_AVATAR_ENABLED_SETTING])) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return [
+                'ok' => false,
+                'code' => 'P2P_AVATAR_CAPABILITY_REQUIRED',
+                'error' => 'Enable P2P Avatar before choosing its delivery mode.',
+                'http_status' => 409,
+            ];
+        }
         if (!empty($effective['diagnostic_screenshots_enabled'])) {
             $days = (int)$effective['diagnostic_screenshot_retention_days'];
             if ($days < 1 || $days > 365) {
@@ -1462,6 +1952,16 @@ function settings_registry_update(
                     'http_status' => 409,
                 ];
             }
+        }
+        $p2pTransportValues = [];
+        foreach (array_keys(p2p_transport_setting_defaults()) as $settingId) {
+            $p2pTransportValues[$settingId] = $effective[$settingId]
+                ?? app_setting($pdo, $settingId, p2p_transport_setting_defaults()[$settingId]);
+        }
+        $p2pTransportValidation = p2p_transport_validate_settings($pdo, $p2pTransportValues);
+        if (empty($p2pTransportValidation['ok'])) {
+            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return $p2pTransportValidation;
         }
         $roleInput = [];
         foreach (role_color_setting_defaults() as $key => $default) $roleInput[$key] = $effective[$key] ?? $default;
@@ -1680,6 +2180,7 @@ function settings_registry_update(
             };
             set_app_setting($pdo, (string)$definition['settingKey'], $stored);
         }
+        $stopped += optional_core_voice_webcam_reconcile_policy_change_locked($pdo, $changedIds, $target);
 
         $databaseBackedChangedIds = array_values(array_filter(
             $changedIds,

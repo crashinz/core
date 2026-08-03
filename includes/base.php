@@ -8,8 +8,11 @@ const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
     '2026-07-23-build-000048-part-1',
     '2026-07-24-build-000048-part-3',
     '2026-07-27-build-000051-part-7',
+    '2026-07-31-post-build-000052-settings-terminology',
+    '2026-07-31-post-build-000052-optional-core-voice-webcam',
+    '2026-07-31-build-000053-delete-account',
 ];
-const CHATSPACE_SCHEMA_VERSION = '2026-07-31-post-build-000052-settings-terminology';
+const CHATSPACE_SCHEMA_VERSION = '2026-08-02-post-build-000055-direct-p2p-file-sharing';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
 
 function chatspace_application_version(): string {
@@ -34,6 +37,7 @@ require_once __DIR__ . '/avatar_visibility_policy.php';
 require_once __DIR__ . '/avatar_relationship_capacity_policy.php';
 require_once __DIR__ . '/avatar_dance_capability_policy.php';
 require_once __DIR__ . '/webcam_policy.php';
+require_once __DIR__ . '/optional_core_voice_webcam.php';
 require_once __DIR__ . '/room_background_upload.php';
 require_once __DIR__ . '/server_events.php';
 require_once __DIR__ . '/tool_log.php';
@@ -43,6 +47,10 @@ require_once __DIR__ . '/moderation_trust.php';
 require_once __DIR__ . '/moderation_identity_policy.php';
 require_once __DIR__ . '/moderation_account_workflows.php';
 require_once __DIR__ . '/moderation_safety.php';
+require_once __DIR__ . '/p2p_transport_policy.php';
+require_once __DIR__ . '/p2p_avatar_policy.php';
+require_once __DIR__ . '/server_media.php';
+require_once __DIR__ . '/p2p_transfer.php';
 require_once __DIR__ . '/message_protection.php';
 require_once __DIR__ . '/retention_lifecycle.php';
 require_once __DIR__ . '/network_moderation.php';
@@ -58,6 +66,7 @@ require_once __DIR__ . '/gesture_package_service.php';
 require_once __DIR__ . '/media_signal_service.php';
 require_once __DIR__ . '/member_profiles.php';
 require_once __DIR__ . '/database_migrations.php';
+require_once __DIR__ . '/account_deletion.php';
 require_once __DIR__ . '/database_recovery.php';
 require_once __DIR__ . '/database_compatibility_policy.php';
 
@@ -179,6 +188,14 @@ function db(): PDO {
     $candidate = db_migration_connection();
     database_compatibility_require_runtime($candidate);
     $GLOBALS['CHATSPACE_RUNTIME_PDO'] = $candidate;
+    if (function_exists('account_deletion_reconcile_file_journals')) {
+        account_deletion_reconcile_file_journals($candidate);
+    }
+    if (function_exists('server_media_schema_valid')
+        && server_media_schema_valid($candidate)
+        && function_exists('server_media_runtime_reconcile')) {
+        server_media_runtime_reconcile($candidate);
+    }
     return $GLOBALS['CHATSPACE_RUNTIME_PDO'];
 }
 
@@ -1496,7 +1513,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], first_party_extension_setting_defaults(), private_site_branding_setting_defaults(), avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), transport_policy_setting_defaults(), settings_registry_setting_defaults());
+    ], first_party_extension_setting_defaults(), private_site_branding_setting_defaults(), avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), optional_core_voice_webcam_setting_defaults(), p2p_avatar_setting_defaults(), server_media_setting_defaults(), p2p_transfer_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), transport_policy_setting_defaults(), settings_registry_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -1756,10 +1773,19 @@ function current_user(): ?array {
     if (empty($_SESSION['user_id'])) return null;
     $stmt = db()->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([(int)$_SESSION['user_id']]);
-    return $stmt->fetch() ?: null;
+    $user = $stmt->fetch() ?: null;
+    if ($user && function_exists('account_deletion_is_deleted')
+        && account_deletion_is_deleted(db(), (int)$user['id'])) {
+        security_destroy_session();
+        return null;
+    }
+    return $user;
 }
 
 function authenticate_user(int $userId): void {
+    if (function_exists('account_deletion_is_deleted') && account_deletion_is_deleted(db(), $userId)) {
+        throw new SecurityPolicyViolation('This account is unavailable.', 403);
+    }
     security_mark_authenticated($userId);
     if (function_exists('retention_lifecycle_session_authorized')) {
         unset($_SESSION['_account_session_generation']);

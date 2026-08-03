@@ -14,6 +14,8 @@ export class ChatSseAdapter {
 
     #failures = 0;
 
+    #renewing = false;
+
     configure(context = {}) {
 
         this.#context =
@@ -96,6 +98,9 @@ export class ChatSseAdapter {
         this.#source =
             source;
 
+        this.#renewing =
+            false;
+
         source.addEventListener("batch", async event => {
 
             if (!this.#running || source !== this.#source) {
@@ -112,10 +117,6 @@ export class ChatSseAdapter {
 
                 await context.onBatch(batch, "sse");
 
-                this.#closeSource();
-
-                this.#schedule(25);
-
             } catch (error) {
 
                 this.#fail(error);
@@ -124,10 +125,64 @@ export class ChatSseAdapter {
 
         });
 
-        source.onerror =
-            () => this.#fail(
-                new Error("Server-Sent Events connection failed.")
+        source.addEventListener("renew", () => {
+
+            if (!this.#running || source !== this.#source) {
+                return;
+            }
+
+            this.#renewing =
+                true;
+
+            this.#closeSource();
+
+            const jitter =
+                Math.floor(Math.random() * 75);
+
+            this.#schedule(50 + jitter);
+
+            context.onRenewal?.(
+                Object.freeze({
+
+                    adapter:
+                        "sse",
+
+                    expected:
+                        true,
+
+                    retryDelay:
+                        50 + jitter
+
+                })
             );
+
+        });
+
+        source.addEventListener("authorization", event => {
+
+            let detail = {};
+
+            try {
+                detail = JSON.parse(String(event.data || "{}"));
+            } catch (_) {
+                detail = {};
+            }
+
+            this.#fail(
+                new Error(String(detail.error || "Realtime authorization ended."))
+            );
+
+        });
+
+        source.onerror =
+            () => {
+                if (this.#renewing) {
+                    return;
+                }
+                this.#fail(
+                    new Error("Realtime connection failed.")
+                );
+            };
 
     }
 
@@ -141,6 +196,9 @@ export class ChatSseAdapter {
             this.#requireContext();
 
         this.#failures += 1;
+
+        this.#renewing =
+            false;
 
         this.#closeSource();
 

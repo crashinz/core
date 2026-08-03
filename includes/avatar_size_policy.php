@@ -45,6 +45,9 @@ function avatar_size_policy(PDO $pdo): array {
     $bounds = avatar_size_policy_bounds();
     $policy = [
         'revision' => max(1, (int)app_setting($pdo, 'avatar_size_policy_revision', '1')),
+        'avatarMaxSizeMb' => max(0.5, (float)app_setting($pdo, 'avatar_max_size_mb', '5')),
+        'avatarMaxBytes' => app_setting_bytes($pdo, 'avatar_max_size_mb', 5),
+        'avatarMinDimensionPx' => AVATAR_UPLOAD_MIN_DIMENSION_PX,
     ];
     foreach (avatar_size_policy_setting_map() as $setting => $publicKey) {
         [$min, $max] = $bounds[$setting];

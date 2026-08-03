@@ -1144,6 +1144,17 @@ function gesture_catalog_query(PDO $pdo, int $userId, string $scope, array $opti
     );
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $uploaderId = (int)($row['uploaded_by_user_id'] ?? 0);
+        if ($uploaderId > 0) {
+            $row['uploader_display_name'] = account_deletion_visible_name(
+                $pdo,
+                $uploaderId,
+                (string)($row['uploader_display_name'] ?? '')
+            );
+        }
+    }
+    unset($row);
     if (count($rows) > 5000) throw new GestureCatalogException('Gesture catalog exceeds the bounded query limit.', 503, 'CATALOG_QUERY_LIMIT');
 
     $orderMap = [];

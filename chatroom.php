@@ -165,6 +165,7 @@ if (session_status() === PHP_SESSION_ACTIVE) {
         <div class="attach-menu" id="attach-menu" hidden>
           <button type="button" id="attach-file-btn">Attach File</button>
           <button type="button" id="attach-voice-btn">Attach Voice Note</button>
+          <button type="button" id="show-shared-attachments-btn">Show Shared Attachments</button>
         </div>
         <input class="hidden-file-input" id="chat-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.rtf,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/rtf">
         <textarea id="chat-input" maxlength="1000" rows="1" autocomplete="off" placeholder="Message <?= e($room['name']) ?>"></textarea>
@@ -252,6 +253,9 @@ if (session_status() === PHP_SESSION_ACTIVE) {
         <div class="side-title" id="voice-title" hidden>Voice Chat <span id="voice-count-label"></span></div>
         <div class="voice-list" id="voice-list" hidden></div>
         <button class="btn btn-voice" id="voice-toggle" type="button">Join Voice</button>
+        <button class="btn btn-voice-hold" id="voice-transmission-hold" type="button" hidden aria-pressed="false">Hold to talk</button>
+        <div class="minor" id="voice-transmission-status" hidden></div>
+        <button class="btn" id="private-voice-open" type="button" hidden>Private Voice</button>
       </section>
       <section class="side-section">
         <button class="btn icon-label" id="locate-btn" style="width:100%;"><img src="<?= e(app_url('/assets/images/locate.png')) ?>" alt="">Locate Friends</button>
@@ -293,6 +297,78 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       <button class="btn" id="voice-device-cancel" type="button">Cancel</button>
     </div>
     <div class="admin-form-status" id="voice-device-status" aria-live="polite"></div>
+  </form>
+</div>
+<div class="modal" id="private-voice-modal" role="dialog" aria-modal="true" aria-labelledby="private-voice-title">
+  <div class="modal-box private-voice-box">
+    <div class="modal-head">
+      <strong id="private-voice-title">Private Voice Chats</strong>
+      <button class="window-close" id="private-voice-close" type="button" aria-label="Close Private Voice Chats">&times;</button>
+    </div>
+    <p class="minor" id="private-voice-policy-note"></p>
+    <div id="private-voice-content"></div>
+    <div class="admin-form-status" id="private-voice-status" aria-live="polite"></div>
+  </div>
+</div>
+<div class="modal" id="webcam-audience-modal" role="dialog" aria-modal="true" aria-labelledby="webcam-audience-title">
+  <form class="modal-box private-voice-box" id="webcam-audience-form">
+    <div class="modal-head">
+      <strong id="webcam-audience-title">Who can see my webcam?</strong>
+      <button class="window-close" id="webcam-audience-close" type="button" aria-label="Cancel webcam audience selection">&times;</button>
+    </div>
+    <p class="minor">Until you confirm, no remote participant receives your live webcam. Anyone outside the confirmed audience sees your saved avatar.</p>
+    <label class="settings-checkbox-row"><input type="radio" name="audience_mode" value="everyone"><span>Everyone in the room</span></label>
+    <label class="settings-checkbox-row"><input type="radio" name="audience_mode" value="private-voice"><span>Members of my current private voice chat</span></label>
+    <label class="settings-checkbox-row"><input type="radio" name="audience_mode" value="selected"><span>Only selected people</span></label>
+    <label class="settings-checkbox-row"><input type="radio" name="audience_mode" value="nobody"><span>Nobody — local preview only</span></label>
+    <fieldset id="webcam-audience-people" hidden>
+      <legend>Select current room members</legend>
+      <div class="capability-list" id="webcam-audience-person-list"></div>
+    </fieldset>
+    <div class="shared-form-actions">
+      <button class="btn btn-primary" type="submit">Confirm Audience</button>
+      <button class="btn" id="webcam-audience-cancel" type="button">Cancel</button>
+    </div>
+    <div class="admin-form-status" id="webcam-audience-status" aria-live="polite"></div>
+  </form>
+</div>
+<div class="modal" id="message-protection-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="message-protection-dialog-title" aria-describedby="message-protection-dialog-intro">
+  <form class="modal-box message-protection-dialog-box" id="message-protection-form" novalidate>
+    <div class="modal-head">
+      <strong id="message-protection-dialog-title">Change Message Protection</strong>
+    </div>
+    <p class="minor" id="message-protection-dialog-intro">Choose how new messages in this conversation are protected. Earlier messages keep their existing protection unless a verified conversion is available.</p>
+    <fieldset class="message-protection-choices" id="message-protection-choices">
+      <legend>Message protection</legend>
+      <label class="message-protection-choice">
+        <input type="radio" name="message_protection_mode" value="standard">
+        <span><strong>Standard</strong><small>Messages use the conversation's normal access controls.</small></span>
+      </label>
+      <label class="message-protection-choice">
+        <input type="radio" name="message_protection_mode" value="server-encrypted">
+        <span><strong>Encrypted on this server</strong><small>Messages are encrypted while stored and remain available to the server for delivery and approved operations.</small></span>
+      </label>
+      <label class="message-protection-choice">
+        <input type="radio" name="message_protection_mode" value="e2ee-private">
+        <span><strong>End-to-end encrypted</strong><small>New private messages are readable only on participants' trusted devices.</small></span>
+      </label>
+    </fieldset>
+    <div class="message-protection-availability minor" id="message-protection-availability" role="note" hidden></div>
+    <label class="message-protection-note" for="message-protection-note">
+      Private note
+      <textarea id="message-protection-note" maxlength="500" rows="4" required aria-describedby="message-protection-note-help"></textarea>
+    </label>
+    <p class="minor" id="message-protection-note-help">Briefly explain why you are making this change. Participants never see this note. Only a one-way fingerprint is kept to verify that a note was supplied; the note itself is not stored or shared.</p>
+    <div class="message-protection-impact minor" id="message-protection-impact" role="note"></div>
+    <label class="message-protection-confirmation" id="message-protection-e2ee-confirmation" hidden>
+      <input type="checkbox" id="message-protection-e2ee-confirm">
+      <span>I understand that End-to-End Encryption protects new messages only, earlier messages keep their existing protection, and losing all trusted devices and my Private Chat Recovery Phrase may make encrypted history unrecoverable.</span>
+    </label>
+    <div class="admin-form-status" id="message-protection-status" role="status" aria-live="polite" tabindex="-1"></div>
+    <div class="shared-form-actions message-protection-actions">
+      <button class="btn" id="message-protection-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="message-protection-submit" type="submit">Change Message Protection</button>
+    </div>
   </form>
 </div>
 <div class="modal" id="voice-note-modal">
@@ -757,6 +833,8 @@ if (session_status() === PHP_SESSION_ACTIVE) {
       <button id="ctx-community-eject" class="danger" type="button">Community Eject</button>
     </div>
   </div>
+  <div class="ctx-divider" id="ctx-transfer-divider"></div>
+  <button id="ctx-send-file-gesture" type="button">Send File or Gesture</button>
 </div>
 <div id="text-ctx-menu">
   <button id="text-copy" type="button">Copy</button>
@@ -1020,6 +1098,85 @@ if (session_status() === PHP_SESSION_ACTIVE) {
     </article>
   </div>
 </div>
+<div class="modal" id="shared-attachments-modal" role="dialog" aria-modal="true" aria-labelledby="shared-attachments-title" aria-hidden="true">
+  <div class="modal-box shared-attachments-box">
+    <div class="modal-head">
+      <strong id="shared-attachments-title">Shared Attachments</strong>
+      <button class="window-close" id="shared-attachments-close" type="button" aria-label="Close Shared Attachments">&times;</button>
+    </div>
+    <nav class="shared-attachments-tabs" aria-label="Shared attachment views">
+      <button class="btn active" type="button" data-shared-attachments-view="room" aria-current="page">This Room</button>
+      <button class="btn" type="button" data-shared-attachments-view="community">Community</button>
+      <button class="btn" type="button" data-shared-attachments-view="my-uploads">My Uploads</button>
+    </nav>
+    <div class="shared-attachments-list" id="shared-attachments-list" role="list"></div>
+    <div class="admin-form-status" id="shared-attachments-status" role="status" aria-live="polite"></div>
+  </div>
+</div>
+<div class="modal" id="p2p-transfer-compose-modal" role="dialog" aria-modal="true" aria-labelledby="p2p-transfer-compose-title" aria-hidden="true">
+  <form class="modal-box p2p-transfer-box" id="p2p-transfer-compose-form">
+    <div class="modal-head">
+      <strong id="p2p-transfer-compose-title">Send File or Gesture</strong>
+      <button class="window-close" id="p2p-transfer-compose-close" type="button" aria-label="Cancel transfer">&times;</button>
+    </div>
+    <p class="p2p-transfer-recipient">To <strong id="p2p-transfer-recipient-name">participant</strong></p>
+    <div class="settings-choice-row p2p-transfer-choice-row">
+      <span class="settings-choice-name" id="p2p-transfer-kind-label">What do you want to send?</span>
+      <fieldset class="segmented-radio p2p-transfer-kind" aria-labelledby="p2p-transfer-kind-label">
+        <label><input type="radio" name="transfer_kind" value="file" checked><span>File</span></label>
+        <label><input type="radio" name="transfer_kind" value="gesture"><span>Gesture</span></label>
+        <label><input type="radio" name="transfer_kind" value="avatar"><span>Avatar</span></label>
+      </fieldset>
+    </div>
+    <div id="p2p-transfer-file-wrap" class="p2p-transfer-picker">
+      <label>Choose files<input id="p2p-transfer-file" type="file" multiple></label>
+      <label>Choose a folder<input id="p2p-transfer-folder" type="file" webkitdirectory multiple></label>
+      <div id="p2p-transfer-drop-zone" class="p2p-transfer-drop-zone" role="button" tabindex="0" aria-describedby="p2p-transfer-drop-help">Drag files or a folder here</div>
+      <p id="p2p-transfer-drop-help" class="minor">Use the file or folder picker for the equivalent keyboard and touch option.</p>
+      <div id="p2p-transfer-manifest" class="p2p-transfer-manifest" aria-live="polite"></div>
+    </div>
+    <label id="p2p-transfer-gesture-wrap" hidden>Choose a gesture<select id="p2p-transfer-gesture"><option value="">Choose from your available gestures</option></select></label>
+    <label id="p2p-transfer-avatar-wrap" hidden>Choose one avatar<input id="p2p-transfer-avatar" type="file" accept="image/jpeg,image/png,image/gif,image/webp"></label>
+    <div class="settings-choice-row p2p-transfer-choice-row">
+      <span class="settings-choice-name" id="p2p-transfer-delivery-label">Delivery</span>
+      <fieldset class="segmented-radio segmented-radio-wide p2p-transfer-delivery" aria-labelledby="p2p-transfer-delivery-label">
+        <label><input type="radio" name="transfer_delivery" value="p2p" checked><span>Peer-to-peer</span></label>
+        <label><input type="radio" name="transfer_delivery" value="server"><span>Store on this server</span></label>
+      </fieldset>
+    </div>
+    <p class="p2p-transfer-warning" id="p2p-transfer-warning" role="note"></p>
+    <p class="server-upload-notice" id="p2p-server-upload-notice" role="note" hidden>Server upload notice: Files stored by this community may be accessed and reviewed by its administrators to investigate abuse, enforce community rules, and address safety or legal concerns. Use peer-to-peer transfer if you do not want the file stored on this server.</p>
+    <div class="shared-form-actions">
+      <button class="btn btn-primary" type="submit">Send Offer</button>
+      <button class="btn" id="p2p-transfer-compose-cancel" type="button">Cancel</button>
+    </div>
+    <div class="admin-form-status" id="p2p-transfer-compose-status" role="status" aria-live="polite"></div>
+  </form>
+</div>
+<div class="modal" id="p2p-transfer-offer-modal" role="dialog" aria-modal="true" aria-labelledby="p2p-transfer-offer-title" aria-hidden="true">
+  <div class="modal-box p2p-transfer-box">
+    <div class="modal-head"><strong id="p2p-transfer-offer-title" tabindex="-1">Incoming transfer</strong></div>
+    <dl class="p2p-transfer-offer-facts" id="p2p-transfer-offer-facts"></dl>
+    <p class="p2p-transfer-warning" id="p2p-transfer-offer-warning" role="note"></p>
+    <div class="p2p-transfer-preview" id="p2p-transfer-offer-preview" role="status" aria-live="polite" hidden></div>
+    <label class="p2p-transfer-direct-disk" id="p2p-transfer-direct-disk-wrap" hidden>
+      <input id="p2p-transfer-direct-disk" type="checkbox">
+      <span><strong>Download directly to this device</strong><br><small>This P2P-only option requires this tab to remain open and cannot resume after refresh, browser closure, or crash.</small></span>
+    </label>
+    <div class="shared-form-actions">
+      <button class="btn" id="p2p-transfer-preview-request" type="button" hidden>Request safe preview</button>
+      <button class="btn btn-primary" id="p2p-transfer-accept" type="button">Accept</button>
+      <button class="btn" id="p2p-transfer-decline" type="button">Decline</button>
+    </div>
+    <div class="admin-form-status" id="p2p-transfer-offer-status" role="status" aria-live="polite"></div>
+  </div>
+</div>
+<button class="transfers-shell-button" id="transfers-button" type="button" aria-controls="transfers-tray" aria-expanded="false">Transfers <span id="transfers-count" aria-hidden="true">0</span></button>
+<aside class="transfers-tray" id="transfers-tray" aria-labelledby="transfers-tray-title" hidden>
+  <div class="transfers-tray-head"><strong id="transfers-tray-title">Transfers</strong><button id="transfers-tray-close" type="button" aria-label="Close Transfers">&times;</button></div>
+  <p class="minor">Direct transfers continue in the background until their fixed deadline when the required local state remains available.</p>
+  <section class="p2p-transfer-status-drawer" id="p2p-transfer-status-drawer" aria-label="Direct transfer status" aria-live="polite"></section>
+</aside>
 <?php if ($innerTranquillityPlayer['available']): ?>
 <script src="<?= e($innerTranquillityPlayer['assets']['jquery']) ?>"></script>
 <script src="<?= e($innerTranquillityPlayer['assets']['player']) ?>"></script>

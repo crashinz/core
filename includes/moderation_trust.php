@@ -363,7 +363,14 @@ function moderation_trust_require_capability_available(PDO $pdo, string $capabil
             404
         );
     }
-    if (empty($catalog[$capabilityId]['available'])) {
+    $available = !empty($catalog[$capabilityId]['available']);
+    if (database_migration_table_exists($pdo, 'moderation_capability_catalog')) {
+        $statement = $pdo->prepare('SELECT available FROM moderation_capability_catalog WHERE capability_id=? LIMIT 1');
+        $statement->execute([$capabilityId]);
+        $stored = $statement->fetchColumn();
+        if ($stored !== false) $available = (bool)$stored;
+    }
+    if (!$available) {
         throw new ModerationTrustPolicyException(
             'The requested capability is registered for a future implementation and is not available.',
             'CAPABILITY_IMPLEMENTATION_UNAVAILABLE',

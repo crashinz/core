@@ -1368,6 +1368,14 @@ function member_profiles_row(PDO $pdo, int $userId, bool $forUpdate = false): ?a
 
 function member_profiles_projection(PDO $pdo, int $viewerUserId, int $targetUserId): array
 {
+    if (function_exists('account_deletion_is_deleted')
+        && account_deletion_is_deleted($pdo, $targetUserId)) {
+        throw new MemberProfileException(
+            'That member profile is unavailable.',
+            'MEMBER_PROFILE_NOT_FOUND',
+            404
+        );
+    }
     $row = member_profiles_row($pdo, $targetUserId);
     if (!$row) {
         throw new MemberProfileException(

@@ -213,6 +213,9 @@ export class ChatTransportCoordinator {
             onBatch:
                 (batch, adapter) => this.#acceptBatch(batch, adapter),
 
+            onRenewal:
+                detail => this.#context.onExpectedRenewal?.(detail),
+
             onFailure:
                 (error, detail) => this.#handleFailure(error, detail)
 
@@ -282,7 +285,7 @@ export class ChatTransportCoordinator {
             return "polling";
         }
 
-        for (const id of ["websocket", "sse"]) {
+        for (const id of ["sse"]) {
 
             const adapter =
                 policy.adapters?.[id];

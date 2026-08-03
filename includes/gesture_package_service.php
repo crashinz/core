@@ -832,6 +832,9 @@ function gesture_package_create(PDO $pdo, array $actor, array $fields, array $fi
             ]);
             $gestureId = (int)$pdo->lastInsertId();
             gesture_package_insert_generation($pdo, $gestureId, $generation, $actorId, $token, $prepared, $bundle);
+            if (function_exists('server_media_register_gesture_generation')) {
+                server_media_register_gesture_generation($pdo, $publicId, $generation, false);
+            }
             log_tool($pdo, $actorId, 'gesture_part4_create', $actorId, null, json_encode(['gesture_public_id' => $publicId, 'generation' => $generation, 'package_version' => GESTURE_PACKAGE_VERSION, 'content_sha256' => $bundle['content_sha256']], JSON_UNESCAPED_SLASHES));
             $row = gesture_catalog_lock_row($pdo, $publicId, $actorId);
             return [
@@ -891,6 +894,9 @@ function gesture_package_edit(PDO $pdo, array $actor, string $publicId, array $f
                 $now, $now, $now, $generation, $prepared['poster'] ? 1 : 0, GESTURE_PACKAGE_VERSION, $bundle['package_sha256'], $bundle['content_sha256'], $token, $now, (int)$row['id'],
             ]);
             gesture_package_insert_generation($pdo, (int)$row['id'], $generation, $actorId, $token, $prepared, $bundle);
+            if (function_exists('server_media_register_gesture_generation')) {
+                server_media_register_gesture_generation($pdo, $publicId, $generation, false);
+            }
             log_tool($pdo, $actorId, $admin ? 'gesture_part4_admin_edit' : 'gesture_part4_owner_edit', (int)$row['owner_user_id'], null, json_encode(['gesture_public_id' => $publicId, 'generation' => $generation, 'package_version' => GESTURE_PACKAGE_VERSION, 'content_sha256' => $bundle['content_sha256']], JSON_UNESCAPED_SLASHES));
             $updated = gesture_catalog_lock_row($pdo, $publicId, $admin ? null : $actorId);
             return [
@@ -952,7 +958,12 @@ function gesture_package_editor_detail(PDO $pdo, array $actor, string $publicId,
     if ($admin && (($actor['role'] ?? '') !== 'admin' || empty($row['is_public']))) throw new GestureCatalogException('Admin package inspection is not authorized.', 403, 'ADMIN_INSPECTION_NOT_AUTHORIZED');
     $uploader = $pdo->prepare('SELECT display_name FROM users WHERE id = ? LIMIT 1');
     $uploader->execute([(int)($row['uploaded_by_user_id'] ?: $row['owner_user_id'])]);
-    $row['uploader_display_name'] = (string)($uploader->fetchColumn() ?: '');
+    $uploaderId = (int)($row['uploaded_by_user_id'] ?: $row['owner_user_id']);
+    $row['uploader_display_name'] = account_deletion_visible_name(
+        $pdo,
+        $uploaderId,
+        (string)($uploader->fetchColumn() ?: '')
+    );
     $payload = gesture_capability_project_catalog_payload(
         $pdo,
         gesture_catalog_row_payload($row, $actorId, $admin),

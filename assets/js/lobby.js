@@ -843,6 +843,13 @@ const adminModerationTotals = { blocks: 0, roomEjections: 0, communityEjections:
 let adminSystemHealth = null;
 let capacityProfileImpact = null;
 let diagnosticPolicyTimer = null;
+let adminFileReviewSession = null;
+let adminStoragePage = 1;
+let adminStoragePages = 1;
+let adminStorageSearchTimer = 0;
+let adminStoragePendingAction = null;
+let adminStorageActionReturnFocus = null;
+const adminStoragePreviewUrls = new Set();
 let activeManageUsersSection = window.sessionStorage?.getItem(`chatspace.manage-users.section:${document.body.dataset.appBase || '/'}`) || 'accounts';
 
 function applyAdminProgrammaticHeadingFocus(heading) {
@@ -1098,6 +1105,7 @@ function showAdminSection(id) {
   focusAdminOwnedHeading(`#admin-section-${id} .admin-section-title`);
   if (id === 'gestures') loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture catalog could not be loaded.', 'error'));
   if (id === 'system-health') loadAdminSystemHealth().catch(error => setSystemHealthStatus(error.message || 'System Health could not be loaded.', 'error'));
+  if (id === 'storage') loadAdminStorage().catch(error => setAdminStorageStatus(error.message || 'Storage records could not be loaded.', 'error'));
   return true;
 }
 
@@ -2070,7 +2078,6 @@ function renderAdminSystemHealth() {
       ['HTTPS', capabilities.transportSecurity?.httpsActive ? 'Active' : 'Unavailable'],
       ['Trusted proxy ownership', capabilities.transportSecurity?.forwardedHeadersSafelyOwned ? 'Safe' : 'Unproven'],
       ['SSE', capabilities.streaming?.sseEligibilityLabel || 'Unknown'],
-      ['WebSocket/WSS', capabilities.persistentProcess?.wssEligible ? 'Eligible' : 'Unsupported'],
       ['Configured transport', health.operationalSignals?.configuredTransportModeLabel || 'Polling only — Default'],
       ['Selected transport', health.operationalSignals?.selectedTransport || 'polling'],
       ['Disk', capabilities.storage?.disk?.bucket || 'Unknown'],
@@ -2081,6 +2088,26 @@ function renderAdminSystemHealth() {
       row.append(healthElement('strong', '', label), healthElement('span', '', value));
       capabilityRoot.appendChild(row);
     }
+  }
+
+  for (const component of health.components || []) {
+    const root = document.getElementById('system-health-capabilities');
+    if (!root) break;
+    const row = healthElement('div', 'system-health-capability system-health-component');
+    const summary = healthElement('span', 'system-health-component-summary');
+    summary.append(
+      healthElement('strong', '', component.label || 'Component'),
+      healthElement('span', '', `${component.status || 'Unknown'} · ${component.version || 'version unavailable'}`)
+    );
+    row.appendChild(summary);
+    if (component.manageView) {
+      const manage = healthElement('button', 'btn btn-small', component.manageLabel || 'Manage');
+      manage.type = 'button';
+      manage.dataset.adminJump = 'settings';
+      manage.dataset.settingsView = component.manageView;
+      row.appendChild(manage);
+    }
+    root.appendChild(row);
   }
 
   renderDiagnosticPolicy(health.diagnostics?.policy || {}, health.maintenance?.runtimeDiagnostics || {});
@@ -2125,6 +2152,389 @@ async function loadAdminSystemHealth() {
   adminSystemHealth = data.systemHealth;
   renderAdminSystemHealth();
 }
+
+function setAdminStorageStatus(message, type = '') {
+  const status = document.getElementById('admin-storage-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.className = `admin-form-status ${type}`.trim();
+}
+
+function adminStorageReviewId() {
+  if (!adminFileReviewSession?.id) return '';
+  if (Date.parse(`${adminFileReviewSession.expiresAt}Z`) <= Date.now()) {
+    adminFileReviewSession = null;
+    return '';
+  }
+  return adminFileReviewSession.id;
+}
+
+function adminStorageMetadata(label, value) {
+  const item = document.createElement('span');
+  item.className = 'admin-storage-metadata-item';
+  item.append(healthElement('strong', '', `${label}: `), document.createTextNode(value || '—'));
+  return item;
+}
+
+function closeAdminStorageActionConfirmation({restoreFocus = true} = {}) {
+  const panel = document.getElementById('admin-storage-action-confirmation');
+  if (panel) panel.hidden = true;
+  adminStoragePendingAction = null;
+  const returnFocus = adminStorageActionReturnFocus;
+  adminStorageActionReturnFocus = null;
+  if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({preventScroll: true});
+}
+
+function openAdminStorageActionConfirmation({action, id = '', ids = [], reason = '', trigger = null}) {
+  const panel = document.getElementById('admin-storage-action-confirmation');
+  const title = document.getElementById('admin-storage-action-confirmation-title');
+  const message = document.getElementById('admin-storage-action-confirmation-message');
+  const reasonWrap = document.getElementById('admin-storage-action-confirmation-reason-wrap');
+  const reasonInput = document.getElementById('admin-storage-action-confirmation-reason');
+  const confirm = document.getElementById('admin-storage-action-confirm');
+  const status = document.getElementById('admin-storage-action-confirmation-status');
+  if (!panel || !title || !message || !reasonWrap || !reasonInput || !confirm || !status) return;
+  const bulk = ids.length > 0;
+  adminStoragePendingAction = {action, id, ids: [...ids], bulk};
+  adminStorageActionReturnFocus = trigger instanceof HTMLElement ? trigger : document.activeElement;
+  title.textContent = bulk
+    ? (action === 'quarantine' ? 'Quarantine selected files' : 'Delete selected files')
+    : (action === 'quarantine' ? 'Quarantine stored file' : 'Delete stored file');
+  message.textContent = bulk
+    ? `${action === 'quarantine' ? 'Quarantine' : 'Delete'} ${ids.length} selected file${ids.length === 1 ? '' : 's'} after reviewing this action.`
+    : action === 'quarantine'
+      ? 'Quarantine this stored file after recording a specific safety or policy reason.'
+      : 'Delete this stored-file record and remove its bytes only when no valid reference remains.';
+  reasonWrap.hidden = action !== 'quarantine';
+  reasonInput.value = action === 'quarantine' ? reason : '';
+  confirm.textContent = action === 'quarantine' ? 'Confirm Quarantine' : 'Confirm Delete';
+  status.textContent = '';
+  panel.hidden = false;
+  (action === 'quarantine' ? reasonInput : confirm).focus({preventScroll: true});
+}
+
+async function mutateAdminStorageAsset(id, action, trigger = null) {
+  const reviewId = adminStorageReviewId();
+  if (!reviewId) throw new Error('Start a 60-minute File Review Session before taking file actions.');
+  if (action === 'quarantine' || action === 'delete') {
+    openAdminStorageActionConfirmation({action, id, trigger});
+    return;
+  }
+  await lobbyApiPost('/api/server_media.php', {
+    action,
+    id,
+    review_session_id: reviewId,
+    reason: '',
+  });
+  await loadAdminStorage();
+}
+
+function clearAdminStoragePreviewUrls() {
+  for (const url of adminStoragePreviewUrls) URL.revokeObjectURL(url);
+  adminStoragePreviewUrls.clear();
+}
+
+async function loadAdminStoragePreview(asset, panel, trigger) {
+  if (panel.dataset.loaded === '1' || panel.dataset.loading === '1') return;
+  const reviewId = adminStorageReviewId();
+  if (!reviewId) {
+    setAdminStorageStatus('Start a 60-minute File Review Session before inspecting private files.', 'error');
+    return;
+  }
+  panel.dataset.loading = '1';
+  panel.hidden = false;
+  panel.textContent = 'Loading a bounded safe preview…';
+  trigger?.setAttribute('aria-expanded', 'true');
+  try {
+    const response = await fetch(`${asset.previewUrl}&review_session_id=${encodeURIComponent(reviewId)}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {'Cache-Control': 'no-store'},
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'The safe preview is unavailable.');
+    }
+    panel.replaceChildren();
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('application/json')) {
+      const data = await response.json();
+      const summary = document.createElement('p');
+      summary.textContent = `${data.preview?.detail || 'Metadata-only preview.'} ${data.preview?.malwareStatus || 'Not scanned for malware.'}`;
+      panel.appendChild(summary);
+    } else if (contentType.startsWith('text/plain')) {
+      const excerpt = document.createElement('pre');
+      excerpt.className = 'admin-storage-preview-text';
+      excerpt.textContent = (await response.text()).slice(0, 32768);
+      panel.appendChild(excerpt);
+    } else {
+      const blob = await response.blob();
+      if (blob.size > 5 * 1024 * 1024) throw new Error('The bounded preview exceeds the local review limit. Use authenticated Download instead.');
+      const url = URL.createObjectURL(blob);
+      adminStoragePreviewUrls.add(url);
+      if (contentType.startsWith('image/')) {
+        const image = document.createElement('img');
+        image.src = url;
+        image.alt = `Sanitized preview of ${asset.name || 'stored file'}`;
+        image.className = 'admin-storage-preview-image';
+        panel.appendChild(image);
+      } else if (contentType.startsWith('audio/') || contentType.startsWith('video/')) {
+        const media = document.createElement(contentType.startsWith('audio/') ? 'audio' : 'video');
+        media.src = url;
+        media.controls = true;
+        media.preload = 'metadata';
+        media.className = 'admin-storage-preview-media';
+        media.setAttribute('aria-label', `Controlled preview of ${asset.name || 'stored media'}`);
+        panel.appendChild(media);
+      } else {
+        URL.revokeObjectURL(url);
+        adminStoragePreviewUrls.delete(url);
+        throw new Error('Only metadata is available for this file type.');
+      }
+    }
+    panel.dataset.loaded = '1';
+  } catch (error) {
+    panel.textContent = error.message || 'The safe preview is unavailable.';
+    setAdminStorageStatus(panel.textContent, 'error');
+  } finally {
+    delete panel.dataset.loading;
+  }
+}
+
+function renderAdminStorageAsset(asset) {
+  const row = document.createElement('article');
+  row.className = `admin-storage-row risk-${String(asset.risk || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  row.setAttribute('role', 'row');
+
+  const title = healthElement('div', 'admin-storage-title');
+  const selection = document.createElement('input');
+  selection.type = 'checkbox';
+  selection.dataset.adminStorageSelect = asset.id;
+  selection.setAttribute('aria-label', `Select ${asset.name || 'file'} for a bulk action`);
+  title.append(
+    selection,
+    healthElement('strong', '', asset.name || 'Unnamed file'),
+    healthElement('span', `admin-storage-risk ${String(asset.risk || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, asset.risk || 'Cannot be inspected'),
+    healthElement('span', `admin-storage-state state-${asset.status || 'unknown'}`, asset.status || 'unknown')
+  );
+  const metadata = healthElement('div', 'admin-storage-metadata');
+  metadata.append(
+    adminStorageMetadata('Type', `${asset.detectedMime || 'unknown'} (${asset.extension || 'no extension'})`),
+    adminStorageMetadata('Size', formatHealthBytes(asset.sizeBytes)),
+    adminStorageMetadata('Uploader', asset.uploaderLabel || 'Unknown — legacy record'),
+    adminStorageMetadata('Uploaded', asset.createdAt || 'Unknown'),
+    adminStorageMetadata('Expiration', asset.pinned ? 'Pinned' : (asset.expiresAt || 'Persistent')),
+    adminStorageMetadata('References', String(asset.referenceCount ?? 0)),
+    adminStorageMetadata('Review', asset.reviewState || 'Not reviewed')
+  );
+  const detail = healthElement('p', 'minor admin-storage-risk-detail', `${asset.riskDetail || 'Metadata-only review.'} · ${asset.malwareStatus || 'Not scanned for malware'}`);
+  if (asset.archive?.summary) detail.append(document.createTextNode(` · ${asset.archive.summary}`));
+
+  const actions = healthElement('div', 'admin-storage-actions');
+  const reviewId = adminStorageReviewId();
+  const preview = healthElement('div', 'admin-storage-preview');
+  preview.hidden = true;
+  preview.id = `admin-storage-preview-${asset.id}`;
+  preview.setAttribute('role', 'region');
+  preview.setAttribute('aria-label', `Safe preview for ${asset.name || 'stored file'}`);
+  const inspect = healthElement('button', 'btn btn-small', asset.previewKind === 'metadata' ? 'Inspect metadata' : 'Inspect');
+  inspect.type = 'button';
+  inspect.disabled = !reviewId;
+  inspect.setAttribute('aria-controls', preview.id);
+  inspect.setAttribute('aria-expanded', 'false');
+  inspect.addEventListener('click', () => loadAdminStoragePreview(asset, preview, inspect));
+  if (reviewId) {
+    row.addEventListener('pointerenter', () => loadAdminStoragePreview(asset, preview, inspect), {once: true});
+    row.addEventListener('focusin', () => loadAdminStoragePreview(asset, preview, inspect), {once: true});
+  }
+  actions.appendChild(inspect);
+  const download = healthElement('a', 'btn btn-small', 'Download');
+  download.href = reviewId ? `${asset.downloadUrl}&review_session_id=${encodeURIComponent(reviewId)}` : '#';
+  download.rel = 'noopener';
+  if (!reviewId) {
+    download.setAttribute('aria-disabled', 'true');
+    download.addEventListener('click', event => {
+      event.preventDefault();
+      setAdminStorageStatus('Start a 60-minute File Review Session before downloading private files.', 'error');
+    });
+  }
+  actions.appendChild(download);
+  for (const [action, label] of [[asset.pinned ? 'unpin' : 'pin', asset.pinned ? 'Unpin' : 'Pin'], ['quarantine', 'Quarantine'], ['resolve-broken', 'Resolve reference'], ['delete', 'Delete']]) {
+    const button = healthElement('button', `btn btn-small${action === 'delete' ? ' btn-danger' : ''}`, label);
+    button.type = 'button';
+    button.disabled = !reviewId;
+    button.addEventListener('click', () => mutateAdminStorageAsset(asset.id, action, button).catch(error => setAdminStorageStatus(error.message || 'The file action failed.', 'error')));
+    actions.appendChild(button);
+  }
+  row.append(title, metadata, detail, preview, actions);
+  return row;
+}
+
+async function loadAdminStorage() {
+  const root = document.getElementById('admin-storage-list');
+  if (!root) return;
+  clearAdminStoragePreviewUrls();
+  const section = document.getElementById('admin-storage-section')?.value || 'chat-attachments';
+  const query = document.getElementById('admin-storage-search')?.value?.trim() || '';
+  const sort = document.getElementById('admin-storage-sort')?.value || 'date';
+  const direction = document.getElementById('admin-storage-direction')?.value || 'desc';
+  const extension = document.getElementById('admin-storage-extension')?.value?.trim() || '';
+  const detectedMime = document.getElementById('admin-storage-detected-type')?.value?.trim() || '';
+  const uploader = document.getElementById('admin-storage-uploader')?.value?.trim() || '';
+  const statusFilter = document.getElementById('admin-storage-state')?.value || '';
+  const pinned = document.getElementById('admin-storage-pinned')?.value || '';
+  const references = document.getElementById('admin-storage-references')?.value || '';
+  setAdminStorageStatus('Loading storage records…', 'working');
+  const params = new URLSearchParams({view: 'admin', section, query, sort, direction, extension, detected_mime: detectedMime, uploader, status: statusFilter, pinned, references, page: String(adminStoragePage), page_size: '25'});
+  const response = await fetch(appUrl(`/api/server_media.php?${params}`), {headers: {'Cache-Control': 'no-store'}});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) throw new Error(data.error || 'Storage records could not be loaded.');
+  const list = data.list || {};
+  const usageRoot = document.getElementById('admin-storage-usage');
+  if (usageRoot) {
+    usageRoot.replaceChildren();
+    for (const [label, usage] of [['Stored files and previews', data.usage?.storage], ['Monthly authenticated delivery', data.usage?.monthlyDelivery]]) {
+      const card = healthElement('div', `admin-storage-usage-card state-${usage?.status || 'unknown'}`);
+      card.append(
+        healthElement('strong', '', label),
+        healthElement('span', '', `${formatHealthBytes(usage?.usedBytes || 0)} of ${formatHealthBytes(usage?.limitBytes || 0)}`),
+        healthElement('span', 'minor', `${Number(usage?.percent || 0).toFixed(1)}% · ${String(usage?.status || 'unknown').replaceAll('-', ' ')}`)
+      );
+      usageRoot.appendChild(card);
+    }
+  }
+  adminStoragePages = Math.max(1, Math.ceil(Number(list.total || 0) / Number(list.pageSize || 25)));
+  adminStoragePage = Math.min(adminStoragePages, Math.max(1, Number(list.page || adminStoragePage)));
+  root.textContent = '';
+  if (!list.items?.length) root.appendChild(healthElement('p', 'admin-empty', 'No matching server files.'));
+  for (const asset of list.items || []) root.appendChild(renderAdminStorageAsset(asset));
+  const page = document.getElementById('admin-storage-page');
+  if (page) page.textContent = `Page ${adminStoragePage} of ${adminStoragePages} · ${Number(list.total || 0)} files`;
+  const prev = document.getElementById('admin-storage-prev');
+  const next = document.getElementById('admin-storage-next');
+  if (prev) prev.disabled = adminStoragePage <= 1;
+  if (next) next.disabled = adminStoragePage >= adminStoragePages;
+  setAdminStorageStatus(`${Number(list.total || 0)} matching server files.`, 'ok');
+}
+
+document.getElementById('admin-file-review-start')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const status = document.getElementById('admin-file-review-status');
+  button.disabled = true;
+  try {
+    const reason = document.getElementById('admin-file-review-reason')?.value?.trim() || '';
+    const data = await lobbyApiPost('/api/server_media.php', {action: 'start-review', reason});
+    adminFileReviewSession = data.reviewSession;
+    if (status) status.textContent = `Review Session active until ${adminFileReviewSession.expiresAt} UTC. The 60-minute window does not slide.`;
+    await loadAdminStorage();
+  } catch (error) {
+    if (status) status.textContent = error.message || 'The File Review Session could not be started.';
+  } finally {
+    button.disabled = false;
+  }
+});
+
+for (const id of ['admin-storage-section', 'admin-storage-sort', 'admin-storage-direction', 'admin-storage-state', 'admin-storage-pinned', 'admin-storage-references']) {
+  document.getElementById(id)?.addEventListener('change', () => {
+    adminStoragePage = 1;
+    loadAdminStorage().catch(error => setAdminStorageStatus(error.message || 'Storage records could not be loaded.', 'error'));
+  });
+}
+for (const id of ['admin-storage-search', 'admin-storage-extension', 'admin-storage-detected-type', 'admin-storage-uploader']) document.getElementById(id)?.addEventListener('input', () => {
+  window.clearTimeout(adminStorageSearchTimer);
+  adminStorageSearchTimer = window.setTimeout(() => {
+    adminStoragePage = 1;
+    loadAdminStorage().catch(error => setAdminStorageStatus(error.message || 'Storage records could not be loaded.', 'error'));
+  }, 200);
+});
+document.getElementById('admin-storage-select-all')?.addEventListener('click', event => {
+  const boxes = [...document.querySelectorAll('[data-admin-storage-select]')];
+  const select = boxes.some(box => !box.checked);
+  boxes.forEach(box => { box.checked = select; });
+  event.currentTarget.textContent = select ? 'Clear page selection' : 'Select page';
+});
+document.getElementById('admin-storage-bulk-apply')?.addEventListener('click', async event => {
+  const ids = [...document.querySelectorAll('[data-admin-storage-select]:checked')].map(box => box.dataset.adminStorageSelect);
+  const action = document.getElementById('admin-storage-bulk-action')?.value || '';
+  const reason = document.getElementById('admin-storage-bulk-reason')?.value?.trim() || '';
+  const reviewId = adminStorageReviewId();
+  if (!reviewId) return setAdminStorageStatus('Start a 60-minute File Review Session before bulk file actions.', 'error');
+  if (!ids.length || !action) return setAdminStorageStatus('Select at least one file and a bulk action.', 'error');
+  if (action === 'delete' || action === 'quarantine') {
+    openAdminStorageActionConfirmation({action, ids, reason, trigger: event.currentTarget});
+    return;
+  }
+  event.currentTarget.disabled = true;
+  try {
+    const result = await lobbyApiPost('/api/server_media.php', {action: 'bulk', bulk_action: action, ids, reason, review_session_id: reviewId});
+    setAdminStorageStatus(`${result.result?.processed || ids.length} files updated.`, 'ok');
+    await loadAdminStorage();
+  } catch (error) {
+    setAdminStorageStatus(error.message || 'The bulk file action failed.', 'error');
+  } finally {
+    event.currentTarget.disabled = false;
+  }
+});
+document.getElementById('admin-storage-action-confirm')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const pending = adminStoragePendingAction;
+  if (!pending) return;
+  const reviewId = adminStorageReviewId();
+  const status = document.getElementById('admin-storage-action-confirmation-status');
+  const reason = document.getElementById('admin-storage-action-confirmation-reason')?.value?.trim() || '';
+  if (!reviewId) {
+    if (status) status.textContent = 'Start a 60-minute File Review Session before taking file actions.';
+    return;
+  }
+  if (pending.action === 'quarantine' && !reason) {
+    if (status) status.textContent = 'Enter a specific quarantine reason.';
+    document.getElementById('admin-storage-action-confirmation-reason')?.focus();
+    return;
+  }
+  button.disabled = true;
+  try {
+    if (pending.bulk) {
+      await lobbyApiPost('/api/server_media.php', {
+        action: 'bulk',
+        bulk_action: pending.action,
+        ids: pending.ids,
+        reason,
+        review_session_id: reviewId,
+      });
+      setAdminStorageStatus(`${pending.ids.length} files updated.`, 'ok');
+    } else {
+      await lobbyApiPost('/api/server_media.php', {
+        action: pending.action,
+        id: pending.id,
+        review_session_id: reviewId,
+        reason,
+      });
+      setAdminStorageStatus(`Stored file ${pending.action === 'quarantine' ? 'quarantined' : 'deleted'}.`, 'ok');
+    }
+    closeAdminStorageActionConfirmation({restoreFocus: false});
+    await loadAdminStorage();
+  } catch (error) {
+    if (status) status.textContent = error.message || 'The stored-file action failed.';
+  } finally {
+    button.disabled = false;
+  }
+});
+document.getElementById('admin-storage-action-cancel')?.addEventListener('click', () => closeAdminStorageActionConfirmation());
+document.getElementById('admin-storage-action-confirmation')?.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  closeAdminStorageActionConfirmation();
+});
+document.getElementById('admin-storage-prev')?.addEventListener('click', () => {
+  if (adminStoragePage <= 1) return;
+  adminStoragePage--;
+  loadAdminStorage().catch(error => setAdminStorageStatus(error.message || 'Storage records could not be loaded.', 'error'));
+});
+document.getElementById('admin-storage-next')?.addEventListener('click', () => {
+  if (adminStoragePage >= adminStoragePages) return;
+  adminStoragePage++;
+  loadAdminStorage().catch(error => setAdminStorageStatus(error.message || 'Storage records could not be loaded.', 'error'));
+});
 
 document.getElementById('capacity-profile-review')?.addEventListener('click', async () => {
   const status = document.getElementById('capacity-profile-status');
@@ -3889,3 +4299,364 @@ adminLinkIconCreate?.addEventListener('submit', async e => {
     submit.disabled = false;
   }
 });
+
+/* Persistent account-to-account direct transfers remain available while a
+ * member changes rooms. The shared transfer service owns all mutation and
+ * payload behavior; this lobby surface is only a projection and controller. */
+let lobbyP2PTransferService = null;
+let lobbyIncomingTransfer = null;
+let lobbyTransferPreviewUrl = null;
+let lobbyTransferStorageReady = false;
+const lobbyTransferTerminalStates = new Set(['completed', 'failed', 'declined', 'cancelled', 'expired']);
+
+function lobbyFormatBytes(bytes) {
+  const value = Math.max(0, Number(bytes || 0));
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let scaled = value / 1024;
+  let index = 0;
+  while (scaled >= 1024 && index < units.length - 1) { scaled /= 1024; index += 1; }
+  return `${scaled >= 10 ? scaled.toFixed(0) : scaled.toFixed(1)} ${units[index]}`;
+}
+
+function lobbyTransferFact(term, value) {
+  const fragment = document.createDocumentFragment();
+  const dt = document.createElement('dt');
+  const dd = document.createElement('dd');
+  dt.textContent = term;
+  dd.textContent = value;
+  fragment.append(dt, dd);
+  return fragment;
+}
+
+function refreshLobbyTransferCount() {
+  const drawer = document.getElementById('p2p-transfer-status-drawer');
+  const active = [...(drawer?.children || [])].filter(row => row.dataset.terminal !== 'true').length;
+  const count = document.getElementById('transfers-count');
+  const button = document.getElementById('transfers-button');
+  if (count) count.textContent = String(active);
+  if (button) button.setAttribute('aria-label', `Transfers, ${active} active or resumable`);
+}
+
+function openLobbyTransfers() {
+  const tray = document.getElementById('transfers-tray');
+  if (tray) tray.hidden = false;
+  document.getElementById('transfers-button')?.setAttribute('aria-expanded', 'true');
+}
+
+function closeLobbyTransfers(restoreFocus = true) {
+  const tray = document.getElementById('transfers-tray');
+  if (tray) tray.hidden = true;
+  const button = document.getElementById('transfers-button');
+  button?.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) button?.focus();
+}
+
+function lobbyTransferControl(label, action, {offer, state, danger = false} = {}) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = danger ? 'btn btn-danger btn-small' : 'btn btn-small';
+  button.textContent = label;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await action(); }
+    catch (error) { renderLobbyTransferStatus({offer, state, detail: error.message || 'The transfer action failed.'}); }
+    finally { button.disabled = false; }
+  });
+  return button;
+}
+
+function renderLobbyTransferStatus({offer, state, detail, progress}) {
+  if (!offer) return;
+  const drawer = document.getElementById('p2p-transfer-status-drawer');
+  if (!drawer) return;
+  drawer.hidden = false;
+  const effectiveState = state || offer.status || 'unknown';
+  const terminal = lobbyTransferTerminalStates.has(effectiveState) || lobbyTransferTerminalStates.has(offer.status);
+  let row = drawer.querySelector(`[data-transfer-id="${CSS.escape(offer.id)}"]`);
+  if (!row) {
+    row = document.createElement('article');
+    row.dataset.transferId = offer.id;
+    row.innerHTML = '<strong class="p2p-transfer-primary"></strong><span class="p2p-transfer-detail"></span><progress class="p2p-transfer-progress" max="100" value="0" hidden></progress><div class="p2p-transfer-controls"></div>';
+    drawer.appendChild(row);
+  }
+  row.className = `p2p-transfer-status state-${effectiveState}`;
+  row.dataset.terminal = terminal ? 'true' : 'false';
+  row.querySelector('.p2p-transfer-primary').textContent = `${offer.safeName || 'Transfer'} — ${offer.actorIsSender ? `to ${offer.recipient?.name || 'participant'}` : `from ${offer.sender?.name || 'participant'}`}`;
+  row.querySelector('.p2p-transfer-detail').textContent = `${offer.finalStatus || effectiveState}${detail ? ` · ${detail}` : ''}`;
+  const progressBar = row.querySelector('progress');
+  if (progress && Number.isFinite(Number(progress.aggregatePercent))) {
+    progressBar.hidden = false;
+    progressBar.value = Math.max(0, Math.min(100, Number(progress.aggregatePercent)));
+    progressBar.setAttribute('aria-label', `${Math.round(progressBar.value)} percent transferred`);
+  } else progressBar.hidden = true;
+  const controls = row.querySelector('.p2p-transfer-controls');
+  controls.textContent = '';
+  const options = {offer, state: effectiveState};
+  if (['transferring', 'direct', 'relayed', 'resuming'].includes(effectiveState)) {
+    controls.append(lobbyTransferControl(Number(offer.fileCount || 1) > 1 ? 'Pause All' : 'Pause', () => lobbyP2PTransferService.pauseAll(offer.id, true), options));
+  }
+  if (effectiveState === 'paused') {
+    controls.append(lobbyTransferControl(Number(offer.fileCount || 1) > 1 ? 'Resume All' : 'Resume', () => lobbyP2PTransferService.pauseAll(offer.id, false), options));
+  }
+  if (['resumable', 'resume-wait', 'connecting'].includes(effectiveState)) {
+    controls.append(lobbyTransferControl('Resume Transfer', () => lobbyP2PTransferService.resumeTransfer(offer.id), options));
+  }
+  if (effectiveState === 'resume-source-required') {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = Number(offer.fileCount || 1) > 1;
+    input.className = 'hidden-file-input';
+    if ((offer.manifest?.files || []).some(file => String(file.safeName || '').includes('/'))) input.setAttribute('webkitdirectory', '');
+    const choose = document.createElement('button');
+    choose.type = 'button';
+    choose.className = 'btn btn-small';
+    choose.textContent = 'Choose Original Files';
+    choose.addEventListener('click', () => input.click());
+    input.addEventListener('change', async () => {
+      choose.disabled = true;
+      try { await lobbyP2PTransferService.reselectSources(offer.id, input.files); }
+      catch (error) { renderLobbyTransferStatus({offer, state: 'resume-source-required', detail: error.message || 'The original files did not match.'}); }
+      finally { choose.disabled = false; }
+    });
+    controls.append(choose, input);
+  }
+  if (!terminal && Number(offer.fileCount || 1) > 1 && ['transferring', 'paused', 'resuming'].includes(effectiveState)) {
+    controls.append(lobbyTransferControl('Cancel Current', () => lobbyP2PTransferService.cancel(offer.id, 'current'), {...options, danger: true}));
+  }
+  if (!terminal) {
+    controls.append(lobbyTransferControl(Number(offer.fileCount || 1) > 1 ? 'Cancel Batch' : 'Cancel Transfer', () => lobbyP2PTransferService.cancel(offer.id), {...options, danger: true}));
+  } else {
+    controls.append(lobbyTransferControl('Dismiss', async () => {
+      row.remove();
+      if (!drawer.children.length) drawer.hidden = true;
+      refreshLobbyTransferCount();
+    }, options));
+  }
+  refreshLobbyTransferCount();
+}
+
+async function openLobbyIncomingTransfer(offer) {
+  lobbyIncomingTransfer = offer;
+  lobbyTransferStorageReady = false;
+  clearLobbyTransferPreview();
+  const facts = document.getElementById('p2p-transfer-offer-facts');
+  facts.textContent = '';
+  const names = Array.isArray(offer.manifest?.files)
+    ? offer.manifest.files.map(file => file.safeName || 'Unnamed file').join(', ')
+    : (offer.safeName || 'Unnamed file');
+  facts.append(
+    lobbyTransferFact('Sender', offer.sender?.name || 'Participant'),
+    lobbyTransferFact(offer.fileCount > 1 ? 'Files' : 'File', names),
+    lobbyTransferFact('Count', String(Number(offer.fileCount || 1))),
+    lobbyTransferFact('Size', lobbyFormatBytes(offer.size)),
+    lobbyTransferFact('Delivery', offer.deliveryMethod === 'relay-only' ? 'Relay-only' : 'Direct first'),
+    lobbyTransferFact('Risk', offer.riskClass || 'Cannot be inspected'),
+    lobbyTransferFact('Safety', offer.riskDetail || 'Not scanned for malware')
+  );
+  document.getElementById('p2p-transfer-offer-warning').textContent = offer.warning || '';
+  const directWrap = document.getElementById('p2p-transfer-direct-disk-wrap');
+  const directChoice = document.getElementById('p2p-transfer-direct-disk');
+  const status = document.getElementById('p2p-transfer-offer-status');
+  const accept = document.getElementById('p2p-transfer-accept');
+  const previewRequest = document.getElementById('p2p-transfer-preview-request');
+  previewRequest.hidden = !offer.previewAvailable;
+  previewRequest.disabled = false;
+  previewRequest.textContent = 'Request safe preview';
+  directWrap.hidden = true;
+  directChoice.checked = false;
+  accept.disabled = true;
+  status.textContent = 'Checking browser storage for this transfer…';
+  const modal = document.getElementById('p2p-transfer-offer-modal');
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  const offerBox = modal.querySelector('.p2p-transfer-box');
+  if (offerBox) {
+    offerBox.scrollTop = 0;
+    offerBox.scrollLeft = 0;
+  }
+  document.getElementById('p2p-transfer-offer-title')?.focus({preventScroll: true});
+  try {
+    const capabilities = await lobbyP2PTransferService.storageCapabilities(offer);
+    if (capabilities.mode === 'direct') {
+      directWrap.hidden = false;
+      status.textContent = Number(offer.fileCount || 1) > 1
+        ? 'This batch needs supported browser storage to create its local ZIP. This is not a server quota.'
+        : 'Browser storage is unavailable or lacks capacity. Select the non-resumable direct-to-device option to continue.';
+    } else status.textContent = 'Accept only if you know and expect this transfer.';
+    lobbyTransferStorageReady = true;
+    accept.disabled = false;
+  } catch (error) {
+    status.textContent = error.message || 'Browser storage could not be checked.';
+  }
+}
+
+function closeLobbyIncomingTransfer() {
+  const modal = document.getElementById('p2p-transfer-offer-modal');
+  modal?.classList.remove('open');
+  modal?.setAttribute('aria-hidden', 'true');
+  lobbyIncomingTransfer = null;
+  lobbyTransferStorageReady = false;
+  clearLobbyTransferPreview();
+}
+
+function clearLobbyTransferPreview() {
+  if (lobbyTransferPreviewUrl) URL.revokeObjectURL(lobbyTransferPreviewUrl);
+  lobbyTransferPreviewUrl = null;
+  const preview = document.getElementById('p2p-transfer-offer-preview');
+  if (!preview) return;
+  preview.replaceChildren();
+  preview.hidden = true;
+}
+
+function renderLobbyTransferPreview(result = {}) {
+  const preview = document.getElementById('p2p-transfer-offer-preview');
+  if (!preview || !lobbyIncomingTransfer || String(result.offer?.id || '') !== String(lobbyIncomingTransfer.id || '')) return;
+  clearLobbyTransferPreview();
+  const heading = document.createElement('strong');
+  heading.textContent = 'Safe preview';
+  preview.appendChild(heading);
+  if (result.kind === 'image' && result.blob instanceof Blob) {
+    lobbyTransferPreviewUrl = URL.createObjectURL(result.blob);
+    const image = document.createElement('img');
+    image.className = 'p2p-transfer-preview-image';
+    image.src = lobbyTransferPreviewUrl;
+    image.alt = result.text ? `Safe preview: ${result.text}` : 'Safe transfer preview';
+    preview.appendChild(image);
+  } else {
+    const text = document.createElement('p');
+    text.textContent = String(result.text || 'No visual preview is available. Review the transfer details before accepting.');
+    preview.appendChild(text);
+  }
+  preview.hidden = false;
+  const previewRequest = document.getElementById('p2p-transfer-preview-request');
+  if (previewRequest) {
+    previewRequest.hidden = true;
+    previewRequest.disabled = false;
+    previewRequest.textContent = 'Request safe preview';
+  }
+  const status = document.getElementById('p2p-transfer-offer-status');
+  if (status) status.textContent = 'Safe preview is ready. Accept or decline remains separate.';
+}
+
+async function receiveLobbyTransfer({offer, blob, name, savedDirect = false, release = async () => {}}) {
+  const row = document.querySelector(`[data-transfer-id="${CSS.escape(offer.id)}"]`);
+  if (!row || !blob) return;
+  if (savedDirect) {
+    const saved = document.createElement('span');
+    saved.className = 'minor';
+    saved.setAttribute('role', 'status');
+    saved.textContent = `${name || 'The received file'} was saved directly to this device.`;
+    row.appendChild(saved);
+    await release();
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.className = 'btn btn-small';
+  link.href = url;
+  link.download = name || 'download';
+  link.textContent = `Save ${name || 'received file'}`;
+  row.appendChild(link);
+  let released = false;
+  const releaseOutput = async () => {
+    if (released) return;
+    released = true;
+    URL.revokeObjectURL(url);
+    await release();
+  };
+  link.addEventListener('click', () => window.setTimeout(() => void releaseOutput(), 5000), {once: true});
+  window.setTimeout(() => void releaseOutput(), 30 * 60 * 1000);
+}
+
+async function initializeLobbyP2PTransfers() {
+  const userId = Number(document.body?.dataset.userId || 0);
+  if (!userId || !document.getElementById('transfers-button')) return;
+  const policy = JSON.parse(document.getElementById('lobby-p2p-policy')?.textContent || '{}');
+  const {P2PTransferService} = await import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js'));
+  lobbyP2PTransferService = new P2PTransferService();
+  lobbyP2PTransferService.configure({
+    window,
+    setInterval: window.setInterval.bind(window),
+    clearInterval: window.clearInterval.bind(window),
+    getConfig: () => ({myUserId: userId}),
+    getPolicy: () => policy,
+    apiPost: lobbyApiPost,
+    async apiGet(url) {
+      const response = await fetch(appUrl(url), {credentials: 'same-origin', cache: 'no-store'});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.error) {
+        const error = new Error(data.error || 'Transfer status could not be loaded.');
+        error.status = response.status;
+        error.code = response.status === 401 ? 'SESSION_UNAVAILABLE' : 'HTTP_ERROR';
+        throw error;
+      }
+      return data;
+    },
+    async confirmDirectToDisk(offer) {
+      if (!document.getElementById('p2p-transfer-direct-disk')?.checked) return false;
+      await lobbyP2PTransferService.prepareDirectToDisk(offer);
+      return true;
+    },
+    onIncomingOffer: openLobbyIncomingTransfer,
+    onPreview: renderLobbyTransferPreview,
+    onStatus: renderLobbyTransferStatus,
+    onReceived: receiveLobbyTransfer,
+    onReselectRequired(offer) {
+      renderLobbyTransferStatus({offer, state: 'resume-source-required', detail: 'Choose the exact original file or folder again.'});
+      openLobbyTransfers();
+    },
+  });
+  lobbyP2PTransferService.start();
+}
+
+document.getElementById('transfers-button')?.addEventListener('click', () => {
+  if (document.getElementById('transfers-tray')?.hidden) openLobbyTransfers();
+  else closeLobbyTransfers();
+});
+document.getElementById('transfers-tray-close')?.addEventListener('click', () => closeLobbyTransfers());
+document.getElementById('transfers-tray')?.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); closeLobbyTransfers(); }
+});
+document.getElementById('p2p-transfer-accept')?.addEventListener('click', async event => {
+  if (!lobbyIncomingTransfer || !lobbyTransferStorageReady) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try { await lobbyP2PTransferService.respond(lobbyIncomingTransfer.id, true); closeLobbyIncomingTransfer(); }
+  catch (error) { document.getElementById('p2p-transfer-offer-status').textContent = error.message || 'The transfer could not be accepted.'; }
+  finally { button.disabled = false; }
+});
+document.getElementById('p2p-transfer-preview-request')?.addEventListener('click', async event => {
+  if (!lobbyIncomingTransfer?.previewAvailable) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  event.currentTarget.textContent = 'Requesting preview…';
+  try {
+    await lobbyP2PTransferService.requestPreview(lobbyIncomingTransfer.id);
+    document.getElementById('p2p-transfer-offer-status').textContent = 'The sender is preparing a bounded safe preview. Accept or decline remains separate.';
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = 'Request safe preview';
+    document.getElementById('p2p-transfer-offer-status').textContent = error.message || 'The safe preview could not be requested.';
+  }
+});
+document.getElementById('p2p-transfer-decline')?.addEventListener('click', async event => {
+  if (!lobbyIncomingTransfer) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try { await lobbyP2PTransferService.respond(lobbyIncomingTransfer.id, false); closeLobbyIncomingTransfer(); }
+  catch (error) { document.getElementById('p2p-transfer-offer-status').textContent = error.message || 'The transfer could not be declined.'; }
+  finally { button.disabled = false; }
+});
+document.getElementById('p2p-transfer-offer-modal')?.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); document.getElementById('p2p-transfer-decline')?.click(); }
+});
+document.querySelectorAll('form[action$="/logout.php"]').forEach(form => form.addEventListener('submit', async event => {
+  if (form.dataset.p2pLogoutHandled === '1' || !lobbyP2PTransferService) return;
+  event.preventDefault();
+  await lobbyP2PTransferService.explicitLogout().catch(() => {});
+  form.dataset.p2pLogoutHandled = '1';
+  form.submit();
+}));
+window.addEventListener('pagehide', () => lobbyP2PTransferService?.destroy('navigation'));
+initializeLobbyP2PTransfers().catch(error => console.warn('Direct transfer recovery could not start.', error));

@@ -85,7 +85,7 @@ function system_health_migration(PDO $pdo): array
 function system_health_projection(PDO $pdo): array
 {
     $capacity = operational_capacity_projection($pdo);
-    $capabilities = host_capabilities($pdo);
+    $capabilities = host_capabilities_public_projection(host_capabilities($pdo));
     $transport = transport_policy_projection($pdo);
     $diagnosticPolicy = runtime_diagnostic_policy_projection($pdo);
     $retention = runtime_diagnostic_retention_projection($pdo);
@@ -119,6 +119,8 @@ function system_health_projection(PDO $pdo): array
     $active = operational_capacity_counts($pdo);
     $firstParty = first_party_extension_statuses($pdo);
     $enabledExtensions = count(array_filter($firstParty, static fn(array $row): bool => !empty($row['effectiveEnabled'])));
+    $p2pTransfer = p2p_transfer_policy($pdo);
+    $p2pProvenance = p2p_transfer_provenance($pdo, true);
     return [
         'schemaId' => 'chatspace.system-health',
         'schemaVersion' => 1,
@@ -179,6 +181,19 @@ function system_health_projection(PDO $pdo): array
                 'label' => (string)($row['label'] ?? $row['id'] ?? ''),
                 'enabled' => !empty($row['effectiveEnabled']),
             ], $firstParty),
+        ],
+        'components' => [
+            [
+                'id' => 'p2p-file-transfer',
+                'label' => 'Direct file transfer',
+                'status' => !empty($p2pTransfer['effectiveEnabled']) ? 'Enabled' : 'Disabled',
+                'version' => (string)$p2pProvenance['adaptationVersion'],
+                'manageLabel' => 'Manage in P2P Connections',
+                'manageView' => 'voice-media-players',
+                'manageSettingId' => 'file_transfer_source_version',
+                'readOnly' => true,
+                'mutationOwner' => false,
+            ],
         ],
         'privacy' => [
             'reportOrEvidenceContentIncluded' => false,

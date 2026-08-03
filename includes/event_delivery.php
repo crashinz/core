@@ -72,6 +72,23 @@ function event_delivery_room_deleted_notice(
 function event_delivery_map_room_event(PDO $pdo, int $sessionId, array $viewer, array $event): array
 {
     $payload = json_decode((string)$event['payload'], true) ?: [];
+    if ((string)$event['type'] === 'webcam'
+        && !empty($payload['webcam_enabled'])
+        && !empty($payload['participant_id'])
+        && optional_core_voice_webcam_policy($pdo)['selectiveWebcamAudience']['enabled']) {
+        $epoch = $pdo->prepare('SELECT client_epoch FROM media_signal_clients WHERE participant_id=? AND session_id=? LIMIT 1');
+        $epoch->execute([(int)$payload['participant_id'], $sessionId]);
+        if (!webcam_audience_recipient_allowed(
+            $pdo,
+            $sessionId,
+            (int)$payload['participant_id'],
+            (int)$viewer['id'],
+            (string)($epoch->fetchColumn() ?: '')
+        )) {
+            $payload['webcam_enabled'] = false;
+            $payload['webcam_path'] = null;
+        }
+    }
     if (in_array((string)$event['type'], ['relationship', 'link'], true)
         && isset($payload['relationship'])
         && !empty($payload['relationship_id'])
@@ -96,14 +113,18 @@ function event_delivery_map_room_event(PDO $pdo, int $sessionId, array $viewer, 
         (int)$viewer['user_id'],
         $payload
     );
+    $projected = avatar_visibility_project_payload(
+        $pdo,
+        (int)$viewer['user_id'],
+        $payload
+    );
+    if (in_array((string)$event['type'], ['participant_join', 'avatar', 'webcam'], true)) {
+        $projected = p2p_avatar_project_participant($pdo, $sessionId, $viewer, $projected);
+    }
     return [
         'id' => (int)$event['id'],
         'type' => (string)$event['type'],
-        'payload' => avatar_visibility_project_payload(
-            $pdo,
-            (int)$viewer['user_id'],
-            $payload
-        ),
+        'payload' => $projected,
     ];
 }
 

@@ -739,6 +739,9 @@ function retention_lifecycle_revoke_sessions(
          SET session_generation=session_generation+1,sessions_revoked_at=CURRENT_TIMESTAMP,
              updated_at=CURRENT_TIMESTAMP WHERE user_id=?'
     )->execute([$targetUserId]);
+    if (function_exists('p2p_transfer_terminate_user')) {
+        p2p_transfer_terminate_user($pdo, $targetUserId, 'Account sessions revoked');
+    }
     $row = retention_lifecycle_ensure_user($pdo, $targetUserId);
     $result = [
         'userId' => $targetUserId,
@@ -802,7 +805,9 @@ function retention_lifecycle_ownership_safeguards(PDO $pdo, int $userId): array
 
 function retention_lifecycle_assert_future_transfer_safe(PDO $pdo, int $userId): void
 {
-    $projection = retention_lifecycle_ownership_safeguards($pdo, $userId);
+    $projection = function_exists('account_deletion_preview')
+        ? account_deletion_preview($pdo, $userId)
+        : retention_lifecycle_ownership_safeguards($pdo, $userId);
     if ($projection['isInstallationOwner'] || $projection['ownedRoomCount'] > 0) {
         throw new RetentionLifecycleException(
             'Ownership must be transferred before any future account-deletion operation.',

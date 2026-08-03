@@ -5,6 +5,11 @@ const CSRF_TOKEN = document.body?.dataset.csrf || '';
 const appUrl = path => `${APP_BASE}${path}`;
 const statusEl = document.getElementById('account-page-status');
 let account = null;
+let voiceWebcamPreferences = null;
+let pendingTransmissionBinding = false;
+let accountDeletion = null;
+const VOICE_BINDING_STORAGE_KEY = 'corechat.voice.transmission-binding.v1';
+const RESERVED_VOICE_BINDINGS = new Set(['Space', 'Tab', 'Enter', 'Escape', 'Backspace', 'Delete', 'ContextMenu']);
 
 async function request(path, options = {}) {
   const response = await fetch(appUrl(path), { credentials: 'same-origin', ...options });
@@ -20,6 +25,50 @@ function post(path, body) {
 function showStatus(message, error = false) {
   statusEl.textContent = message || '';
   statusEl.classList.toggle('error', error);
+}
+
+function transmissionBinding() {
+  const code = localStorage.getItem(VOICE_BINDING_STORAGE_KEY) || '';
+  return code ? { code, label: code.replace(/^Key/, '').replace(/^Digit/, '') } : { code: '', label: 'Unassigned' };
+}
+
+function renderVoiceWebcamPreferences(data) {
+  voiceWebcamPreferences = data || {};
+  const form = document.getElementById('account-voice-webcam-form');
+  if (!form) return;
+  form.dataset.expectedVersion = String(data.version || 1);
+  form.elements.transmission_mode.value = data.transmissionMode || 'voice-activation';
+  form.elements.always_muted_on_join.checked = Boolean(data.alwaysMutedOnJoin);
+  form.elements.webcam_audience_mode.value = data.webcamAudienceMode || 'everyone';
+  form.elements.transmission_binding.value = transmissionBinding().label;
+  const voiceEnabled = Boolean(data.policy?.transmissionModes?.enabled);
+  const audienceEnabled = Boolean(data.policy?.selectiveWebcamAudience?.enabled);
+  const voiceFields = document.getElementById('account-transmission-mode-fields');
+  const audienceFields = document.getElementById('account-webcam-audience-fields');
+  const destination = document.querySelector('[data-account-panel="voice-webcam"]');
+  const destinationTab = document.querySelector('[data-account-tab="voice-webcam"]');
+  const destinationAvailable = voiceEnabled || audienceEnabled;
+  voiceFields.hidden = !voiceEnabled;
+  audienceFields.hidden = !audienceEnabled;
+  destination.hidden = !destinationAvailable;
+  destinationTab.hidden = !destinationAvailable;
+  form.elements.transmission_mode.disabled = !voiceEnabled;
+  form.elements.always_muted_on_join.disabled = !voiceEnabled;
+  form.elements.webcam_audience_mode.disabled = !audienceEnabled;
+  document.getElementById('account-binding-set').disabled = !voiceEnabled;
+  document.getElementById('account-binding-clear').disabled = !voiceEnabled;
+  if (!destinationAvailable && destinationTab.classList.contains('active')) {
+    selectAccountTab('profile', false);
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set('tab', 'profile');
+    globalThis.history.replaceState({ accountTab: 'profile' }, '', url);
+  }
+}
+
+async function loadVoiceWebcamPreferences() {
+  const data = await request('/api/voice_webcam_preferences.php');
+  renderVoiceWebcamPreferences(data.preferences || {});
+  return data;
 }
 
 async function moderationProjection() {
@@ -122,14 +171,61 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
 }
 
+function selectAccountTab(tabId, pushHistory = true) {
+  const requested = String(tabId || 'profile');
+  let button = document.querySelector(`[data-account-tab="${CSS.escape(requested)}"]`);
+  if (!button || button.hidden) button = document.querySelector('[data-account-tab="profile"]');
+  if (!button) return false;
+  document.querySelectorAll('[data-account-tab]').forEach(item => {
+    const selected = item === button;
+    item.classList.toggle('active', selected);
+    item.setAttribute('aria-current', selected ? 'page' : 'false');
+  });
+  document.querySelectorAll('[data-account-panel]').forEach(panel => {
+    panel.classList.toggle('active', panel.dataset.accountPanel === button.dataset.accountTab);
+  });
+  if (pushHistory || button.dataset.accountTab !== requested) {
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set('tab', button.dataset.accountTab);
+    const state = { accountTab: button.dataset.accountTab };
+    if (pushHistory) globalThis.history.pushState(state, '', url);
+    else globalThis.history.replaceState(state, '', url);
+  }
+  return true;
+}
+
+function setAccountInformation(button, expanded, returnFocus = false) {
+  const panel = document.getElementById(button.getAttribute('aria-controls') || '');
+  if (!panel) return;
+  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  panel.hidden = !expanded;
+  if (expanded) panel.focus({ preventScroll: true });
+  if (!expanded && returnFocus) button.focus({ preventScroll: true });
+}
+
+document.querySelectorAll('[data-account-info]').forEach(button => {
+  button.addEventListener('click', () => {
+    setAccountInformation(button, button.getAttribute('aria-expanded') !== 'true');
+  });
+  const panel = document.getElementById(button.getAttribute('aria-controls') || '');
+  panel?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    setAccountInformation(button, false, true);
+  });
+});
+
 document.querySelectorAll('[data-account-tab]').forEach(button => button.addEventListener('click', () => {
-  document.querySelectorAll('[data-account-tab]').forEach(item => item.classList.toggle('active', item === button));
-  document.querySelectorAll('[data-account-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.accountPanel === button.dataset.accountTab));
+  selectAccountTab(button.dataset.accountTab);
 }));
 
 const accountQuery = new URLSearchParams(globalThis.location.search);
+selectAccountTab(accountQuery.get('tab') || 'profile', false);
+globalThis.addEventListener('popstate', () => {
+  const tab = new URLSearchParams(globalThis.location.search).get('tab') || 'profile';
+  selectAccountTab(tab, false);
+});
 if (accountQuery.get('tab') === 'safety') {
-  document.querySelector('[data-account-tab="safety"]')?.click();
   const reportForm = document.getElementById('account-report-form');
   if (reportForm) {
     reportForm.elements.reported_user_id.value = accountQuery.get('report_user_id') || '';
@@ -175,6 +271,81 @@ function accountRequestId(prefix) {
   return globalThis.crypto?.randomUUID?.()
     || `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
+
+function renderAccountDeletion(deletion) {
+  accountDeletion = deletion || {};
+  const readiness = document.getElementById('account-delete-readiness');
+  const rooms = document.getElementById('account-delete-owned-rooms');
+  const form = document.getElementById('account-delete-form');
+  const successorLabel = document.getElementById('account-delete-successor-label');
+  const successorHelp = document.getElementById('account-delete-successor-help');
+  const successor = form.elements.room_successor_user_id;
+  successorLabel.hidden = !accountDeletion.roomTransferRequired;
+  successorHelp.hidden = !accountDeletion.roomTransferRequired;
+  successor.required = Boolean(accountDeletion.roomTransferRequired);
+  successor.innerHTML = '<option value="">Choose an eligible account</option>'
+    + (accountDeletion.eligibleSuccessors || []).map(item => `<option value="${Number(item.id)}">${escapeHtml(item.displayName)} — ${escapeHtml(item.role)}</option>`).join('');
+  rooms.innerHTML = (accountDeletion.ownedRooms || []).map(room => `
+    <article class="admin-user-row"><strong>${escapeHtml(room.name)}</strong><small>This room must transfer before deletion completes.</small></article>
+  `).join('');
+  if (accountDeletion.isInstallationOwner) {
+    readiness.textContent = 'Transfer Installation Owner responsibility from Admin before deleting this account.';
+  } else if (accountDeletion.roomTransferRequired && !(accountDeletion.eligibleSuccessors || []).length) {
+    readiness.textContent = 'No eligible account can receive your rooms. Resolve room ownership before deleting this account.';
+  } else if (accountDeletion.roomTransferRequired) {
+    readiness.textContent = `Choose one eligible account to receive ${Number(accountDeletion.ownedRoomCount)} owned room(s), then complete the confirmation below.`;
+  } else {
+    readiness.textContent = 'No ownership transfer is required. Complete the confirmation below when you are ready.';
+  }
+  updateAccountDeleteSubmit();
+}
+
+function updateAccountDeleteSubmit() {
+  const form = document.getElementById('account-delete-form');
+  if (!form) return;
+  const successorReady = !accountDeletion?.roomTransferRequired || Boolean(form.elements.room_successor_user_id.value);
+  document.getElementById('account-delete-submit').disabled = !accountDeletion?.canDelete
+    || !successorReady
+    || !form.elements.current_password.value
+    || form.elements.confirmation.value !== 'DELETE';
+}
+
+async function loadAccountDeletion() {
+  const data = await request('/api/account_deletion.php');
+  renderAccountDeletion(data.deletion || {});
+}
+
+document.getElementById('account-delete-form')?.addEventListener('input', event => {
+  delete event.currentTarget.dataset.requestId;
+  updateAccountDeleteSubmit();
+});
+document.getElementById('account-delete-form')?.addEventListener('change', event => {
+  delete event.currentTarget.dataset.requestId;
+  updateAccountDeleteSubmit();
+});
+document.getElementById('account-delete-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (document.getElementById('account-delete-submit').disabled) return;
+  const submit = document.getElementById('account-delete-submit');
+  submit.disabled = true;
+  try {
+    showStatus('Deleting account securely…');
+    form.dataset.requestId ||= accountRequestId('delete-account');
+    const data = await post('/api/account_deletion.php', {
+      request_id: form.dataset.requestId,
+      current_password: form.elements.current_password.value,
+      confirmation: form.elements.confirmation.value,
+      room_successor_user_id: Number(form.elements.room_successor_user_id.value || 0) || null,
+    });
+    globalThis.location.assign(data.redirect || appUrl('/login.php?account=deleted'));
+  } catch (error) {
+    form.elements.current_password.value = '';
+    showStatus(error.message, true);
+    updateAccountDeleteSubmit();
+    statusEl.focus?.();
+  }
+});
 
 document.getElementById('account-trusted-review-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -557,6 +728,62 @@ document.getElementById('account-private-chat-recovery-create')?.addEventListene
   try { await protectionFinishRecovery(); } catch (error) { showStatus(error.message, true); }
 });
 
-Promise.all([request('/api/account.php'), moderationProjection(), loadPrivateChatProtection()])
+document.getElementById('account-binding-set')?.addEventListener('click', () => {
+  pendingTransmissionBinding = true;
+  showStatus('Press one non-reserved key for Push to talk or Push to mute. Escape cancels.');
+});
+
+document.getElementById('account-binding-clear')?.addEventListener('click', () => {
+  localStorage.removeItem(VOICE_BINDING_STORAGE_KEY);
+  pendingTransmissionBinding = false;
+  if (voiceWebcamPreferences) renderVoiceWebcamPreferences(voiceWebcamPreferences);
+  showStatus('The device-local voice hold key is Unassigned.');
+});
+
+document.addEventListener('keydown', event => {
+  if (!pendingTransmissionBinding) return;
+  event.preventDefault();
+  if (event.code === 'Escape') {
+    pendingTransmissionBinding = false;
+    showStatus('Voice hold-key selection cancelled.');
+    return;
+  }
+  if (event.repeat || RESERVED_VOICE_BINDINGS.has(event.code) || /^(?:Shift|Control|Alt|Meta)(?:Left|Right)$/.test(event.code)) {
+    showStatus('That key is reserved. Choose a letter, number, or punctuation key that does not conflict with navigation.', true);
+    return;
+  }
+  localStorage.setItem(VOICE_BINDING_STORAGE_KEY, event.code);
+  pendingTransmissionBinding = false;
+  if (voiceWebcamPreferences) renderVoiceWebcamPreferences(voiceWebcamPreferences);
+  showStatus(`Voice hold key saved on this device as ${transmissionBinding().label}.`);
+}, true);
+
+document.getElementById('account-voice-webcam-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    showStatus('Saving Voice & Webcam settings...');
+    const payload = {
+      expected_version: Number(form.dataset.expectedVersion || 1),
+    };
+    if (!document.getElementById('account-transmission-mode-fields').hidden) {
+      payload.transmission_mode = form.elements.transmission_mode.value;
+      payload.always_muted_on_join = form.elements.always_muted_on_join.checked;
+    }
+    if (!document.getElementById('account-webcam-audience-fields').hidden) {
+      payload.webcam_audience_mode = form.elements.webcam_audience_mode.value;
+    }
+    const data = await post('/api/voice_webcam_preferences.php', payload);
+    renderVoiceWebcamPreferences(data.preferences || {});
+    showStatus('Voice & Webcam settings saved.');
+  } catch (error) { showStatus(error.message, true); }
+});
+
+document.getElementById('account-voice-webcam-reset')?.addEventListener('click', () => {
+  if (voiceWebcamPreferences) renderVoiceWebcamPreferences(voiceWebcamPreferences);
+  showStatus('Unsaved Voice & Webcam changes were cleared.');
+});
+
+Promise.all([request('/api/account.php'), moderationProjection(), loadPrivateChatProtection(), loadVoiceWebcamPreferences(), loadAccountDeletion()])
   .then(([data, safety]) => { render(data); renderSafety(safety); })
   .catch(error => showStatus(error.message, true));

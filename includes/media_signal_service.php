@@ -112,15 +112,28 @@ function media_signal_recipient_epoch(PDO $pdo, int $sessionId, int $participant
     return is_string($value) && $value !== '' ? $value : null;
 }
 
-function media_signal_insert(PDO $pdo, int $sessionId, string $media, int $from, int $to, string $type, mixed $data, ?string $senderEpoch = null): array
+function media_signal_insert(
+    PDO $pdo,
+    int $sessionId,
+    string $media,
+    int $from,
+    int $to,
+    string $type,
+    mixed $data,
+    ?string $senderEpoch = null,
+    string $contextType = 'room',
+    ?string $contextPublicId = null
+): array
 {
     $recipientEpoch = media_signal_recipient_epoch($pdo, $sessionId, $to);
     $pdo->prepare(
         'INSERT INTO media_signals
-            (session_id, media, from_participant_id, to_participant_id, sender_epoch, recipient_epoch, type, data, expires_at)
-         VALUES (?,?,?,?,?,?,?,?,?)'
+            (session_id, media, from_participant_id, to_participant_id, sender_epoch, recipient_epoch,
+             context_type, context_public_id, type, data, expires_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)'
     )->execute([
-        $sessionId, $media, $from, $to, $senderEpoch, $recipientEpoch, $type,
+        $sessionId, $media, $from, $to, $senderEpoch, $recipientEpoch,
+        $contextType, $contextPublicId, $type,
         json_encode($data, JSON_UNESCAPED_SLASHES), media_signal_expiry(),
     ]);
     return ['signal_id' => (int)$pdo->lastInsertId(), 'recipient_epoch' => $recipientEpoch];

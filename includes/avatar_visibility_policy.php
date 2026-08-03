@@ -159,7 +159,7 @@ function avatar_visibility_version(PDO $pdo, int $viewerUserId): int {
 
 function avatar_visibility_preferences(PDO $pdo, int $viewerUserId): array {
     $stmt = $pdo->prepare(
-        'SELECT hp.id, hp.target_user_id, hp.scope, u.display_name
+        'SELECT hp.id, hp.target_user_id, hp.scope, hp.avatar_identity, u.display_name
            FROM avatar_hidden_preferences hp
            JOIN users u ON u.id = hp.target_user_id
           WHERE hp.viewer_user_id = ?
@@ -173,6 +173,9 @@ function avatar_visibility_preferences(PDO $pdo, int $viewerUserId): array {
             'targetUserId' => (int)$row['target_user_id'],
             'displayName' => (string)$row['display_name'],
             'scope' => $scope,
+            'avatarIdentity' => $scope === AVATAR_VISIBILITY_SCOPE_EXACT
+                ? (string)($row['avatar_identity'] ?? '')
+                : null,
             'notice' => $scope === AVATAR_VISIBILITY_SCOPE_USER
                 ? 'Avatar hidden — You chose to hide avatars from this user.'
                 : 'Avatar hidden — You chose to hide this avatar until it changes.',

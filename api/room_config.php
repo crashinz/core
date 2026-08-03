@@ -108,8 +108,8 @@ $stmt = $pdo->prepare(
 );
 $stmt->execute([(int)$session['id'], stale_cutoff($pdo)]);
 $roomOwnerId = (int)$room['owner_id'];
-$participants = array_map(function(array $p) use ($roomOwnerId, $pdo): array {
-    return array_merge([
+$participants = array_map(function(array $p) use ($roomOwnerId, $pdo, $session, $participant): array {
+    $projected = webcam_audience_project_participant($pdo, (int)$session['id'], (int)$participant['id'], array_merge([
         'id' => (int)$p['id'],
         'user_id' => (int)$p['user_id'],
         'public_profile_id' => member_profiles_validate_public_profile_id(
@@ -132,7 +132,8 @@ $participants = array_map(function(array $p) use ($roomOwnerId, $pdo): array {
         'linked_to' => $p['linked_to_participant_id'] ? (int)$p['linked_to_participant_id'] : null,
         'link_mode' => in_array(($p['link_mode'] ?? 'normal'), ['normal', 'lap'], true) ? $p['link_mode'] : 'normal',
         'online' => $p['last_seen_at'] && strtotime($p['last_seen_at']) >= time() - 35,
-    ], avatar_size_participant_event_fields($pdo, $p));
+    ], avatar_size_participant_event_fields($pdo, $p)));
+    return p2p_avatar_project_participant($pdo, (int)$session['id'], $participant, $projected);
 }, $stmt->fetchAll());
 
 $stmt = $pdo->prepare(
@@ -477,8 +478,13 @@ $roomConfig = [
     'avatarSizePolicy' => avatar_size_policy($pdo),
     'danceCapability' => avatar_dance_capability_policy($pdo),
     'webcamCapability' => webcam_capability($pdo),
+    'voiceWebcamPolicy' => optional_core_voice_webcam_policy($pdo),
+    'voiceWebcamPreferences' => voice_webcam_preferences($pdo, (int)$user['id']),
     'webcamViewerPreferences' => webcam_viewer_preferences($pdo, (int)$user['id']),
     'avatarVisibilityPreferences' => avatar_visibility_preferences($pdo, (int)$user['id']),
+    'p2pAvatarPolicy' => p2p_avatar_policy($pdo, true),
+    'p2pTransferPolicy' => p2p_transfer_policy($pdo),
+    'serverMediaPolicy' => server_media_policy($pdo),
     'backgroundPath' => $room['background_path'],
     'backgroundMime' => $room['background_mime'],
     'backgroundTile' => !empty($room['import_url']) && !empty($room['background_path']) && !str_starts_with((string)$room['background_mime'], 'video/'),

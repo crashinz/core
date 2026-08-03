@@ -133,6 +133,7 @@ try {
         (int)$p['user_id'],
         'participant-avatar-source-change'
     );
+    server_media_register_avatar($pdo, (int)$p['user_id'], $public, $dest, $mime, false);
     $pdo->commit();
 } catch (Throwable $error) {
     if ($pdo->inTransaction()) $pdo->rollBack();

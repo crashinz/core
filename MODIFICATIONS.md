@@ -35,6 +35,38 @@ Technical reference: Original release, 2026-05-18, commit `2e7b10f`.
 
 </details>
 
+## Private gesture delivery and shared P2P connections
+
+CoreChat now offers exact local matching for personal gesture media, complete
+viewer-private sender-media hiding, and one shared P2P connection policy.
+
+<details>
+<summary>More about this change</summary>
+
+- Keeps server-stored personal and community gesture delivery as the default
+  while adding **Local Match Only for Personal Gestures** as a deliberate
+  administrator choice.
+- Matches media only from the viewer's installed valid gesture package with
+  the exact message-time content hash. Missing media keeps canonical gesture
+  text and shows an accessible local-unavailable notice without sender-media
+  or hosted fallback.
+- Applies each viewer's per-sender gesture-media choice before projection in
+  supported live and history channels without affecting the same gesture from
+  other senders or notifying the hidden sender.
+- Adds one **P2P Connections** owner for the existing STUN/TURN keys. Cloudflare
+  STUN is the fresh and restorable default; custom STUN servers remain
+  supported.
+- Keeps TURN Disabled with blank defaults, preserves configured values while
+  disabled, requires an explicit relay warning and complete provider
+  credentials, and offers no provider-login or anonymous TURN mode.
+- Adds registry-derived P2P Avatar and P2P Gesture Local Match status and
+  navigation without duplicate setting controls.
+
+Technical reference: Build 000055 Gesture Distribution And Hidden-Media
+Privacy, 2026-08-01.
+
+</details>
+
 ## Early room, chat, media, and administration improvements
 
 The modified distribution expanded room presentation, chat composition,
@@ -744,5 +776,104 @@ administrative labels without changing saved upgrades or runtime limits.
 
 Technical reference: Post-Build 000052 Settings Terminology Clarification
 Before Public Release, 2026-07-31.
+
+</details>
+
+## Private voice and selective webcam controls
+
+CoreChat now adds independently controlled private-call admission,
+transmission preferences, and selective webcam audiences while preserving the
+established room-wide voice and webcam experience.
+
+<details>
+<summary>More about this change</summary>
+
+- Adds server-authoritative private voice membership, invitations, requests,
+  blocking/moderation eligibility, idempotent decisions, and exact
+  180-second expiry and retry boundaries.
+- Adds Voice activation, Push to talk, Push to mute, and Always muted on join,
+  with an unassigned device-local binding and fail-safe focus/lifecycle
+  handling.
+- Adds confirmed webcam audiences that send no live track to excluded members,
+  retain local preview, show the saved avatar as fallback, and clear grants on
+  every relevant lifecycle transition.
+- Adds a registry-derived **Voice, Media & Players** overview to shared Setup
+  and Admin Settings and a separate member **Voice & Webcam** preferences
+  destination without creating duplicate setting owners.
+- Keeps all new optional controls Disabled by default, preserves stored
+  subordinate settings during disablement, and retains ordinary room
+  voice/webcam behavior.
+- Records a privacy-safe media audit outcome that retains browser-managed
+  quality and the four-participant supported private-call ceiling.
+- Clarifies that initial policy acceptance applies to the first administrator
+  account while preserving both required policy controls and records.
+
+Technical reference: Post-Build 000052 Mandatory Optional-Core Voice and
+Webcam Program, 2026-07-31.
+
+</details>
+
+## Safe irreversible account deletion
+
+CoreChat now provides one self-service Delete Account flow with strong
+confirmation, atomic cleanup, privacy-safe retained history, and explicit
+ownership safeguards.
+
+<details>
+<summary>More about this change</summary>
+
+- Adds Delete Account to Account → Security & Privacy with recent
+  authentication, current-password reauthentication, exact `DELETE`, CSRF,
+  stable replay protection, and accessible status handling.
+- Prevents Installation Owner deletion until ownership is transferred and
+  requires an eligible successor for owned rooms so shared history remains
+  intact.
+- Atomically revokes sessions and credentials, clears private profile and
+  recovery state, ends active relationships and media state, and removes
+  unshared personal media across SQLite and MariaDB.
+- Preserves required chat, moderation, safety, legal, audit, shared-asset, and
+  integrity history under a privacy-safe **[Deleted User]** identity.
+- Releases the old username for a wholly new immutable account without
+  inheriting former history, profile, grants, ownership, or dates.
+- Replaces technical Message Protection prompts with one accessible dialog,
+  clear protection names, a private-note fingerprint, one E2EE confirmation,
+  and content-free participant notices.
+
+Technical reference: Build 000053 Delete Account, 2026-07-31.
+
+</details>
+
+## Private peer-to-peer avatars
+
+CoreChat now offers an optional peer-to-peer avatar delivery mode that keeps
+received avatar bytes in session memory and preserves the established
+server-stored and built-in avatar choices.
+
+<details>
+<summary>More about this change</summary>
+
+- Adds a Disabled-by-default **P2P Avatar** capability to the shared
+  **Voice, Media & Players** Settings overview without duplicating setting
+  ownership.
+- Authorizes each transfer for the exact authenticated room participants,
+  current avatar identity, and short-lived session context, and revalidates
+  visibility and blocking policy before delivery.
+- Applies account-wide and exact-avatar hide choices before request, transfer,
+  display, or retention while allowing a genuinely new avatar identity after
+  an exact hide.
+- Uses direct or configured STUN connectivity first, keeps TURN fallback
+  explicitly Disabled by default, preserves saved subordinate settings, and
+  never exposes relay credentials or network details.
+- Keeps received bytes in session memory only, validates bounded GIF/WebP
+  content, uses the standard avatar until retrieval succeeds, and clears
+  peers, channels, buffers, object URLs, tokens, and timers across every room,
+  participant, session, and identity lifecycle.
+- Shows only currently available member Voice & Webcam preferences, preserves
+  hidden values during policy disablement, and restores those values when the
+  corresponding option becomes available again.
+- Leaves ordinary room voice/webcam behavior and the default server-stored
+  avatar path unchanged.
+
+Technical reference: Build 000054 P2P Avatar Capability, 2026-08-01.
 
 </details>

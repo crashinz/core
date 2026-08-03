@@ -48,6 +48,18 @@ import {
 
 } from "./services/webcam-viewer-policy-service.js";
 
+import {
+
+    PrivateVoiceMembershipService
+
+} from "./services/private-voice-membership-service.js";
+
+import {
+
+    VoiceTransmissionModeService
+
+} from "./services/voice-transmission-mode-service.js";
+
 //--------------------------------------------------
 // Voice Runtime
 //--------------------------------------------------
@@ -70,6 +82,10 @@ export class VoiceRuntime extends CoreModule {
      * Current-viewer webcam presentation and receive policy.
      */
     #viewerPolicy = null;
+
+    #privateVoice = null;
+
+    #transmissionModes = null;
 
     //--------------------------------------------------
     // Constructor
@@ -122,6 +138,18 @@ export class VoiceRuntime extends CoreModule {
 
     }
 
+    get privateVoice() {
+
+        return this.#privateVoice;
+
+    }
+
+    get transmissionModes() {
+
+        return this.#transmissionModes;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -145,7 +173,10 @@ export class VoiceRuntime extends CoreModule {
                 this.#media?.getDiagnostics() ?? null,
 
             viewerPolicy:
-                this.#viewerPolicy?.getDiagnostics() ?? null
+                this.#viewerPolicy?.getDiagnostics() ?? null,
+
+            privateVoice:
+                this.#privateVoice?.snapshot() ?? null
 
         });
 
@@ -161,6 +192,8 @@ export class VoiceRuntime extends CoreModule {
     onInitialize() {
 
         this.#createViewerPolicyService();
+        this.#createPrivateVoiceService();
+        this.#createTransmissionModeService();
         this.#createMediaService();
 
     }
@@ -172,6 +205,8 @@ export class VoiceRuntime extends CoreModule {
 
         this.#media?.destroy();
         this.#viewerPolicy?.destroy();
+        this.#privateVoice?.destroy();
+        this.#transmissionModes?.destroy();
 
     }
 
@@ -201,6 +236,20 @@ export class VoiceRuntime extends CoreModule {
             );
 
         this.#viewerPolicy.initialize();
+
+    }
+
+    #createPrivateVoiceService() {
+
+        this.#privateVoice =
+            new PrivateVoiceMembershipService();
+
+    }
+
+    #createTransmissionModeService() {
+
+        this.#transmissionModes =
+            new VoiceTransmissionModeService();
 
     }
 

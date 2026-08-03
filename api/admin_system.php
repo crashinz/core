@@ -93,8 +93,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         json_out(['logs' => array_map(fn(array $row): array => [
             'id' => (int)$row['id'],
             'action' => $row['action'],
-            'actor_name' => $row['actor_name'] ?: 'System',
-            'target_name' => $row['target_name'] ?: '',
+            'actor_name' => !empty($row['actor_user_id'])
+                ? account_deletion_visible_name($pdo, (int)$row['actor_user_id'], (string)$row['actor_name'])
+                : 'System',
+            'target_name' => !empty($row['target_user_id'])
+                ? account_deletion_visible_name($pdo, (int)$row['target_user_id'], (string)$row['target_name'])
+                : '',
             'room_name' => $row['room_name'] ?: '',
             'detail' => $row['detail'] ?: '',
             'created_at' => $row['created_at'],
@@ -131,8 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         json_out(['ejections' => array_map(fn(array $row): array => [
             'id' => (int)$row['id'],
             'user_id' => (int)$row['user_id'],
-            'display_name' => $row['display_name'],
-            'ejected_by_name' => $row['ejected_by_name'],
+            'display_name' => account_deletion_visible_name($pdo, (int)$row['user_id'], (string)$row['display_name']),
+            'ejected_by_name' => account_deletion_visible_name($pdo, (int)$row['ejected_by_user_id'], (string)$row['ejected_by_name']),
             'duration_minutes' => $row['duration_minutes'] !== null ? (int)$row['duration_minutes'] : null,
             'permanent' => (bool)$row['permanent'],
             'reason' => $row['reason'] ?: '',
@@ -155,9 +159,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             'id' => (int)$row['id'],
             'room_id' => (int)$row['room_id'],
             'user_id' => (int)$row['user_id'],
-            'display_name' => $row['display_name'],
+            'display_name' => account_deletion_visible_name($pdo, (int)$row['user_id'], (string)$row['display_name']),
             'room_name' => $row['room_name'],
-            'ejected_by_name' => $row['ejected_by_name'],
+            'ejected_by_name' => account_deletion_visible_name($pdo, (int)$row['ejected_by_user_id'], (string)$row['ejected_by_name']),
             'duration_minutes' => $row['duration_minutes'] !== null ? (int)$row['duration_minutes'] : null,
             'permanent' => (bool)$row['permanent'],
             'created_at' => $row['created_at'],

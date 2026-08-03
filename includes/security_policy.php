@@ -148,8 +148,8 @@ function security_outside_content_catalog(): array
         'admin_branding' => ['auth' => 'user', 'storage' => '/assets/uploads/branding/', 'archive' => false],
         'gesture_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/gestures/', 'archive' => 'agst'],
         'gesture_package_download' => ['auth' => 'user', 'storage' => 'private', 'archive' => 'agst'],
-        'chat_file_upload' => ['auth' => 'participant', 'storage' => '/assets/uploads/files/', 'archive' => false],
-        'voice_note_upload' => ['auth' => 'participant', 'storage' => '/assets/uploads/voice/', 'archive' => false],
+        'chat_file_upload' => ['auth' => 'participant', 'storage' => 'private:server-media/', 'archive' => false],
+        'voice_note_upload' => ['auth' => 'participant', 'storage' => 'private:server-media/', 'archive' => false],
         'room_create' => ['auth' => 'user', 'storage' => null, 'archive' => false],
         'room_background_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/backgrounds/', 'archive' => false],
         'room_import_preview' => ['auth' => 'user', 'storage' => null, 'archive' => false],
@@ -312,6 +312,7 @@ function security_valid_uploaded_file_signature(string $path, string $mime, stri
         'audio/aac' => strlen($prefix) >= 2 && ord($prefix[0]) === 0xFF && (ord($prefix[1]) & 0xF6) === 0xF0,
         'audio/wav', 'audio/x-wav' => str_starts_with($prefix, 'RIFF') && substr($prefix, 8, 4) === 'WAVE',
         'video/mp4' => strlen($prefix) >= 12 && substr($prefix, 4, 4) === 'ftyp',
+        'application/zip' => str_starts_with($prefix, "PK\x03\x04") || str_starts_with($prefix, "PK\x05\x06") || str_starts_with($prefix, "PK\x07\x08"),
         default => false,
     };
 }

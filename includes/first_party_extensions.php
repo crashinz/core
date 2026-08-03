@@ -543,6 +543,7 @@ function first_party_extension_read_document(
     $allowed = [
         'LICENSE.md' => 'legal.license.read',
         'MODIFICATIONS.md' => 'legal.modifications.read',
+        'THIRD_PARTY_NOTICES.md' => 'legal.third-party-notices.read',
     ];
     if (($allowed[$document] ?? null) !== $capability) {
         throw new RuntimeException('Repository document capability denied.');

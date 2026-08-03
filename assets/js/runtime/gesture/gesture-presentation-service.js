@@ -213,6 +213,20 @@ export class GesturePresentationService {
                 playSound: false,
             });
         }
+        const localMatchUnavailable = gesture?.media_projection?.localMatchUnavailable === true;
+        if (localMatchUnavailable) {
+            return Object.freeze({
+                publicId,
+                individuallyHidden: false,
+                senderMediaHidden: false,
+                localMatchUnavailable: true,
+                showAnimation: false,
+                showText: true,
+                canonicalText,
+                hiddenText: "Gesture media unavailable — This gesture is not installed locally.",
+                playSound: false,
+            });
+        }
         const animationAvailable = String(gesture?.gif_path || gesture?.gif_url || "").trim() !== "";
         const showAnimation = this.#preferences.showAnimations && animationAvailable;
         const showText = this.#preferences.showText;

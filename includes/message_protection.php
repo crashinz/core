@@ -1069,7 +1069,10 @@ function message_protection_request_transition(PDO $pdo, int $userId, array $inp
         strtoupper(hash('sha256', $explanation)), 1, $status, $oldTotal, 0, $remaining,
         $status === 'complete' ? gmdate('Y-m-d H:i:s') : null,
     ]);
-    if ($status === 'complete') message_protection_set_policy($pdo, $kind, $key, $toMode, $userId, $policy['revision']);
+    if ($status === 'complete') {
+        message_protection_set_policy($pdo, $kind, $key, $toMode, $userId, $policy['revision']);
+        message_protection_emit_change_notice($pdo, $kind, $key, $policy['mode'], $toMode);
+    }
     log_tool(
         $pdo,
         $userId,
@@ -1120,6 +1123,41 @@ function message_protection_set_policy(
            protocol_version=excluded.protocol_version,revision=message_protection_policies.revision+1,
            updated_by_user_id=excluded.updated_by_user_id,updated_at=CURRENT_TIMESTAMP';
     $pdo->prepare($sql)->execute([$kind, $key, $mode, MESSAGE_PROTECTION_VERSION, $actorUserId]);
+}
+
+function message_protection_emit_change_notice(
+    PDO $pdo,
+    string $kind,
+    string $key,
+    string $fromMode,
+    string $toMode
+): void {
+    if ($fromMode === $toMode) return;
+    $payload = [
+        'conversationKind' => $kind,
+        'conversationKey' => $key,
+        'mode' => $toMode,
+        'changedAt' => gmdate('c'),
+    ];
+    if ($kind === 'room') {
+        emit_event($pdo, (int)$key, 'message_protection_change', $payload);
+        return;
+    }
+    if ($kind === 'community' || $kind === 'dm') {
+        emit_community_event($pdo, $kind, null, $key, 'message_protection_change', $payload);
+        return;
+    }
+    if ($kind === 'link') {
+        $statement = $pdo->prepare(
+            "SELECT session_id FROM avatar_relationships
+             WHERE conversation_public_id=? AND status='active' LIMIT 1"
+        );
+        $statement->execute([$key]);
+        $sessionId = (int)($statement->fetchColumn() ?: 0);
+        if ($sessionId > 0) {
+            emit_community_event($pdo, 'link', $sessionId, $key, 'message_protection_change', $payload);
+        }
+    }
 }
 
 function message_protection_transition_route(array $transition): array
@@ -1309,6 +1347,7 @@ function message_protection_run_transition_batch(
                 );
             }
             message_protection_set_policy($pdo, $kind, $key, $toMode, $userId, $policy['revision']);
+            message_protection_emit_change_notice($pdo, $kind, $key, $fromMode, $toMode);
             $pdo->prepare(
                 "UPDATE message_protection_transitions
                  SET status='complete',remaining_total=0,completed_at=CURRENT_TIMESTAMP,

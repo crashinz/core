@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-07-31-001-post-build-000052-settings-terminology';
+const CORE_MIGRATION_REQUIRED_ID = '2026-08-02-001-post-build-000055-direct-p2p-file-sharing';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -315,7 +315,10 @@ function database_migrations_manifest(): array
                 'database_migration_apply_build_000051_identity_policy_trust',
                 'database_migration_validate_build_000051_identity_policy_trust',
             ],
-            'expected_checksum' => 'D5328EE253A6A80C97F5B7D3F0A3A024DCAE3661B96F4D2963261C932AE5FECC',
+            'accepted_prior_checksums' => [
+                'D5328EE253A6A80C97F5B7D3F0A3A024DCAE3661B96F4D2963261C932AE5FECC',
+            ],
+            'expected_checksum' => '36BE58D00C9B8D24C9B841025D0901A919DD82A28B7C33A25F5D14A45D3A409D',
         ],
         [
             'id' => '2026-07-27-003-build-000051-account-workflows-confirmations',
@@ -351,7 +354,10 @@ function database_migrations_manifest(): array
                 'database_migration_apply_build_000051_moderation_safety_evidence',
                 'database_migration_validate_build_000051_moderation_safety_evidence',
             ],
-            'expected_checksum' => '820CB798017046FA5B8674446C4A50FB80456312BB990B9A4EB13437C4D2DC98',
+            'accepted_prior_checksums' => [
+                '820CB798017046FA5B8674446C4A50FB80456312BB990B9A4EB13437C4D2DC98',
+            ],
+            'expected_checksum' => '16AE56A26B60FCC4144A752594ECD9CFB11B284C343AD8A6BB4F5F89B473837C',
         ],
         [
             'id' => '2026-07-27-005-build-000051-network-privacy',
@@ -487,7 +493,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => '5E45D2345679165F840CF2B62B41090135072A7C3DDFDD17D9B79694CE42E131',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-07-31-001-post-build-000052-settings-terminology',
             'title' => 'Post-Build 000052 Settings terminology and fresh community default',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -502,6 +508,70 @@ function database_migrations_manifest(): array
                 'database_migration_validate_post_build_000052_settings_terminology',
             ],
             'expected_checksum' => '86DBA4C25A7B0B9C2F460E96ABDACF937E5AF8840A82F69BD7590BBE93FF86AF',
+        ],
+        [
+            'id' => '2026-07-31-002-post-build-000052-optional-core-voice-webcam',
+            'title' => 'Voice and webcam settings',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_post_build_000052_optional_core_voice_webcam',
+            'validate' => 'database_migration_validate_post_build_000052_optional_core_voice_webcam',
+            'source_functions' => [
+                'optional_core_voice_webcam_setting_defaults',
+                'optional_core_voice_webcam_schema_statements',
+                'optional_core_voice_webcam_install_schema',
+                'optional_core_voice_webcam_schema_valid',
+                'database_migration_apply_post_build_000052_optional_core_voice_webcam',
+                'database_migration_validate_post_build_000052_optional_core_voice_webcam',
+            ],
+            'expected_checksum' => '3C300EF74BAF10054EA169163F49541A8E196FC00594C0DE02917E1314F6AB19',
+        ],
+        [
+            'id' => '2026-07-31-003-build-000053-delete-account',
+            'title' => 'Account deletion and privacy-safe identity lifecycle',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000053_delete_account',
+            'validate' => 'database_migration_validate_build_000053_delete_account',
+            'source_functions' => [
+                'account_deletion_schema_statements',
+                'account_deletion_install_schema',
+                'account_deletion_schema_valid',
+                'account_deletion_apply_bundled_seed_compatibility',
+                'database_migration_apply_build_000053_delete_account',
+                'database_migration_validate_build_000053_delete_account',
+            ],
+            'expected_checksum' => 'A64618E2F61B10F4993702BD2814FE01BB2368F24EE831F90518D8714F3C3BC5',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Direct file sharing and authenticated server media',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb-with-hash-verified-private-file-copy',
+            'revision' => 1,
+            'up' => 'database_migration_apply_post_build_000055_direct_file_sharing',
+            'validate' => 'database_migration_validate_post_build_000055_direct_file_sharing',
+            'source_functions' => [
+                'server_media_setting_defaults',
+                'server_media_schema_statements',
+                'server_media_install_schema',
+                'server_media_schema_valid',
+                'server_media_register_owned_asset',
+                'server_media_register_avatar',
+                'server_media_register_gesture_generation',
+                'server_media_inventory_owned_uploads',
+                'server_media_migrate_legacy_messages',
+                'server_media_migrate_legacy_unreferenced_files',
+                'p2p_transfer_setting_defaults',
+                'p2p_transfer_schema_statements',
+                'p2p_transfer_install_schema',
+                'p2p_transfer_schema_valid',
+                'database_migration_apply_post_build_000055_direct_file_sharing',
+                'database_migration_validate_post_build_000055_direct_file_sharing',
+            ],
+            'expected_checksum' => '1F32DD4EE24078040CF00B5883CEA6B3B35C03DAB65DE11231EF26AD7D9AB6D8',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -533,6 +603,15 @@ function database_migrations_release_preflight(): array
         if (($migration['owner'] ?? '') !== 'core') $defects[] = "Unsupported migration owner for {$id}.";
         if (!is_callable($migration['up'] ?? null)) $defects[] = "Missing migration operation for {$id}.";
         if (!is_callable($migration['validate'] ?? null)) $defects[] = "Missing migration validator for {$id}.";
+        $priorChecksums = (array)($migration['accepted_prior_checksums'] ?? []);
+        if (count($priorChecksums) !== count(array_unique($priorChecksums))) {
+            $defects[] = "Duplicate accepted prior migration checksum for {$id}.";
+        }
+        foreach ($priorChecksums as $priorChecksum) {
+            if (!is_string($priorChecksum) || preg_match('/^[A-F0-9]{64}$/', $priorChecksum) !== 1) {
+                $defects[] = "Invalid accepted prior migration checksum for {$id}.";
+            }
+        }
         if (!hash_equals((string)$migration['expected_checksum'], (string)$migration['checksum'])) {
             $defects[] = "Migration definition checksum mismatch for {$id}.";
         }
@@ -1475,6 +1554,39 @@ function database_migration_validate_post_build_000052_settings_terminology(PDO 
     return moderation_identity_open_community_default_valid($pdo);
 }
 
+function database_migration_apply_post_build_000052_optional_core_voice_webcam(PDO $pdo): void
+{
+    optional_core_voice_webcam_install_schema($pdo);
+    seed_app_settings($pdo);
+}
+
+function database_migration_validate_post_build_000052_optional_core_voice_webcam(PDO $pdo): bool
+{
+    if (!optional_core_voice_webcam_schema_valid($pdo)) return false;
+    foreach (optional_core_voice_webcam_setting_defaults() as $key => $expected) {
+        $statement = $pdo->prepare('SELECT value FROM app_settings WHERE setting_key=? LIMIT 1');
+        $statement->execute([$key]);
+        $value = $statement->fetchColumn();
+        if ($value === false) return false;
+        if (in_array($key, [PRIVATE_VOICE_ENABLED_SETTING, VOICE_TRANSMISSION_MODES_ENABLED_SETTING, SELECTIVE_WEBCAM_AUDIENCE_ENABLED_SETTING], true)
+            && !in_array((string)$value, ['0', '1'], true)) return false;
+        if ($key === PRIVATE_VOICE_PARTICIPANT_LIMIT_SETTING
+            && ((int)$value < 2 || (int)$value > PRIVATE_VOICE_SUPPORTED_CEILING)) return false;
+    }
+    return true;
+}
+
+function database_migration_apply_build_000053_delete_account(PDO $pdo): void
+{
+    account_deletion_install_schema($pdo);
+    account_deletion_apply_bundled_seed_compatibility($pdo);
+}
+
+function database_migration_validate_build_000053_delete_account(PDO $pdo): bool
+{
+    return account_deletion_schema_valid($pdo);
+}
+
 function database_migrations_bootstrap_control_tables(PDO $pdo): void
 {
     if (db_driver($pdo) === 'mysql') {
@@ -1645,6 +1757,15 @@ function database_migration_validator_passes(PDO $pdo, array $migration): bool
     }
 }
 
+function database_migration_checksum_is_accepted(array $migration, string $checksum): bool
+{
+    if (hash_equals((string)$migration['checksum'], $checksum)) return true;
+    foreach ((array)($migration['accepted_prior_checksums'] ?? []) as $accepted) {
+        if (is_string($accepted) && hash_equals($accepted, $checksum)) return true;
+    }
+    return false;
+}
+
 function database_migration_status(PDO $pdo): array
 {
     $preflight = database_migrations_release_preflight();
@@ -1666,7 +1787,7 @@ function database_migration_status(PDO $pdo): array
             $stateDefects[] = "Unknown applied migration: {$id}.";
             continue;
         }
-        if (!hash_equals((string)$manifestById[$id]['checksum'], (string)$row['checksum'])) {
+        if (!database_migration_checksum_is_accepted($manifestById[$id], (string)$row['checksum'])) {
             $stateDefects[] = "Completed migration checksum mismatch: {$id}.";
             continue;
         }
@@ -3172,7 +3293,7 @@ function database_migration_record_ledger(PDO $pdo, array $migration, string $at
     $stmt->execute([$migration['id']]);
     $existing = $stmt->fetchColumn();
     if ($existing !== false) {
-        if (!hash_equals((string)$migration['checksum'], (string)$existing)) {
+        if (!database_migration_checksum_is_accepted($migration, (string)$existing)) {
             throw new CoreMigrationException('Completed migration checksum changed: ' . $migration['id'] . '.', 'MIGRATION_CHECKSUM_MISMATCH', 409);
         }
         return;

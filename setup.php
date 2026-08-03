@@ -983,6 +983,8 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
             <label>Confirm password<input name="confirm_password" type="password" minlength="8" required autocomplete="new-password"></label>
           </div>
           <div class="policy-acceptance-summary">
+            <h2>First Administrator Account Agreement</h2>
+            <p><strong>This acceptance applies to the administrator account you are creating. It is not a software-license agreement or a server settings choice.</strong></p>
             <p>Review the complete <a href="<?= e(app_url('/policy.php')) ?>" target="_blank" rel="noopener">Terms of Use v<?= e(MODERATION_IDENTITY_TERMS_VERSION) ?> and Community Rules v<?= e(MODERATION_IDENTITY_RULES_VERSION) ?></a>.</p>
             <label class="check-label"><input type="checkbox" name="accept_terms" value="1" required> I accept the complete current Terms of Use.</label>
             <label class="check-label"><input type="checkbox" name="accept_rules" value="1" required> I accept the complete current Community Rules.</label>

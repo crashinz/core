@@ -648,6 +648,60 @@
 
     createControl(entry) {
       const id = `settings-registry-${safeId(entry.id)}`;
+      if (entry.type === 'file-transfer-provenance') {
+        const provenance = this.registry?.fileTransferProvenance || {};
+        const wrapper = element('div', 'settings-file-transfer-provenance');
+        wrapper.id = id;
+        const summary = element('dl', 'settings-file-transfer-provenance-summary');
+        const add = (label, value) => summary.append(element('dt', '', label), element('dd', '', String(value || 'Not yet checked')));
+        add('Pinned upstream commit', provenance.pinnedSource);
+        add('CoreChat adaptation', provenance.adaptationVersion);
+        add('Upstream source date', provenance.sourceDate);
+        const checkedValue = element('dd', '', String(provenance.lastUpdateCheckAt || 'Not yet checked'));
+        summary.append(element('dt', '', 'Last update check'), checkedValue);
+        const review = element('button', 'btn', provenance.reviewAction || 'Review upstream changes');
+        review.type = 'button';
+        const status = element('span', 'minor settings-file-transfer-provenance-status', 'Manual and informational only; no source is downloaded or applied.');
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        review.addEventListener('click', async () => {
+          review.disabled = true;
+          status.textContent = 'Reviewing the pinned source identity...';
+          try {
+            const base = String(document.body?.dataset?.appBase || '').replace(/\/$/, '');
+            const csrf = String(document.body?.dataset?.csrf || '');
+            const response = await fetch(`${base}/api/p2p_transfer.php`, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+              body: JSON.stringify({ action: 'review-upstream', _csrf: csrf }),
+            });
+            const result = await response.json();
+            if (!response.ok || result.error) throw new Error(result.error || 'The source review could not be recorded.');
+            checkedValue.textContent = result.provenance?.lastUpdateCheckAt || 'Checked now';
+            status.textContent = 'Pinned source metadata reviewed. No source was downloaded or applied.';
+          } catch (error) {
+            status.textContent = error?.message || 'The source review could not be recorded.';
+          } finally {
+            review.disabled = false;
+          }
+        });
+        const details = document.createElement('details');
+        details.className = 'settings-file-transfer-provenance-details';
+        details.appendChild(element('summary', '', 'Source, license, and adaptation details'));
+        for (const source of provenance.sources || []) {
+          const sourceFacts = element('dl', 'settings-file-transfer-source');
+          const addSource = (label, value) => sourceFacts.append(element('dt', '', label), element('dd', '', String(value || '')));
+          addSource('Repository', source.repository);
+          addSource('Commit', source.commit);
+          addSource('License', source.license);
+          addSource('Source/archive SHA-256', source.archiveSha256);
+          details.appendChild(sourceFacts);
+        }
+        details.appendChild(element('p', 'minor', provenance.adaptationSummary || 'CoreChat maintains the authenticated transfer adaptation.'));
+        wrapper.append(summary, review, status, details);
+        return wrapper;
+      }
       if (entry.type === 'profile-review') {
         const value = element('div', 'settings-profile-current');
         const profiles = this.registry?.operationalCapacity?.profiles || [];
@@ -820,7 +874,7 @@
     }
 
     isDirty(entry) {
-      if (entry.type === 'asset' || entry.type === 'fixed' || entry.type === 'profile-review') return false;
+      if (entry.type === 'asset' || entry.type === 'fixed' || entry.type === 'profile-review' || entry.type === 'file-transfer-provenance') return false;
       if (entry.type === 'secret') return this.touched.has(entry.id) && String(this.draft.get(entry.id) || '') !== '';
       return !valuesEqual(this.draft.get(entry.id), entry.currentValue, entry.type);
     }
@@ -932,12 +986,57 @@
         node.closest('[data-settings-nav-item]')?.classList.toggle('has-changes', changed > 0);
       }
       this.updateInstalledFeatureStatuses();
+      this.updateConnectionCapabilityStatuses();
     }
 
     installedFeatures() {
       return Array.isArray(this.registry?.installedFeatures)
         ? this.registry.installedFeatures
         : [];
+    }
+
+    connectionCapabilities() {
+      return Array.isArray(this.registry?.connectionCapabilities)
+        ? this.registry.connectionCapabilities
+        : [];
+    }
+
+    connectionCapabilityEnabled(capability) {
+      const settingId = String(capability?.manageSettingId || '');
+      const entry = this.entryMap.get(settingId);
+      if (!entry) return Boolean(capability?.effectiveEnabled);
+      let enabled = entry.type === 'fixed'
+        ? Boolean(entry.effectiveValue)
+        : entry.type === 'boolean'
+          ? Boolean(this.draft.get(settingId))
+          : Boolean(this.draft.has(settingId) ? this.draft.get(settingId) : entry.effectiveValue);
+      for (const [requiredId, requiredValue] of Object.entries(capability?.effectiveWhen || {})) {
+        const requiredEntry = this.entryMap.get(String(requiredId));
+        const current = this.draft.has(String(requiredId))
+          ? this.draft.get(String(requiredId))
+          : requiredEntry?.effectiveValue;
+        if (current !== requiredValue) enabled = false;
+      }
+      return enabled;
+    }
+
+    updateConnectionCapabilityStatuses() {
+      for (const node of this.container.querySelectorAll('[data-connection-capability-status]')) {
+        const settingId = String(node.dataset.connectionCapabilitySettingId || '');
+        const capability = this.connectionCapabilities().find(item => item.manageSettingId === settingId);
+        if (!capability) continue;
+        const enabled = this.connectionCapabilityEnabled(capability);
+        node.textContent = enabled ? 'Enabled' : 'Disabled';
+        node.classList.toggle('is-enabled', enabled);
+        node.classList.toggle('is-disabled', !enabled);
+        const pending = node.parentElement?.querySelector('[data-connection-capability-pending]');
+        if (pending) {
+          const entry = this.entryMap.get(settingId);
+          const dirty = Boolean(entry && this.isDirty(entry));
+          pending.hidden = !dirty;
+          pending.textContent = dirty ? `Pending save: ${enabled ? 'Enabled' : 'Disabled'}` : '';
+        }
+      }
     }
 
     updateInstalledFeatureStatuses() {
@@ -970,6 +1069,8 @@
         window.requestAnimationFrame(() => {
           const row = this.container.querySelector(`[data-setting-id="${CSS.escape(settingId)}"]`);
           row?.scrollIntoView?.({ block: 'nearest' });
+          const control = row?.querySelector('input, select, textarea, button');
+          control?.focus({ preventScroll: true });
         });
         return true;
       }
@@ -1021,6 +1122,50 @@
       section.appendChild(list);
       target.appendChild(section);
       this.updateInstalledFeatureStatuses();
+    }
+
+    renderConnectionCapabilities(target) {
+      const capabilities = this.connectionCapabilities();
+      if (!capabilities.length) return;
+      const section = element('section', 'settings-installed-features settings-connection-capabilities');
+      section.dataset.connectionCapabilities = 'true';
+      const heading = element('div', 'settings-installed-features-heading');
+      const title = element('h3', '', 'Voice, Media & Players');
+      const titleId = `${this.container.id || 'settings-registry'}-connection-capabilities-title`;
+      title.id = titleId;
+      section.setAttribute('aria-labelledby', titleId);
+      heading.append(
+        title,
+        element('p', 'minor', 'Installed voice, webcam, and direct-connection capabilities are listed once. Each action opens its authoritative control.')
+      );
+      section.appendChild(heading);
+      const list = element('div', 'settings-installed-feature-list settings-connection-capability-list');
+      for (const capability of capabilities) {
+        const row = element('article', 'settings-installed-feature settings-connection-capability');
+        row.dataset.connectionCapability = String(capability.id || '');
+        const summary = element('div', 'settings-installed-feature-summary');
+        summary.appendChild(element('strong', '', String(capability.name || 'Connection capability')));
+        const enabled = this.connectionCapabilityEnabled(capability);
+        const state = element(
+          'span',
+          `settings-installed-feature-status ${enabled ? 'is-enabled' : 'is-disabled'}`,
+          enabled ? 'Enabled' : 'Disabled'
+        );
+        state.dataset.connectionCapabilityStatus = 'true';
+        state.dataset.connectionCapabilitySettingId = String(capability.manageSettingId || '');
+        const pending = element('span', 'settings-installed-feature-pending', '');
+        pending.dataset.connectionCapabilityPending = 'true';
+        pending.hidden = true;
+        summary.append(state, pending);
+        const action = element('button', 'btn settings-installed-feature-action', String(capability.manageLabel || 'Manage'));
+        action.type = 'button';
+        action.addEventListener('click', () => this.manageInstalledFeature(capability));
+        row.append(summary, action);
+        list.appendChild(row);
+      }
+      section.appendChild(list);
+      target.appendChild(section);
+      this.updateConnectionCapabilityStatuses();
     }
 
     applyDependencyStates() {
@@ -1159,7 +1304,7 @@
     }
 
     entryRequiresWidePresentation(entry) {
-      if (['asset', 'color', 'editable-reminder', 'fixed', 'profile-review'].includes(entry.type)) return true;
+      if (['asset', 'color', 'editable-reminder', 'fixed', 'profile-review', 'file-transfer-provenance'].includes(entry.type)) return true;
       if (entry.previewPath || entry.standardFallback || entry.fixedReason || entry.allowsOverride) return true;
       if ((entry.dependencies || []).length) return true;
       return `${entry.description || ''} ${entry.helpText || ''}`.trim().length > 220;
@@ -1175,7 +1320,7 @@
       const main = element('div', 'settings-entry-main');
       const labelGroup = element('div', 'settings-entry-label-group');
       const label = element('label', 'settings-entry-label', entry.label);
-      if (entry.type !== 'fixed' && entry.type !== 'profile-review') label.htmlFor = controlId;
+      if (!['fixed', 'profile-review', 'file-transfer-provenance'].includes(entry.type)) label.htmlFor = controlId;
       const helpId = `${controlId}-details`;
       const infoLabel = `More information about ${entry.label}`;
       const info = element('button', 'settings-entry-info');
@@ -1511,6 +1656,7 @@
         'Account Protection',
         'Avatar Relationships',
         'Community Capacity',
+        'Private Voice Chats',
         'Diagnostics',
         'Other Limits',
       ];
@@ -1755,14 +1901,20 @@
           for (const category of categories) {
             if (!searchActive && category.id !== this.selectedView) continue;
             const categoryEntries = entries.filter(entry => entry.categoryId === category.id);
-            if (categoryEntries.length) this.renderCategory(content, category, categoryEntries, !searchActive);
+            if (categoryEntries.length) {
+              if (category.id === 'voice-media-players') this.renderConnectionCapabilities(content);
+              this.renderCategory(content, category, categoryEntries, !searchActive);
+            }
           }
         }
       } else {
         if (!searchActive) this.renderInstalledFeatures(content);
         for (const category of categories) {
           const categoryEntries = entries.filter(entry => entry.categoryId === category.id);
-          if (categoryEntries.length) this.renderCategory(content, category, categoryEntries);
+          if (categoryEntries.length) {
+            if (category.id === 'voice-media-players') this.renderConnectionCapabilities(content);
+            this.renderCategory(content, category, categoryEntries);
+          }
         }
       }
 

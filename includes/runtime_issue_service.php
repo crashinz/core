@@ -644,7 +644,9 @@ function runtime_issue_detail(PDO $pdo, int $issueId): ?array
         'history' => array_map(fn(array $row): array => [
             'fromStatus' => $row['from_status'],
             'toStatus' => $row['to_status'],
-            'actorName' => $row['actor_name'] ?: 'System',
+            'actorName' => !empty($row['actor_user_id'])
+                ? account_deletion_visible_name($pdo, (int)$row['actor_user_id'], (string)$row['actor_name'])
+                : 'System',
             'reason' => $row['reason'],
             'verificationReference' => $row['verification_reference'],
             'createdAt' => $row['created_at'],

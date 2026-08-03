@@ -548,7 +548,14 @@ function moderation_identity_schema_valid(PDO $pdo): bool
         if (!database_migration_table_exists($pdo, $table)) return false;
     }
     if ((int)$pdo->query('SELECT COUNT(*) FROM policy_documents')->fetchColumn() !== 2) return false;
-    if ((int)$pdo->query('SELECT COUNT(*) FROM moderation_capability_catalog WHERE available = 0')->fetchColumn() !== 2) return false;
+    $unavailable = (int)$pdo->query('SELECT COUNT(*) FROM moderation_capability_catalog WHERE available = 0')->fetchColumn();
+    if (!in_array($unavailable, [1, 2], true)) return false;
+    $direct = $pdo->prepare('SELECT available,implementation_owner FROM moderation_capability_catalog WHERE capability_id=? LIMIT 1');
+    $direct->execute(['send-direct-p2p-files']);
+    $directRow = $direct->fetch();
+    if (!is_array($directRow)) return false;
+    if (!empty($directRow['available']) && (string)$directRow['implementation_owner'] !== 'p2p-transfer') return false;
+    if (empty($directRow['available']) && (string)$directRow['implementation_owner'] !== 'not-yet-available') return false;
     if ((int)$pdo->query(
         'SELECT COUNT(*) FROM user_capability_grants g JOIN moderation_capability_catalog c ON c.capability_id=g.capability_id WHERE g.enabled=1 AND c.available=0'
     )->fetchColumn() !== 0) return false;

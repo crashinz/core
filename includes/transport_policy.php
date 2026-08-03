@@ -30,10 +30,6 @@ function transport_policy_projection(PDO $pdo, ?array $server = null): array
     $configuredMode = transport_policy_normalize_mode(
         app_setting($pdo, REALTIME_TRANSPORT_MODE_SETTING, 'polling-only')
     );
-    $wssEligible = !empty($capabilities['persistentProcess']['wssEligible'])
-        && !empty($capabilities['persistentProcess']['repositoryWebSocketProcessPresent'])
-        && !empty($capabilities['persistentProcess']['lifecycleOwnerProven'])
-        && ($capabilities['persistentProcess']['proxyWssSupport'] ?? 'unknown') !== 'unknown';
     $sseEligible = !empty($capabilities['streaming']['sseEligible'])
         && in_array(
             (string)($capabilities['streaming']['proxySseSupport'] ?? 'unknown'),
@@ -44,14 +40,11 @@ function transport_policy_projection(PDO $pdo, ?array $server = null): array
     $selected = 'polling';
     $reason = 'Polling only is configured. Polling is the mandatory default and permanent fallback.';
     if ($configuredMode === 'automatic-best') {
-        if ($wssEligible) {
-            $selected = 'websocket';
-            $reason = 'Automatic best available selected the verified secure WebSocket transport.';
-        } elseif ($sseEligible) {
+        if ($sseEligible) {
             $selected = 'sse';
-            $reason = 'Automatic best available selected proven HTTPS Server-Sent Events; Polling remains the fallback.';
+            $reason = 'Automatic best available selected proven realtime updates; Polling remains the fallback.';
         } else {
-            $reason = 'Automatic best available found no proven optional adapter and safely selected Polling.';
+            $reason = 'Automatic best available found no proven realtime connection and safely selected Polling.';
         }
     }
 
@@ -62,7 +55,7 @@ function transport_policy_projection(PDO $pdo, ?array $server = null): array
         'configuredModeLabel' => $configuredMode === 'automatic-best'
             ? 'Automatic best available'
             : 'Polling only — Default',
-        'selectionOrder' => ['websocket', 'sse', 'polling'],
+        'selectionOrder' => ['sse', 'polling'],
         'selectedAdapter' => $selected,
         'activeAdapter' => $selected,
         'fallbackAdapter' => 'polling',
@@ -83,16 +76,8 @@ function transport_policy_projection(PDO $pdo, ?array $server = null): array
                 'security' => 'HTTPS required',
                 'reason' => (string)$capabilities['streaming']['sseEligibilityLabel'],
             ],
-            'websocket' => [
-                'eligible' => $wssEligible,
-                'mandatory' => false,
-                'permanentFallback' => false,
-                'endpoint' => null,
-                'security' => 'WSS required',
-                'reason' => (string)$capabilities['persistentProcess']['reason'],
-            ],
         ],
         'transportEncryptionIsEndToEndEncryption' => false,
-        'hostCapabilities' => $capabilities,
+        'hostCapabilities' => host_capabilities_public_projection($capabilities),
     ];
 }

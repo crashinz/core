@@ -108,6 +108,16 @@ export class ParticipantActionCatalogService {
         actions.push(...Array.from(
             this.#context?.getAvatarInteractionActions?.(participant) || []
         ));
+        if (!own) {
+            const transfer = this.#context?.getTransferPolicy?.() || {};
+            actions.push({
+                id: "transfer.send-file-or-gesture",
+                label: "Send File or Gesture",
+                active: false,
+                disabled: blocked || transfer.effectiveEnabled === false,
+                applicable: transfer.filesEnabled !== false || transfer.sendGestureEnabled !== false
+            });
+        }
         const unique = new Map();
         actions.forEach(action => {
             if (unique.has(action.id)) this.#duplicateCount += 1;
@@ -121,7 +131,7 @@ export class ParticipantActionCatalogService {
         return Object.freeze({
             owner: "RoomRuntime",
             service: "ParticipantActionCatalogService",
-            actionDefinitionCount: 10,
+            actionDefinitionCount: 11,
             resolutionCount: this.#resolutionCount,
             duplicateCount: this.#duplicateCount
         });

@@ -11,6 +11,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 COALESCE(t.trust_state,\'pending-approval\') AS trust_state,
                 COALESCE(t.revision,1) AS trust_revision
          FROM users u LEFT JOIN user_trust t ON t.user_id=u.id
+         LEFT JOIN account_deletions d ON d.user_id=u.id
+         WHERE d.user_id IS NULL
          ORDER BY u.display_name ASC'
     )->fetchAll();
     $payload = ['users' => array_map(fn(array $u): array => [

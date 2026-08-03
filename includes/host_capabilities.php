@@ -136,3 +136,13 @@ function host_capabilities(PDO $pdo, ?array $server = null): array
         ],
     ];
 }
+
+/**
+ * Remove unavailable future-adapter implementation facts from ordinary
+ * product projections while retaining the internal capability scaffolding.
+ */
+function host_capabilities_public_projection(array $capabilities): array
+{
+    unset($capabilities['persistentProcess']);
+    return $capabilities;
+}
