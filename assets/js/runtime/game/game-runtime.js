@@ -40,13 +40,13 @@ import {
 
     GameLifecycleService
 
-} from "./services/game-lifecycle-service.js?v=b075f1589f29";
+} from "./services/game-lifecycle-service.js?v=69f8e27bbfc6";
 
 import {
 
     GameStageRenderer
 
-} from "./renderers/game-stage-renderer.js?v=8dbe798644a5";
+} from "./renderers/game-stage-renderer.js?v=dfe5b1393ceb";
 
 import {
 

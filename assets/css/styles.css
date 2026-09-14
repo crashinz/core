@@ -1693,6 +1693,11 @@ textarea:focus { border-color: rgba(124,106,247,.8); box-shadow: 0 0 0 3px rgba(
 .game-mode-rule-control strong { font-size: 12px; }
 .game-pregame-rule-control small,
 .game-mode-rule-control small { grid-column: 2; color: var(--muted); line-height: 1.35; }
+.game-mode-rule-control:has(> select) { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.game-mode-rule-control > select { grid-row: 2; min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; }
+.game-mode-rule-control:has(> select) > strong { grid-row: 1; }
+.game-mode-rule-control:has(> select) > small { grid-column: 1; grid-row: 3; overflow-wrap: anywhere; }
+.game-mode-rule-control[hidden] { display: none !important; }
 .game-pregame-rule-control.is-stepper,
 .game-mode-rule-control.is-stepper,
 .game-pregame-rule-control.is-choice-grid,

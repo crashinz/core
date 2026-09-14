@@ -123,8 +123,8 @@
       "assets/audio/built-in-games/chess-piece-slide.mp3": "25d1c87adbcf749afebb83a21e4c4b7c50ff1b7c65398e94e348024eb78fdbf1",
       "assets/audio/built-in-games/chess-piece-capture.mp3": "c447674370e3e511270948e6e831eb9107ed64ed76645d581cf2a978b221871a",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
-      "games/chess-first-party/index.html": "7817431a00da0948621de5b70940043e1e8a6d20b51b0f9a31253f8d9b80e130",
+      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
+      "games/chess-first-party/index.html": "797bbe069c2cfcd97ab94b9ea2c3e1807a9585d0ee249341736c8bd7aeae8074",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

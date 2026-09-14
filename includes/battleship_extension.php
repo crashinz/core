@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/battleship_bot_support.php';
 
 const BATTLESHIP_EXTENSION_ID = 'battleship';
 const BATTLESHIP_STATE_SCHEMA_VERSION = 2;
@@ -9,7 +10,7 @@ const BATTLESHIP_STATE_SCHEMA_VERSION = 2;
 function battleship_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['attackHistory', 'completed', 'fleets', 'headToHeadRecord', 'headToHeadRoundRecorded', 'lastPlacement', 'meaningfulPlay', 'phase', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
+        'stateKeys' => ['attackHistory', 'bots', 'completed', 'fleets', 'headToHeadRecord', 'headToHeadRoundRecorded', 'lastPlacement', 'meaningfulPlay', 'phase', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
         'payloadKeys' => ['column', 'operation', 'row', 'shipId', 'ships']];
 }
 
@@ -24,6 +25,7 @@ function battleship_extension_adapter(): array
         'settingsProjection' => 'battleship_settings_projection',
         'rulesProjection' => 'battleship_rules_projection',
         'projectState' => 'battleship_project_state',
+        'projectVirtualMembers' => 'battleship_project_virtual_members',
         'randomnessPurposes' => ['auto-place' => 'battleship-auto-placement'],
         'deriveRandomness' => 'battleship_derive_randomness',
         'presentationStatus' => 'battleship_presentation_status',
@@ -35,7 +37,7 @@ function battleship_extension_adapter(): array
 function battleship_settings_projection(array $settings, string $mode, array $definition = []): array
 {
     $settings = battleship_validate_settings($settings, $mode, $definition);
-    return [
+    $projection = [
         'label' => 'Game Options',
         'description' => 'Every player must accept the exact ship-touching rule before placement begins.',
         'classification' => !empty($settings['shipsMayTouch']) ? 'allow-touching' : 'no-touching',
@@ -51,6 +53,13 @@ function battleship_settings_projection(array $settings, string $mode, array $de
             ],
         ]],
     ];
+    if ($mode === 'practice') $projection['controls'][] = [
+        'key' => 'botSeat2Difficulty', 'type' => 'select', 'value' => $settings['botSeat2Difficulty'],
+        'defaultValue' => 'none', 'label' => 'Empty seat 2 bot',
+        'description' => 'None keeps the seat open for a person. Normal hunts the largest unsunk ship; Expert also weighs the remaining fleet. Both finish hits and follow the touching rule.',
+        'options' => [['value' => 'none', 'label' => 'None'], ['value' => 'normal', 'label' => 'Normal'], ['value' => 'expert', 'label' => 'Expert']],
+    ];
+    return $projection;
 }
 
 function battleship_presentation_status(PDO $pdo, ?string $requestedPack = null): array
@@ -60,7 +69,7 @@ function battleship_presentation_status(PDO $pdo, ?string $requestedPack = null)
 
 function battleship_validate_settings(array $settings, string $mode, array $definition = []): array
 {
-    $allowed = ['gridSize', 'fleetLengths', 'shipsMayTouch'];
+    $allowed = ['gridSize', 'fleetLengths', 'shipsMayTouch', 'botSeat2Difficulty'];
     if (array_diff(array_keys($settings), $allowed)) {
         throw new MultiplayerGameException('A Battleship setting is not supported.', 'BATTLESHIP_SETTINGS_INVALID', 422);
     }
@@ -74,7 +83,15 @@ function battleship_validate_settings(array $settings, string $mode, array $defi
     if (!is_bool($touching) && !in_array($touching, [0, 1, '0', '1'], true)) {
         throw new MultiplayerGameException('Choose whether ships may touch.', 'BATTLESHIP_SETTINGS_INVALID', 422);
     }
-    return ['gridSize' => 10, 'fleetLengths' => [1, 2, 3, 4, 5], 'shipsMayTouch' => filter_var($touching, FILTER_VALIDATE_BOOLEAN)];
+    $result = ['gridSize' => 10, 'fleetLengths' => [1, 2, 3, 4, 5], 'shipsMayTouch' => filter_var($touching, FILTER_VALIDATE_BOOLEAN)];
+    if ($mode === 'practice') {
+        $difficulty = (string)($settings['botSeat2Difficulty'] ?? 'none');
+        if (!in_array($difficulty, ['none', 'normal', 'expert'], true)) throw new MultiplayerGameException('Choose None, Normal, or Expert for the Practice bot.', 'BATTLESHIP_BOT_DIFFICULTY_INVALID', 422);
+        $result['botSeat2Difficulty'] = $difficulty;
+    } elseif (isset($settings['botSeat2Difficulty']) && $settings['botSeat2Difficulty'] !== 'none') {
+        throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
+    }
+    return $result;
 }
 
 function battleship_rules_projection(array $settings, string $mode, array $definition = []): array
@@ -133,8 +150,16 @@ function battleship_head_to_head_record(array $state, array $playerUserIds): arr
 function battleship_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) !== 2 || min($players) < 1) throw new MultiplayerGameException('Battleship requires two authenticated players.', 'BATTLESHIP_PLAYER_SET_INVALID', 422);
+    if (count($players) < 1 || count($players) > 2 || min($players) < 1) throw new MultiplayerGameException('Battleship requires one or two authenticated players in Practice.', 'BATTLESHIP_PLAYER_SET_INVALID', 422);
     $settings = battleship_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    $bots = [];
+    if (count($players) === 1 && ($context['mode'] ?? 'practice') === 'practice' && ($settings['botSeat2Difficulty'] ?? 'none') !== 'none') {
+        $difficulty = $settings['botSeat2Difficulty'];
+        $players[] = BATTLESHIP_BOT_ID;
+        $bots[(string)BATTLESHIP_BOT_ID] = ['userId' => BATTLESHIP_BOT_ID, 'seat' => 2,
+            'difficulty' => $difficulty, 'displayName' => ($difficulty === 'expert' ? 'Expert' : 'Normal') . ' Bot 2'];
+    }
+    if (count($players) !== 2) throw new MultiplayerGameException('Another player must join, or choose a Practice bot.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
     $roundContext = (array)($context['roundContext'] ?? []);
     $previousState = (array)($roundContext['previousState'] ?? []);
     $advance = !empty($roundContext['seriesContinues']) && !empty($roundContext['advancesSeries']);
@@ -150,10 +175,16 @@ function battleship_initial_state(array $playerUserIds, array $context = []): ar
         : battleship_empty_head_to_head_record($players);
     $fleets = [];
     foreach ($players as $userId) $fleets[(string)$userId] = ['placed' => false, 'accepted' => false, 'ships' => [], 'attacksReceived' => []];
+    if ($bots !== []) {
+        $bytes = array_values(unpack('C*', random_bytes(512)));
+        $ships = battleship_auto_fleet($bytes, !empty($settings['shipsMayTouch']));
+        $fleets[(string)BATTLESHIP_BOT_ID] = ['placed' => true, 'accepted' => true, 'ships' => $ships, 'attacksReceived' => []];
+    }
     return [
         'schemaVersion' => BATTLESHIP_STATE_SCHEMA_VERSION,
+        'bots' => $bots,
         'turnOrder' => $players,
-        'turnIndex' => $starterIndex,
+        'turnIndex' => $players[$starterIndex] < 0 ? null : $starterIndex,
         'roundNumber' => $roundNumber,
         'starterIndex' => $starterIndex,
         'starterUserId' => $players[$starterIndex],
@@ -469,7 +500,7 @@ function battleship_terminal(array &$state, int $winner, string $reason): array
     return ['state' => $state, 'turnUserId' => null, 'terminal' => true, 'result' => ocx_game_result_from_scores($scores)];
 }
 
-function battleship_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function battleship_apply_action_core(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== BATTLESHIP_STATE_SCHEMA_VERSION || !empty($state['completed'])) throw new MultiplayerGameException('The Battleship state is unavailable.', 'BATTLESHIP_STATE_INVALID', 409);
     if (!isset($state['fleets'][(string)$actorUserId])) throw new MultiplayerGameException('Only a player may act.', 'BATTLESHIP_PLAYER_INVALID', 403);
@@ -534,6 +565,7 @@ function battleship_apply_action(array $state, int $actorUserId, string $action,
                 }
             }
             $state['phase'] = 'battle';
+            $state['turnIndex'] = (int)$state['starterIndex'];
             $state['meaningfulPlay'] = true;
         }
         return ['state' => $state, 'turnUserId' => $accepted ? (int)$state['starterUserId'] : null];

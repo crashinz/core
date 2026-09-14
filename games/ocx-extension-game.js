@@ -2,6 +2,7 @@ import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=c2557c225fbc";
 
 import { bindGameAvatar } from "./game-avatar.js?v=20260913-room-avatars";
+import { renderGameSeatControls, renderGameBotControls } from "../assets/js/runtime/game/renderers/game-seat-controls.js?v=4a0cfc15ad09";
 
 const params = new URLSearchParams(location.search);
 const context = Object.freeze({
@@ -9697,7 +9698,8 @@ function renderGameSettings() {
   const host = el("game-settings");
   const body = el("game-settings-body");
   const projection = session?.settingsControls || {};
-  const controls = Array.isArray(projection.controls) ? projection.controls : [];
+  const controls = (Array.isArray(projection.controls) ? projection.controls : [])
+    .filter(control => session.status !== "lobby" || !session.botSeats?.options?.length || !/^botSeat\d+Difficulty$/.test(control.key));
   const viewerOptions = renderViewerGameOptions();
   const available = true;
   const sharedReviewRequired = session?.status === "lobby"
@@ -9728,6 +9730,16 @@ function renderGameSettings() {
       ? "Choose the complete rules package. Any change clears prior acceptance, so every player must accept again."
       : "Review the current Game Options. Only the Master may change them before play.";
   const content = make("div", "game-settings-content");
+  const seating = renderGameSeatControls(document, session.seating, currentUserId(), async (action, payload) => {
+    await apiPost(action, payload);
+    await refreshSession(false);
+  });
+  if (seating) content.append(seating);
+  const bots = renderGameBotControls(document, session.botSeats, async (action, payload) => {
+    await apiPost(action, payload);
+    await refreshSession(false);
+  });
+  if (bots) content.append(bots);
 
   const modeSetting = make("div", "game-setting game-mode-setting");
   const modeLabel = make("span", "game-setting-label", "Play mode");
@@ -9899,11 +9911,12 @@ function renderGameSettings() {
     update.type = "button";
     update.addEventListener("click", async () => {
       if (busy) return;
-      const next = {};
+      const next = { ...session.settings };
       for (const [key, { readValue }] of fields) {
         next[key] = readValue();
       }
       const nextMode = modeSetting.dataset.selectedMode || session.mode;
+      if (nextMode === "recorded") for (const key of Object.keys(next)) if (/^botSeat\d+Difficulty$/.test(key)) delete next[key];
       if (nextMode === "recorded" && next.inactivityProfile === "unlimited") next.inactivityProfile = "default";
       settingsDraft = { ...next };
       settingsDraftSha256 = session.settingsSha256;

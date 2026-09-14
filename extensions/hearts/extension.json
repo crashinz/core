@@ -111,8 +111,8 @@
       "assets/audio/card-games/hearts-win.wav": "46bc3bcbaf0a1c55849500841af3ccbfb2adc589edf2658b288bdf9cfb3513f6",
       "assets/audio/card-games/hearts-loss.wav": "e4b64f24310e11200e434ba5d50179b6a654506a0914c922e4bef2373fce8637",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
-      "games/hearts-first-party/index.html": "6ee89233849cda05dc18b481be3919ceaebc9b2bfcf5bb785721a0d350a5e569",
+      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
+      "games/hearts-first-party/index.html": "70df6c1f9dee90a0ce93cace6abffd72591b3670a557e04e52655fe19251d3c1",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

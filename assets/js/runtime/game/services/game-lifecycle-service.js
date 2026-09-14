@@ -1466,7 +1466,7 @@ export class GameLifecycleService {
     _isFrameworkActionResponse(value, action, lobbyCode, gameType) {
 
         if (!this._isResponseObject(value)) return false;
-        if (["start", "update-settings"].includes(action)) {
+        if (["start", "update-settings", "set-lobby-bot"].includes(action)) {
             return this._isFrameworkProjection(value, lobbyCode);
         }
         if (action === "pause-game") {

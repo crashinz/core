@@ -43,8 +43,8 @@
     "entry": "index.html",
     "icon": "battleship-first-party-icon.svg",
     "profile": "versus",
-    "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "minPlayers": 1,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 2,
     "seats": [
@@ -89,7 +89,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "includes/battleship_extension.php": "8923debe44337bb62182ce794170b9a7c4501f812a915dbece375a66f81dc477",
+      "includes/battleship_extension.php": "46272e9ef6f6e028b49c59c498adf0797877f004399b0d8b555f0eb7f77c1c0d",
       "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
       "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
       "assets/images/battleship-first-party-icon.svg": "d5ed447292bfc5dc80436bb0c86e54000146b8d577e444ad2b8b1783edbb9023",
@@ -123,9 +123,10 @@
       "assets/audio/built-in-games/ship-water-miss.wav": "b50f1e210b80ccc232d2b67c01cd4f4ecb63fd641dbabf2bd733a12f4a3f1d69",
       "assets/audio/built-in-games/ship-sinking-sequence.wav": "9dc83503785a5cf3d06ca28c2b57bc7627c0bd9a340c37b832dcacbb0014bd19",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
-      "games/battleship-first-party/index.html": "a43aad9f3af93a348bf38e87b515548431aa482814f53b7ae3323318a9ab55b9",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
+      "games/battleship-first-party/index.html": "651be420414e9b1a2836a81fbbaeaf7ba7cd63d8c898a37cecb073ffa779ab64",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
+      "includes/battleship_bot_support.php": "ced0e98f1db62f3f95e72dd3cbb066cb40c1f6287134e5c5b8805d565c025a4f"
     }
   }
 }

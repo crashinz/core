@@ -90,7 +90,7 @@
     "algorithm": "sha256",
     "files": {
       "includes/checkers_extension.php": "7e5da7280001c8ebf0a6090cd3052039b00b61af57856a42a8c1549f06d46981",
-      "games/checkers-first-party/index.html": "bff5ef7347e39a4f33d1442d1e50c86fd3fa575d7463a2e87db1e16fdf3a4a31",
+      "games/checkers-first-party/index.html": "b4174adc5cd46545b63fe47a3c492924c15e1722ef49c54debcce0fa49d41fc4",
       "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
       "games/checkers-chess-modern.css": "e3755ea19150c3928dbb36bb7ce6c2152aa9274850a14e76951dd58ba50f9e99",
       "assets/images/checkers-piece-approved-navy.png": "68b9c6725818899ea841e69aa8a0597e4d2bb82bf7227520096ed61660bff463",
@@ -110,7 +110,7 @@
       "assets/audio/built-in-games/checker-explosion.ogg": "9c3a1c73cadf0de5d5a578b31a264f20b1ac7cb6ec9bbd34a203f58402ea5390",
       "assets/audio/built-in-games/checker-explosion-rumble.ogg": "3cb48d86dab63140cfb9aaeea4d4a6846abaca5831d157d8adbec0490da26343",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

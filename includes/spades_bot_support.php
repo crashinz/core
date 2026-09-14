@@ -12,14 +12,17 @@ function spades_bot_deadline_reached(?int $deadlineNs): bool
     return $deadlineNs !== null && hrtime(true) >= $deadlineNs;
 }
 
-function spades_bot_fill_seats(array $humanPlayerIds, array $settings, string $mode): array
+function spades_bot_fill_seats(array $humanPlayerIds, array $settings, string $mode, array $humanSeats = []): array
 {
-    $turnOrder = array_values(array_map('intval', $humanPlayerIds));
+    if ($humanSeats === []) foreach (array_values($humanPlayerIds) as $index => $id) $humanSeats[$index + 1] = (int)$id;
+    ksort($humanSeats, SORT_NUMERIC);
+    $turnOrder = [];
     $bots = [];
-    if ($mode !== 'practice') return [$turnOrder, $bots];
-    for ($seat = count($turnOrder) + 1; $seat <= 4; $seat++) {
+    for ($seat = 1; $seat <= 4; $seat++) {
+        if (isset($humanSeats[$seat])) { $turnOrder[] = (int)$humanSeats[$seat]; continue; }
+        if ($mode !== 'practice') continue;
         $userId = SPADES_BOT_ID_BASE - $seat;
-        $difficulty = (string)($settings['botSeat' . $seat . 'Difficulty'] ?? 'normal');
+        $difficulty = (string)($settings['botSeat' . $seat . 'Difficulty'] ?? 'none');
         if ($difficulty === 'none') continue;
         $label = $difficulty === 'expert' ? 'Expert' : 'Normal';
         $turnOrder[] = $userId;

@@ -133,6 +133,7 @@ function game_recording_capture_core(PDO $pdo, string $publicId, string $kind, a
             foreach ((array)($state['bots'] ?? []) as $botId => $bot) $names[] = ['id' => (int)$botId, 'name' => (string)($bot['displayName'] ?? $bot['name'] ?? 'Bot'), 'type' => 'bot', 'difficulty' => (string)($bot['difficulty'] ?? '')];
             $files = [str_replace('-', '_', $game) . '_extension.php'];
             if ($game === 'spades') $files = array_merge($files, ['spades_bot_support.php', 'spades_bot_endgame_support.php']);
+            if ($game === 'battleship') $files[] = 'battleship_bot_support.php';
             $hashes = [];
             foreach ($files as $file) $hashes[$file] = hash_file('sha256', __DIR__ . '/' . $file);
             $metadata = ['format' => GAME_RECORDING_FORMAT, 'formatVersion' => GAME_RECORDING_VERSION,

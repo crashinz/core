@@ -671,7 +671,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260914-custom-emojis')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
-    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=9951ddcc1828')),
+    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=dbca606b0647')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
     import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js?v=20260913-regression')),
     import(`${appUrl('/assets/js/runtime/avatar/avatar-runtime.js?v=20260914-bubble-emojis')}?v=20260913-away-layout`),
@@ -7629,6 +7629,12 @@ function renderGameModeRules(game) {
 }
 
 function syncGameModeInactivityProfile(mode) {
+  gameModeForm?.querySelectorAll('[data-game-setting-key]').forEach(control => {
+    if (!/^botSeat\d+Difficulty$/.test(String(control.dataset.gameSettingKey))) return;
+    control.disabled = mode === 'recorded';
+    const label = control.closest('.game-mode-rule-control');
+    if (label) label.hidden = mode === 'recorded';
+  });
   const input = gameModeForm?.querySelector('[data-game-setting-key="inactivityProfile"][data-game-setting-type="select"]');
   if (!input) return;
   const recorded = mode === 'recorded';
@@ -7648,6 +7654,7 @@ function syncGameModeInactivityProfile(mode) {
 function selectedGameModeSettings() {
   const settings = {};
   document.querySelectorAll('#game-mode-rule-controls [data-game-setting-key]').forEach(input => {
+    if (input.disabled && /^botSeat\d+Difficulty$/.test(String(input.dataset.gameSettingKey))) return;
     settings[String(input.dataset.gameSettingKey)] = projectedGameSettingValue(input);
   });
   return settings;

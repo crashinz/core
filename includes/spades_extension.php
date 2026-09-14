@@ -49,7 +49,7 @@ function spades_validate_settings(array $settings, string $mode, array $definiti
         'regularNilOneCardExchange', 'exchangeMode',
         'minimumTeamBid', 'deckVariant', 'tenForTwoHundred', 'bostonBonus',
         'bagRule', 'legacyBackDoorEnding',
-        'botSeat2Difficulty', 'botSeat3Difficulty', 'botSeat4Difficulty',
+        'botSeat1Difficulty', 'botSeat2Difficulty', 'botSeat3Difficulty', 'botSeat4Difficulty',
     ];
     if (array_diff(array_keys($settings), $allowed)) throw new MultiplayerGameException('A Spades setting is not supported.', 'SPADES_SETTINGS_INVALID', 422);
     $legacy = $settings !== []
@@ -107,9 +107,9 @@ function spades_validate_settings(array $settings, string $mode, array $definiti
     if (!in_array($schema, range(1, SPADES_SETTINGS_SCHEMA_VERSION), true)) throw new MultiplayerGameException('The Spades scoring settings version is unavailable.', 'SPADES_SETTINGS_SCHEMA_INVALID', 422);
     $botDifficulties = [];
     if ($mode === 'practice') {
-        foreach ([2, 3, 4] as $seat) {
+        foreach ([1, 2, 3, 4] as $seat) {
             $key = 'botSeat' . $seat . 'Difficulty';
-            $difficulty = strtolower(trim((string)($settings[$key] ?? 'normal')));
+            $difficulty = strtolower(trim((string)($settings[$key] ?? 'none')));
             if (!in_array($difficulty, ['none', 'normal', 'expert'], true)) throw new MultiplayerGameException('Choose None, Normal, or Expert for each Practice bot seat.', 'SPADES_BOT_DIFFICULTY_INVALID', 422);
             $botDifficulties[$key] = $difficulty;
         }
@@ -154,9 +154,9 @@ function spades_settings_projection(array $settings, string $mode, array $defini
         ['key' => 'legacyBackDoorEnding', 'type' => 'select', 'value' => $settings['legacyBackDoorEnding'] ? 1 : 0, 'defaultValue' => 0, 'label' => 'Back-door ending', 'description' => 'Off by default. The Legacy OCX option ends the game when a team falls strictly below the negative winning-score threshold; the other team wins. If both teams are tied below it, the game is a draw.', 'options' => [['value' => 0, 'label' => 'Disabled'], ['value' => 1, 'label' => 'Enabled (Legacy OCX)']]],
     ];
     if ($mode === 'practice') {
-        foreach ([2, 3, 4] as $seat) {
+        foreach ([1, 2, 3, 4] as $seat) {
             $key = 'botSeat' . $seat . 'Difficulty';
-            $controls[] = ['key' => $key, 'type' => 'select', 'value' => $settings[$key], 'defaultValue' => 'normal', 'label' => 'Empty seat ' . $seat . ' bot', 'description' => 'None keeps the seat open for a person after the host accepts. Normal is an intermediate human-like player; Expert adds public-history inference and expected-trick analysis.', 'options' => [['value' => 'none', 'label' => 'None'], ['value' => 'normal', 'label' => 'Normal'], ['value' => 'expert', 'label' => 'Expert']]];
+            $controls[] = ['key' => $key, 'type' => 'select', 'value' => $settings[$key], 'defaultValue' => 'none', 'label' => 'Empty seat ' . $seat . ' bot', 'description' => 'None keeps the seat open for a person. You can add bots later from the waiting lobby. Normal is an intermediate human-like player; Expert adds public-history inference and expected-trick analysis.', 'options' => [['value' => 'none', 'label' => 'None'], ['value' => 'normal', 'label' => 'Normal'], ['value' => 'expert', 'label' => 'Expert']]];
         }
     }
     return [
@@ -235,7 +235,7 @@ function spades_initial_state(array $playerUserIds, array $context = []): array
     if ($humanPlayers === [] || min($humanPlayers) < 1 || count($humanPlayers) > 4) throw new MultiplayerGameException('Spades requires one through four authenticated players.', 'SPADES_PLAYER_SET_INVALID', 422);
     if ($mode === 'recorded' && count($humanPlayers) !== 4) throw new MultiplayerGameException('Recorded Spades requires exactly four authenticated human players.', 'SPADES_RECORDED_PLAYER_SET_INVALID', 422);
     $settings = spades_validate_settings((array)($context['settings'] ?? []), $mode);
-    [$players, $bots] = spades_bot_fill_seats($humanPlayers, $settings, $mode);
+    [$players, $bots] = spades_bot_fill_seats($humanPlayers, $settings, $mode, (array)($context['humanSeats'] ?? []));
     if (count($players) !== 4) throw new MultiplayerGameException('More players must join before Spades can start with bot seats set to None.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
     $roundContext = (array)($context['roundContext'] ?? []);
     $previousState = (array)($roundContext['previousState'] ?? []);

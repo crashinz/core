@@ -10,6 +10,43 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Add bots from waiting lobbies
+
+Spades and Battleship bot slots now default to None. Hosts can add Normal or Expert bots to empty seats after people join, automatically switching to Practice, then explicitly start. Occupied human seats and all ranking safeguards are preserved.
+
+
+## 2026-09-14 — Spades and Hearts seat-map orientation
+
+Seat 1 now appears below the table, followed by seats 2 left, 3 above and 4 right. Two-player Hearts puts its first occupied seat below the opponent. Fixed seat IDs, partnerships and UNO positions are preserved.
+
+
+## 2026-09-14 — Clickable card-table seats
+
+- Replaced Hearts/Spades seat dropdowns with a compact clickable table showing
+  current players, open seats and Spades partners. Two-player Hearts displays
+  opposing players; full relationship labels remain available below the table.
+- Added the same pregame seat and approved-swap controls to UNO, retaining its
+  existing two-to-ten-player capacity and chosen clockwise order. The host starts
+  once seating is arranged; seats lock during play. UNO bots remain future work.
+- Shared controls support keyboard focus, narrow screens and long player names.
+  Existing Practice-only bot enforcement and protected game recordings remain.
+
+
+## 2026-09-14 — Practice bots and card-game seating
+
+- Added Normal and Expert Battleship bots through the existing empty-seat Game
+  Options controls. Bots follow the accepted touching rule, finish hit ships and
+  prioritize the largest unsunk ship using public information. Automatic moves
+  are captured individually in protected game recordings.
+- All games containing bots are Practice only. Shared server checks prevent
+  ranked/Recorded bot results, including invalid restored or modified state.
+- Added pregame Hearts and Spades seat choices and consent-based seat swaps,
+  with partner labels for Spades and opposite-player labels for individual Hearts.
+  These games now wait for the host to start after seating is arranged. Changed
+  seating requires fresh acceptance; seats stay fixed during play.
+- No database migration or deployment is part of this local update.
+
+
 ## 2026-09-14 - Shared game recordings and verified Spades bots
 
 - Added automatic protected game recordings through the Multiplayer Game Framework

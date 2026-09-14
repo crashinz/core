@@ -59,6 +59,8 @@ const SINGLE_SCROLL_GAME_PATHS = Object.freeze({
     "g_4f8c2d71": "/games/five-dice/index.html"
 });
 
+import { renderGameSeatControls, renderGameBotControls } from "./game-seat-controls.js?v=4a0cfc15ad09";
+
 export function gameUsesSingleScroll(gameType, documentUrl, context) {
     const path = SINGLE_SCROLL_GAME_PATHS[String(gameType || "")];
     if (typeof path !== "string" || typeof context?.appUrl !== "function") return false;
@@ -747,6 +749,31 @@ export class GameStageRenderer {
             }
         } else if (rulesHost) {
             rulesHost.replaceChildren();
+        }
+
+        const summary = document?.getElementById("game-session-summary");
+        const priorSeating = summary?.querySelector(".game-seat-controls");
+        const seatingFingerprint = JSON.stringify(framework.seating || {});
+        if (!priorSeating || priorSeating.dataset.seatingFingerprint !== seatingFingerprint) {
+            priorSeating?.remove();
+            const seating = renderGameSeatControls(document, framework.seating, Number(viewer?.userId),
+                (action, payload) => stageContext.runFrameworkAction(action, payload));
+            if (seating && summary) {
+                seating.dataset.seatingFingerprint = seatingFingerprint;
+                summary.insertBefore(seating, rulesSurface);
+            }
+        }
+
+        const priorBots = summary?.querySelector(".game-bot-controls");
+        const botFingerprint = JSON.stringify(framework.botSeats || {});
+        if (!priorBots || priorBots.dataset.botFingerprint !== botFingerprint) {
+            priorBots?.remove();
+            const bots = renderGameBotControls(document, framework.botSeats,
+                (action, payload) => stageContext.runFrameworkAction(action, payload));
+            if (bots && summary) {
+                bots.dataset.botFingerprint = botFingerprint;
+                summary.insertBefore(bots, rulesSurface);
+            }
         }
 
         const reconnectNotice = gameReconnectNotice(activeMembers, framework);

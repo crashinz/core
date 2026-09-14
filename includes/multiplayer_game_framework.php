@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/game_recording.php';
+require_once __DIR__ . '/multiplayer_game_seating.php';
 
 /**
  * Build 000056 mandatory multiplayer-game framework.
@@ -279,6 +280,7 @@ function multiplayer_game_validate_extension_settings(
     array $settings,
     string $mode
 ): array {
+    multiplayer_game_assert_bot_mode($mode, [], $settings);
     $sharedKeys = ['inactivityProfile', 'customInactivitySeconds', 'customPlacementInactivitySeconds'];
     $sharedInput = array_intersect_key($settings, array_fill_keys($sharedKeys, true));
     $extensionInput = array_diff_key($settings, array_fill_keys($sharedKeys, true));
@@ -295,6 +297,21 @@ function multiplayer_game_validate_extension_settings(
         throw new MultiplayerGameException('The installed game settings are invalid.', 'MULTIPLAYER_GAME_SETTINGS_INVALID', 500);
     }
     return $validated + $shared;
+}
+
+/** Shared invariant for every adapter: virtual players can never enter rankings. */
+function multiplayer_game_assert_bot_mode(string $mode, array $state = [], array $settings = []): void
+{
+    if ($mode === 'practice') return;
+    $hasBots = !empty($state['bots']);
+    foreach ((array)($state['turnOrder'] ?? []) as $id) $hasBots = $hasBots || (int)$id < 0;
+    foreach ($settings as $key => $value) {
+        if (preg_match('/^botSeat[1-9][0-9]*Difficulty$/D', (string)$key) && $value !== 'none') $hasBots = true;
+    }
+    foreach ((array)($state['_framework']['players'] ?? []) as $player) {
+        if (is_array($player) && (!empty($player['bot']) || (int)($player['userId'] ?? 0) < 0)) $hasBots = true;
+    }
+    if ($hasBots) throw new MultiplayerGameException('Games with bots are Practice only and cannot update rankings or Recorded records.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
 }
 
 function multiplayer_game_settings_control_projection(
@@ -1292,6 +1309,9 @@ function multiplayer_game_join_session(
         $counts = ['master' => 0, 'player' => 0, 'spectator' => 0];
         foreach ($countStmt->fetchAll() as $row) $counts[(string)$row['role']] = (int)$row['total'];
         $playerCount = $counts['master'] + $counts['player'];
+        if ($role === 'player' && multiplayer_game_requires_host_start($definition) && $session['status'] !== 'lobby') {
+            throw new MultiplayerGameException('Seats are fixed after play starts. Join the next game.', 'MULTIPLAYER_GAME_SEAT_CHOICE_LOCKED', 409);
+        }
         if ($role === 'player' && (string)($definition['extensionId'] ?? '') === 'space-invasion') {
             $spaceSettings=json_decode((string)$session['settings_json'],true) ?: [];
             if((string)$session['status']!=='lobby') throw new MultiplayerGameException('Player seats are fixed after this run starts. Start a new Two-player co-op run.','MULTIPLAYER_GAME_SEAT_APPROVAL_STATE_INVALID',409);
@@ -1353,6 +1373,7 @@ function multiplayer_game_join_session(
         }
         if ($role === 'player'
             && (string)$session['mode'] === 'practice'
+            && !multiplayer_game_requires_host_start($definition)
             && (string)$session['status'] === 'lobby') {
             try {
                 $projection = multiplayer_game_start_session($pdo, $publicId, (int)$session['master_user_id']);
@@ -1430,6 +1451,7 @@ function multiplayer_game_accept_and_start_if_ready(
 ): array {
     $projection = multiplayer_game_accept_settings($pdo, $publicId, $userId, $expectedSha256, $expectedMode);
     if ((string)$projection['status'] !== 'lobby' || (string)$projection['mode'] === 'recorded') return $projection;
+    if (multiplayer_game_requires_host_start(multiplayer_game_definition($pdo, (string)$projection['gameKey']))) return $projection;
     try {
         return multiplayer_game_start_session($pdo, $publicId, (int)$projection['masterUserId']);
     } catch (MultiplayerGameException $error) {
@@ -1509,6 +1531,12 @@ function multiplayer_game_resolve_seat_request(PDO $pdo, string $publicId, int $
     }
     $transaction = database_transaction_begin($pdo, true);
     try {
+        multiplayer_game_lock_session($pdo, $publicId);
+        $session = multiplayer_game_require_member($pdo, $publicId, $masterUserId, ['master']);
+        $request->execute([(int)$session['id'], $requestedUserId]);
+        if ($request->fetchColumn() !== 'pending') {
+            throw new MultiplayerGameException('This seat request is no longer pending.', 'MULTIPLAYER_GAME_SEAT_REQUEST_STALE', 409);
+        }
         if ($decision === 'approve') {
             if ((string)$session['status'] !== 'lobby') {
                 throw new MultiplayerGameException('A seat request can be approved before play begins.', 'MULTIPLAYER_GAME_SEAT_APPROVAL_STATE_INVALID', 409);
@@ -1524,8 +1552,13 @@ function multiplayer_game_resolve_seat_request(PDO $pdo, string $publicId, int $
             if ($playerCount >= min(MULTIPLAYER_GAME_MAX_PLAYERS, (int)$definition['maxPlayers'])) {
                 throw new MultiplayerGameException('All player seats are occupied.', 'MULTIPLAYER_GAME_PLAYER_LIMIT', 409);
             }
+            $occupied = $pdo->prepare("SELECT seat_number FROM multiplayer_game_members WHERE game_session_id=? AND role IN ('master','player') AND membership_status='active'");
+            $occupied->execute([(int)$session['id']]);
+            $usedSeats = array_fill_keys(array_map('intval', $occupied->fetchAll(PDO::FETCH_COLUMN)), true);
+            $seatNumber = 1;
+            while (isset($usedSeats[$seatNumber])) $seatNumber++;
             $member = $pdo->prepare("UPDATE multiplayer_game_members SET role='player',seat_number=? WHERE game_session_id=? AND user_id=? AND role='spectator' AND membership_status='active'");
-            $member->execute([$playerCount + 1, (int)$session['id'], $requestedUserId]);
+            $member->execute([$seatNumber, (int)$session['id'], $requestedUserId]);
             if ($member->rowCount() !== 1) {
                 throw new MultiplayerGameException('The requested spectator is no longer eligible.', 'MULTIPLAYER_GAME_SEAT_REQUEST_STALE', 409);
             }
@@ -2194,9 +2227,15 @@ function multiplayer_game_start_session_core(PDO $pdo, string $publicId, int $us
         throw new MultiplayerGameException('Only a waiting game can start.', 'MULTIPLAYER_GAME_START_STATE_INVALID', 409);
     }
     $definition = multiplayer_game_definition($pdo, (string)$session['game_key']);
-    $players = $pdo->prepare("SELECT user_id FROM multiplayer_game_members WHERE game_session_id=? AND role IN ('master','player') AND membership_status='active' ORDER BY seat_number ASC");
+    $players = $pdo->prepare("SELECT user_id,seat_number FROM multiplayer_game_members WHERE game_session_id=? AND role IN ('master','player') AND membership_status='active' ORDER BY seat_number ASC");
     $players->execute([(int)$session['id']]);
-    $playerIds = array_map('intval', array_column($players->fetchAll(), 'user_id'));
+    $playerRows = $players->fetchAll();
+    $playerIds = array_map('intval', array_column($playerRows, 'user_id'));
+    $humanSeats = [];
+    foreach ($playerRows as $row) $humanSeats[(int)$row['seat_number']] = (int)$row['user_id'];
+    if (multiplayer_game_has_seat_choices($definition) && multiplayer_game_valid_seat_requests((array)((json_decode((string)$session['state_json'], true) ?: [])['seatChangeRequests'] ?? []), array_flip($humanSeats)) !== []) {
+        throw new MultiplayerGameException('Resolve or cancel pending seat swaps before starting.', 'MULTIPLAYER_GAME_SEAT_SWAP_PENDING', 409);
+    }
     $minimumPlayers = multiplayer_game_minimum_players($definition, (string)$session['mode'], json_decode((string)$session['settings_json'],true) ?: []);
     if (count($playerIds) < $minimumPlayers) {
         throw new MultiplayerGameException('More players must join before the game can start.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
@@ -2234,6 +2273,7 @@ function multiplayer_game_start_session_core(PDO $pdo, string $publicId, int $us
         }
         $state = $factory($playerIds, [
             'pdo' => $pdo,
+            'humanSeats' => $humanSeats,
             'mode' => (string)$session['mode'],
             'settings' => multiplayer_game_extension_only_settings($settings),
             'gameKey' => (string)$session['game_key'],
@@ -2275,6 +2315,7 @@ function multiplayer_game_start_session_core(PDO $pdo, string $publicId, int $us
             $startedAt
         );
     }
+    multiplayer_game_assert_bot_mode((string)$session['mode'], $state, $settings);
     $stateJson = multiplayer_game_canonical_json($state);
     if (strlen($stateJson) > 262144) {
         throw new MultiplayerGameException('The authoritative game state is too large.', 'MULTIPLAYER_GAME_STATE_TOO_LARGE', 500);
@@ -2406,6 +2447,7 @@ function multiplayer_game_record_compatibility_action(
         if ($turnUserId !== null && $nextState['turnIndex'] === false) {
             throw new MultiplayerGameException('The next turn owner is outside the server turn order.', 'MULTIPLAYER_GAME_TURN_OWNER_INVALID', 422);
         }
+        multiplayer_game_assert_bot_mode((string)$session['mode'], $nextState);
         $nextStateJson = multiplayer_game_canonical_json($nextState);
         if (strlen($nextStateJson) > 262144) {
             throw new MultiplayerGameException('The authoritative game state is too large.', 'MULTIPLAYER_GAME_STATE_TOO_LARGE', 422);
@@ -2684,6 +2726,7 @@ function multiplayer_game_extension_action(
                 } catch (Throwable $ignored) { $recordingStepsIncomplete = true; }
             };
         }
+        multiplayer_game_assert_bot_mode((string)$session['mode'], $state, (array)$context['settings']);
         $beforeState = $state;
         if ($timing) $timing('action_context');
         $beforeTurnUserId = $session['turn_user_id'] === null ? null : (int)$session['turn_user_id'];
@@ -2735,6 +2778,7 @@ function multiplayer_game_extension_action(
             $applied['state']['_framework']['pause']['reason'] = 'completed';
             multiplayer_game_freeze_shared_timing($applied['state'], multiplayer_game_shared_now($context));
         }
+        multiplayer_game_assert_bot_mode((string)$session['mode'], $applied['state']);
         $nextStateJson = multiplayer_game_canonical_json($applied['state']);
         if (strlen($nextStateJson) > 262144) {
             throw new MultiplayerGameException('The authoritative game state is too large.', 'MULTIPLAYER_GAME_STATE_TOO_LARGE', 500);
@@ -2923,6 +2967,7 @@ function multiplayer_game_complete_session(
     $session = multiplayer_game_require_member($pdo, $publicId, $userId, ['master']);
     $definition = multiplayer_game_definition($pdo, (string)$session['game_key'], false);
     $displayName = multiplayer_game_effective_display_name($pdo, $definition);
+    multiplayer_game_assert_bot_mode((string)$session['mode'], json_decode((string)$session['state_json'], true) ?: [], json_decode((string)$session['settings_json'], true) ?: []);
     if (trim((string)($session['extension_id'] ?? '')) !== '' && !$extensionAuthorized) {
         throw new MultiplayerGameException(
             'Installed game results are completed by their server-authoritative rules.',
@@ -3348,6 +3393,7 @@ function multiplayer_game_restore_saved_game(PDO $pdo, string $publicId, int $us
 
         $snapshot = multiplayer_game_resume($pdo, $publicId, $userId);
         $state = is_array($snapshot['state'] ?? null) ? $snapshot['state'] : [];
+        multiplayer_game_assert_bot_mode((string)$session['mode'], $state);
         if ($state === [] || !empty($state['completed'])) {
             throw new MultiplayerGameException(
                 'The saved game cannot be resumed.',
@@ -4500,6 +4546,8 @@ function multiplayer_game_project_session(PDO $pdo, string $publicId, int $viewe
         'settings' => $settings,
         'settingsSha256' => (string)$session['settings_sha256'],
         'settingsControls' => multiplayer_game_settings_control_projection($pdo, $definition, $settings, (string)$session['mode']),
+        'seating' => multiplayer_game_seating_projection($definition, $session, $projectedMembers, $state, $viewerUserId),
+        'botSeats' => multiplayer_game_bot_lobby_projection($definition, $session, $projectedMembers, $viewerUserId, $playerSet['sha256']),
         'playerSetSha256' => $playerSet['sha256'],
         'frameworkSchemaVersion' => MULTIPLAYER_GAME_FRAMEWORK_SCHEMA_VERSION,
         'adaptationVersion' => (string)$definition['adaptationVersion'],
@@ -4642,6 +4690,8 @@ function multiplayer_game_room_projection(PDO $pdo, string $publicId, int $roomS
         'settings' => $settings,
         'settingsControls' => multiplayer_game_settings_control_projection($pdo, $definition, $settings, (string)$session['mode']),
         'rules' => multiplayer_game_rules_projection($pdo, $definition, $settings, (string)$session['mode']),
+        'seating' => multiplayer_game_seating_projection($definition, $session, $projectedMembers, $sessionState, $viewerUserId),
+        'botSeats' => multiplayer_game_bot_lobby_projection($definition, $session, $projectedMembers, $viewerUserId, $playerSet['sha256']),
         'playerSetSha256' => $playerSet['sha256'],
         'stateVersion' => (int)$session['state_version'],
         'masterUserId' => (int)$session['master_user_id'],

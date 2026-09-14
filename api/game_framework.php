@@ -332,6 +332,16 @@ try {
         emit_event($pdo, $roomSessionId, 'game_update', ['lobby_code' => $publicId]);
         json_out($result);
     }
+    if ($action === 'set-lobby-bot') {
+        $result = multiplayer_game_set_lobby_bot($pdo, $publicId, (int)$user['id'], (int)($source['seat'] ?? 0), (string)($source['difficulty'] ?? ''), (string)($source['settings_sha256'] ?? ''), (string)($source['player_set_sha256'] ?? ''));
+        emit_event($pdo, $roomSessionId, 'game_update', ['lobby_code' => $publicId]);
+        json_out($result);
+    }
+    if ($action === 'choose-seat') {
+        $result = multiplayer_game_choose_seat($pdo, $publicId, (int)$user['id'], (int)($source['seat'] ?? 0), (string)($source['decision'] ?? ''), (string)($source['request_id'] ?? ''));
+        emit_event($pdo, $roomSessionId, 'game_update', ['lobby_code' => $publicId]);
+        json_out($result);
+    }
     if ($action === 'request-seat') {
         $result = multiplayer_game_request_seat($pdo, $publicId, (int)$user['id']);
         emit_event($pdo, $roomSessionId, 'game_update', ['lobby_code' => $publicId]);
