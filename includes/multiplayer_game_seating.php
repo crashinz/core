@@ -11,13 +11,17 @@ function multiplayer_game_bot_slots(array $definition): array
 {
     return match ((string)($definition['extensionId'] ?? '')) {
         'spades' => [1, 2, 3, 4],
-        'battleship', 'chess' => [2],
+        'battleship', 'chess', 'checkers' => [2],
         default => [],
     };
 }
 
 function multiplayer_game_bot_choices(array $definition): array
 {
+    if (($definition['extensionId'] ?? '') === 'checkers') {
+        require_once __DIR__ . '/checkers_bot_support.php';
+        return checkers_bot_choices();
+    }
     if (($definition['extensionId'] ?? '') === 'chess') {
         require_once __DIR__ . '/chess_bot_support.php';
         return chess_bot_choices();
@@ -55,7 +59,7 @@ function multiplayer_game_bot_lobby_projection(array $definition, array $session
             'difficulty' => $difficulty, 'editable' => $isHost && !$occupied];
     }
     return ['choices' => multiplayer_game_bot_choices($definition),
-        'strengthNote' => ($definition['extensionId'] ?? '') === 'chess' ? chess_bot_strength_note() : '',
+        'strengthNote' => match ($definition['extensionId'] ?? '') { 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), default => '' },
         'options' => $options, 'isHost' => $isHost, 'mode' => $session['mode'],
         'settingsSha256' => $session['settings_sha256'], 'playerSetSha256' => $playerSetSha,
         'showStart' => $isHost && !multiplayer_game_has_seat_choices($definition),

@@ -10,6 +10,21 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Checkers bot optional rules
+
+Checkers Practice bots now support optional backward movement, backward captures and flying kings in every combination. Preserved Easy, Normal and Expert choices and bounded thinking time. Updated engine version checks, movement-rule recording details and the existing centralized Marcher notices/source patch. Expanded local lobby, saved-game, rematch and recording verification. Testing is WIP.
+
+
+## 2026-09-14 — Practice bot completion results
+
+Corrected Checkers and Chess Practice bot winner names in game results and the result sound when the bot wins. Expanded complete-game, saved-game restoration and cross-game verification. Testing is WIP.
+
+
+## 2026-09-14 — Checkers Practice bots
+
+Added Marcher Checkers bots with Easy, Normal and Expert levels, default-None lobby controls, automatic Practice conversion, server-validated moves and shared game recording. Corrected draw outcome scoring and preserved draw history across reloads and rematches. Added centralized Marcher attribution and source/build access. Testing is WIP.
+
+
 ## 2026-09-14 — Chess Practice bots
 
 Added a separate Stockfish.js browser engine with approximate rating choices and readable level names, default-None lobby controls, automatic Practice conversion, server-validated moves and shared game recording. Includes engine license and corresponding source access. Testing is WIP.

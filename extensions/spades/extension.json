@@ -116,8 +116,8 @@
       "assets/images/spades-modern/joker-little.svg": "440743d19c6084774094183bd6ed26d9fde77d941f51ede6cc5ced104e0e3f67",
       "assets/images/spades-modern/joker-big.svg": "a42199b120d87380d66625cb7ae9298d1eed10f2e90a34bacfa2ac0a4b11645b",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "4618b21a5ad10c111891812b4e4e32bcaca52de3ac2c55993cf8d94fc176d220",
-      "games/spades-first-party/index.html": "7151a312862695215a2274c4fe262734e08d888bd148891d6633a2bb41ad99a9",
+      "games/ocx-extension-game.js": "f07442a0eae4063a37613e4c92805f57b9f649bce06c8468c9190d9cba7fdc0c",
+      "games/spades-first-party/index.html": "c75163ea9cb1b65db87740f9c09877682f645fc34fdc6b22dca7900b04cdb43d",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/spades_bot_endgame_support.php": "608657cf5d18490bd64b45646815a4ea82465aa0276db5b2214f4677bcfdc447"
     }

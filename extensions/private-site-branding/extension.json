@@ -36,7 +36,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "includes/private_site_branding.php": "cefb1738b5d987335bb3419cf4a4b77d3c5dcd33544ca6a48e8137f9289c10b3"
+      "includes/private_site_branding.php": "4fbf532f6c33e453adea1eafb0830da9e705ca2acbecb3c90cd1d468e2713503"
     }
   }
 }

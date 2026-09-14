@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/checkers_bot_support.php';
 
 const CHECKERS_EXTENSION_ID = 'checkers';
 const CHECKERS_STATE_SCHEMA_VERSION = 1;
@@ -35,7 +36,7 @@ function checkers_clock_descriptor(array $settings): array
 function checkers_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['sideLabels', 'board', 'clock', 'clocks', 'completed', 'drawNoticeSequence', 'drawOfferBy', 'forcedFrom', 'history', 'lastDrawResponse', 'meaningfulPlay', 'movesByUser', 'positionCounts', 'quietKingPlies', 'resignedUserId', 'roundNumber', 'rulesClassification', 'schemaVersion', 'settings', 'sideAssignments', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
+        'stateKeys' => ['bots', 'sideLabels', 'board', 'clock', 'clocks', 'completed', 'drawNoticeSequence', 'drawOfferBy', 'forcedFrom', 'history', 'lastDrawResponse', 'meaningfulPlay', 'movesByUser', 'positionCounts', 'positionSnapshots', 'positionHistoryComplete', 'quietKingPlies', 'resignedUserId', 'roundNumber', 'rulesClassification', 'schemaVersion', 'settings', 'sideAssignments', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
         'payloadKeys' => ['from', 'to']];
 }
 
@@ -45,6 +46,7 @@ function checkers_extension_adapter(): array
         'recordingAdapter' => 'checkers_recording_adapter',
         'id' => CHECKERS_EXTENSION_ID,
         'initialState' => 'checkers_initial_state',
+        'projectVirtualMembers' => 'checkers_project_virtual_members',
         'applyAction' => 'checkers_apply_action',
         'validateSettings' => 'checkers_validate_settings',
         'settingsProjection' => 'checkers_settings_projection',
@@ -74,7 +76,11 @@ function checkers_settings_projection(array $settings, string $mode, array $defi
         'classificationLabel' => $custom ? 'Custom Rules' : 'Standard Rules',
         'defaultClassificationLabel' => 'Standard Rules',
         'customClassificationLabel' => 'Custom Rules',
-        'controls' => [
+        'controls' => array_merge($mode === 'practice' ? [[
+            'key' => 'botSeat2Difficulty', 'type' => 'select', 'value' => $settings['botSeat2Difficulty'],
+            'defaultValue' => 'none', 'label' => 'Empty seat 2 bot', 'description' => checkers_bot_strength_note(),
+            'options' => checkers_bot_choices(),
+        ]] : [], [
             ['key' => 'backwardMovement', 'type' => 'checkbox', 'value' => $settings['backwardMovement'], 'defaultValue' => false, 'label' => 'Regular pieces may move backward', 'description' => 'Off in Standard Rules.'],
             ['key' => 'backwardCapture', 'type' => 'checkbox', 'value' => $settings['backwardCapture'], 'defaultValue' => false, 'label' => 'Regular pieces may capture backward', 'description' => 'Off in Standard Rules.'],
             ['key' => 'flyingKings', 'type' => 'checkbox', 'value' => $settings['flyingKings'], 'defaultValue' => false, 'label' => 'Kings may move multiple open squares', 'description' => 'Off in Standard Rules; ordinary kings move one diagonal square.'],
@@ -112,7 +118,7 @@ function checkers_settings_projection(array $settings, string $mode, array $defi
                 'defaultValue' => 0, 'minimum' => 0, 'maximum' => 300, 'step' => 1,
                 'label' => 'Custom increment seconds', 'description' => 'Added after a complete Checkers turn; 0 through 300 seconds.',
             ],
-        ],
+        ]),
     ];
 }
 
@@ -126,7 +132,7 @@ function checkers_validate_settings(array $settings, string $mode, array $defini
     if (!in_array($mode, ['practice', 'recorded'], true)) {
         throw new MultiplayerGameException('Choose Practice or Recorded Play.', 'MULTIPLAYER_GAME_MODE_INVALID', 422);
     }
-    $allowed = ['backwardMovement', 'backwardCapture', 'flyingKings', 'mandatoryCapture', 'drawHandling', 'rematchColors', 'clockProfile', 'customInitialMinutes', 'customIncrementSeconds'];
+    $allowed = ['botSeat2Difficulty', 'backwardMovement', 'backwardCapture', 'flyingKings', 'mandatoryCapture', 'drawHandling', 'rematchColors', 'clockProfile', 'customInitialMinutes', 'customIncrementSeconds'];
     if (array_diff(array_keys($settings), $allowed)) {
         throw new MultiplayerGameException('A Checkers setting is not supported.', 'CHECKERS_SETTINGS_INVALID', 422);
     }
@@ -167,6 +173,12 @@ function checkers_validate_settings(array $settings, string $mode, array $defini
         $validated['customInitialMinutes'] = $initial;
         $validated['customIncrementSeconds'] = $increment;
     }
+    $difficulty = (string)($settings['botSeat2Difficulty'] ?? 'none');
+    if (!in_array($difficulty, array_column(checkers_bot_choices(), 'value'), true)) throw new MultiplayerGameException('Choose a listed Checkers difficulty.', 'CHECKERS_BOT_DIFFICULTY_INVALID', 422);
+    if ($difficulty !== 'none') {
+        if ($mode !== 'practice') throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
+    }
+    if ($mode === 'practice') $validated['botSeat2Difficulty'] = $difficulty;
     return $validated;
 }
 
@@ -206,10 +218,17 @@ function checkers_rules_projection(array $settings, string $mode, array $definit
 function checkers_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) !== 2 || min($players) < 1) {
+    if (count($players) < 1 || count($players) > 2 || min($players) < 1) {
         throw new MultiplayerGameException('Checkers requires two authenticated players.', 'CHECKERS_PLAYER_SET_INVALID', 422);
     }
     $settings = checkers_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    $bots = [];
+    if (count($players) === 1 && ($context['mode'] ?? 'practice') === 'practice' && ($settings['botSeat2Difficulty'] ?? 'none') !== 'none') {
+        $difficulty = $settings['botSeat2Difficulty']; $players[] = CHECKERS_BOT_ID;
+        $bots[(string)CHECKERS_BOT_ID] = ['userId' => CHECKERS_BOT_ID, 'seat' => 2, 'difficulty' => $difficulty,
+            'displayName' => checkers_bot_levels()[$difficulty]['label'] . ' Bot', 'engine' => CHECKERS_BOT_ENGINE];
+    }
+    if (count($players) !== 2) throw new MultiplayerGameException('Another player must join, or choose a Practice bot.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
     $clock = checkers_clock_descriptor($settings);
     $startedAt = (string)($context['startedAt'] ?? gmdate('c'));
     $rulesClassification = $settings['backwardMovement'] || $settings['backwardCapture'] || $settings['flyingKings']
@@ -259,6 +278,8 @@ function checkers_initial_state(array $playerUserIds, array $context = []): arra
         'forcedFrom' => null,
         'quietKingPlies' => 0,
         'positionCounts' => [],
+        'positionSnapshots' => [],
+        'positionHistoryComplete' => true,
         'drawOfferBy' => null,
         'drawNoticeSequence' => 0,
         'lastDrawResponse' => null,
@@ -266,6 +287,7 @@ function checkers_initial_state(array $playerUserIds, array $context = []): arra
         'meaningfulPlay' => false,
         'completed' => false,
     ];
+    if ($bots !== []) $state['bots'] = $bots;
     checkers_record_position($state);
     return $state;
 }
@@ -424,6 +446,7 @@ function checkers_project_state(array $state, int $viewerUserId, array $context)
     }
     $projection['interaction'] = $interaction;
     $projection['drawProgress'] = checkers_draw_progress_projection($state);
+    $projection['botTask'] = checkers_bot_task($state, $viewerUserId, $context);
     return $projection;
 }
 
@@ -478,6 +501,12 @@ function checkers_record_position(array &$state): int
     $key = checkers_position_key($state);
     $state['positionCounts'][$key] = (int)($state['positionCounts'][$key] ?? 0) + 1;
     if (count($state['positionCounts']) > 256) $state['positionCounts'] = array_slice($state['positionCounts'], -256, null, true);
+    // Keep reversible position data alongside the authoritative repetition counts.
+    // Legacy saves remain incomplete until a new round; never invent their history.
+    $state['positionSnapshots'][$key] = [
+        'board' => $state['board'], 'turnIndex' => $state['turnIndex'], 'forcedFrom' => $state['forcedFrom'],
+    ];
+    $state['positionSnapshots'] = array_intersect_key($state['positionSnapshots'], $state['positionCounts']);
     return (int)$state['positionCounts'][$key];
 }
 
@@ -498,11 +527,16 @@ function checkers_terminal(array &$state, ?int $winner, string $reason): array
     $state['completed'] = true;
     $state['terminalReason'] = $reason;
     $state['winnerUserId'] = $winner;
+    // Outcome scores drive Recorded results. Material belongs to the board
+    // projection and must not turn an agreed or automatic draw into a win/loss.
+    $outcomeScores = $winner === null
+        ? array_fill_keys(array_map('strval', $state['turnOrder']), 0)
+        : checkers_scores($state, $winner);
     return [
         'state' => $state,
         'turnUserId' => null,
         'terminal' => true,
-        'result' => ocx_game_result_from_scores(checkers_scores($state, $winner)) + [
+        'result' => ocx_game_result_from_scores($outcomeScores) + [
             'recordClass' => (string)($state['rulesClassification'] ?? 'standard'),
         ],
     ];
@@ -572,7 +606,7 @@ function checkers_start_next_clock(array &$state, int $movedUserId, array $conte
     $state['clocks'][(string)$nextUserId]['turnStartedAt'] = gmdate('c', checkers_now($context));
 }
 
-function checkers_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function checkers_apply_action_core(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== CHECKERS_STATE_SCHEMA_VERSION || !empty($state['completed'])) {
         throw new MultiplayerGameException('The Checkers state is unavailable.', 'CHECKERS_STATE_INVALID', 409);

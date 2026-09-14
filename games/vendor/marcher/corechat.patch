@@ -1,0 +1,437 @@
+--- a/src/engine/board_search.c
++++ b/src/engine/board_search.c
+@@ -363,6 +363,7 @@
+ struct search_info* start_board_search(long long p1, long long p2, long long p1k, long long p2k, int player, float search_time, int search_depth, int forced_pos);
+ void human_readble_board(long long p1, long long p2, long long p1k, long long p2k);
+ long long n_ply_search(long long* p1, long long* p2, long long* p1k, long long* p2k, int player, struct set* piece_loc, char* offsets, int depth);
++long long cc_perft(long long* p1, long long* p2, long long* p1k, long long* p2k, int player, struct set* piece_loc, char* offsets, int depth, int forced_pos);
+ unsigned long long int update_hash(long long p1, long long p2, long long p1k, long long p2k, int pos_init, int pos_after, unsigned long long int hash, struct board_evaler* evaler);
+ unsigned long long int update_hash_typed(int pos_init, int pos_after, int piece_type, int jumped_piece_type, unsigned long long int hash, struct board_evaler* evaler);
+ void end_board_search(struct board_evaler* evaler);
+@@ -384,6 +385,8 @@
+ static unsigned long long GAME_HISTORY[GAME_HISTORY_MAX];
+ static int GAME_HISTORY_LEN = 0;
+ static int LAST_TOTAL_PIECES = 0;
++
++#include "corechat_draw_context.c"
+ 
+ // Python comunication code 
+ #ifdef PYTHON
+@@ -1272,8 +1275,15 @@
+     // (>= rather than ==: the count cannot currently skip 2, since every entry is
+     // checked on the way in and only ever incremented by one, but that makes the
+     // test correct by an argument about the caller rather than by construction)
+-    if (get_draw_entry(evaler->draw_table, hash) >= 2){
++    if (!CC_ACTIVE && get_draw_entry(evaler->draw_table, hash) >= 2){
+         return 0;
++    }
++
++    // CoreChat adjudicates loss before automatic draw, only at turn boundaries.
++    // Exact board comparisons avoid repetition-table hash collisions.
++    if (CC_ACTIVE && CC_AUTOMATIC && forced_pos < 0){
++        if (!has_any_move(*p1, *p2, *p1k, *p2k, player)) return -WIN_SCORE;
++        if (CC_QUIET[depth_abs] >= 80 || cc_occurrences(*p1,*p2,*p1k,*p2k,player,depth_abs) >= 3) return 0;
+     }
+ 
+ #if USE_ENDGAME_DB
+@@ -1289,7 +1299,7 @@
+     // dtw is capped at 254 by the generator and 255 means the distance file was
+     // missing, so clamping keeps an unknown distance inside the proven band
+     // rather than letting it wrap into the heuristic range.
+-    if (depth_abs > 0 && forced_pos < 0 && endgame_db_max_pieces() > 0
++    if (!CC_ACTIVE && depth_abs > 0 && forced_pos < 0 && endgame_db_max_pieces() > 0
+         && get_bits_set(*p1 | *p2 | *p1k | *p2k) <= endgame_db_max_pieces()){
+         int wld, dtw;
+         if (probe_endgame_db(*p1, *p2, *p1k, *p2k, player, &wld, &dtw)){
+@@ -1312,7 +1322,7 @@
+     // not the age test: a cached score knows nothing about repetitions along the current
+     // line, so the defence has to be at the node, not at the entry.
+     struct hash_table_entry* table_entry = get_hash_entry(evaler->hash_table, hash);
+-    if (table_entry != NULL && table_entry->depth >= depth && TT_PLAYER(table_entry) == player && depth_abs > 0
++    if (!CC_ACTIVE && table_entry != NULL && table_entry->depth >= depth && TT_PLAYER(table_entry) == player && depth_abs > 0
+         && (USE_STALE_TT_CUTOFF || table_entry->age == evaler->hash_table->age)) {
+         if (TT_NODE_TYPE(table_entry) == PV_NODE) {
+             return adjust_mate_score(table_entry->eval);
+@@ -1434,7 +1444,7 @@
+     //   * only in quiet positions - neither side has a capture available, so
+     //     nothing is hanging that a single reply could take
+     //   * never against a proven score, where "close to beta" is meaningless
+-    if (static_eval != NO_EVAL && beta == alpha + 1 && depth <= RFP_MAX_DEPTH
++    if ((!CC_ACTIVE || !CC_AUTOMATIC) && static_eval != NO_EVAL && beta == alpha + 1 && depth <= RFP_MAX_DEPTH
+         && beta < WIN_MIN && beta > -WIN_MIN
+         && !has_any_jump(*p1, *p2, *p1k, *p2k, player == 1 ? 2 : 1)
+         && static_eval - RFP_MARGIN * depth >= beta){
+@@ -1482,7 +1492,7 @@
+         // four to five times per move by a four branch scan of the bitboards.
+         initial_piece_type = get_piece_at_location(*p1, *p2, *p1k, *p2k, move_start);
+ 
+-        if (static_eval != NO_EVAL && i > 0 && beta == alpha + 1
++        if ((!CC_ACTIVE || !CC_AUTOMATIC) && static_eval != NO_EVAL && i > 0 && beta == alpha + 1
+             && depth > 0 && depth <= FUTILITY_MAX_DEPTH
+             && alpha > -WIN_MIN && alpha < WIN_MIN
+             && static_eval + FUTILITY_MARGIN * depth <= alpha){
+@@ -1536,7 +1546,13 @@
+         // draw bookkeeping and the reduction rules below have run - enough work to
+         // hide most of the cache miss
+         prefetch_hash_entry(evaler->hash_table, next_hash);
+-        add_draw_entry(evaler->draw_table, next_hash);
++        if (!CC_ACTIVE) add_draw_entry(evaler->draw_table, next_hash);
++        else {
++            // The PHP counter counts individual legal king steps; captures reset it.
++            CC_QUIET[depth_abs + 1] = jumped_piece_type || initial_piece_type <= 2
++                ? 0 : CC_QUIET[depth_abs] + 1;
++            CC_LINE[depth_abs + 1] = (struct cc_position){*p1,*p2,*p1k,*p2k,player_next,next_forced < 0};
++        }
+ 
+         // only flip the eval if the player changed
+         flip = (player != player_next) ? -1 : 1;
+@@ -1662,7 +1678,7 @@
+         undo_piece_locations_update(move_start, move_end, piece_loc);
+ #endif
+         undo_board_update(p1, p2, p1k, p2k, move_start, move_end, jumped_piece_type, initial_piece_type);
+-        remove_draw_entry(evaler->draw_table, next_hash);
++        if (!CC_ACTIVE) remove_draw_entry(evaler->draw_table, next_hash);
+ 
+         // if the eval is infinity the search is trying to end so return.
+         // This is checked BEFORE the root bookkeeping below: the sentinel is not a
+@@ -1799,6 +1815,7 @@
+     // in-search draw check fires when the table count reaches 2, so each position
+     // is seeded with (occurrences - 1): played once -> the line must repeat it
+     // twice more; played twice -> once more completes the 3-fold.
++    if (!CC_ACTIVE) {
+     int total_pieces = get_bits_set(p1 | p2 | p1k | p2k);
+     if (total_pieces > LAST_TOTAL_PIECES){
+         GAME_HISTORY_LEN = 0;
+@@ -1816,6 +1833,8 @@
+                 break;
+             }
+         }
++    }
++
+     }
+ 
+ #if USE_NNUE
+@@ -2020,7 +2039,7 @@
+ 
+ // search to the depth specified and count to total amount of boards for a certain depth
+ // this is used to test if the move generation is working as expected and to see how much time is spent
+-long long n_ply_search(long long* p1, long long* p2, long long* p1k, long long* p2k, int player, struct set* piece_loc, char* offsets, int depth){
++long long cc_perft(long long* p1, long long* p2, long long* p1k, long long* p2k, int player, struct set* piece_loc, char* offsets, int depth, int forced_pos){
+     // make a int array of size 96 elements to hold the moves
+     int moves[96];
+     long long total_boards = 0;
+@@ -2041,7 +2060,9 @@
+     // its first call. Nothing had called it since main() was commented out, which
+     // is exactly the kind of rot exposing it to Python is meant to stop.
+     int jump = 0;
+-    int num_moves = generate_all_moves(*p1, *p2, *p1k, *p2k, player, &moves[0], piece_loc, offsets, &jump);
++    int num_moves = forced_pos >= 0
++        ? generate_moves(*p1,*p2,*p1k,*p2k,forced_pos,moves,offsets,True)
++        : generate_all_moves(*p1,*p2,*p1k,*p2k,player,moves,piece_loc,offsets,&jump);
+ 
+     // otherwise loop over all the moves and call the function recursivly
+     for (int i = 0; i < num_moves; i++){
+@@ -2058,7 +2079,7 @@
+         player_next = get_next_board_state(*p1, *p2, *p1k, *p2k, pos_init, pos_final, player, intitial_piece_type, offsets);
+ 
+         // call the function recursivly
+-        total_boards += n_ply_search(p1, p2, p1k, p2k, player_next, piece_loc, offsets, depth - 1);
++        total_boards += cc_perft(p1, p2, p1k, p2k, player_next, piece_loc, offsets, depth - 1, player_next == player ? pos_final : -1);
+ 
+         // undo the update to the board and piece locations
+         undo_piece_locations_update(pos_init, pos_final, piece_loc);
+@@ -2067,6 +2088,10 @@
+     
+     return total_boards;
+ 
++}
++
++long long n_ply_search(long long* p1, long long* p2, long long* p1k, long long* p2k, int player, struct set* piece_loc, char* offsets, int depth){
++    return cc_perft(p1,p2,p1k,p2k,player,piece_loc,offsets,depth,-1);
+ }
+ 
+ // print the board to standard out in a human readable format (for debugging)
+@@ -2194,4 +2219,4 @@
+ //     start_board_search(p1, p2, p1k, p2k, player, 10, 40);
+ 
+ //     return 0;
+-// }
+\ No newline at end of file
++// }
+--- /dev/null
++++ b/src/engine/corechat_draw_context.c
+@@ -0,0 +1,17 @@
++// CoreChat isolated Marcher candidate, 2026-09-14. MIT, like the parent engine.
++// Exact saved positions plus the active search line; no hash-table collisions.
++// Search is limited to depth 50 at the WASM boundary (engine's absolute cap).
++#define CC_HISTORY_MAX 256
++struct cc_position { unsigned long long p1,p2,p1k,p2k; int player,count; };
++static struct cc_position CC_HISTORY[CC_HISTORY_MAX], CC_LINE[128];
++static int CC_HISTORY_LEN, CC_ACTIVE, CC_READY, CC_AUTOMATIC, CC_QUIET[128];
++static int cc_matches(struct cc_position* p,unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,int player){
++    return p->player==player && p->p1==a && p->p2==b && p->p1k==c && p->p2k==d;
++}
++static int cc_occurrences(unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,int player,int ply){
++    int count=0;
++    for(int i=0;i<CC_HISTORY_LEN;i++) if(cc_matches(&CC_HISTORY[i],a,b,c,d,player)) count+=CC_HISTORY[i].count;
++    // Root is already in saved counts. Intermediate jumps never count as turns.
++    for(int i=1;i<=ply;i++) if(CC_LINE[i].count && cc_matches(&CC_LINE[i],a,b,c,d,player)) count++;
++    return count;
++}
+--- /dev/null
++++ b/src/engine/corechat_variants.c
+@@ -0,0 +1,193 @@
++// CoreChat optional-rule candidate. MIT, like Marcher. Included by wasm_api.c.
++// Standard Marcher search is retained when the rule mask is zero. The variant
++// path uses explicit captured squares and a full-width alpha-beta search: the
++// standard-trained network, opening book and tablebase are not variant oracles.
++#define CCV_MAX_MOVES (32 * 4 * 7)
++#define CCV_MAX_PLY 96
++#define CCV_WIN 30000
++typedef struct { unsigned char board[64]; int side,forced,quiet; } ccv_board;
++typedef struct { int from,to,capture; } ccv_move;
++static int CC_RULES;
++static int32_t CCV_EXPORT[CCV_MAX_MOVES * 3 + 80];
++static unsigned long long CCV_NODES, CCV_EVALS;
++static int CCV_ABORT,CCV_MAX_REACHED;
++static double CCV_DEADLINE;
++
++static int ccv_side(int p){return p ? ((p==1 || p==3)?1:2) : 0;}
++static ccv_board ccv_unpack(unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,int side,int forced,int quiet){
++    ccv_board s={{0},side,forced,quiet};
++    for(int i=0;i<64;i++)s.board[i]=(a>>i&1)?1:(b>>i&1)?2:(c>>i&1)?3:(d>>i&1)?4:0;
++    return s;
++}
++static struct cc_position ccv_pack(const ccv_board* s,int count){
++    struct cc_position p={0,0,0,0,s->side,count};
++    for(int i=0;i<64;i++)switch(s->board[i]){
++        case 1:p.p1|=1ull<<i;break; case 2:p.p2|=1ull<<i;break;
++        case 3:p.p1k|=1ull<<i;break; case 4:p.p2k|=1ull<<i;break;
++    }
++    return p;
++}
++static int ccv_valid(unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,int side,int forced,int rules){
++    const unsigned long long dark=0x55aa55aa55aa55aaull;
++    unsigned long long all=a|b|c|d;
++    return side>=1 && side<=2 && forced>=-1 && forced<64 && rules>=0 && rules<=7
++        && !(all&~dark) && !(a&b) && !(a&c) && !(a&d) && !(b&c) && !(b&d) && !(c&d)
++        && __builtin_popcountll(a|c)<=12 && __builtin_popcountll(b|d)<=12
++        && (forced<0 || (((side==1)?(a|c):(b|d))>>forced&1));
++}
++// Captures and quiet steps are deliberately generated in separate passes.
++// A capture anywhere suppresses every quiet move; a forced continuation stays
++// on exactly one piece. Long king captures may land on EACH empty square after
++// the first enemy, but never cross a second piece.
++static int ccv_piece(const ccv_board* s,int from,int captures,int rules,ccv_move* out){
++    int p=s->board[from],n=0,side=ccv_side(p),king=p>2;
++    int flying=king&&(rules&4),back=king||(rules&(captures?2:1));
++    if(!p)return 0;
++    for(int dr=-1;dr<=1;dr+=2)for(int dc=-1;dc<=1;dc+=2){
++        if(!back && dr!=(side==1?-1:1))continue;
++        int enemy=-1,limit=flying?7:(captures?2:1);
++        for(int step=1;step<=limit;step++){
++            int r=from/8+dr*step,c=from%8+dc*step;
++            if(r<0||r>7||c<0||c>7)break;
++            int to=r*8+c,target=s->board[to];
++            if(!captures){
++                if(target)break;
++                out[n++]=(ccv_move){from,to,-1};
++            }else if(target){
++                if(ccv_side(target)==side || enemy>=0)break;
++                enemy=to;
++            }else if(enemy>=0){
++                out[n++]=(ccv_move){from,to,enemy};
++            }else if(!flying)break;
++        }
++    }
++    return n;
++}
++static int ccv_moves(const ccv_board* s,int rules,ccv_move* out){
++    if(s->forced>=0)return ccv_piece(s,s->forced,1,rules,out);
++    int n=0;
++    for(int i=0;i<64;i++)if(ccv_side(s->board[i])==s->side)n+=ccv_piece(s,i,1,rules,out+n);
++    if(n)return n;
++    for(int i=0;i<64;i++)if(ccv_side(s->board[i])==s->side)n+=ccv_piece(s,i,0,rules,out+n);
++    return n;
++}
++static ccv_board ccv_apply(const ccv_board* s,ccv_move m,int rules){
++    ccv_board t=*s; int piece=s->board[m.from],promoted=0;
++    t.board[m.from]=0;t.board[m.to]=piece;
++    if(m.capture>=0)t.board[m.capture]=0;
++    if((piece==1&&m.to<8)||(piece==2&&m.to>55)){t.board[m.to]=piece+2;promoted=1;}
++    t.quiet=(m.capture>=0||piece<=2)?0:s->quiet+1;
++    t.forced=-1;
++    if(m.capture>=0&&!promoted){
++        ccv_move more[28];
++        if(ccv_piece(&t,m.to,1,rules,more)){t.forced=m.to;return t;}
++    }
++    t.side^=3;return t;
++}
++static void ccv_line(const ccv_board* t,int ply){CC_LINE[ply]=ccv_pack(t,t->forced<0?1:0);}
++static int ccv_draw(const ccv_board* s,int ply){
++    if(!CC_AUTOMATIC||s->forced>=0)return 0;
++    if(s->quiet>=80)return 1;
++    struct cc_position p=ccv_pack(s,0);
++    return cc_occurrences(p.p1,p.p2,p.p1k,p.p2k,p.player,ply)>=3;
++}
++static int ccv_eval(const ccv_board* s,int rules){
++    int value=0;
++    for(int i=0;i<64;i++)if(s->board[i]){
++        int p=s->board[i],side=ccv_side(p),r=i/8,c=i%8;
++        int central=6-abs(2*r-7)/2-abs(2*c-7)/2;
++        int v=p>2?((rules&4)?280:190)+central*3:100+((side==1?7-r:r)*5)+central;
++        value+=(side==s->side)?v:-v;
++    }
++    CCV_EVALS++;return value;
++}
++static int ccv_priority(const ccv_board* s,ccv_move m,int preferred){
++    if(((m.from<<8)|m.to)==preferred)return 100000;
++    return (m.capture<0?0:(s->board[m.capture]>2?400:200))
++        +((s->board[m.from]==1&&m.to<8)||(s->board[m.from]==2&&m.to>55)?150:0);
++}
++static void ccv_order(const ccv_board* s,ccv_move* moves,int n,int preferred){
++    // Stable insertion sort preserves deterministic ties across scalar/SIMD.
++    for(int i=1;i<n;i++){
++        ccv_move m=moves[i];int v=ccv_priority(s,m,preferred),j=i;
++        while(j>0&&ccv_priority(s,moves[j-1],preferred)<v){moves[j]=moves[j-1];j--;}
++        moves[j]=m;
++    }
++}
++static int ccv_expired(void){if(emscripten_get_now()>=CCV_DEADLINE)CCV_ABORT=1;return CCV_ABORT;}
++static int ccv_search_node(const ccv_board* s,int rules,int depth,int ply,int alpha,int beta){
++    CCV_NODES++;if(ply>CCV_MAX_REACHED)CCV_MAX_REACHED=ply;
++    if((CCV_NODES&63)==0&&ccv_expired())return 0;
++    ccv_move moves[CCV_MAX_MOVES];int n=ccv_moves(s,rules,moves);
++    // Loss has precedence over automatic draw, matching the server reducer.
++    if(!n)return -CCV_WIN+ply;
++    if(ccv_draw(s,ply))return 0;
++    // At nominal depth, extend compulsory captures until the position is quiet.
++    if(ply>=CCV_MAX_PLY || (depth<=0&&moves[0].capture<0))return ccv_eval(s,rules);
++    ccv_order(s,moves,n,-1);
++    int best=-CCV_WIN-1;
++    for(int i=0;i<n;i++){
++        ccv_board t=ccv_apply(s,moves[i],rules);ccv_line(&t,ply+1);
++        int v=t.side==s->side?ccv_search_node(&t,rules,depth-1,ply+1,alpha,beta)
++            :-ccv_search_node(&t,rules,depth-1,ply+1,-beta,-alpha);
++        if(CCV_ABORT)return 0;
++        if(v>best)best=v;if(v>alpha)alpha=v;if(alpha>=beta)break;
++    }
++    return best;
++}
++static int ccv_search(ccv_board s,int rules,double seconds,int depth){
++    CCV_NODES=CCV_EVALS=0;CCV_ABORT=CCV_MAX_REACHED=0;CCV_DEADLINE=emscripten_get_now()+seconds*1000;
++    ccv_move moves[CCV_MAX_MOVES];int n=ccv_moves(&s,rules,moves);
++    memset(WASM_RESULT,0,sizeof(WASM_RESULT));
++    if(!n||ccv_draw(&s,0)){WASM_RESULT[0]=WASM_RESULT[1]=-1;return -1;}
++    ccv_order(&s,moves,n,-1);
++    int best=(moves[0].from<<8)|moves[0].to,bestScore=0,done=0;
++    for(int d=1;d<=depth;d++){
++        ccv_order(&s,moves,n,best);int iterationBest=best,score=-CCV_WIN-1;
++        for(int i=0;i<n;i++){
++            if(ccv_expired())break;
++            ccv_board t=ccv_apply(&s,moves[i],rules);ccv_line(&t,1);
++            int v=t.side==s.side?ccv_search_node(&t,rules,d-1,1,score,CCV_WIN+1)
++                :-ccv_search_node(&t,rules,d-1,1,-CCV_WIN-1,-score);
++            if(CCV_ABORT)break;
++            if(v>score){score=v;iterationBest=(moves[i].from<<8)|moves[i].to;}
++        }
++        if(CCV_ABORT)break;
++        best=iterationBest;bestScore=score;done=d;
++        if(abs(score)>CCV_WIN-CCV_MAX_PLY)break;
++    }
++    WASM_RESULT[0]=best>>8;WASM_RESULT[1]=best&255;WASM_RESULT[2]=bestScore;WASM_RESULT[3]=done;
++    WASM_RESULT[4]=CCV_MAX_REACHED;WASM_RESULT[5]=(int32_t)CCV_NODES;WASM_RESULT[6]=(int32_t)(CCV_NODES>>32);
++    WASM_RESULT[9]=(int32_t)CCV_EVALS;WASM_RESULT[10]=(int32_t)(CCV_EVALS>>32);WASM_RESULT[11]=CCV_MAX_REACHED;
++    return best;
++}
++EMSCRIPTEN_KEEPALIVE int wasm_variant_configure(int rules){
++    if(!CC_READY||rules<0||rules>7){CC_READY=0;return 0;}CC_RULES=rules;return 1;
++}
++EMSCRIPTEN_KEEPALIVE int32_t* wasm_variant_result_ptr(void){return CCV_EXPORT;}
++EMSCRIPTEN_KEEPALIVE int wasm_variant_moves(unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,int side,int forced,int rules){
++    if(!ccv_valid(a,b,c,d,side,forced,rules))return -1;
++    ccv_board s=ccv_unpack(a,b,c,d,side,forced,0);ccv_move moves[CCV_MAX_MOVES];int n=ccv_moves(&s,rules,moves);
++    for(int i=0;i<n;i++){CCV_EXPORT[i*3]=moves[i].from;CCV_EXPORT[i*3+1]=moves[i].to;CCV_EXPORT[i*3+2]=moves[i].capture;}
++    return n;
++}
++EMSCRIPTEN_KEEPALIVE int wasm_variant_step(unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,int side,int forced,int rules,int quiet,int from,int to){
++    if(!ccv_valid(a,b,c,d,side,forced,rules)||quiet<0||quiet>1000000)return -1;
++    ccv_board s=ccv_unpack(a,b,c,d,side,forced,quiet);ccv_move moves[CCV_MAX_MOVES];int n=ccv_moves(&s,rules,moves);
++    for(int i=0;i<n;i++)if(moves[i].from==from&&moves[i].to==to){
++        ccv_board t=ccv_apply(&s,moves[i],rules);ccv_line(&t,1);
++        for(int sq=0;sq<64;sq++)CCV_EXPORT[sq]=t.board[sq];
++        CCV_EXPORT[64]=t.side;CCV_EXPORT[65]=t.forced;CCV_EXPORT[66]=t.quiet;
++        int next=ccv_moves(&t,rules,moves);CCV_EXPORT[67]=!next?2:ccv_draw(&t,1)?1:0;return 1;
++    }
++    return -1;
++}
++static double ccv_perft(const ccv_board* s,int rules,int depth){
++    if(!depth)return 1;
++    ccv_move moves[CCV_MAX_MOVES];int n=ccv_moves(s,rules,moves);double total=0;
++    for(int i=0;i<n;i++){ccv_board t=ccv_apply(s,moves[i],rules);total+=ccv_perft(&t,rules,depth-1);}return total;
++}
++EMSCRIPTEN_KEEPALIVE double wasm_variant_perft(unsigned long long a,unsigned long long b,unsigned long long c,unsigned long long d,int side,int forced,int rules,int depth){
++    if(!ccv_valid(a,b,c,d,side,forced,rules)||depth<0||depth>5)return -1;
++    ccv_board s=ccv_unpack(a,b,c,d,side,forced,0);return ccv_perft(&s,rules,depth);
++}
+--- a/src/engine/wasm_api.c
++++ b/src/engine/wasm_api.c
+@@ -28,6 +28,7 @@
+ //   [3] nominal depth      [7] tt entries low   [11] extended depth
+ #define WASM_RESULT_FIELDS 12
+ static int32_t WASM_RESULT[WASM_RESULT_FIELDS];
++#include "corechat_variants.c"
+ 
+ EMSCRIPTEN_KEEPALIVE
+ int32_t* wasm_result_ptr(void){
+@@ -54,6 +55,13 @@
+                 unsigned long long p1k, unsigned long long p2k,
+                 int player, double search_time, int search_depth,
+                 int forced_pos){
++    if (!CC_READY || player < 1 || player > 2 || forced_pos < -1 || forced_pos > 63
++        || !isfinite(search_time) || search_time <= 0 || search_time > 5 || search_depth < 1 || search_depth > 50) return -1;
++    CC_READY = 0; // Context is single-use; every move must import current saved state.
++    if(CC_RULES){
++        if(!ccv_valid(p1,p2,p1k,p2k,player,forced_pos,CC_RULES))return -1;
++        return ccv_search(ccv_unpack(p1,p2,p1k,p2k,player,forced_pos,CC_QUIET[0]),CC_RULES,search_time,search_depth);
++    }
+     struct search_info* si = start_board_search((long long)p1, (long long)p2,
+                                                 (long long)p1k, (long long)p2k,
+                                                 player, (float)search_time,
+@@ -147,3 +155,36 @@
+         postMessage({ type: 'progress', depth: depth, ext: ext, eval: eval });
+     }
+ });
++
++// CoreChat host imports complete authoritative counts, without replaying searches.
++EMSCRIPTEN_KEEPALIVE
++int wasm_context_reset(int automatic, int quiet){
++    CC_RULES = 0;
++    CC_READY = 0;
++    if ((automatic != 0 && automatic != 1) || quiet < 0 || quiet > 1000000) return 0;
++    CC_ACTIVE = 1; CC_AUTOMATIC = automatic; CC_HISTORY_LEN = 0;
++    memset(CC_LINE,0,sizeof(CC_LINE)); memset(CC_QUIET,0,sizeof(CC_QUIET));
++    CC_QUIET[0] = quiet;
++    GAME_HISTORY_LEN = 0; LAST_TOTAL_PIECES = 0;
++    // Keep move ordering/static eval reuse within this search, but never carry it
++    // across reconnects or games. Draw-dependent TT score cutoffs are disabled.
++    if (GLOBAL_HASH_TABLE){
++        memset(GLOBAL_HASH_TABLE->table,0,GLOBAL_HASH_TABLE->total_size*sizeof(struct hash_table_entry));
++        GLOBAL_HASH_TABLE->num_entries = 1; GLOBAL_HASH_TABLE->age = 0;
++    }
++    CC_READY = 1; return 1;
++}
++EMSCRIPTEN_KEEPALIVE
++int wasm_context_add(unsigned long long p1,unsigned long long p2,unsigned long long p1k,unsigned long long p2k,int player,int count){
++    if (!CC_READY || CC_HISTORY_LEN >= CC_HISTORY_MAX || player < 1 || player > 2 || count < 1 || count > 1000000){CC_READY=0;return 0;}
++    CC_HISTORY[CC_HISTORY_LEN++] = (struct cc_position){p1,p2,p1k,p2k,player,count};
++    return 1;
++}
++EMSCRIPTEN_KEEPALIVE
++double wasm_perft_forced(unsigned long long p1,unsigned long long p2,unsigned long long p1k,unsigned long long p2k,int player,int depth,int forced){
++    if (depth < 0 || depth > 8 || player < 1 || player > 2 || forced < -1 || forced > 63) return -1;
++    long long a=p1,b=p2,c=p1k,d=p2k;
++    struct set* loc=get_piece_locations(a,b,c,d); char* offsets=compute_offsets();
++    long long total=cc_perft(&a,&b,&c,&d,player,loc,offsets,depth,forced);
++    free(loc);free(offsets);return (double)total;
++}

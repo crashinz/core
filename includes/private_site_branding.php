@@ -505,7 +505,7 @@ function private_site_branding_inline_markdown(string $text): string {
                 'MODIFICATIONS.md' => '/changelog.php',
                 'THIRD_PARTY_NOTICES.md' => '/changelog.php?document=third-party-notices',
             ];
-            $allowedLocal = ['README.md', 'AUTHORS.md'];
+            $allowedLocal = ['README.md', 'AUTHORS.md', 'games/vendor/marcher/corechat.patch', 'games/vendor/marcher/BUILD.md'];
             if (isset($browserRoutes[$target])) {
                 $href = app_url($browserRoutes[$target]);
             } elseif (in_array($target, $allowedLocal, true)) {
@@ -568,7 +568,7 @@ function private_site_branding_render_modifications(string $markdown): string {
                 $inList = false;
             }
             $level = strlen($match[1]) + 1;
-            $anchor = $match[2] === 'Stockfish' ? ' id="stockfish"' : '';
+            $anchor = match ($match[2]) { 'Stockfish' => ' id="stockfish"', 'Marcher' => ' id="marcher"', default => '' };
             $html[] = "<h{$level}{$anchor}>" . private_site_branding_inline_markdown($match[2]) . "</h{$level}>";
             continue;
         }

@@ -1,3 +1,4 @@
+import { createCheckersBotController } from "./checkers-bot-controller.js?v=729241a2b45b";
 import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
 import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=c49eea58cd30";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=c2557c225fbc";
@@ -1234,8 +1235,11 @@ function gameSessionIsTerminal(value = session) {
 function gameTerminalOutcome(value = session, extensionId = context.extensionId) {
   const state = value?.state || {};
   const status = String(value?.status || "");
+  const eligibleParticipant = id => Number.isSafeInteger(id) && (id > 0
+    || (id < 0 && value?.mode === "practice" && ["checkers", "chess"].includes(extensionId)
+      && state.bots?.[String(id)]?.userId === id));
   const participants = Array.isArray(state.turnOrder)
-    ? state.turnOrder.filter(id => Number.isSafeInteger(id) && id > 0)
+    ? state.turnOrder.filter(eligibleParticipant)
     : (value?.members || []).filter(member => ["master", "player"].includes(member.role)).map(member => Number(member.userId));
   const outcome = {
     terminal: gameSessionIsTerminal(value), status,
@@ -1245,7 +1249,7 @@ function gameTerminalOutcome(value = session, extensionId = context.extensionId)
   };
   if (!outcome.terminal || state.completed !== true) return outcome;
   // A shared timeout/disconnect winner takes precedence over unfinished scores.
-  if (Number.isSafeInteger(state.winnerUserId) && state.winnerUserId > 0) {
+  if (eligibleParticipant(state.winnerUserId)) {
     if (!outcome.participantIds.includes(state.winnerUserId)) return outcome;
     outcome.known = true;
     outcome.winnerIds = [state.winnerUserId];
@@ -3144,7 +3148,7 @@ function playBuiltInTransitionSound(previous, current) {
   if (checkersMove?.captured) {
     const winnerUserId = Number(after.winnerUserId || 0);
     const terminalAsset = !before.completed && after.completed
-      ? (winnerUserId > 0 && winnerUserId !== currentUserId()
+      ? ((winnerUserId > 0 || gameTerminalOutcome(current).winnerIds.includes(winnerUserId)) && winnerUserId !== currentUserId()
         ? BUILT_IN_PUBLIC_SOUNDS.loss
         : BUILT_IN_PUBLIC_SOUNDS.success)
       : "";
@@ -3185,7 +3189,7 @@ function playBuiltInTransitionSound(previous, current) {
     const terminalAsset = !before.completed && after.completed
       ? (chessCheckmate
         ? BUILT_IN_PUBLIC_SOUNDS.chessCheckmate
-        : Number(after.winnerUserId || 0) > 0 && Number(after.winnerUserId || 0) !== currentUserId()
+        : (Number(after.winnerUserId || 0) > 0 || gameTerminalOutcome(current).winnerIds.includes(after.winnerUserId)) && Number(after.winnerUserId || 0) !== currentUserId()
           ? BUILT_IN_PUBLIC_SOUNDS.loss
           : BUILT_IN_PUBLIC_SOUNDS.success)
       : "";
@@ -3217,7 +3221,7 @@ function playBuiltInTransitionSound(previous, current) {
     const terminalAsset = !before.completed && after.completed
       ? (chessCheckmate
         ? BUILT_IN_PUBLIC_SOUNDS.chessCheckmate
-        : Number(after.winnerUserId || 0) > 0 && Number(after.winnerUserId || 0) !== currentUserId()
+        : (Number(after.winnerUserId || 0) > 0 || gameTerminalOutcome(current).winnerIds.includes(after.winnerUserId)) && Number(after.winnerUserId || 0) !== currentUserId()
           ? BUILT_IN_PUBLIC_SOUNDS.loss
           : BUILT_IN_PUBLIC_SOUNDS.success)
       : "";
@@ -3259,7 +3263,7 @@ function playBuiltInTransitionSound(previous, current) {
     const winnerUserId = Number(after.winnerUserId || 0);
     const resultAsset = chessCheckmate
       ? BUILT_IN_PUBLIC_SOUNDS.chessCheckmate
-      : winnerUserId > 0 && winnerUserId !== currentUserId()
+      : (winnerUserId > 0 || gameTerminalOutcome(current).winnerIds.includes(winnerUserId)) && winnerUserId !== currentUserId()
         ? BUILT_IN_PUBLIC_SOUNDS.loss : BUILT_IN_PUBLIC_SOUNDS.success;
     const playedOutPointResult = context.extensionId === "backgammon-first-party"
       ? String(after.terminalCause || "") === "bear-off"
@@ -5677,7 +5681,8 @@ function builtInModernPiece(gameId, piece, extraClass = "") {
 
 function builtInModernWinnerName(state) {
   const winnerId = state?.winnerUserId;
-  if (!Number.isSafeInteger(winnerId) || winnerId <= 0) return "A player";
+  if (!Number.isSafeInteger(winnerId) || (winnerId <= 0
+    && !gameTerminalOutcome(session).winnerIds.includes(winnerId))) return "A player";
   const candidates = [
     ...(Array.isArray(state?.players) ? state.players : []),
     ...(Array.isArray(session?.members) ? session.members : []),
@@ -10363,6 +10368,38 @@ const chessBotController = createChessBotController({
 });
 window.addEventListener("pagehide", () => chessBotController.stop());
 
+const checkersBotController = createCheckersBotController({
+  snapshot: () => ({
+    enabled: context.extensionId === "checkers" && gameSurfaceVisible && gameLifecycleAvailable(),
+    key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
+    task: session?.state?.botTask,
+  }),
+  submit: payload => performAction("bot-step", payload),
+  showStatus: (message, retry) => {
+    let panel = document.getElementById("checkers-bot-status");
+    if (!panel && context.extensionId === "checkers") {
+      panel = make("div", "checkers-bot-status minor");
+      panel.id = "checkers-bot-status";
+      el("player-status-strip")?.insertAdjacentElement("afterend", panel);
+    }
+    if (!panel) return;
+    panel.hidden = !session?.state?.bots || !Object.keys(session.state.bots).length;
+    panel.replaceChildren();
+    const status = make("span", "", message || "Practice checkers bot");
+    status.setAttribute("role", "status");
+    panel.append(status);
+    if (retry) {
+      const button = make("button", "btn", "Retry bot");
+      button.type = "button"; button.addEventListener("click", retry); panel.append(button);
+    }
+    const credits = make("a", "", "Engine license & source");
+    credits.href = new URL("../changelog.php?document=third-party-notices#marcher", import.meta.url).href;
+    credits.target = "_blank"; credits.rel = "noopener";
+    panel.append(document.createTextNode(" · "), credits);
+  },
+});
+window.addEventListener("pagehide", () => checkersBotController.stop());
+
 function render() {
   if (terminalSessionError) return;
   if (!session) return;
@@ -10436,6 +10473,7 @@ function render() {
   scheduleHeartsAutomaticAction();
   scheduleUnoAutomaticAction();
   chessBotController.sync();
+  checkersBotController.sync();
   scheduleSurfaceReachability(() => {
     syncSurfaceReachability();
     if (openCheckersDrawer) {

@@ -164,8 +164,8 @@
       "assets/images/uno/cards/yellow-reverse.png": "caa07c6fa5e26360babbd42bee262d0b72b6b091aa84f25b9e88a397e387b422",
       "assets/images/uno/cards/yellow-skip.png": "d96c03ec1974e748a42948cd9e86b99dee4036f64f2d0a6457ff3bc7797c13fa",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "4618b21a5ad10c111891812b4e4e32bcaca52de3ac2c55993cf8d94fc176d220",
-      "games/uno-first-party/index.html": "20a58249dc5a468540fb07505f0870aaa768aa1e9075467b28c2509ee57adf7c",
+      "games/ocx-extension-game.js": "f07442a0eae4063a37613e4c92805f57b9f649bce06c8468c9190d9cba7fdc0c",
+      "games/uno-first-party/index.html": "dc4b1838e585d44939503d2fda3be28e67e7d7aab0362807fec5a446af0fb8dc",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }
