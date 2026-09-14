@@ -1491,6 +1491,22 @@ body[data-appearance="classic"] .board { background-color: transparent; }
 .built-in-point-board .built-in-roll-action:focus-visible { outline: 3px solid #f5d89b; outline-offset: 2px; }
 .built-in-point-board .built-in-roll-action:disabled { color: #809492; border-color: #46575a; background: #1a282c; opacity: .78; }
 
+/* Keep the Backgammon dice inside their board area on narrow screens. */
+.built-in-point-board.is-backgammon .built-in-dice {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 42px));
+  pointer-events: none;
+}
+.built-in-point-board.is-backgammon .built-in-die {
+  width: 100%;
+  max-width: 38px;
+}
+.built-in-point-board.is-backgammon .built-in-roll-action:not(:disabled) {
+  pointer-events: auto;
+}
+
 .built-in-point-board .acey-doublet-overlay {
   z-index: 44;
   padding: 5%;

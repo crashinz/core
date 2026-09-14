@@ -1,3 +1,4 @@
+import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=65d896c667ff";
 import { createCheckersBotController } from "./checkers-bot-controller.js?v=729241a2b45b";
 import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
 import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=c49eea58cd30";
@@ -1236,7 +1237,7 @@ function gameTerminalOutcome(value = session, extensionId = context.extensionId)
   const state = value?.state || {};
   const status = String(value?.status || "");
   const eligibleParticipant = id => Number.isSafeInteger(id) && (id > 0
-    || (id < 0 && value?.mode === "practice" && ["checkers", "chess"].includes(extensionId)
+    || (id < 0 && value?.mode === "practice" && ["checkers", "chess", "backgammon-first-party"].includes(extensionId)
       && state.bots?.[String(id)]?.userId === id));
   const participants = Array.isArray(state.turnOrder)
     ? state.turnOrder.filter(eligibleParticipant)
@@ -2258,8 +2259,8 @@ function boardCenter(box) {
 
 function pointMoveHitOpponent(before, after, move) {
   const actor = Number(move?.actorUserId || 0);
-  const opponent = (after?.turnOrder || []).map(Number).find(userId => userId > 0 && userId !== actor) || 0;
-  return opponent > 0
+  const opponent = (after?.turnOrder || []).map(Number).find(userId => userId !== 0 && userId !== actor && (userId > 0 || after?.bots?.[String(userId)]?.userId === userId)) || 0;
+  return opponent !== 0
     && Number(after?.bar?.[String(opponent)] || 0) > Number(before?.bar?.[String(opponent)] || 0);
 }
 
@@ -2273,7 +2274,7 @@ function classifyClassicMotion(previous, current) {
   const before = previous.state || {};
   const after = current.state || {};
   const base = { gameId: context.extensionId, version: Number(current.stateVersion), before, after, startedAt: performance.now() };
-  if (!before.completed && after.completed && Number(after.winnerUserId || 0) > 0) {
+  if (!before.completed && after.completed && (Number(after.winnerUserId || 0) > 0 || (context.extensionId === "backgammon-first-party" && Number(after.winnerUserId || 0) < 0 && after.bots?.[String(after.winnerUserId)]?.userId === after.winnerUserId))) {
     const latestMove = listLength(after.history) > listLength(before.history) ? latest(after.history) : null;
     const terminalReason = String(after.terminalReason || "").toLowerCase();
     if (context.extensionId === "chess" && terminalReason.includes("checkmate")) return {
@@ -6894,7 +6895,7 @@ function classifyBuiltInPointWin(previous, current) {
   const before = previous.state || {};
   const after = current.state || {};
   const winnerUserId = Number(after.winnerUserId || 0);
-  if (winnerUserId <= 0) return null;
+  if (winnerUserId <= 0 && !(gameId === "backgammon-first-party" && after.bots?.[String(winnerUserId)]?.userId === winnerUserId)) return null;
   const latestMove = listLength(after.history) > listLength(before.history) ? latest(after.history) : null;
   const borneOffWin = gameId === "backgammon-first-party"
     ? safe(after.terminalCause).toLowerCase() === "bear-off"
@@ -10400,6 +10401,44 @@ const checkersBotController = createCheckersBotController({
 });
 window.addEventListener("pagehide", () => checkersBotController.stop());
 
+const backgammonBotController = createBackgammonBotController({
+  snapshot: () => ({
+    enabled: context.extensionId === "backgammon-first-party" && gameSurfaceVisible && gameLifecycleAvailable() && !(pendingClassicMotion && performance.now() - pendingClassicMotion.startedAt < motionLength(pendingClassicMotion.gameId, pendingClassicMotion.type)),
+    key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
+    task: session?.state?.botTask,
+  }),
+  submit: payload => { const rolling = payload.action === "roll"; return performAction(rolling ? "bot-roll" : "bot-step", payload, rolling ? "backgammon-roll" : ""); },
+  showStatus: (message, retry) => {
+    let panel = document.getElementById("backgammon-bot-status");
+    if (!panel && context.extensionId === "backgammon-first-party") {
+      panel = make("div", "backgammon-bot-status minor");
+      panel.id = "backgammon-bot-status";
+      el("player-status-strip")?.insertAdjacentElement("afterend", panel);
+    }
+    if (!panel) return;
+    panel.hidden = !session?.state?.bots || !Object.keys(session.state.bots).length;
+    const statusKey = JSON.stringify([message || "", Boolean(retry)]);
+    if (panel.dataset.statusKey === statusKey && panel.childNodes.length) return;
+    panel.dataset.statusKey = statusKey;
+    panel.replaceChildren();
+    const status = make("span", "", message || "Practice backgammon bot");
+    status.setAttribute("role", "status");
+    panel.append(status);
+    if (retry) {
+      const button = make("button", "btn", "Retry bot");
+      button.type = "button"; button.addEventListener("click", retry); panel.append(button);
+    }
+    const credits = make("a", "", "Engine license & source");
+    credits.href = new URL("../changelog.php?document=third-party-notices#gnubg", import.meta.url).href;
+    credits.target = "_blank"; credits.rel = "noopener";
+    panel.append(document.createTextNode(" · "), credits);
+  },
+});
+window.addEventListener("pagehide", () => backgammonBotController.stop());
+
+const backgammonBotTimer = setInterval(() => { if (context.extensionId === "backgammon-first-party") backgammonBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => clearInterval(backgammonBotTimer));
+
 function render() {
   if (terminalSessionError) return;
   if (!session) return;
@@ -10474,6 +10513,7 @@ function render() {
   scheduleUnoAutomaticAction();
   chessBotController.sync();
   checkersBotController.sync();
+  backgammonBotController.sync();
   scheduleSurfaceReachability(() => {
     syncSurfaceReachability();
     if (openCheckersDrawer) {

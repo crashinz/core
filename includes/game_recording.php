@@ -139,6 +139,7 @@ function game_recording_capture_core(PDO $pdo, string $publicId, string $kind, a
             if ($game === 'battleship') $files[] = 'battleship_bot_support.php';
             if ($game === 'chess') $files[] = 'chess_bot_support.php';
             if ($game === 'checkers') $files[] = 'checkers_bot_support.php';
+            if ($game === 'backgammon') $files[] = 'backgammon_bot_support.php';
             $hashes = [];
             foreach ($files as $file) $hashes[$file] = hash_file('sha256', __DIR__ . '/' . $file);
             $metadata = ['format' => GAME_RECORDING_FORMAT, 'formatVersion' => GAME_RECORDING_VERSION,

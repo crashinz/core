@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "id": "backgammon-first-party",
   "name": "Backgammon",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "repositoryOwned": true,
   "trustedFirstParty": true,
   "compatibility": {
@@ -44,14 +44,14 @@
     "icon": "backgammon-first-party-icon.svg",
     "profile": "versus",
     "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 2,
     "seats": [
       "Player 1",
       "Player 2"
     ],
-    "adaptationVersion": "1.0.4",
+    "adaptationVersion": "1.0.5",
     "presentationSelectionOwner": "viewer",
     "presentationPackSettingKey": "multiplayer_game_appearance_g_b61c0a01",
     "defaultPresentationPack": "built-in",
@@ -89,8 +89,8 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "includes/backgammon_extension.php": "e4a8930455c5bf647f2290efac349edaacd6696fd08e6e94e9f304c7edd6d935",
-      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "includes/backgammon_extension.php": "13a016276543a5fa1f1027a9b86f6745dfd29cd1f2c82e6d0e9322aef8c59214",
+      "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
       "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
       "assets/images/backgammon-first-party-icon.svg": "d80ea2a95e04cb7f01246697a16c4b2c8dcd87525b1933fe695d37f41b5219fc",
       "assets/images/point-game-ocx-legal-move-cue.png": "39d0f466f678614cbe65cd0751ff7dade305a17d56af1103f76e49df07a63e1b",
@@ -111,9 +111,20 @@
       "assets/audio/built-in-games/backgammon-gammon.wav": "0dc9ea88f55d61dd6c17c333469bfb77bd1a91355416bdb86281e3ca445a7f31",
       "assets/audio/built-in-games/backgammon-backgammon.wav": "8f043a7916501544730cb482c53e9134e1f53dfbfe52018216fa3c3a0b315d50",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "f07442a0eae4063a37613e4c92805f57b9f649bce06c8468c9190d9cba7fdc0c",
-      "games/backgammon-first-party/index.html": "5069b959da3bf9d20eebe02526f50492885d9901952c62dc30e8e2755ddce501",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+      "games/ocx-extension-game.js": "5f825562c84ea534510c5bbe98a028294993a417475ebae5eeeec044fb25fd78",
+      "games/backgammon-first-party/index.html": "b0f3501c7e2f00216d13c3d58aa9525b0a9fdb4bddf85392ec03e0a8426b7041",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
+      "includes/backgammon_bot_support.php": "738a8d3178f3fa7073c69e7be96ca16478e5a7a04d23a3b8ecd57d4ad7573316",
+      "games/backgammon-bot-controller.js": "65d896c667ffd93e9a0ec6d2e78fed2f19458a24105b987a0be8e72ea596e8e9",
+      "games/vendor/gnubg/corechat_api.c": "331d6987fa64298a1336c1e7c03ebf086903835ad60f338829e7eef7ab70192b",
+      "games/vendor/gnubg/gnubg.js": "d7b1e07200c9e024563ea65df0fdfe9ca5f54019a1e0181e1d30d98127ab86c7",
+      "games/vendor/gnubg/gnubg.wasm": "fa386803ac3483f380550a360483f37a73481e8769bd0a5e1da806f98d2c2c86",
+      "games/vendor/gnubg/rules.js": "c370ec7bd4b2e6d2c89084af594a05ffd4c259827c529f94a25eedc60e57dd92",
+      "games/vendor/gnubg/search.js": "3d1f55414e295831ec5be5fb18f5d276cbae6e34929c72ffcb9f4b51826f62f6",
+      "games/vendor/gnubg/worker.js": "18a748d11b7c50960667254efa0d73e587358823d647f5e983e04772506931bb",
+      "games/vendor/gnubg/.htaccess": "20fffcce1bc7bc78c0215c89a3988787c003fa1094ce6c1f5a74f434b4b1d057",
+      "games/vendor/gnubg/BUILD.md": "606b6d666f5a12373176827b360c88f4661a3c3c47e2f44cdc799d654d0ea102",
+      "games/vendor/gnubg/build.py": "ec2032ffd84bc1c02d69158a75c064853839214d1899544c80a7bf8c73adc8a1"
     }
   }
 }

@@ -10,6 +10,16 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Backgammon narrow-screen bar entry
+
+Fixed the built-in Backgammon dice panel covering the bar and intercepting checker clicks on narrow screens. The panel now fits its board area, and only the enabled Roll button captures clicks. Verified actual bar entry, bot pacing, failed-download Retry, pause/resume, focus and recording replay locally. Testing is WIP.
+
+
+## 2026-09-14 — Backgammon Practice bots
+
+Added Easy, Normal and Expert Backgammon bots using a bundled GNU Backgammon browser evaluator. Hosts can fill the second empty seat before starting; bot games automatically use Practice Mode and never affect rankings. Both starter methods and Standard/Legacy OCX move-use options remain supported. Added bounded thinking, retry, server-validated moves and dice, saved continuation, automatic recording metadata, and centralized engine licenses/source/build instructions. Local compatibility, complete-game, save/resume and recording checks passed. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+
+
 ## 2026-09-14 — Checkers bot optional rules
 
 Checkers Practice bots now support optional backward movement, backward captures and flying kings in every combination. Preserved Easy, Normal and Expert choices and bounded thinking time. Updated engine version checks, movement-rule recording details and the existing centralized Marcher notices/source patch. Expanded local lobby, saved-game, rematch and recording verification. Testing is WIP.

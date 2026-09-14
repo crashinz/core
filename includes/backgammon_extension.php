@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/backgammon_bot_support.php';
 
 const BACKGAMMON_EXTENSION_ID = 'backgammon-first-party';
 const BACKGAMMON_STATE_SCHEMA_VERSION = 1;
@@ -9,7 +10,7 @@ const BACKGAMMON_STATE_SCHEMA_VERSION = 1;
 function backgammon_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['starterMethod', 'backgammonStage', 'bar', 'borneOff', 'completed', 'dice', 'history', 'lastBlockedRoll', 'lastNoLegalMove', 'meaningfulPlay', 'moveUseRule', 'openingCoordinatorUserId', 'openingRollAttempts', 'points', 'remainingDice', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'terminalCause', 'terminalClassification', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
+        'stateKeys' => ['bots', 'starterMethod', 'backgammonStage', 'bar', 'borneOff', 'completed', 'dice', 'history', 'lastBlockedRoll', 'lastNoLegalMove', 'meaningfulPlay', 'moveUseRule', 'openingCoordinatorUserId', 'openingRollAttempts', 'points', 'remainingDice', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'terminalCause', 'terminalClassification', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
         'payloadKeys' => ['die', 'from']];
 }
 
@@ -19,12 +20,13 @@ function backgammon_extension_adapter(): array
         'recordingAdapter' => 'backgammon_recording_adapter',
         'id' => BACKGAMMON_EXTENSION_ID,
         'initialState' => 'backgammon_initial_state',
+        'projectVirtualMembers' => 'backgammon_project_virtual_members',
         'applyAction' => 'backgammon_apply_action',
         'validateSettings' => 'backgammon_validate_settings',
         'settingsProjection' => 'backgammon_settings_projection',
         'rulesProjection' => 'backgammon_rules_projection',
         'projectState' => 'backgammon_project_state',
-        'randomnessPurposes' => ['roll' => 'backgammon-roll'],
+        'randomnessPurposes' => ['roll' => 'backgammon-roll', 'bot-roll' => 'backgammon-roll'],
         'deriveRandomness' => 'backgammon_derive_randomness',
         'presentationStatus' => 'backgammon_presentation_status',
         'openingProcedure' => 'settings-owned-high-roll-or-legacy-rotating-starter',
@@ -74,7 +76,7 @@ function backgammon_validate_settings(array $settings, string $mode, array $defi
     if (!in_array($mode, ['practice', 'recorded'], true)) {
         throw new MultiplayerGameException('Choose Practice or Recorded Play.', 'MULTIPLAYER_GAME_MODE_INVALID', 422);
     }
-    $allowed = ['profile', 'starterMethod', 'moveUseRule'];
+    $allowed = ['profile', 'starterMethod', 'moveUseRule', 'botSeat2Difficulty'];
     if (array_diff(array_keys($settings), $allowed)
         || (isset($settings['profile']) && $settings['profile'] !== 'standard-backgammon')) {
         throw new MultiplayerGameException('A Backgammon setting is not supported.', 'BACKGAMMON_SETTINGS_INVALID', 422);
@@ -85,7 +87,12 @@ function backgammon_validate_settings(array $settings, string $mode, array $defi
         || !in_array($moveUseRule, ['standard', 'legacy-ocx'], true)) {
         throw new MultiplayerGameException('Choose valid independent Backgammon starter and move-use rules.', 'BACKGAMMON_SETTINGS_INVALID', 422);
     }
-    return ['profile' => 'standard-backgammon', 'starterMethod' => $starterMethod, 'moveUseRule' => $moveUseRule];
+    $validated = ['profile' => 'standard-backgammon', 'starterMethod' => $starterMethod, 'moveUseRule' => $moveUseRule];
+    $level = (string)($settings['botSeat2Difficulty'] ?? 'none');
+    if (!in_array($level, array_column(backgammon_bot_choices(), 'value'), true)) throw new MultiplayerGameException('Choose a listed Backgammon difficulty.', 'BACKGAMMON_BOT_DIFFICULTY_INVALID', 422);
+    if ($level !== 'none' && $mode !== 'practice') throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
+    if ($mode === 'practice') $validated['botSeat2Difficulty'] = $level;
+    return $validated;
 }
 
 function backgammon_rules_projection(array $settings, string $mode, array $definition = []): array
@@ -114,11 +121,18 @@ function backgammon_derive_randomness(string $canonicalReveal, string $actionTyp
 function backgammon_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) !== 2 || min($players) < 1) {
+    if (count($players) < 1 || count($players) > 2 || min($players) < 1) {
         throw new MultiplayerGameException('Backgammon requires two authenticated players.', 'BACKGAMMON_PLAYER_SET_INVALID', 422);
     }
     $roundContext = (array)($context['roundContext'] ?? []);
     $settings = backgammon_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    $bots = [];
+    if (count($players) === 1 && ($context['mode'] ?? 'practice') === 'practice' && ($settings['botSeat2Difficulty'] ?? 'none') !== 'none') {
+        $difficulty = $settings['botSeat2Difficulty']; $players[] = BACKGAMMON_BOT_ID;
+        $bots[(string)BACKGAMMON_BOT_ID] = ['userId' => BACKGAMMON_BOT_ID, 'seat' => 2, 'difficulty' => $difficulty,
+            'displayName' => backgammon_bot_levels()[$difficulty]['label'] . ' Bot', 'engine' => BACKGAMMON_BOT_ENGINE];
+    }
+    if (count($players) !== 2) throw new MultiplayerGameException('Another player must join, or choose a Practice bot.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
     $rematchContinues = !empty($roundContext['rematchContinues']);
     $roundNumber = $rematchContinues
         ? max(1, (int)($roundContext['previousRoundNumber'] ?? 1) + (!empty($roundContext['advancesSeries']) ? 1 : 0))
@@ -148,6 +162,7 @@ function backgammon_initial_state(array $playerUserIds, array $context = []): ar
         $startingIndex = $previousIndex === false ? 0 : (1 - (int)$previousIndex);
     }
     return [
+        'bots' => $bots,
         'schemaVersion' => BACKGAMMON_STATE_SCHEMA_VERSION,
         'turnOrder' => $players,
         'turnIndex' => $startingIndex,
@@ -364,6 +379,7 @@ function backgammon_project_state(array $state, int $viewerUserId, array $contex
         unset($destinations);
     }
     $projection['interaction'] = $interaction;
+    $projection['botTask'] = backgammon_bot_task($state, $viewerUserId, $context);
     return $projection;
 }
 
@@ -405,14 +421,14 @@ function backgammon_terminal(array &$state, int $winner, string $cause = 'bear-o
     ];
 }
 
-function backgammon_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function backgammon_apply_action_core(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== BACKGAMMON_STATE_SCHEMA_VERSION || !empty($state['completed'])) {
         throw new MultiplayerGameException('The Backgammon state is unavailable.', 'BACKGAMMON_STATE_INVALID', 409);
     }
     if ($action === 'resign') {
         $players = array_values(array_map('intval', (array)($state['turnOrder'] ?? [])));
-        if (count($players) !== 2 || count(array_unique($players)) !== 2 || min($players) < 1) {
+        if (count($players) !== 2 || count(array_unique($players)) !== 2 || count(array_filter($players, static fn(int $id): bool => $id > 0 || ($id === BACKGAMMON_BOT_ID && isset($state['bots'][(string)$id])))) !== 2) {
             throw new MultiplayerGameException('Backgammon requires two authenticated players.', 'BACKGAMMON_PLAYER_SET_INVALID', 422);
         }
         if ($actorUserId < 1 || !in_array($actorUserId, $players, true)) {

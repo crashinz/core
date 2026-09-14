@@ -96,7 +96,7 @@
       "assets/images/puppy-panic/toy-basket.svg": "82c1d43d242dbeae2b379aa705cd970ebdf5be26deb74052255892e70e11a524",
       "games/puppy-panic-first-party/app.js": "a56c6c748ec5bc43f7b2678eab5b5e621f2b9399c3cb04596bcaa2741b752bef",
       "games/puppy-panic-first-party/style.css": "9beaf9585855192922c7455bcf5eec0975a44d3fe571c9b3cf4d905b59190d26",
-      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
       "includes/puppy_panic_extension.php": "4e4abe1eec9455b0a21c4d28b942673ec5a8e88b5340b6322b4c2ee0365c07cc",
       "assets/images/puppy-panic/cards/action-nap-time.png": "dbfdb666fc78bf9f7ff065ddadca1020b4773b68c7e759d4664c28b204b91d7b",
       "assets/images/puppy-panic/cards/action-not-today.png": "f69aca337f2a4af953c196c2c02bde5b4bfebbb709717c006c26385fbad115c8",
@@ -128,8 +128,8 @@
       "assets/images/puppy-panic/cards/mischief-under-the-couch.png": "f0bb781ecde1f81d8720bb116a4f999b8d4e81ea712334a0385ba829d52d449c",
       "assets/images/puppy-panic/cards/selected-card-frame.png": "424ffef53e8f45769517562e0bae0621d599f45577b974f0602cf541d1c35a00",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "f07442a0eae4063a37613e4c92805f57b9f649bce06c8468c9190d9cba7fdc0c",
-      "games/puppy-panic-first-party/index.html": "b161701370002c287d384501ac5448ecd1a4d2d9c21ef99d02ec41b6b814e81e",
+      "games/ocx-extension-game.js": "5f825562c84ea534510c5bbe98a028294993a417475ebae5eeeec044fb25fd78",
+      "games/puppy-panic-first-party/index.html": "567b32db5cafa284dc7b35228f7e97ebe0cba67adaa16ce7d589e718af7b241d",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }
