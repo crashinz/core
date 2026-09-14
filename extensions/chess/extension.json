@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "id": "chess",
   "name": "Chess",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "repositoryOwned": true,
   "trustedFirstParty": true,
   "compatibility": {
@@ -44,14 +44,14 @@
     "icon": "chess-first-party-icon.svg",
     "profile": "versus",
     "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 2,
     "seats": [
       "White",
       "Black"
     ],
-    "adaptationVersion": "1.0.5",
+    "adaptationVersion": "1.0.6",
     "presentationSelectionOwner": "viewer",
     "defaultPresentationPack": "built-in",
     "presentationPacks": [
@@ -92,7 +92,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "includes/chess_extension.php": "c1398241fbd39456e16458b493826dfb7ed240b634f348eef8a6b27a82f7637b",
+      "includes/chess_extension.php": "33ec9b75a4c554a9b647ebc09a259fd3c8682408c80b6f9eace1a2f439f48244",
       "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
       "games/checkers-chess-modern.css": "e3755ea19150c3928dbb36bb7ce6c2152aa9274850a14e76951dd58ba50f9e99",
       "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
@@ -123,9 +123,15 @@
       "assets/audio/built-in-games/chess-piece-slide.mp3": "25d1c87adbcf749afebb83a21e4c4b7c50ff1b7c65398e94e348024eb78fdbf1",
       "assets/audio/built-in-games/chess-piece-capture.mp3": "c447674370e3e511270948e6e831eb9107ed64ed76645d581cf2a978b221871a",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
-      "games/chess-first-party/index.html": "797bbe069c2cfcd97ab94b9ea2c3e1807a9585d0ee249341736c8bd7aeae8074",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+      "games/ocx-extension-game.js": "4618b21a5ad10c111891812b4e4e32bcaca52de3ac2c55993cf8d94fc176d220",
+      "games/chess-first-party/index.html": "c32ca0e0894afc9f98ce245fa2cd11b4292fa7516f47c06805ee9b5e453c2995",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
+      "includes/chess_bot_support.php": "f3a183c45df4c9cecd21b8f4c528894acf758416635d1793877a77e473894e85",
+      "games/chess-bot-controller.js": "4f211cad590f69012147a5cfa0d0195c06c93042656e9c6f34637c0a0b246bb6",
+      "games/vendor/stockfish/.htaccess": "9b5f6a455e01f59de6d41fc448495e39ed93b3a54f58d3346cfacab1784fd3e7",
+      "games/vendor/stockfish/license.html": "3aa3b966eb47297d5fbbcd9d0ed044695fd20fbf55624282052fb0663ce53e98",
+      "games/vendor/stockfish/stockfish-18-lite-single.js": "2278005057f381491f1c9bb3e44c9f5920b3a00bef9759e33cc6582769a1f1fe",
+      "games/vendor/stockfish/stockfish-18-lite-single.wasm": "a8fbc05ec6920b56d7485826dcb02c5ffd2826bcbf751cf973046f237a9096f1"
     }
   }
 }

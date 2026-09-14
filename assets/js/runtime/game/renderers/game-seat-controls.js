@@ -37,6 +37,11 @@ export function renderGameBotControls(document, bots, runAction) {
         finally { busy = false; for (const [button, disabled] of controls) button.disabled = disabled; }
     };
     panel.append(heading, note);
+    if (bots.strengthNote) {
+        const strengthNote = document.createElement("p");
+        strengthNote.textContent = bots.strengthNote;
+        panel.append(strengthNote);
+    }
     for (const slot of bots.options) {
         const row = document.createElement("div");
         row.className = "game-bot-seat";
@@ -53,7 +58,7 @@ export function renderGameBotControls(document, bots, runAction) {
             choices.className = "game-bot-choices";
             choices.setAttribute("role", "group");
             choices.setAttribute("aria-label", `Seat ${slot.seat} bot`);
-            for (const [value, caption] of [["none", "None"], ["normal", "Normal"], ["expert", "Expert"]]) {
+            for (const {value, label: caption} of (bots.choices || [{value:"none",label:"None"},{value:"normal",label:"Normal"},{value:"expert",label:"Expert"}])) {
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "btn";

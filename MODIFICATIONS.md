@@ -10,6 +10,11 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Chess Practice bots
+
+Added a separate Stockfish.js browser engine with approximate rating choices and readable level names, default-None lobby controls, automatic Practice conversion, server-validated moves and shared game recording. Includes engine license and corresponding source access. Testing is WIP.
+
+
 ## 2026-09-14 — Add bots from waiting lobbies
 
 Spades and Battleship bot slots now default to None. Hosts can add Normal or Expert bots to empty seats after people join, automatically switching to Practice, then explicitly start. Occupied human seats and all ranking safeguards are preserved.

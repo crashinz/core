@@ -111,8 +111,8 @@
       "assets/audio/built-in-games/backgammon-gammon.wav": "0dc9ea88f55d61dd6c17c333469bfb77bd1a91355416bdb86281e3ca445a7f31",
       "assets/audio/built-in-games/backgammon-backgammon.wav": "8f043a7916501544730cb482c53e9134e1f53dfbfe52018216fa3c3a0b315d50",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
-      "games/backgammon-first-party/index.html": "7c989bea1bba6ae4fefe2f4e5452012f3cdbe109348ab6a622df97200665238b",
+      "games/ocx-extension-game.js": "4618b21a5ad10c111891812b4e4e32bcaca52de3ac2c55993cf8d94fc176d220",
+      "games/backgammon-first-party/index.html": "1d0d3770731929b3b61d6af4563ade9bf1ce28c7d5f55c50c09b5fdc4a799ada",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

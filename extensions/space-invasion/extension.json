@@ -77,10 +77,10 @@
     "files": {
       "includes/arcade_extension_support.php": "b9d60d657c2ace2a66a6b371b0ce4c7d49d268ed86a35a447ed812c886f897f1",
       "includes/space_arcade_extension.php": "a8b4a7b3c4b44b661a0ba2aba73b2ca2246a480bfc43005bee6255690c75bd6e",
-      "games/space-invasion-first-party/index.html": "7e721d33b1ad5e4e7f87a2ad7e57c46719fccb5c67b5cf25334e8e91218eebfb",
+      "games/space-invasion-first-party/index.html": "9e684e50b6c30beee6bc140ee056529862d6b45761477858b8d6f131727289d8",
       "games/arcade-first-party/app.js": "84bfff3e3492d65eccdc7d9f5626599f77be7b15ae916d6ba3ff5a164f472651",
       "games/arcade-first-party/style.css": "636901afd9d6116c3f054f8d63508088c40d3f68a217daef1ae8b8ab30fa9eb2",
-      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
+      "games/ocx-extension-game.js": "4618b21a5ad10c111891812b4e4e32bcaca52de3ac2c55993cf8d94fc176d220",
       "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
       "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",

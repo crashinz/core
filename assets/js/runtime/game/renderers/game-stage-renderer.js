@@ -59,7 +59,7 @@ const SINGLE_SCROLL_GAME_PATHS = Object.freeze({
     "g_4f8c2d71": "/games/five-dice/index.html"
 });
 
-import { renderGameSeatControls, renderGameBotControls } from "./game-seat-controls.js?v=4a0cfc15ad09";
+import { renderGameSeatControls, renderGameBotControls } from "./game-seat-controls.js?v=8829b14ae801";
 
 export function gameUsesSingleScroll(gameType, documentUrl, context) {
     const path = SINGLE_SCROLL_GAME_PATHS[String(gameType || "")];

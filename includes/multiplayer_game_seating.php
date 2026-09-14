@@ -11,9 +11,18 @@ function multiplayer_game_bot_slots(array $definition): array
 {
     return match ((string)($definition['extensionId'] ?? '')) {
         'spades' => [1, 2, 3, 4],
-        'battleship' => [2],
+        'battleship', 'chess' => [2],
         default => [],
     };
+}
+
+function multiplayer_game_bot_choices(array $definition): array
+{
+    if (($definition['extensionId'] ?? '') === 'chess') {
+        require_once __DIR__ . '/chess_bot_support.php';
+        return chess_bot_choices();
+    }
+    return [['value' => 'none', 'label' => 'None'], ['value' => 'normal', 'label' => 'Normal'], ['value' => 'expert', 'label' => 'Expert']];
 }
 
 function multiplayer_game_requires_host_start(array $definition): bool
@@ -45,7 +54,9 @@ function multiplayer_game_bot_lobby_projection(array $definition, array $session
         $options[] = ['seat' => $seat, 'occupantName' => $humans[$seat]['displayName'] ?? '',
             'difficulty' => $difficulty, 'editable' => $isHost && !$occupied];
     }
-    return ['options' => $options, 'isHost' => $isHost, 'mode' => $session['mode'],
+    return ['choices' => multiplayer_game_bot_choices($definition),
+        'strengthNote' => ($definition['extensionId'] ?? '') === 'chess' ? chess_bot_strength_note() : '',
+        'options' => $options, 'isHost' => $isHost, 'mode' => $session['mode'],
         'settingsSha256' => $session['settings_sha256'], 'playerSetSha256' => $playerSetSha,
         'showStart' => $isHost && !multiplayer_game_has_seat_choices($definition),
         'canStart' => $isHost && $readyCount === (int)$definition['maxPlayers'] && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
@@ -60,8 +71,8 @@ function multiplayer_game_set_lobby_bot(PDO $pdo, string $publicId, int $userId,
         $session = multiplayer_game_require_member($pdo, $publicId, $userId, ['master']);
         if ($session['status'] !== 'lobby') throw new MultiplayerGameException('Bot seats are locked after play begins.', 'MULTIPLAYER_GAME_SETTINGS_LOCKED', 409);
         $definition = multiplayer_game_definition($pdo, (string)$session['game_key']);
-        if (!in_array($seat, multiplayer_game_bot_slots($definition), true) || !in_array($difficulty, ['none', 'normal', 'expert'], true)) {
-            throw new MultiplayerGameException('Choose an available bot seat and None, Normal, or Expert.', 'MULTIPLAYER_GAME_BOT_CHOICE_INVALID', 422);
+        if (!in_array($seat, multiplayer_game_bot_slots($definition), true) || !in_array($difficulty, array_column(multiplayer_game_bot_choices($definition), 'value'), true)) {
+            throw new MultiplayerGameException('Choose an available bot seat and a listed strength.', 'MULTIPLAYER_GAME_BOT_CHOICE_INVALID', 422);
         }
         $playerSet = multiplayer_game_player_set($pdo, (int)$session['id']);
         if (!hash_equals((string)$session['settings_sha256'], $expectedSettings) || !hash_equals($playerSet['sha256'], $expectedPlayers)) {

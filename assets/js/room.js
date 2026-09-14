@@ -671,7 +671,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260914-custom-emojis')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
-    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=dbca606b0647')),
+    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=084fa623d9fa')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
     import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js?v=20260913-regression')),
     import(`${appUrl('/assets/js/runtime/avatar/avatar-runtime.js?v=20260914-bubble-emojis')}?v=20260913-away-layout`),

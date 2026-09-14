@@ -1,0 +1,7 @@
+# Only this independent engine worker needs WebAssembly compilation permission.
+<IfModule mod_headers.c>
+  Header always set Content-Security-Policy "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'"
+</IfModule>
+<IfModule mod_mime.c>
+  AddType application/wasm .wasm
+</IfModule>

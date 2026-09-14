@@ -1,8 +1,9 @@
+import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
 import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=c49eea58cd30";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=c2557c225fbc";
 
 import { bindGameAvatar } from "./game-avatar.js?v=20260913-room-avatars";
-import { renderGameSeatControls, renderGameBotControls } from "../assets/js/runtime/game/renderers/game-seat-controls.js?v=4a0cfc15ad09";
+import { renderGameSeatControls, renderGameBotControls } from "../assets/js/runtime/game/renderers/game-seat-controls.js?v=8829b14ae801";
 
 const params = new URLSearchParams(location.search);
 const context = Object.freeze({
@@ -10330,6 +10331,38 @@ function renderReceivedDrawProposalDialog() {
   requestAnimationFrame(() => accept.focus({ preventScroll:true }));
 }
 
+const chessBotController = createChessBotController({
+  snapshot: () => ({
+    enabled: context.extensionId === "chess" && gameSurfaceVisible && gameLifecycleAvailable(),
+    key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
+    task: session?.state?.botTask,
+  }),
+  submit: payload => performAction("bot-step", payload),
+  showStatus: (message, retry) => {
+    let panel = document.getElementById("chess-bot-status");
+    if (!panel && context.extensionId === "chess") {
+      panel = make("div", "chess-bot-status minor");
+      panel.id = "chess-bot-status";
+      el("player-status-strip")?.insertAdjacentElement("afterend", panel);
+    }
+    if (!panel) return;
+    panel.hidden = !session?.state?.bots || !Object.keys(session.state.bots).length;
+    panel.replaceChildren();
+    const status = make("span", "", message || "Practice chess bot");
+    status.setAttribute("role", "status");
+    panel.append(status);
+    if (retry) {
+      const button = make("button", "btn", "Retry bot");
+      button.type = "button"; button.addEventListener("click", retry); panel.append(button);
+    }
+    const credits = make("a", "", "Engine license & source");
+    credits.href = new URL("../changelog.php?document=third-party-notices#stockfish", import.meta.url).href;
+    credits.target = "_blank"; credits.rel = "noopener";
+    panel.append(document.createTextNode(" · "), credits);
+  },
+});
+window.addEventListener("pagehide", () => chessBotController.stop());
+
 function render() {
   if (terminalSessionError) return;
   if (!session) return;
@@ -10402,6 +10435,7 @@ function render() {
   scheduleBlackjackAutomaticAction();
   scheduleHeartsAutomaticAction();
   scheduleUnoAutomaticAction();
+  chessBotController.sync();
   scheduleSurfaceReachability(() => {
     syncSurfaceReachability();
     if (openCheckersDrawer) {

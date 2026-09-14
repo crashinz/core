@@ -77,10 +77,10 @@
     "files": {
       "includes/arcade_extension_support.php": "b9d60d657c2ace2a66a6b371b0ce4c7d49d268ed86a35a447ed812c886f897f1",
       "includes/tetris_arcade_extension.php": "673a741e7f0c55955f7f7fc3dc3badae32cada4349d85841c7cdfb46b8e4c8e6",
-      "games/tetris-versus-first-party/index.html": "6a92844341f1f228b679d2dc47be376cba6173ce57ee1adb4dd2f89f0d018e34",
+      "games/tetris-versus-first-party/index.html": "4675d9029377a4d9fb9b03f5703716b170bd7ce0188d2c952f8c86b7ee866ba3",
       "games/arcade-first-party/app.js": "84bfff3e3492d65eccdc7d9f5626599f77be7b15ae916d6ba3ff5a164f472651",
       "games/arcade-first-party/style.css": "636901afd9d6116c3f054f8d63508088c40d3f68a217daef1ae8b8ab30fa9eb2",
-      "games/ocx-extension-game.js": "3bbe44b0c32d30d10e4a5fe1a5870705df892136663400b0bb6f81fe210166a6",
+      "games/ocx-extension-game.js": "4618b21a5ad10c111891812b4e4e32bcaca52de3ac2c55993cf8d94fc176d220",
       "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
       "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",

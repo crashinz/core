@@ -94,7 +94,7 @@ function game_recording_step(string $game, array $before, int $actor, string $ac
     $step['randomness'] = game_recording_pick((array)($context['authoritativeRandomness'] ?? []), ['deck', 'dice', 'bytes', 'initialDealerIndex', 'dealerIndex', 'seed', 'reshuffleSeed', 'starterIndex', 'openingRolls']);
     if (isset($context['nowUnixMs'])) $step['nowUnixMs'] = (int)$context['nowUnixMs'];
     if ($trace !== null) $step['botDecision'] = game_recording_pick($trace,
-        ['difficulty', 'legal', 'selected', 'reason', 'candidateScores', 'publicObservation', 'elapsedMs', 'bid', 'candidates', 'returning', 'cardCount']);
+        ['engine', 'difficulty', 'legal', 'selected', 'reason', 'candidateScores', 'publicObservation', 'elapsedMs', 'bid', 'candidates', 'returning', 'cardCount']);
     return $step;
 }
 
@@ -114,6 +114,9 @@ function game_recording_capture_core(PDO $pdo, string $publicId, string $kind, a
         $record->execute([$id]);
         $row = $record->fetch(PDO::FETCH_ASSOC);
         if (is_array($row) && (int)$row['deleted'] !== 0) return;
+        // Lobby reconnects can create shared state before the final players and
+        // bot choices exist. Start the archive with the actual initial game.
+        if (!is_array($row) && $session['status'] === 'lobby' && empty($session['started_at'])) return;
         if (!game_recording_enabled($pdo, $game)) {
             if (is_array($row)) $pdo->prepare("UPDATE multiplayer_game_recordings SET gap_count=gap_count+1,error_code='recording-disabled',status=?,last_version=? WHERE id=?")
                 ->execute([$session['status'], (int)$session['state_version'], $id]);
@@ -134,6 +137,7 @@ function game_recording_capture_core(PDO $pdo, string $publicId, string $kind, a
             $files = [str_replace('-', '_', $game) . '_extension.php'];
             if ($game === 'spades') $files = array_merge($files, ['spades_bot_support.php', 'spades_bot_endgame_support.php']);
             if ($game === 'battleship') $files[] = 'battleship_bot_support.php';
+            if ($game === 'chess') $files[] = 'chess_bot_support.php';
             $hashes = [];
             foreach ($files as $file) $hashes[$file] = hash_file('sha256', __DIR__ . '/' . $file);
             $metadata = ['format' => GAME_RECORDING_FORMAT, 'formatVersion' => GAME_RECORDING_VERSION,

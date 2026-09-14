@@ -46,7 +46,7 @@ import {
 
     GameStageRenderer
 
-} from "./renderers/game-stage-renderer.js?v=dfe5b1393ceb";
+} from "./renderers/game-stage-renderer.js?v=a45a7cff474e";
 
 import {
 

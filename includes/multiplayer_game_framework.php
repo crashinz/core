@@ -1656,13 +1656,15 @@ function multiplayer_game_round_context(PDO $pdo, string $gameKey, string $publi
     ];
 }
 
-function multiplayer_game_turn_owner_from_state(array $state, array $playerUserIds): ?int
+function multiplayer_game_turn_owner_from_state(array $state, array $playerUserIds, string $mode = 'recorded'): ?int
 {
     if (!array_key_exists('turnIndex', $state) || $state['turnIndex'] === null) return null;
     $turnOrder = array_values(array_map('intval', (array)($state['turnOrder'] ?? [])));
     $turnIndex = (int)$state['turnIndex'];
     $turnUserId = (int)($turnOrder[$turnIndex] ?? 0);
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
+    if ($mode === 'practice' && $turnUserId < 0
+        && (int)($state['bots'][(string)$turnUserId]['userId'] ?? 0) === $turnUserId) return $turnUserId;
     if ($turnUserId < 1 || !in_array($turnUserId, $players, true)) {
         throw new MultiplayerGameException('The initial turn owner is invalid.', 'MULTIPLAYER_GAME_TURN_OWNER_INVALID', 500);
     }
@@ -1728,7 +1730,7 @@ function multiplayer_game_initialize_shared_state(
     $seconds = $inactivityEnabled
         ? multiplayer_game_shared_inactivity_seconds($settings, $definition, $state)
         : null;
-    $turnOwner = multiplayer_game_turn_owner_from_state($state, $playerIds);
+    $turnOwner = multiplayer_game_turn_owner_from_state($state, $playerIds, $mode);
     $state['_framework'] = [
         'schemaVersion' => 1,
         'players' => $players,
@@ -1823,7 +1825,7 @@ function multiplayer_game_resume_shared_timing(array &$state, int $now): void
     }
     $turnOrder = array_values(array_map('intval', (array)($state['turnOrder'] ?? [])));
     $turnOwner = (int)($turnOrder[(int)($state['turnIndex'] ?? -1)] ?? 0);
-    if ($turnOwner > 0 && isset($state['clocks'][(string)$turnOwner])
+    if (($turnOwner > 0 || isset($state['bots'][(string)$turnOwner])) && isset($state['clocks'][(string)$turnOwner])
         && is_numeric($state['clocks'][(string)$turnOwner]['remainingSeconds'] ?? null)) {
         $state['clocks'][(string)$turnOwner]['turnStartedAt'] = gmdate('c', $now);
     }
@@ -2320,7 +2322,7 @@ function multiplayer_game_start_session_core(PDO $pdo, string $publicId, int $us
     if (strlen($stateJson) > 262144) {
         throw new MultiplayerGameException('The authoritative game state is too large.', 'MULTIPLAYER_GAME_STATE_TOO_LARGE', 500);
     }
-    $turnUserId = multiplayer_game_turn_owner_from_state($state, $playerIds);
+    $turnUserId = multiplayer_game_turn_owner_from_state($state, $playerIds, (string)$session['mode']);
     $update = $pdo->prepare("UPDATE multiplayer_game_sessions SET status='active',state_json=?,turn_user_id=?,started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,state_version=state_version+1 WHERE id=? AND status='lobby'");
     $update->execute([$stateJson, $turnUserId, (int)$session['id']]);
     if ($update->rowCount() !== 1) throw new MultiplayerGameException('The game changed elsewhere.', 'MULTIPLAYER_GAME_START_CONFLICT', 409);
@@ -3411,7 +3413,7 @@ function multiplayer_game_restore_saved_game(PDO $pdo, string $publicId, int $us
         }
 
         $set = multiplayer_game_player_set($pdo, (int)$session['id'], true);
-        $turnUserId = multiplayer_game_turn_owner_from_state($state, (array)$set['userIds']);
+        $turnUserId = multiplayer_game_turn_owner_from_state($state, (array)$set['userIds'], (string)$session['mode']);
         $nextStatus = (string)($snapshot['sessionStatus'] ?? 'active') === 'paused' ? 'paused' : 'active';
         $nextStateJson = multiplayer_game_canonical_json($state);
         $update = $pdo->prepare(

@@ -40,7 +40,7 @@ if (isset($markdown) && $markdown !== false) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e(private_site_branding_page_title($pdo, $selectedDocument['title'], 'login')) ?></title>
-  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css?v=d3f3e5eb5caf')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>">
 <main class="public-document-shell">

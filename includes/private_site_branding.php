@@ -527,6 +527,7 @@ function private_site_branding_render_modifications(string $markdown): string {
     $html = [];
     $paragraph = [];
     $inList = false;
+    $codeLines = null;
     $flushParagraph = static function () use (&$paragraph, &$html): void {
         if (!$paragraph) return;
         $html[] = '<p>' . private_site_branding_inline_markdown(implode(' ', $paragraph)) . '</p>';
@@ -534,6 +535,24 @@ function private_site_branding_render_modifications(string $markdown): string {
     };
     foreach (preg_split('/\R/', $markdown) ?: [] as $line) {
         $trimmed = trim($line);
+        if ($codeLines !== null) {
+            if ($trimmed === '```') {
+                $html[] = '<pre>' . htmlspecialchars(implode("\n", $codeLines), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</pre>';
+                $codeLines = null;
+            } else {
+                $codeLines[] = $line;
+            }
+            continue;
+        }
+        if ($trimmed === '```') {
+            $flushParagraph();
+            if ($inList) {
+                $html[] = '</ul>';
+                $inList = false;
+            }
+            $codeLines = [];
+            continue;
+        }
         if ($trimmed === '') {
             $flushParagraph();
             if ($inList) {
@@ -549,7 +568,8 @@ function private_site_branding_render_modifications(string $markdown): string {
                 $inList = false;
             }
             $level = strlen($match[1]) + 1;
-            $html[] = "<h{$level}>" . private_site_branding_inline_markdown($match[2]) . "</h{$level}>";
+            $anchor = $match[2] === 'Stockfish' ? ' id="stockfish"' : '';
+            $html[] = "<h{$level}{$anchor}>" . private_site_branding_inline_markdown($match[2]) . "</h{$level}>";
             continue;
         }
         if ($trimmed === '<details>') {
@@ -583,6 +603,9 @@ function private_site_branding_render_modifications(string $markdown): string {
         $paragraph[] = $trimmed;
     }
     $flushParagraph();
+    if ($codeLines !== null) {
+        $html[] = '<pre>' . htmlspecialchars(implode("\n", $codeLines), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</pre>';
+    }
     if ($inList) $html[] = '</ul>';
     return implode("\n", $html);
 }

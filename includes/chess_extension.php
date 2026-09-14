@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/chess_bot_support.php';
 
 const CHESS_EXTENSION_ID = 'chess';
 const CHESS_STATE_SCHEMA_VERSION = 1;
@@ -9,7 +10,7 @@ const CHESS_STATE_SCHEMA_VERSION = 1;
 function chess_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['board', 'castling', 'clock', 'clocks', 'colorAssignments', 'completed', 'drawNoticeSequence', 'drawOfferBy', 'enPassant', 'expiredClockUserId', 'fullmoveNumber', 'halfmoveClock', 'history', 'lastDrawResponse', 'meaningfulPlay', 'movesByUser', 'positionCounts', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
+        'stateKeys' => ['bots', 'botPosition', 'board', 'castling', 'clock', 'clocks', 'colorAssignments', 'completed', 'drawNoticeSequence', 'drawOfferBy', 'enPassant', 'expiredClockUserId', 'fullmoveNumber', 'halfmoveClock', 'history', 'lastDrawResponse', 'meaningfulPlay', 'movesByUser', 'positionCounts', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
         'payloadKeys' => ['claim', 'from', 'promotion', 'to']];
 }
 
@@ -19,6 +20,7 @@ function chess_extension_adapter(): array
         'recordingAdapter' => 'chess_recording_adapter',
         'id' => CHESS_EXTENSION_ID,
         'initialState' => 'chess_initial_state',
+        'projectVirtualMembers' => 'chess_project_virtual_members',
         'applyAction' => 'chess_apply_action',
         'validateSettings' => 'chess_validate_settings',
         'settingsProjection' => 'chess_settings_projection',
@@ -49,7 +51,7 @@ function chess_clock_profiles(): array
 
 function chess_validate_settings(array $settings, string $mode, array $definition = []): array
 {
-    $allowed = ['clockProfile', 'customInitialMinutes', 'customIncrementSeconds'];
+    $allowed = ['botSeat2Difficulty', 'clockProfile', 'customInitialMinutes', 'customIncrementSeconds'];
     if (array_diff(array_keys($settings), $allowed)) throw new MultiplayerGameException('A Chess setting is not supported.', 'CHESS_SETTINGS_INVALID', 422);
     $profile = strtolower(trim((string)($settings['clockProfile'] ?? 'no-clock')));
     if ($profile !== 'custom' && !isset(chess_clock_profiles()[$profile])) throw new MultiplayerGameException('Choose a published Chess clock profile.', 'CHESS_CLOCK_PROFILE_INVALID', 422);
@@ -62,6 +64,10 @@ function chess_validate_settings(array $settings, string $mode, array $definitio
         }
         $validated += ['customInitialMinutes' => $initial, 'customIncrementSeconds' => $increment];
     }
+    $difficulty = (string)($settings['botSeat2Difficulty'] ?? 'none');
+    if (!in_array($difficulty, array_column(chess_bot_choices(), 'value'), true)) throw new MultiplayerGameException('Choose a listed Chess bot strength.', 'CHESS_BOT_DIFFICULTY_INVALID', 422);
+    if ($mode !== 'practice' && $difficulty !== 'none') throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
+    if ($mode === 'practice') $validated['botSeat2Difficulty'] = $difficulty;
     return $validated;
 }
 
@@ -78,7 +84,12 @@ function chess_settings_projection(array $settings, string $mode, array $definit
         'description' => 'Every player must accept the selected server-authoritative Chess clock before play begins.',
         'classification' => (string)$settings['clockProfile'],
         'classificationLabel' => (string)(chess_clock_profiles()[$settings['clockProfile']]['label'] ?? 'Custom clock'),
-        'controls' => [[
+        'controls' => array_merge($mode === 'practice' ? [[
+            'key' => 'botSeat2Difficulty', 'type' => 'select',
+            'value' => $settings['botSeat2Difficulty'], 'defaultValue' => 'none',
+            'label' => 'Empty seat 2 bot', 'description' => chess_bot_strength_note(),
+            'options' => chess_bot_choices(),
+        ]] : [], [[
             'key' => 'clockProfile',
             'type' => 'choice-grid',
             'value' => (string)$settings['clockProfile'],
@@ -94,7 +105,7 @@ function chess_settings_projection(array $settings, string $mode, array $definit
             'key' => 'customIncrementSeconds', 'type' => 'stepper', 'value' => (int)($settings['customIncrementSeconds'] ?? 0),
             'defaultValue' => 0, 'minimum' => 0, 'maximum' => 300, 'step' => 1,
             'label' => 'Custom increment seconds', 'description' => 'Added after a completed move in the Custom time-bank method; 0 through 300 seconds.',
-        ]],
+        ]]),
     ];
 }
 
@@ -153,8 +164,17 @@ function chess_initial_clocks(array $players, array $clock, string $startedAt, i
 function chess_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) !== 2 || min($players) < 1) throw new MultiplayerGameException('Chess requires two authenticated players.', 'CHESS_PLAYER_SET_INVALID', 422);
+    if (count($players) < 1 || count($players) > 2 || min($players) < 1) throw new MultiplayerGameException('Chess requires one or two authenticated players in Practice.', 'CHESS_PLAYER_SET_INVALID', 422);
     $settings = chess_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    $bots = [];
+    if (count($players) === 1 && ($context['mode'] ?? 'practice') === 'practice' && ($settings['botSeat2Difficulty'] ?? 'none') !== 'none') {
+        $difficulty = $settings['botSeat2Difficulty'];
+        $labels = array_column(chess_bot_choices(), 'label', 'value');
+        $players[] = CHESS_BOT_ID;
+        $bots[(string)CHESS_BOT_ID] = ['userId' => CHESS_BOT_ID, 'seat' => 2,
+            'difficulty' => $difficulty, 'displayName' => $labels[$difficulty] . ' Bot', 'engine' => CHESS_BOT_ENGINE];
+    }
+    if (count($players) !== 2) throw new MultiplayerGameException('Another player must join, or choose a Practice bot.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
     $clock = chess_clock_descriptor($settings);
     $startedAt = (string)($context['startedAt'] ?? gmdate('c'));
     $roundContext = (array)($context['roundContext'] ?? []);
@@ -199,6 +219,7 @@ function chess_initial_state(array $playerUserIds, array $context = []): array
         'meaningfulPlay' => false,
         'completed' => false,
     ];
+    if ($bots !== []) { $state['bots'] = $bots; $state['botPosition'] = ['fen' => chess_bot_fen($state), 'moves' => []]; }
     chess_record_position($state);
     return $state;
 }
@@ -357,6 +378,7 @@ function chess_project_state(array $state, int $viewerUserId, array $context): a
         unset($destinations);
         $interaction['legalMoveCount'] = count($moves);
     }
+    $projection['botTask'] = chess_bot_task($state, $viewerUserId, $context);
     $projection['interaction'] = $interaction;
     $projection['drawClaims'] = chess_draw_claim_eligibility($state, $viewerUserId);
     $projection['drawProgress'] = chess_draw_progress_projection($state);
@@ -368,12 +390,12 @@ function chess_draw_progress_projection(array $state): array
     $turnIndex = (int)($state['turnIndex'] ?? -1);
     $currentUserId = (int)($state['turnOrder'][$turnIndex] ?? 0);
     $positionOccurrences = 0;
-    if ($currentUserId > 0) {
+    if ($currentUserId !== 0) {
         $key = chess_position_key($state);
         $positionOccurrences = (int)($state['positionCounts'][$key] ?? 0);
     }
     $consecutiveMoves = max(0, (int)($state['halfmoveClock'] ?? 0));
-    $sideToMove = $currentUserId > 0 ? chess_color_for_user($state, $currentUserId) : 'w';
+    $sideToMove = $currentUserId !== 0 ? chess_color_for_user($state, $currentUserId) : 'w';
     $lastMover = $sideToMove === 'w' ? 'b' : 'w';
     $movesByColor = [
         $lastMover => intdiv($consecutiveMoves + 1, 2),
@@ -382,7 +404,7 @@ function chess_draw_progress_projection(array $state): array
     $movesByUser = [];
     foreach ((array)($state['turnOrder'] ?? []) as $userId) {
         $userId = (int)$userId;
-        if ($userId > 0) $movesByUser[(string)$userId] = (int)($movesByColor[chess_color_for_user($state, $userId)] ?? 0);
+        if ($userId !== 0) $movesByUser[(string)$userId] = (int)($movesByColor[chess_color_for_user($state, $userId)] ?? 0);
     }
     return [
         'positionAppearances' => $positionOccurrences,
@@ -402,7 +424,7 @@ function chess_effective_en_passant_target(array $state): ?array
     if (!is_array($target) || count($target) !== 2) return null;
     $turnIndex = (int)($state['turnIndex'] ?? -1);
     $userId = (int)($state['turnOrder'][$turnIndex] ?? 0);
-    if ($userId < 1) return null;
+    if ($userId === 0) return null;
     try {
         $color = chess_color_for_user($state, $userId);
         foreach (chess_legal_moves($state, $color) as $move) {
@@ -418,7 +440,7 @@ function chess_position_key(array $state): string
 {
     $turnIndex = (int)($state['turnIndex'] ?? -1);
     $userId = (int)($state['turnOrder'][$turnIndex] ?? 0);
-    $sideToMove = $userId > 0 ? chess_color_for_user($state, $userId) : null;
+    $sideToMove = $userId !== 0 ? chess_color_for_user($state, $userId) : null;
     return strtoupper(hash('sha256',multiplayer_game_canonical_json([
         'board'=>$state['board'],
         'sideToMove'=>$sideToMove,
@@ -438,11 +460,11 @@ function chess_draw_claim_eligibility(array $state, int $actorUserId): array
     $turnIndex = (int)($state['turnIndex'] ?? -1);
     $currentUserId = (int)($state['turnOrder'][$turnIndex] ?? 0);
     $positionOccurrences = 0;
-    if ($currentUserId > 0) {
+    if ($currentUserId !== 0) {
         $key = chess_position_key($state);
         $positionOccurrences = (int)($state['positionCounts'][$key] ?? 0);
     }
-    $eligibleCurrentPlayer = empty($state['completed']) && $actorUserId > 0 && $actorUserId === $currentUserId;
+    $eligibleCurrentPlayer = empty($state['completed']) && $actorUserId !== 0 && $actorUserId === $currentUserId;
     return [
         'eligibleCurrentPlayer' => $eligibleCurrentPlayer,
         'positionOccurrences' => $positionOccurrences,
@@ -519,7 +541,7 @@ function chess_update_castling(array &$state,string $movedPiece,array $from,arra
     foreach([['piece'=>'wR','square'=>[7,0],'right'=>'wQ'],['piece'=>'wR','square'=>[7,7],'right'=>'wK'],['piece'=>'bR','square'=>[0,0],'right'=>'bQ'],['piece'=>'bR','square'=>[0,7],'right'=>'bK']] as $rook){if($movedPiece===$rook['piece']&&$from===$rook['square'])$state['castling'][$rook['right']]=false;if($captured===$rook['piece']&&$to===$rook['square'])$state['castling'][$rook['right']]=false;}
 }
 
-function chess_apply_action(array $state,int $actorUserId,string $action,array $payload,array $context): array
+function chess_apply_action_core(array $state,int $actorUserId,string $action,array $payload,array $context): array
 {
     if((int)($state['schemaVersion']??0)!==CHESS_STATE_SCHEMA_VERSION||!empty($state['completed']))throw new MultiplayerGameException('The Chess state is unavailable.','CHESS_STATE_INVALID',409);
     $expired=chess_settle_active_clock($state,$context);
@@ -587,7 +609,7 @@ function chess_apply_action(array $state,int $actorUserId,string $action,array $
     $state['history'][]=['actorUserId'=>$actorUserId,'from'=>[$fr,$fc],'to'=>[$tr,$tc],'piece'=>$movedPiece,'promotion'=>$promotion?:null,'capture'=>$captured!==null,'check'=>false];
     $state['movesByUser'][(string)$actorUserId]=(int)($state['movesByUser'][(string)$actorUserId]??0)+1;
     if(count($state['history'])>512)$state['history']=array_slice($state['history'],-512);if($color==='b')$state['fullmoveNumber']=(int)$state['fullmoveNumber']+1;
-    $next=ocx_game_advance_turn($state);chess_start_next_clock($state,$actorUserId,$context);$nextColor=$color==='w'?'b':'w';$inCheck=chess_in_check($state['board'],$nextColor);$state['history'][array_key_last($state['history'])]['check']=$inCheck;$nextMoves=chess_legal_moves($state,$nextColor);
+    $next=ocx_game_advance_turn($state);chess_start_next_clock($state,$actorUserId,$context);chess_bot_track_move($state,$payload);$nextColor=$color==='w'?'b':'w';$inCheck=chess_in_check($state['board'],$nextColor);$state['history'][array_key_last($state['history'])]['check']=$inCheck;$nextMoves=chess_legal_moves($state,$nextColor);
     if($nextMoves===[])return $inCheck?chess_terminal($state,$actorUserId,'checkmate'):chess_terminal($state,null,'stalemate');
     $positionOccurrences=chess_record_position($state);
     if($positionOccurrences>=5)return chess_terminal($state,null,'automatic-fivefold-repetition');

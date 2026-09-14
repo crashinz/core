@@ -7630,6 +7630,7 @@ body:has(.main.game-surface-visible[data-game-layout="overlay"]) > .modal.open {
 .public-document-content h2 { margin-top: 2em; padding-bottom: .35em; border-bottom: 1px solid var(--line); }
 .public-document-content a { color: #9fc1ff; }
 .public-document-content code { border-radius: 5px; padding: 2px 5px; background: rgba(255,255,255,.08); }
+.public-document-content pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .public-document-source {
   margin: 0;
   overflow-wrap: anywhere;
