@@ -201,6 +201,28 @@ function custom_emoji_upload(PDO $pdo, int $userId, mixed $nameValue, mixed $fil
     }
 }
 
+/** Remove picker membership; immutable history remains resolvable. */
+function custom_emoji_delete(PDO $pdo, mixed $id): void {
+    if (!custom_emoji_valid_id($id)) throw new CustomEmojiException('Custom emoji unavailable.', 404);
+    $transaction = database_transaction_begin($pdo, true);
+    if (empty($transaction['owned'])) throw new LogicException('Custom emoji deletion must own its transaction.');
+    try {
+        $ids = custom_emoji_index($pdo, true);
+        $record = custom_emoji_record($pdo, $id);
+        if (!$record) throw new CustomEmojiException('Custom emoji unavailable.', 404);
+        if (in_array($id, $ids, true)) {
+            set_app_setting($pdo, CUSTOM_EMOJI_INDEX_KEY, json_encode(array_values(array_diff($ids, [$id])), JSON_THROW_ON_ERROR));
+            // Do not release a replacement's reservation on a repeated old deletion.
+            $pdo->prepare('DELETE FROM app_settings WHERE setting_key = ? AND value = ?')
+                ->execute([CUSTOM_EMOJI_NAME_PREFIX . $record['name'], $id]);
+        }
+        database_transaction_commit($pdo, $transaction);
+    } catch (Throwable $error) {
+        database_transaction_rollback($pdo, $transaction);
+        throw $error;
+    }
+}
+
 function custom_emoji_serve_image(PDO $pdo, mixed $id): never {
     if (!custom_emoji_valid_id($id)) json_out(['error' => 'Custom emoji unavailable.'], 404);
     // Historical resolution deliberately does not depend on membership in the picker index.

@@ -1335,6 +1335,27 @@ function gesture_catalog_admin_update(PDO $pdo, array $actor, string $publicId, 
     });
 }
 
+/** Administrator deletion is restricted to the shared server catalog. */
+function gesture_catalog_admin_delete(PDO $pdo, array $actor, string $publicId, int $expectedVersion, string $requestKey): array
+{
+    if (($actor['role'] ?? '') !== 'admin') throw new GestureCatalogException('Administrator authorization is required.', 403, 'ADMIN_REQUIRED');
+    if ($requestKey === '') throw new GestureCatalogException('A request key is required.', 400, 'REQUEST_KEY_REQUIRED');
+    $actorId = (int)$actor['id'];
+    $result = gesture_catalog_idempotent($pdo, $actorId, 'admin-delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $actorId, $publicId, $expectedVersion): array {
+        $row = gesture_catalog_lock_row($pdo, $publicId);
+        if (empty($row['is_public'])) throw new GestureCatalogException('Only Server Gestures can be deleted by an administrator.', 403, 'ADMIN_DELETE_NOT_AUTHORIZED');
+        gesture_catalog_require_version((int)$row['version'], $expectedVersion, 'GESTURE_VERSION_CONFLICT', gesture_catalog_row_payload($row, $actorId, true));
+        $pdo->prepare("UPDATE gestures SET deleted_at = CURRENT_TIMESTAMP, is_public = 0, active_catalog_key = NULL, visibility_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE id = ?")->execute([(int)$row['id']]);
+        foreach (['gesture_custom_order', 'gesture_hidden', 'gesture_downloads'] as $table) {
+            $pdo->prepare('DELETE FROM ' . $table . ' WHERE gesture_public_id = ?')->execute([$publicId]);
+        }
+        log_tool($pdo, $actorId, 'gesture_admin_delete', (int)$row['owner_user_id'], null, json_encode(['gesture_public_id' => $publicId, 'version' => $expectedVersion], JSON_UNESCAPED_SLASHES));
+        return ['ok' => true, 'gesture_public_id' => $publicId];
+    });
+    if (function_exists('gesture_package_cleanup_deleted')) gesture_package_cleanup_deleted($pdo, $publicId);
+    return $result;
+}
+
 function gesture_catalog_delete(PDO $pdo, int $userId, string $publicId, int $expectedVersion, string $requestKey): array
 {
     $result = gesture_catalog_idempotent($pdo, $userId, 'delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $expectedVersion): array {

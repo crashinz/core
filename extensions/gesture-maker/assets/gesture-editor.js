@@ -144,6 +144,7 @@ function hydrate(payload) {
     byId("gesture-audio-input-row").hidden = features.audio_media === false;
     byId("gesture-animation-input-row").hidden = features.animation_media === false;
     byId("gesture-download-package").hidden = !gesture || features.user_package_download === false;
+    if (byId("gesture-editor-delete")) byId("gesture-editor-delete").disabled = !gesture;
     renderPackageSummary(state.packageSummary());
     renderPreview();
 }
@@ -245,6 +246,31 @@ byId("gesture-download-package").addEventListener("click", () => {
     if (!gesture) return;
     const requestId = requestKey("gesture-download");
     window.location.assign(appUrl(`${editorApi}?action=download&id=${encodeURIComponent(gesture.public_id)}&request_id=${encodeURIComponent(requestId)}`));
+});
+
+byId("gesture-editor-delete")?.addEventListener("click", async () => {
+    const gesture = state.gesture();
+    if (!admin || !gesture || saveButton.disabled) return;
+    if (!window.confirm(`Delete "${gesture.title || gesture.text}" for everyone? This removes it from the Server Gesture catalog.`)) return;
+    const button = byId("gesture-editor-delete");
+    button.disabled = true; saveButton.disabled = true;
+    try {
+        const response = await fetch(appUrl('/api/admin_gestures.php'), {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+            body: JSON.stringify({ action: 'delete', public_id: gesture.public_id, expected_version: gesture.version, request_key: requestKey('gesture-admin-delete') }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.error) throw new Error(payload.error || 'Gesture could not be deleted.');
+        stopAudio();
+        channel?.postMessage({ type: 'gesture-saved', gesturePublicId: gesture.public_id });
+        try { window.opener?.postMessage({ type: 'chatspace-gesture-saved', gesturePublicId: gesture.public_id }, window.location.origin); } catch {}
+        form.querySelectorAll('input, textarea, button').forEach(control => { if (control.id !== 'gesture-editor-cancel') control.disabled = true; });
+        setStatus('Gesture deleted from the Server Gesture catalog. You can close this editor.', 'ok');
+    } catch (error) {
+        setStatus(error.message || 'Gesture could not be deleted.', 'error');
+        button.disabled = false; saveButton.disabled = false;
+    }
 });
 
 function closeEditor() {

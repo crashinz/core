@@ -680,7 +680,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/core/runtime-request-client.js?v=20260913-server-clock-r2')),
   import(appUrl('/assets/js/core/runtime-issue-capture-service.js?v=20260913-local-failure-recovery')),
     import(appUrl('/assets/js/runtime/gesture/gesture-presentation-service.js')),
-    import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js?v=20260914-menu-position')),
+    import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js?v=20260914-gesture-actions')),
     import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js?v=20260913-server-clock')),
     import(appUrl('/assets/js/core/animation-server-clock.js?v=20260913-r2')),
   ]);
@@ -7196,6 +7196,8 @@ function closeRoomActionMenu() {
 
 function closeMediaPicker() {
   gestureCatalogController?.closeActionMenu();
+  const emojiMenu = document.getElementById('custom-emoji-action-menu');
+  if (emojiMenu) emojiMenu.hidden = true;
   if (mediaPicker) mediaPicker.hidden = true;
 }
 
@@ -7774,20 +7776,33 @@ function closeFloatingShells(except = []) {
   if (!skip.has('attach')) closeAttachMenu();
 }
 
+function positionMediaPicker() {
+  if (!mediaPicker || mediaPicker.hidden) return;
+  const r = document.getElementById('emoji-btn').getBoundingClientRect();
+  const scale = mediaPicker.getBoundingClientRect().width / mediaPicker.offsetWidth || 1;
+  mediaPicker.style.maxWidth = `${(window.innerWidth - 16) / scale}px`;
+  mediaPicker.style.maxHeight = `${(window.innerHeight - 16) / scale}px`;
+  const rect = mediaPicker.getBoundingClientRect();
+  mediaPicker.style.left = `${Math.max(8, Math.min(r.right - rect.width, window.innerWidth - rect.width - 8)) / scale}px`;
+  mediaPicker.style.top = `${Math.max(8, Math.min(r.top - rect.height - 8, window.innerHeight - rect.height - 8)) / scale}px`;
+}
+window.addEventListener('resize', () => {
+  gestureCatalogController?.closeActionMenu();
+  const emojiMenu = document.getElementById('custom-emoji-action-menu');
+  if (emojiMenu) emojiMenu.hidden = true;
+  positionMediaPicker();
+});
+
 function openEmojiPicker() {
   closeFloatingShells(['message']);
   gesturePaletteLoaded = false;
-  const btn = document.getElementById('emoji-btn');
-  const r = btn.getBoundingClientRect();
   mediaPicker.hidden = false;
   const activeButton = mediaPicker.querySelector(`[data-media-tab="${activeMediaTab}"]`);
   if (!activeButton || activeButton.hidden) {
     const firstAvailable = mediaPicker.querySelector('[data-media-tab]:not([hidden])');
     if (firstAvailable) setMediaTab(firstAvailable.dataset.mediaTab || 'gifs');
   }
-  const er = mediaPicker.getBoundingClientRect();
-  mediaPicker.style.left = `${Math.max(8, Math.min(r.right - er.width, window.innerWidth - er.width - 8))}px`;
-  mediaPicker.style.top = `${Math.max(8, r.top - er.height - 8)}px`;
+  positionMediaPicker();
   mediaSearchInput?.focus();
   if (activeMediaTab === 'gestures') loadGestures();
   if (activeMediaTab === 'emojis') renderEmojiGrid();
@@ -8213,6 +8228,9 @@ function initializeGestureCatalog() {
     onEdit: gesture => openGestureEditor(gesture),
     onDownload: downloadGesturePackage,
     onDelete: openDeleteGestureModal,
+    isAdmin: () => cfg.myRole === 'admin',
+    onManage: gesture => openGestureEditor(gesture, true),
+    onAdminDelete: gesture => openDeleteGestureModal({ ...gesture, adminDelete: true }),
     onTogglePublic: toggleGesturePublic,
     onAudio: toggleGestureAudio,
     management: {
@@ -8266,14 +8284,14 @@ function initializeGestureCatalog() {
   return gestureCatalogController;
 }
 
-function openGestureEditor(gesture = null) {
-  if (cfg.gesturePart4?.features?.editor === false
+function openGestureEditor(gesture = null, admin = false) {
+  if ((admin ? cfg.gesturePart4?.features?.admin_package_inspection : cfg.gesturePart4?.features?.editor) === false
       || cfg.gesturePart4?.extension?.state !== 'enabled') {
     showWarning('Gesture Maker is disabled through shared Settings.');
     return;
   }
   const publicId = String(gesture?.public_id || '');
-  const path = publicId ? `/gesture_editor.php?id=${encodeURIComponent(publicId)}` : '/gesture_editor.php';
+  const path = publicId ? `/gesture_editor.php?id=${encodeURIComponent(publicId)}${admin ? '&admin=1' : ''}` : '/gesture_editor.php';
   const editor = window.open(appUrl(path), publicId ? `chatspace-gesture-editor-${publicId}` : 'chatspace-gesture-maker', 'popup,width=1080,height=820,resizable=yes,scrollbars=yes');
   if (!editor) {
     showWarning('Allow this site to open the Gesture Maker, then try again.');
@@ -8673,7 +8691,7 @@ function insertEmoji(emoji) {
 let customEmojiPickerPromise = null;
 function openCustomEmojiPicker() {
   if (!customEmojiPickerPromise) {
-    customEmojiPickerPromise = import(appUrl('/assets/js/custom-emojis.js?v=20260914-custom-emojis'))
+    customEmojiPickerPromise = import(appUrl('/assets/js/custom-emojis.js?v=20260914-emoji-actions'))
       .then(({ CustomEmojiPicker }) => new CustomEmojiPicker({
         root: document.getElementById('custom-emoji-picker'),
         appUrl,
@@ -9094,7 +9112,7 @@ function closeDeleteGestureModal() {
 
 async function deleteGesture(gesture) {
   try {
-    await apiPost('/api/gestures.php', { session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'delete', gesture_id: gesture.id });
+    await apiPost(gesture.adminDelete ? '/api/admin_gestures.php' : '/api/gestures.php', { session_id: cfg.sessionId, join_token: cfg.myJoinToken, action: 'delete', public_id: gesture.public_id, expected_version: gesture.version, request_key: gestureRequestKey('gesture-delete'), gesture_id: gesture.id });
     document.querySelector(`[data-gesture-public-id="${CSS.escape(String(gesture.public_id || ''))}"]`)?.remove();
     gestureGrid?.querySelector(gestureTileSelector(gesture.id))?.remove();
     if (gesture.mine) {
@@ -9193,6 +9211,7 @@ document.addEventListener('click', e => {
     mediaPicker
     && !mediaPicker.contains(e.target)
     && !e.target.closest('#gesture-action-menu')
+    && !e.target.closest('#custom-emoji-action-menu')
     && !e.target.closest('#emoji-btn')
     && !e.target.closest('#gesture-management-modal')
     && !e.target.closest('#gesture-delete-modal')

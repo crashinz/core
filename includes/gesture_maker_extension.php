@@ -89,12 +89,13 @@ function gesture_maker_extension_render_editor(array $view): void {
     <div class="gesture-editor-actions">
       <button class="primary" id="gesture-editor-save" type="submit">Save Gesture</button>
       <button id="gesture-download-package" type="button" hidden>Download Gesture Package</button>
+      <?php if ($admin && $publicId !== ''): ?><button class="btn btn-danger" id="gesture-editor-delete" type="button" disabled>Delete gesture</button><?php endif; ?>
       <button id="gesture-editor-cancel" type="button">Cancel</button>
       <span class="gesture-editor-status" id="gesture-editor-status" role="status" aria-live="polite"></span>
     </div>
   </form>
 </main>
-<script type="module" src="<?= e(app_url('/extensions/gesture-maker/assets/gesture-editor.js')) ?>"></script>
+<script type="module" src="<?= e(app_url('/extensions/gesture-maker/assets/gesture-editor.js?v=20260914-delete')) ?>"></script>
 </body>
 </html>
     <?php

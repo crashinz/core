@@ -23,6 +23,10 @@ try {
     csrf_protect_post();
     if (!custom_emoji_can_manage($pdo, $user)) json_out(['error' => 'Administrator or installation owner required.'], 403);
     security_require_recent_authentication_or_json();
+    if (($_POST['action'] ?? '') === 'delete') {
+        custom_emoji_delete($pdo, $_POST['id'] ?? null);
+        json_out(['ok' => true] + custom_emoji_snapshot($pdo, $user));
+    }
     if (($_POST['action'] ?? '') !== 'upload') json_out(['error' => 'Unknown custom emoji action.'], 400);
     security_authorize_outside_content_or_json($pdo, $user, 'custom_emoji_upload', [
         'source' => 'admin-custom-emojis', 'becomes_public' => true,

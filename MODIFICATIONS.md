@@ -10,6 +10,11 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Emoji and gesture management actions
+
+Added administrator right-click custom emoji deletion while preserving images in older messages. Restored gesture three-dot menus, added Manage gesture and Delete gesture for administrators, and added deletion to the existing admin gesture editor. Added viewport bounds for picker menus. Testing is WIP.
+
+
 ## 2026-09-14 — UNO Easy and Normal choices
 
 Updated UNO bot choices to Easy and Normal, with None remaining the default. Older Expert lobby settings and rematches use Normal; existing in-progress and saved Expert matches remain compatible through completion. Bot games remain Practice only. Testing is WIP.

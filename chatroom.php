@@ -1292,6 +1292,7 @@ $roomAssetVersion = static function (string $path): string {
   </div>
 <div class="media-panel" id="media-panel-custom-emojis"><div id="custom-emoji-picker"><p class="minor">Loading custom emojis...</p></div></div>
 </div>
+<div id="gesture-action-menu" class="gesture-action-menu" role="menu" aria-label="Gesture actions" hidden></div>
 <div class="modal" id="gesture-management-modal" role="dialog" aria-modal="true" aria-labelledby="gesture-management-title">
   <div class="modal-box gesture-management-box">
     <div class="modal-head">

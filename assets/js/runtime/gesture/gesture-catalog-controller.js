@@ -1,5 +1,7 @@
 "use strict";
 
+import { positionPickerMenu } from '../../core/picker-menu-position.js';
+
 function element(tag, className = "", text = "") {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -476,6 +478,8 @@ export class GestureCatalogController {
         if (this.features().context_menus !== false) {
             const actions = element("button", "gesture-actions", "⋮");
             actions.type = "button";
+            actions.setAttribute("aria-haspopup", "menu");
+            actions.setAttribute("aria-controls", "gesture-action-menu");
             actions.setAttribute("aria-label", `Actions for ${gesture.text || gesture.title || "gesture"}`);
             actions.addEventListener("click", event => {
                 event.stopPropagation();
@@ -642,6 +646,12 @@ export class GestureCatalogController {
             });
             menu.appendChild(button);
         };
+        if (scope === "server" && this.#options.isAdmin?.()) {
+            action("Manage gesture", () => this.#options.onManage?.(gesture), this.part4Features().admin_package_inspection === false);
+            action("Delete gesture", () => this.#options.onAdminDelete?.(gesture));
+        } else if (gesture.mine) {
+            action("Delete gesture", () => this.#options.onDelete?.(gesture), this.capabilities().allowUserGestureMutation === false);
+        }
         const searchActive = this.#states.get(scope).query !== "";
         const scopeDisabled = this.capabilities().allowGestures === false
             || (scope === "personal"
@@ -673,8 +683,7 @@ export class GestureCatalogController {
         action("Move to Page…", () => this.#openMovePage(scope, gesture), scopeDisabled || searchActive || this.features().custom_order === false, true);
         action("Reset Custom Position", () => this.#move(scope, gesture.public_id, "reset_position"), scopeDisabled || searchActive || this.features().custom_order === false);
         menu.hidden = false;
-        menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - 230))}px`;
-        menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8))}px`;
+        positionPickerMenu(menu, x, y);
         menu.querySelector("button:not(:disabled)")?.focus();
     }
 

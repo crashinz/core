@@ -56,6 +56,9 @@ if (!$rateStatus['allowed']) {
 auth_rate_record_failure($pdo, $rateScope, (string)$me['id']);
 
 try {
+    if ($action === 'delete') {
+        json_out(gesture_catalog_admin_delete($pdo, $me, (string)($body['public_id'] ?? ''), (int)($body['expected_version'] ?? -1), substr(trim((string)($body['request_key'] ?? '')), 0, 96)));
+    }
     if ($action !== 'update_metadata') {
         throw new GestureCatalogException('Unsupported Admin gesture action.', 400, 'UNSUPPORTED_ACTION');
     }

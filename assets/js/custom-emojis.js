@@ -1,3 +1,5 @@
+import { positionPickerMenu } from './core/picker-menu-position.js';
+
 export class CustomEmojiPicker {
   constructor({ root, appUrl, upload, onSelect }) {
     this.root = root;
@@ -9,6 +11,7 @@ export class CustomEmojiPicker {
     this.policy = { maxBytes: 5 * 1024 * 1024, maxWidth: 512, maxHeight: 512 };
     this.pending = null;
     this.busy = false;
+    this.canManage = false;
     this.build();
   }
 
@@ -74,7 +77,60 @@ export class CustomEmojiPicker {
     this.more.hidden = true;
     this.more.addEventListener('click', () => { this.visibleCount += 48; this.render(); });
     this.root.replaceChildren(toolbar, this.manager, this.status, this.grid, this.more);
+    this.menu = this.element('div', 'gesture-action-menu custom-emoji-action-menu');
+    this.menu.id = 'custom-emoji-action-menu';
+    this.menu.hidden = true;
+    this.menu.setAttribute('role', 'menu');
+    this.menu.setAttribute('aria-label', 'Custom emoji actions');
+    document.body.append(this.menu);
+    document.addEventListener('pointerdown', event => {
+      if (!this.menu.contains(event.target)) this.closeMenu();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !this.menu.hidden) {
+        event.preventDefault(); event.stopImmediatePropagation(); this.closeMenu(true);
+      }
+    }, true);
     this.updateGuidance();
+  }
+
+  closeMenu(restoreFocus = false) {
+    this.menu.hidden = true;
+    if (restoreFocus) this.menuTarget?.focus();
+    this.menuTarget = null;
+  }
+
+  openMenu(emoji, target, x, y) {
+    if (!this.canManage || this.busy) return;
+    this.menuTarget = target;
+    const remove = this.element('button', '', 'Delete emoji');
+    remove.type = 'button'; remove.setAttribute('role', 'menuitem');
+    remove.addEventListener('click', event => {
+      event.stopPropagation(); this.closeMenu(); this.remove(emoji, target);
+    });
+    this.menu.replaceChildren(remove);
+    this.menu.hidden = false;
+    positionPickerMenu(this.menu, x, y);
+    remove.focus({ preventScroll: true });
+  }
+
+  async remove(emoji, target) {
+    if (!this.canManage || this.busy) return;
+    if (!window.confirm(`Delete :${emoji.name}: from the custom emoji picker? Existing messages will keep their image.`)) {
+      target.focus(); return;
+    }
+    this.busy = true; this.uploadButton.disabled = true;
+    this.status.textContent = `Deleting :${emoji.name}:...`;
+    try {
+      const form = new FormData(); form.append('action', 'delete'); form.append('id', emoji.id);
+      const data = await this.upload(this.appUrl('/api/custom_emojis.php'), form);
+      this.applyCatalog(data);
+      this.status.textContent = `Deleted :${emoji.name}: from the picker. Existing messages keep their image.`;
+      this.search.focus();
+    } catch (error) {
+      this.status.textContent = error.message || 'The emoji could not be deleted.';
+      target.focus();
+    } finally { this.busy = false; this.uploadButton.disabled = false; }
   }
 
   updateGuidance() {
@@ -84,7 +140,8 @@ export class CustomEmojiPicker {
   applyCatalog(data) {
     this.emojis = (Array.isArray(data.emojis) ? data.emojis : []).filter(emoji =>
       /^[a-f0-9]{32}$/.test(String(emoji.id)) && /^[a-z0-9_-]{1,32}$/.test(String(emoji.name)));
-    this.manager.hidden = data.canManage !== true;
+    this.canManage = data.canManage === true;
+    this.manager.hidden = !this.canManage;
     for (const key of ['maxBytes', 'maxWidth', 'maxHeight']) {
       if (Number.isFinite(Number(data[key])) && Number(data[key]) > 0) this.policy[key] = Number(data[key]);
     }
@@ -101,7 +158,7 @@ export class CustomEmojiPicker {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Custom emojis could not be loaded.');
         this.applyCatalog(data);
-        this.status.textContent = this.emojis.length ? 'Select an emoji to insert it into your message.' : 'No custom emojis yet. An admin can add the first one.';
+        this.status.textContent = this.emojis.length ? 'Select an emoji to insert it into your message.' + (this.canManage ? ' Right-click an emoji to delete it (keyboard: Shift+F10).' : '') : 'No custom emojis yet. An admin can add the first one.';
       } catch (error) {
         this.status.textContent = error.message || 'Custom emojis could not be loaded. Use Refresh to try again.';
       } finally {
@@ -112,6 +169,7 @@ export class CustomEmojiPicker {
   }
 
   render() {
+    this.closeMenu();
     const query = this.search.value.trim().toLowerCase();
     const entries = this.emojis.filter(emoji => emoji.name.includes(query))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -129,6 +187,19 @@ export class CustomEmojiPicker {
       image.loading = 'lazy';
       image.decoding = 'async';
       button.append(image, this.element('span', '', emoji.name));
+      if (this.canManage) {
+        button.title += ' — Right-click to delete';
+        button.setAttribute('aria-haspopup', 'menu');
+        button.addEventListener('contextmenu', event => {
+          event.preventDefault(); event.stopPropagation();
+          this.openMenu(emoji, button, event.clientX, event.clientY);
+        });
+        button.addEventListener('keydown', event => {
+          if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+          event.preventDefault(); event.stopPropagation();
+          const rect = button.getBoundingClientRect(); this.openMenu(emoji, button, rect.left, rect.bottom);
+        });
+      }
       button.addEventListener('click', () => {
         try { this.onSelect(emoji); }
         catch (error) { this.status.textContent = error.message || 'This emoji could not be inserted.'; }
