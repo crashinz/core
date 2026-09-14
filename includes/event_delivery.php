@@ -61,6 +61,7 @@ function event_delivery_room_deleted_notice(
     if ($sessionPublicId === '' || $joinToken === '') return null;
     $noticeStatement->execute([$sessionPublicId, $joinToken]);
     $notice = $noticeStatement->fetch();
+    $noticeStatement->closeCursor();
     if (!$notice) return null;
     return [
         'id' => (int)$notice['id'],
@@ -118,7 +119,8 @@ function event_delivery_map_room_event(PDO $pdo, int $sessionId, array $viewer, 
         (int)$viewer['user_id'],
         $payload
     );
-    if (in_array((string)$event['type'], ['participant_join', 'avatar', 'webcam'], true)) {
+    $projected = nameplate_visibility_project_payload($pdo, (int)$viewer['user_id'], $projected);
+    if (in_array((string)$event['type'], ['participant_join', 'avatar', 'nameplate', 'webcam'], true)) {
         $projected = p2p_avatar_project_participant($pdo, $sessionId, $viewer, $projected);
     }
     return [
@@ -211,6 +213,28 @@ function event_delivery_collect(
 
     $sessionId = resolve_session_id($pdo, $sessionPublicId);
     $viewer = event_delivery_authorized_viewer($pdo, $sessionId, $joinToken);
+    $capacityValues = operational_capacity_runtime_values($pdo);
+    $batchLimit = max(1, min(EVENT_DELIVERY_BATCH_LIMIT, (int)$capacityValues['capacity_event_batch_limit']));
+    $queryLimit = min(EVENT_DELIVERY_BATCH_LIMIT + 1, $batchLimit + 1);
+    $replayWindow = max(1, (int)$capacityValues['capacity_event_replay_window']);
+    $latestRoomEventStatement = $pdo->prepare('SELECT COALESCE(MAX(id),0) FROM events WHERE session_id = ?');
+    $latestRoomEventStatement->execute([$sessionId]);
+    $latestRoomEventId = (int)$latestRoomEventStatement->fetchColumn();
+    // fetchColumn() returns the aggregate row without stepping SQLite to DONE.
+    // Release its read lock before the bounded poll waits, otherwise unrelated
+    // game/heartbeat writers cannot commit until this request returns.
+    $latestRoomEventStatement->closeCursor();
+    $latestCommunityEventId = (int)$pdo->query('SELECT COALESCE(MAX(id),0) FROM community_events')->fetchColumn();
+    $roomReplayFloor = max(0, $latestRoomEventId - $replayWindow);
+    $communityReplayFloor = max(0, $latestCommunityEventId - $replayWindow);
+    if ($lastRoomEventId < $roomReplayFloor) {
+        $lastRoomEventId = $roomReplayFloor;
+        limit_event_record_reached($pdo, 'capacity_event_replay_window', 'member', 'user:' . (int)$viewer['user_id'], 'truncated', ['ledger' => 'room']);
+    }
+    if ($lastCommunityEventId < $communityReplayFloor) {
+        $lastCommunityEventId = $communityReplayFloor;
+        limit_event_record_reached($pdo, 'capacity_event_replay_window', 'member', 'user:' . (int)$viewer['user_id'], 'truncated', ['ledger' => 'community']);
+    }
     $dmLeft = 'dm:' . (int)$viewer['user_id'] . ':%';
     $dmRight = 'dm:%:' . (int)$viewer['user_id'];
     $initialLinkAccess = avatar_relationship_chat_access($pdo, $sessionId, (int)$viewer['id']);
@@ -220,7 +244,7 @@ function event_delivery_collect(
     $roomStatement = $pdo->prepare(
         'SELECT id, type, payload FROM events
           WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT '
-        . EVENT_DELIVERY_BATCH_LIMIT
+        . $queryLimit
     );
     $communityStatement = $pdo->prepare(
         "SELECT ce.id, ce.scope, ce.link_key, ce.type, ce.payload FROM community_events ce
@@ -270,7 +294,7 @@ function event_delivery_collect(
                )
              )
            )
-         ORDER BY ce.id ASC LIMIT " . EVENT_DELIVERY_BATCH_LIMIT
+         ORDER BY ce.id ASC LIMIT " . $queryLimit
     );
 
     for ($attempt = 0; $attempt < $attempts; $attempt++) {
@@ -292,6 +316,9 @@ function event_delivery_collect(
         $viewer = event_delivery_authorized_viewer($pdo, $sessionId, $joinToken);
         $roomStatement->execute([$sessionId, $lastRoomEventId]);
         $roomRows = $roomStatement->fetchAll();
+        $roomStatement->closeCursor();
+        $roomBatchReached = count($roomRows) > $batchLimit;
+        if ($roomBatchReached) $roomRows = array_slice($roomRows, 0, $batchLimit);
         $linkAccess = $linkConversationId !== ''
             ? avatar_relationship_chat_access(
                 $pdo,
@@ -315,8 +342,12 @@ function event_delivery_collect(
             (int)$viewer['id'],
             (int)$viewer['id'],
         ]);
+        $rawCommunityRows = $communityStatement->fetchAll();
+        $communityStatement->closeCursor();
+        $communityBatchReached = count($rawCommunityRows) > $batchLimit;
+        if ($communityBatchReached) $rawCommunityRows = array_slice($rawCommunityRows, 0, $batchLimit);
         $communityRows = array_values(array_filter(
-            $communityStatement->fetchAll(),
+            $rawCommunityRows,
             static function(array $event) use ($linkAccess): bool {
                 if ((string)($event['scope'] ?? '') !== 'link') return true;
                 if (!$linkAccess
@@ -330,6 +361,12 @@ function event_delivery_collect(
                     || $messageId > (int)$linkAccess['visible_after_message_id'];
             }
         ));
+        if ($roomBatchReached || $communityBatchReached) {
+            limit_event_record_reached($pdo, 'capacity_event_batch_limit', 'member', 'user:' . (int)$viewer['user_id'], 'truncated', [
+                'roomBatchReached' => $roomBatchReached,
+                'communityBatchReached' => $communityBatchReached,
+            ]);
+        }
         if ($roomRows || $communityRows) {
             return event_delivery_projection(
                 $pdo,
@@ -345,6 +382,15 @@ function event_delivery_collect(
                     $communityRows
                 )
             );
+        }
+        // PHP's Windows CLI development server is single-threaded. Holding its
+        // only worker here queues heartbeat, game, transfer, and media requests
+        // behind the room poll. Production servers retain the bounded long poll;
+        // the local CLI fixture returns the current projection immediately.
+        if (PHP_SAPI === 'cli-server'
+            || (defined('CHATSPACE_RUNTIME_VERIFICATION_CONTROLS_ENABLED')
+                && CHATSPACE_RUNTIME_VERIFICATION_CONTROLS_ENABLED)) {
+            break;
         }
         if ($attempt + 1 < $attempts && $sleepMicroseconds > 0) {
             usleep($sleepMicroseconds);

@@ -211,11 +211,33 @@ function runtime_issue_lifecycle_schema_valid(PDO $pdo): bool
     return true;
 }
 
+function runtime_issue_redact_private_paths(string $text): string
+{
+    // A word boundary before '/' misses the usual "in /home/..." fatal text.
+    // Handle quoted paths first so spaces inside them cannot leak a suffix.
+    $root = <<<'REGEX'
+(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/]|/(?:Users|home|tmp|var|srv|opt|private|etc|root|usr|mnt|Volumes)/)
+REGEX;
+    $text = preg_replace('~(["\'])' . $root . '[^\r\n]*?\1~i', '$1[private-path]$1', $text) ?? $text;
+    return preg_replace('~(?<![A-Za-z0-9_])' . $root . '[^\s<>"\']+~i', '[private-path]', $text) ?? $text;
+}
+
+function runtime_issue_redact_export_paths(array $artifact): array
+{
+    // Export projection only: never rewrite legacy rows, fingerprints or evidence.
+    // Preserve field names, error types and structured lifecycle/correlation data.
+    foreach ($artifact as $key => $value) {
+        if (is_array($value)) $artifact[$key] = runtime_issue_redact_export_paths($value);
+        elseif (is_string($value)) $artifact[$key] = runtime_issue_redact_private_paths($value);
+    }
+    return $artifact;
+}
+
 function runtime_issue_clean_string(mixed $value, int $max = 512): string
 {
     $text = trim((string)$value);
     $text = preg_replace('#https?://\S+#i', '[url]', $text) ?? $text;
-    $text = preg_replace('/\b(?:[A-Za-z]:\\\\|\/(?:Users|home|tmp)\/)\S+/i', '[private-path]', $text) ?? $text;
+    $text = runtime_issue_redact_private_paths($text);
     $text = preg_replace('/\b(?:cookie|authorization|password|secret|token|csrf)\s*[:=]\s*\S+/i', '$1=[redacted]', $text) ?? $text;
     $text = preg_replace('/\s+/', ' ', $text) ?? $text;
     if (function_exists('mb_substr')) return mb_substr($text, 0, $max, 'UTF-8');
@@ -225,7 +247,7 @@ function runtime_issue_clean_string(mixed $value, int $max = 512): string
 
 function runtime_issue_sanitize_value(mixed $value, string $key = '', int $depth = 0): mixed
 {
-    if (preg_match('/authorization|cookie|csrf|password|secret|token|deviceid|groupid|sdp|candidate|message|content|private/i', $key)) return '[redacted]';
+    if (preg_match('/authorization|cookie|csrf|password|secret|token|deviceid|groupid|sdp|candidate|message|content|private|request[_-]?body|file(?:system)?[_-]?path/i', $key)) return '[redacted]';
     if ($depth >= 5) return '[truncated]';
     if ($value === null || is_bool($value) || is_int($value) || is_float($value)) return $value;
     if (is_string($value)) return runtime_issue_clean_string($value);
@@ -235,7 +257,7 @@ function runtime_issue_sanitize_value(mixed $value, string $key = '', int $depth
     foreach ($value as $childKey => $childValue) {
         if ($count++ >= 64) { $result['__truncated'] = true; break; }
         $safeKey = preg_replace('/[^A-Za-z0-9_.:-]/', '-', (string)$childKey) ?: 'value';
-        if (preg_match('/authorization|cookie|csrf|password|secret|token|deviceid|groupid|sdp|candidate|message|content|private/i', $safeKey)) continue;
+        if (preg_match('/authorization|cookie|csrf|password|secret|token|deviceid|groupid|sdp|candidate|message|content|private|request[_-]?body|file(?:system)?[_-]?path/i', $safeKey)) continue;
         $result[$safeKey] = runtime_issue_sanitize_value($childValue, $safeKey, $depth + 1);
     }
     return $result;
@@ -302,21 +324,26 @@ function runtime_issue_server_context(PDO $pdo): array
 {
     $migration = [];
     try {
-        $status = database_migration_status($pdo);
+        // Error capture must not run the full migration audit. Validators can
+        // scan large policy/catalog surfaces and delay the requests being
+        // diagnosed. These are metadata, not a claim of migration health.
+        $storedVersion = database_migration_read_setting($pdo, 'schema_version');
         $migration = [
-            'kind' => runtime_issue_clean_string($status['kind'] ?? 'unknown', 32),
-            'storedSchemaVersion' => runtime_issue_clean_string($status['stored_schema_version'] ?? '', 96) ?: null,
-            'requiredSchemaVersion' => runtime_issue_clean_string($status['required_schema_version'] ?? CHATSPACE_SCHEMA_VERSION, 96),
-            'pendingCount' => max(0, (int)($status['pending_count'] ?? 0)),
-            'releaseComplete' => !empty($status['release_complete']),
+            'kind' => 'metadata-only',
+            'validationScope' => 'schema-marker-only',
+            'storedSchemaVersion' => runtime_issue_clean_string($storedVersion ?? '', 96) ?: null,
+            'requiredSchemaVersion' => CHATSPACE_SCHEMA_VERSION,
+            'pendingCount' => null,
+            'releaseComplete' => null,
         ];
     } catch (Throwable) {
         $migration = [
             'kind' => 'unavailable',
+            'validationScope' => 'schema-marker-only',
             'storedSchemaVersion' => null,
             'requiredSchemaVersion' => CHATSPACE_SCHEMA_VERSION,
             'pendingCount' => null,
-            'releaseComplete' => false,
+            'releaseComplete' => null,
         ];
     }
     return [
@@ -443,6 +470,9 @@ function runtime_issue_submit(PDO $pdo, int $reporterUserId, array $input): arra
         $current->execute([$issueId]);
         $projection = $current->fetch() ?: [];
         database_transaction_commit($pdo, $transaction);
+        $auditCheck = function_exists('runtime_audit_attach_issue')
+            ? runtime_audit_attach_issue($pdo, $reporterUserId, $issueId, $occurrenceId, $identity, $evidence)
+            : null;
         return [
             'accepted' => true,
             'issue_id' => $issueId,
@@ -453,6 +483,7 @@ function runtime_issue_submit(PDO $pdo, int $reporterUserId, array $input): arra
             'occurrenceCount' => (int)($projection['occurrence_count'] ?? 1),
             'recurrenceCount' => (int)($projection['recurrence_count'] ?? 0),
             'recurrenceGeneration' => (int)($projection['recurrence_generation'] ?? 0),
+            'auditCheck' => $auditCheck,
         ];
     } catch (Throwable $error) {
         database_transaction_rollback($pdo, $transaction);
@@ -530,14 +561,59 @@ function runtime_issue_list(PDO $pdo, ?string $status = null, int $limit = 200):
     return runtime_issue_query($pdo, $status, null, 1, min($limit, RUNTIME_ISSUE_MAX_PAGE_SIZE))['issues'];
 }
 
+function runtime_issue_audit_baseline(PDO $pdo): array
+{
+    $raw = trim(app_setting($pdo, 'runtime_issue_audit_baseline', ''));
+    $decoded = $raw !== '' ? json_decode($raw, true) : null;
+    if (!is_array($decoded) || trim((string)($decoded['setAt'] ?? '')) === '') {
+        return [
+            'configured' => false,
+            'setAt' => null,
+            'lastOccurrenceId' => 0,
+        ];
+    }
+    return [
+        'configured' => true,
+        'setAt' => (string)$decoded['setAt'],
+        'lastOccurrenceId' => max(0, (int)($decoded['lastOccurrenceId'] ?? 0)),
+    ];
+}
+
+function runtime_issue_set_audit_baseline(PDO $pdo, int $actorUserId): array
+{
+    $lastOccurrenceId = max(0, (int)$pdo->query('SELECT COALESCE(MAX(id), 0) FROM runtime_issue_occurrences')->fetchColumn());
+    $baseline = [
+        'configured' => true,
+        'setAt' => gmdate('c'),
+        'lastOccurrenceId' => $lastOccurrenceId,
+    ];
+    set_app_setting($pdo, 'runtime_issue_audit_baseline', (string)json_encode([
+        'schemaVersion' => 1,
+        'setAt' => $baseline['setAt'],
+        'lastOccurrenceId' => $lastOccurrenceId,
+    ], JSON_UNESCAPED_SLASHES));
+    log_tool(
+        $pdo,
+        $actorUserId,
+        'runtime_issue_audit_baseline_set',
+        null,
+        null,
+        'Set runtime issue audit baseline after occurrence ' . $lastOccurrenceId . '; no issues or evidence changed.'
+    );
+    return $baseline;
+}
+
 function runtime_issue_query(
     PDO $pdo,
     ?string $status,
     ?string $severity,
     int $page,
-    int $perPage
+    int $perPage,
+    bool $sinceAuditBaseline = false
 ): array {
-    if ($status !== null && $status !== '' && !in_array($status, RUNTIME_ISSUE_STATUSES, true)) {
+    $unresolvedStatuses = ['new', 'confirmed', 'investigating', 'fixed-pending-verification', 'regressed'];
+    $unresolvedOnly = $status === 'unresolved';
+    if ($status !== null && $status !== '' && !$unresolvedOnly && !in_array($status, RUNTIME_ISSUE_STATUSES, true)) {
         throw new RuntimeIssueException('Choose a supported issue state.', 'RUNTIME_ISSUE_STATUS_INVALID', 400);
     }
     if ($severity !== null && $severity !== '' && !in_array($severity, RUNTIME_ISSUE_SEVERITIES, true)) {
@@ -547,13 +623,25 @@ function runtime_issue_query(
     $perPage = max(1, min(RUNTIME_ISSUE_MAX_PAGE_SIZE, $perPage));
     $where = [];
     $params = [];
-    if ($status !== null && $status !== '') {
+    if ($unresolvedOnly) {
+        $where[] = 'status IN (' . implode(', ', array_fill(0, count($unresolvedStatuses), '?')) . ')';
+        array_push($params, ...$unresolvedStatuses);
+    } elseif ($status !== null && $status !== '') {
         $where[] = 'status = ?';
         $params[] = $status;
     }
     if ($severity !== null && $severity !== '') {
         $where[] = 'severity = ?';
         $params[] = $severity;
+    }
+    $auditBaseline = runtime_issue_audit_baseline($pdo);
+    if ($sinceAuditBaseline) {
+        if ($auditBaseline['configured']) {
+            $where[] = 'EXISTS (SELECT 1 FROM runtime_issue_occurrences audit_activity WHERE audit_activity.issue_id = runtime_issues.id AND audit_activity.id > ?)';
+            $params[] = $auditBaseline['lastOccurrenceId'];
+        } else {
+            $where[] = '1 = 0';
+        }
     }
     $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
     $count = $pdo->prepare('SELECT COUNT(*) FROM runtime_issues' . $whereSql);
@@ -579,6 +667,8 @@ function runtime_issue_query(
         'perPage' => $perPage,
         'total' => $total,
         'pageCount' => max(1, (int)ceil($total / $perPage)),
+        'activityFilter' => $sinceAuditBaseline ? 'since-audit-baseline' : 'all',
+        'auditBaseline' => $auditBaseline,
         'totals' => [
             'all' => array_sum($statusTotals),
             'byStatus' => $statusTotals,
@@ -772,8 +862,8 @@ function runtime_issue_private_root(): string
 function runtime_issue_store_screenshot(PDO $pdo, int $issueId, int $occurrenceId, int $ownerUserId, string $dataUrl): array
 {
     if (app_setting($pdo, 'diagnostic_screenshots_enabled', '0') !== '1') throw new RuntimeException('Diagnostic screenshots are disabled.');
-    $retention = (int)app_setting($pdo, 'diagnostic_screenshot_retention_days', '0');
-    if ($retention < 1 || $retention > 365) throw new RuntimeException('Choose screenshot retention before enabling capture.');
+    $retention = corechat_limit_value($pdo, 'diagnostic_screenshot_retention_days', 0);
+    if ($retention !== null && ($retention < 1 || $retention > 365)) throw new RuntimeException('Choose screenshot retention before enabling capture.');
     if (!preg_match('#^data:image/png;base64,([A-Za-z0-9+/=]+)$#', $dataUrl, $match)) throw new InvalidArgumentException('Only censored PNG screenshots are accepted.');
     $bytes = base64_decode($match[1], true);
     if (!is_string($bytes) || $bytes === '' || strlen($bytes) > RUNTIME_ISSUE_MAX_SCREENSHOT_BYTES) throw new InvalidArgumentException('Screenshot exceeds the allowed size.');
@@ -829,8 +919,8 @@ function runtime_issue_delete_screenshots_for_issue(PDO $pdo, int $issueId, int 
 
 function runtime_issue_cleanup_screenshots(PDO $pdo): int
 {
-    $days = (int)app_setting($pdo, 'diagnostic_screenshot_retention_days', '0');
-    if ($days < 1 || $days > 365) return 0;
+    $days = corechat_limit_value($pdo, 'diagnostic_screenshot_retention_days', 0);
+    if ($days === null || $days < 1 || $days > 365) return 0;
     $stmt = $pdo->prepare(
         "SELECT s.public_id
            FROM runtime_issue_screenshots s
@@ -843,14 +933,54 @@ function runtime_issue_cleanup_screenshots(PDO $pdo): int
     $stmt->execute([gmdate('Y-m-d H:i:s', time() - ($days * 86400))]);
     $count = 0;
     foreach ($stmt->fetchAll() as $row) if (runtime_issue_delete_screenshot($pdo, (string)$row['public_id'], 0, true)) $count++;
+    if ($count > 0) limit_event_record_reached($pdo, 'diagnostic_screenshot_retention_days', 'installation', 'diagnostic-screenshots', 'cleaned', ['deletedCount' => $count]);
     return $count;
+}
+
+function runtime_issue_audit_correlation(PDO $pdo, int $issueId): array
+{
+    try {
+        $statement = $pdo->prepare(
+            'SELECT r.public_id AS audit_run_public_id,
+                    r.environment,
+                    r.status AS audit_status,
+                    r.release_id,
+                    r.started_at,
+                    r.completed_at,
+                    c.check_id,
+                    c.status AS check_status,
+                    c.evidence_reference,
+                    c.created_at AS linked_at,
+                    c.updated_at
+               FROM runtime_audit_checks c
+               JOIN runtime_audit_runs r ON r.id = c.audit_run_id
+              WHERE c.issue_id = ?
+              ORDER BY c.id ASC'
+        );
+        $statement->execute([$issueId]);
+        return array_map(static fn(array $row): array => [
+            'auditRunPublicId' => (string)$row['audit_run_public_id'],
+            'environment' => (string)$row['environment'],
+            'auditStatus' => (string)$row['audit_status'],
+            'releaseId' => $row['release_id'] ?: null,
+            'checkId' => (string)$row['check_id'],
+            'checkStatus' => (string)$row['check_status'],
+            'evidenceReference' => $row['evidence_reference'] ?: null,
+            'startedAt' => $row['started_at'],
+            'completedAt' => $row['completed_at'],
+            'linkedAt' => $row['linked_at'],
+            'updatedAt' => $row['updated_at'],
+        ], $statement->fetchAll());
+    } catch (Throwable) {
+        return [];
+    }
 }
 
 function runtime_issue_support_bundle(PDO $pdo, int $issueId, ?string $generatedAt = null): array
 {
     $detail = runtime_issue_detail($pdo, $issueId);
     if (!$detail) throw new RuntimeException('Issue not found.');
-    return [
+    return runtime_issue_redact_export_paths([
         'schemaId' => 'chatspace.runtime-issue-support-bundle',
         'schemaVersion' => 1,
         'generatedAt' => $generatedAt ?? gmdate('c'),
@@ -867,7 +997,8 @@ function runtime_issue_support_bundle(PDO $pdo, int $issueId, ?string $generated
         'history' => $detail['history'],
         'retention' => $detail['retention'],
         'screenshotMetadata' => $detail['screenshots'],
-    ];
+        'auditCorrelation' => runtime_issue_audit_correlation($pdo, $issueId),
+    ]);
 }
 
 function runtime_issue_handoff_bundle(PDO $pdo, int $issueId, ?string $generatedAt = null): array
@@ -885,7 +1016,7 @@ function runtime_issue_handoff_bundle(PDO $pdo, int $issueId, ?string $generated
             'createdAt' => $occurrence['createdAt'],
         ];
     }
-    return [
+    return runtime_issue_redact_export_paths([
         'schemaId' => 'chatspace.runtime-issue-handoff',
         'schemaVersion' => 1,
         'generatedAt' => $generatedAt ?? gmdate('c'),
@@ -903,7 +1034,7 @@ function runtime_issue_handoff_bundle(PDO $pdo, int $issueId, ?string $generated
         'contextSummaries' => $contexts,
         'retention' => $detail['retention'],
         'screenshotMetadata' => $detail['screenshots'],
-    ];
+    ]);
 }
 
 function runtime_issue_export_preview(PDO $pdo, int $issueId, string $kind): array
@@ -941,6 +1072,7 @@ function runtime_issue_export_preview(PDO $pdo, int $issueId, string $kind): arr
             'bounded history and verification references',
             'retention and hold metadata',
             'censored screenshot metadata',
+            'linked audit-run identity and check correlation',
         ],
         'excludes' => [
             'screenshot pixels', 'raw network addresses', 'proxy chains',
@@ -1088,6 +1220,185 @@ function runtime_issue_export(
             'byteSize' => $bytes,
             'requestId' => $requestId,
             'idempotentReplay' => $idempotent,
+            'payloadRetainedByAudit' => false,
+        ],
+    ];
+}
+
+function runtime_issue_collection_filter(PDO $pdo, ?string $status, ?string $severity, bool $sinceAuditBaseline = false): array
+{
+    $status = trim((string)$status);
+    $severity = trim((string)$severity);
+    $unresolvedOnly = $status === 'unresolved';
+    if ($status !== '' && !$unresolvedOnly && !in_array($status, RUNTIME_ISSUE_STATUSES, true)) {
+        throw new RuntimeIssueException('Choose a supported issue state.', 'RUNTIME_ISSUE_STATUS_INVALID', 400);
+    }
+    if ($severity !== '' && !in_array($severity, RUNTIME_ISSUE_SEVERITIES, true)) {
+        throw new RuntimeIssueException('Choose a supported issue severity.', 'RUNTIME_ISSUE_SEVERITY_INVALID', 400);
+    }
+    $where = [];
+    $params = [];
+    if ($unresolvedOnly) {
+        // Match the dashboard list without treating this grouped filter as a
+        // persisted issue state. Preview and download use this same predicate.
+        $statuses = ['new', 'confirmed', 'investigating', 'fixed-pending-verification', 'regressed'];
+        $where[] = 'i.status IN (' . implode(', ', array_fill(0, count($statuses), '?')) . ')';
+        array_push($params, ...$statuses);
+    } elseif ($status !== '') { $where[] = 'i.status = ?'; $params[] = $status; }
+    if ($severity !== '') { $where[] = 'i.severity = ?'; $params[] = $severity; }
+    $auditBaseline = runtime_issue_audit_baseline($pdo);
+    if ($sinceAuditBaseline) {
+        if ($auditBaseline['configured']) {
+            $where[] = 'EXISTS (SELECT 1 FROM runtime_issue_occurrences audit_activity WHERE audit_activity.issue_id = i.id AND audit_activity.id > ?)';
+            $params[] = $auditBaseline['lastOccurrenceId'];
+        } else {
+            $where[] = '1 = 0';
+        }
+    }
+    return [$where ? ' WHERE ' . implode(' AND ', $where) : '', $params, $status, $severity, $auditBaseline];
+}
+
+function runtime_issue_collection_export_preview(PDO $pdo, ?string $status, ?string $severity, bool $sinceAuditBaseline = false): array
+{
+    [$whereSql, $params, $status, $severity, $auditBaseline] = runtime_issue_collection_filter($pdo, $status, $severity, $sinceAuditBaseline);
+    $summary = $pdo->prepare('SELECT COUNT(*) AS total, MAX(i.updated_at) AS latest_update FROM runtime_issues i' . $whereSql);
+    $summary->execute($params);
+    $row = $summary->fetch() ?: [];
+    $total = max(0, (int)($row['total'] ?? 0));
+    $latestUpdate = (string)($row['latest_update'] ?? '');
+    $previewToken = strtoupper(hash('sha256', implode("\n", [
+        'chatspace.runtime-issue-collection-export-preview.v1',
+        $status,
+        $severity,
+        $sinceAuditBaseline ? 'since-audit-baseline' : 'all',
+        (string)$auditBaseline['lastOccurrenceId'],
+        (string)$total,
+        $latestUpdate,
+    ])));
+    return [
+        'kind' => 'filtered-diagnostics',
+        'schemaId' => 'chatspace.runtime-issue-collection',
+        'schemaVersion' => 1,
+        'filters' => [
+            'status' => $status ?: null,
+            'severity' => $severity ?: null,
+            'activity' => $sinceAuditBaseline ? 'since-audit-baseline' : 'all',
+            'auditBaseline' => $sinceAuditBaseline ? $auditBaseline : null,
+        ],
+        'issueCount' => $total,
+        'exportLimit' => 500,
+        'previewToken' => $previewToken,
+        'includes' => [
+            'stable issue identities, state, severity, and component',
+            'aggregate occurrence and recurrence counts',
+            'first-seen and last-seen timestamps',
+            'latest sanitized occurrence evidence and runtime context',
+            'client build and request-correlation hints',
+        ],
+        'excludes' => [
+            'screenshot pixels', 'raw network addresses', 'proxy chains',
+            'credentials', 'sessions', 'private messages or request bodies',
+            'raw media', 'configuration', 'private filesystem paths',
+        ],
+        'explicitActionRequired' => true,
+        'contentFreeAuditOnly' => true,
+    ];
+}
+
+function runtime_issue_collection_artifact(PDO $pdo, ?string $status, ?string $severity, bool $sinceAuditBaseline = false): array
+{
+    [$whereSql, $params, $status, $severity] = runtime_issue_collection_filter($pdo, $status, $severity, $sinceAuditBaseline);
+    $sql = 'SELECT i.*, o.evidence_json AS latest_evidence_json, o.context_json AS latest_context_json,
+                   o.build_id AS latest_build_id, o.request_correlation AS latest_request_correlation,
+                   o.created_at AS latest_occurrence_at
+              FROM runtime_issues i
+              LEFT JOIN runtime_issue_occurrences o ON o.id = (
+                    SELECT MAX(o2.id) FROM runtime_issue_occurrences o2 WHERE o2.issue_id = i.id
+              )'
+        . $whereSql . ' ORDER BY i.last_seen_at DESC, i.id DESC LIMIT 500';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $issues = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $evidence = json_decode((string)($row['latest_evidence_json'] ?? ''), true);
+        $context = json_decode((string)($row['latest_context_json'] ?? ''), true);
+        $issues[] = [
+            'issue' => runtime_issue_project_row($row),
+            'latestOccurrence' => [
+                'evidence' => is_array($evidence) ? runtime_issue_sanitize_value($evidence) : [],
+                'context' => is_array($context) ? runtime_issue_sanitize_value($context) : null,
+                'clientBuildHint' => runtime_issue_client_hint($row['latest_build_id'] ?? null),
+                'clientRequestCorrelation' => runtime_issue_client_hint($row['latest_request_correlation'] ?? null),
+                'createdAt' => $row['latest_occurrence_at'] ?? null,
+            ],
+        ];
+    }
+    $preview = runtime_issue_collection_export_preview($pdo, $status, $severity, $sinceAuditBaseline);
+    return runtime_issue_redact_export_paths([
+        'schemaId' => 'chatspace.runtime-issue-collection',
+        'schemaVersion' => 1,
+        'generatedAt' => gmdate('c'),
+        'filters' => $preview['filters'],
+        'summary' => [
+            'matchingIssueCount' => $preview['issueCount'],
+            'exportedIssueCount' => count($issues),
+            'truncated' => $preview['issueCount'] > count($issues),
+        ],
+        'privacy' => [
+            'sanitizedEvidenceIncluded' => true,
+            'screenshotPixelsIncluded' => false,
+            'networkAddressDataIncluded' => false,
+            'credentialsIncluded' => false,
+            'messageOrRequestBodyContentIncluded' => false,
+            'privatePathsIncluded' => false,
+        ],
+        'issues' => $issues,
+    ]);
+}
+
+function runtime_issue_collection_export(
+    PDO $pdo,
+    int $actorUserId,
+    ?string $status,
+    ?string $severity,
+    bool $sinceAuditBaseline,
+    string $requestId,
+    string $previewToken
+): array {
+    $requestId = runtime_issue_operation_id($requestId, 'collection export');
+    $preview = runtime_issue_collection_export_preview($pdo, $status, $severity, $sinceAuditBaseline);
+    if (!hash_equals((string)$preview['previewToken'], strtoupper(trim($previewToken)))) {
+        throw new RuntimeIssueException(
+            'The diagnostics export preview is stale. Review the current filtered issue set again.',
+            'RUNTIME_ISSUE_COLLECTION_EXPORT_PREVIEW_STALE',
+            409,
+            ['preview' => $preview]
+        );
+    }
+    $artifact = runtime_issue_collection_artifact($pdo, $status, $severity, $sinceAuditBaseline);
+    $encoded = json_encode($artifact, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if (!is_string($encoded) || strlen($encoded) > RUNTIME_ISSUE_MAX_EXPORT_BYTES) {
+        throw new RuntimeIssueException('The sanitized diagnostics export exceeds the bounded artifact size.', 'RUNTIME_ISSUE_EXPORT_TOO_LARGE', 413);
+    }
+    $hash = strtoupper(hash('sha256', $encoded));
+    $bytes = strlen($encoded);
+    log_tool(
+        $pdo,
+        $actorUserId,
+        'runtime_issue_collection_export',
+        null,
+        null,
+        'Filtered diagnostics export; request ' . $requestId . '; activity '
+        . ($sinceAuditBaseline ? 'since-audit-baseline' : 'all') . '; issues ' . count($artifact['issues'])
+        . '; sha256 ' . $hash . '; bytes ' . $bytes . '; no exported payload retained.'
+    );
+    return [
+        'artifact' => $artifact,
+        'download' => [
+            'kind' => 'filtered-diagnostics',
+            'sha256' => $hash,
+            'byteSize' => $bytes,
+            'requestId' => $requestId,
             'payloadRetainedByAudit' => false,
         ],
     ];
@@ -1332,20 +1643,156 @@ function runtime_issue_install_server_capture(): void
     $installed = true;
     register_shutdown_function(static function (): void {
         $error = error_get_last();
-        if (!$error || !in_array((int)($error['type'] ?? 0), [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) return;
         $userId = (int)($_SESSION['user_id'] ?? 0);
-        if ($userId < 1) return;
-        try {
-            runtime_issue_submit(db(), $userId, [
+        // Never reconnect during shutdown: bootstrap may already have emitted a
+        // database-unavailable JSON response and exited before caching its PDO.
+        $runtimePdo = $GLOBALS['CHATSPACE_RUNTIME_PDO'] ?? null;
+        $databaseConfigured = $runtimePdo instanceof PDO;
+        if ($error && $userId > 0 && in_array((int)($error['type'] ?? 0), [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+            $input = [
                 'category' => 'server',
                 'component' => basename((string)($_SERVER['SCRIPT_NAME'] ?? 'php-runtime')),
                 'error_code' => 'PHP_FATAL_' . (int)$error['type'],
                 'message' => (string)($error['message'] ?? 'Fatal PHP failure'),
                 'severity' => 'critical',
                 'evidence' => ['errorType' => (int)$error['type'], 'requestMethod' => (string)($_SERVER['REQUEST_METHOD'] ?? 'CLI')],
-            ]);
+            ];
+            if (!$databaseConfigured) {
+                runtime_issue_queue_deferred($userId, $input);
+            } else {
+                try {
+                    runtime_issue_submit($runtimePdo, $userId, $input);
+                } catch (Throwable) {
+                    runtime_issue_queue_deferred($userId, $input);
+                }
+            }
+        }
+        if (!$databaseConfigured) return;
+        try {
+            runtime_issue_flush_deferred($runtimePdo);
         } catch (Throwable) {
-            // Diagnostics must never replace or suppress the original fatal failure.
+            // Diagnostics must never replace or suppress the original request.
         }
     });
+}
+
+function runtime_issue_deferred_queue_path(): string
+{
+    $override = trim((string)(getenv('CORECHAT_RUNTIME_ISSUE_DEFERRED_PATH') ?: ''));
+    if ($override !== '') return $override;
+    return runtime_issue_private_root() . DIRECTORY_SEPARATOR . 'deferred-runtime-issues.jsonl';
+}
+
+function runtime_issue_queue_deferred(int $reporterUserId, array $input): void
+{
+    if ($reporterUserId < 1) return;
+    $sanitized = runtime_issue_sanitize_value($input);
+    if (!is_array($sanitized)) return;
+    $encoded = json_encode([
+        'reporter_user_id' => $reporterUserId,
+        'input' => $sanitized,
+        'queued_at' => gmdate('c'),
+    ], JSON_UNESCAPED_SLASHES);
+    if (!is_string($encoded)) return;
+    $path = runtime_issue_deferred_queue_path();
+    $line = $encoded . PHP_EOL;
+    $handle = @fopen($path, 'ab');
+    if ($handle) {
+        try {
+            if (@flock($handle, LOCK_EX | LOCK_NB)) {
+                $written = fwrite($handle, $line);
+                fflush($handle);
+                flock($handle, LOCK_UN);
+                if ($written === strlen($line)) return;
+            }
+        } finally { fclose($handle); }
+    }
+    // A drainer may hold the main queue while its database is slow. Publish an
+    // individual, complete record instead of waiting for that lock.
+    $suffix = bin2hex(random_bytes(12));
+    $temporary = $path . '.writing-' . $suffix;
+    $pending = $path . '.pending-' . $suffix;
+    $file = @fopen($temporary, 'xb');
+    if (!$file) { error_log('{"event":"runtime_issue_deferred_spool_open_failed"}'); return; }
+    try {
+        $written = fwrite($file, $line);
+        $flushed = fflush($file);
+    } finally { fclose($file); }
+    if ($written !== strlen($line) || !$flushed || !@rename($temporary, $pending)) {
+        error_log('{"event":"runtime_issue_deferred_spool_publish_failed"}');
+    }
+}
+
+function runtime_issue_deferred_spool_files(string $path): array
+{
+    $files = [];
+    $directory = dirname($path);
+    if (!is_dir($directory)) return $files;
+    $pattern = '/^' . preg_quote(basename($path), '/') . '\\.pending-[a-f0-9]{24}$/D';
+    foreach (new DirectoryIterator($directory) as $entry) {
+        if (!$entry->isFile() || $entry->isLink() || !preg_match($pattern, $entry->getFilename())) continue;
+        $files[] = $entry->getPathname();
+        if (count($files) >= 100) break;
+    }
+    return $files;
+}
+
+function runtime_issue_flush_deferred(PDO $pdo, int $limit = 20, ?callable $submitter = null): int
+{
+    $path = runtime_issue_deferred_queue_path();
+    $spooled = runtime_issue_deferred_spool_files($path);
+    if (!is_file($path) && !$spooled) return 0;
+    $handle = @fopen($path, 'c+');
+    if (!$handle) return 0;
+    $processed = 0;
+    try {
+        if (!flock($handle, LOCK_EX | LOCK_NB)) return 0;
+        rewind($handle);
+        $contents = stream_get_contents($handle);
+        $lines = preg_split('/\R/', trim((string)$contents)) ?: [];
+        $remaining = [];
+        $blocked = false;
+        $submit = $submitter ?? static fn(PDO $connection, int $userId, array $payload): array => runtime_issue_submit($connection, $userId, $payload);
+        foreach ($lines as $index => $line) {
+            if ($line === '') continue;
+            if ($processed >= max(1, min(100, $limit))) {
+                $remaining = array_merge($remaining, array_slice($lines, $index));
+                break;
+            }
+            $record = json_decode($line, true);
+            $userId = (int)($record['reporter_user_id'] ?? 0);
+            $input = $record['input'] ?? null;
+            if ($userId < 1 || !is_array($input)) continue;
+            try {
+                $submit($pdo, $userId, $input);
+                $processed++;
+            } catch (Throwable) {
+                $remaining = array_merge($remaining, array_slice($lines, $index));
+                $blocked = true;
+                break;
+            }
+        }
+        rewind($handle);
+        ftruncate($handle, 0);
+        if ($remaining) fwrite($handle, implode(PHP_EOL, $remaining) . PHP_EOL);
+        fflush($handle);
+        if (!$blocked) {
+            foreach ($spooled as $spoolPath) {
+                if ($processed >= max(1, min(100, $limit))) break;
+                $record = json_decode((string)@file_get_contents($spoolPath), true);
+                $userId = (int)($record['reporter_user_id'] ?? 0);
+                $input = $record['input'] ?? null;
+                if ($userId < 1 || !is_array($input)) continue;
+                try {
+                    $submit($pdo, $userId, $input);
+                    $processed++;
+                    if (!@unlink($spoolPath)) break;
+                } catch (Throwable) { break; }
+            }
+        }
+        flock($handle, LOCK_UN);
+    } finally {
+        fclose($handle);
+    }
+    return $processed;
 }

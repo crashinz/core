@@ -19,6 +19,7 @@ if (empty($result['ok'])) {
     unset($result['http_status']);
     json_out($result, $status);
 }
+$result['nameplateVisibilityPreferences'] = nameplate_visibility_preferences($pdo, (int)$user['id']);
 $policy = p2p_avatar_policy($pdo);
 if ((string)$policy['deliveryMode'] === 'p2p-plus-built-in-generated'
     && !empty($result['revealedAvatars'])) {

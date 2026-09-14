@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 230" role="img" aria-labelledby="title desc">
+  <title id="title">Little Joker</title>
+  <desc id="desc">A refined silver harlequin-spade seal with teal ornament on a midnight playing card.</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f8fcff"/>
+      <stop offset=".6" stop-color="#c3dadd"/>
+      <stop offset="1" stop-color="#5d929a"/>
+    </linearGradient>
+    <radialGradient id="field" cx="50%" cy="42%" r="72%">
+      <stop stop-color="#124452"/>
+      <stop offset=".58" stop-color="#071e2b"/>
+      <stop offset="1" stop-color="#020811"/>
+    </radialGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f1feff"/>
+      <stop offset=".35" stop-color="#8edce4"/>
+      <stop offset=".72" stop-color="#3e8b99"/>
+      <stop offset="1" stop-color="#c9f5f7"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="2" y="2" width="156" height="226" rx="13" fill="url(#paper)" stroke="#10151a" stroke-width="4"/>
+  <rect x="9" y="9" width="142" height="212" rx="9" fill="url(#field)" stroke="#72dce8" stroke-width="3"/>
+  <rect x="14" y="14" width="132" height="202" rx="6" fill="none" stroke="#397f8c"/>
+
+  <g fill="#c9f7fb" font-family="Georgia,serif" font-weight="700">
+    <text x="19" y="35" font-size="23">J</text>
+    <text x="141" y="195" font-size="23" text-anchor="end" transform="rotate(180 131 187)">J</text>
+  </g>
+  <path d="M18 41h25M117 41h25" stroke="#6fc9d4" stroke-width="1.5"/>
+
+  <g fill="none" stroke="#4b9dab" stroke-width="1.4" opacity=".92">
+    <path d="M22 66c12-12 23-14 34-7M138 66c-12-12-23-14-34-7"/>
+    <path d="M22 147c12 12 23 14 34 7M138 147c-12 12-23 14-34 7"/>
+    <path d="M26 73c7 0 11 4 11 11s-4 11-11 11M134 73c-7 0-11 4-11 11s4 11 11 11"/>
+    <path d="M26 140c7 0 11-4 11-11s-4-11-11-11M134 140c-7 0-11-4-11-11s4-11 11-11"/>
+  </g>
+
+  <g filter="url(#glow)">
+    <ellipse cx="80" cy="107" rx="45" ry="55" fill="#06131f" stroke="#85e6ed" stroke-width="2"/>
+    <path d="M80 61l8 10-8 10-8-10zM52 84l8 10-8 10-8-10zM108 84l8 10-8 10-8-10z" fill="#d8b24e" stroke="#fff0a0" stroke-width="1.2"/>
+    <path d="M80 70c-8 13-29 23-29 41 0 14 13 23 24 14-1 11-5 21-13 30h36c-8-9-12-19-13-30 11 9 24 0 24-14 0-18-21-28-29-41z" fill="url(#silver)" stroke="#eaffff" stroke-width="2.4"/>
+    <path d="M80 81v61M64 99l32 20M96 99l-32 20" stroke="#164655" stroke-width="1.8"/>
+    <path d="M80 89l7 10-7 10-7-10zM80 116l7 10-7 10-7-10z" fill="#b72f49" stroke="#e8fdff" stroke-width="1.2"/>
+    <path d="M73 143h14l6 12H67z" fill="#6bc9d4" stroke="#eaffff" stroke-width="1.7"/>
+  </g>
+
+  <g fill="#a9eef3">
+    <path d="M24 108l4-7 4 7-4 7zM128 108l4-7 4 7-4 7z"/>
+    <circle cx="28" cy="126" r="2"/><circle cx="132" cy="126" r="2"/>
+  </g>
+
+  <rect x="18" y="177" width="124" height="34" rx="4" fill="#030c14" stroke="#5fbcc8" stroke-width="1.5"/>
+  <text x="80" y="190" fill="#76d7df" font-family="Georgia,serif" font-size="7.5" font-weight="700" letter-spacing="2.2" text-anchor="middle">THE</text>
+  <text x="80" y="205" fill="#dcfcff" font-family="Georgia,serif" font-size="12.5" font-weight="700" letter-spacing=".9" text-anchor="middle">LITTLE JOKER</text>
+</svg>

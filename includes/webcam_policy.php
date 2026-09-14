@@ -62,12 +62,9 @@ function webcam_viewer_preferences_update(
         }
     }
 
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = [];
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
+        $transaction = database_transaction_begin($pdo, true);
         $sql = 'SELECT webcam_show_preference, webcam_receive_preference, webcam_preferences_version
                   FROM users WHERE id = ? LIMIT 1';
         if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
@@ -75,7 +72,7 @@ function webcam_viewer_preferences_update(
         $stmt->execute([$userId]);
         $current = $stmt->fetch();
         if (!$current) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             return [
                 'ok' => false,
                 'code' => 'WEBCAM_PREFERENCES_USER_NOT_FOUND',
@@ -85,7 +82,7 @@ function webcam_viewer_preferences_update(
         }
         $preferences = webcam_viewer_preferences_from_row($current);
         if ((int)$preferences['version'] !== (int)$parsedVersion) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             return [
                 'ok' => false,
                 'code' => 'WEBCAM_PREFERENCES_STALE',
@@ -107,7 +104,7 @@ function webcam_viewer_preferences_update(
                   WHERE id = ?'
             )->execute([$nextShow ? 1 : 0, $nextReceive ? 1 : 0, $nextVersion, $userId]);
         }
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         return [
             'ok' => true,
             'idempotent' => !$changed,
@@ -118,7 +115,7 @@ function webcam_viewer_preferences_update(
             ],
         ];
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 }
@@ -130,12 +127,9 @@ function webcam_capability_update(PDO $pdo, bool $allowWebcamUse): array {
     }
 
     $affected = [];
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = [];
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
+        $transaction = database_transaction_begin($pdo, true);
         if (!$allowWebcamUse) {
             $affected = $pdo->query(
                 'SELECT id, session_id, avatar_path FROM participants
@@ -146,9 +140,9 @@ function webcam_capability_update(PDO $pdo, bool $allowWebcamUse): array {
         }
         set_app_setting($pdo, 'allow_webcam_use', $allowWebcamUse ? '1' : '0');
         set_app_setting($pdo, 'webcam_policy_revision', (string)((int)$before['revision'] + 1));
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 

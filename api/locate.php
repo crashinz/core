@@ -5,7 +5,7 @@ $pdo = db();
 $q = trim((string)($_GET['q'] ?? ''));
 $like = '%' . $q . '%';
 $stmt = $pdo->prepare(
-    'SELECT u.id,
+    'SELECT DISTINCT u.id,
             u.display_name,
             u.avatar_path,
             mp.public_profile_id,
@@ -23,7 +23,12 @@ $stmt = $pdo->prepare(
              WHERE p.last_seen_at >= ?
              GROUP BY p.user_id
        ) live_room ON live_room.user_id = u.id
-       LEFT JOIN rooms owned_room ON owned_room.owner_id = u.id
+       LEFT JOIN (
+            SELECT owner_id, MAX(id) AS room_id
+              FROM rooms
+             GROUP BY owner_id
+       ) owned_room_choice ON owned_room_choice.owner_id = u.id
+       LEFT JOIN rooms owned_room ON owned_room.id = owned_room_choice.room_id
        LEFT JOIN room_ejections re ON re.room_id = COALESCE(live_room.id, owned_room.id)
             AND re.user_id = ?
             AND ' . active_ejection_sql('re') . '

@@ -318,7 +318,9 @@ function network_moderation_observe(PDO $pdo, string $requestAddress): string
          WHERE opaque_id=?'
     );
     $update->execute([$opaqueId]);
-    if ($update->rowCount() < 1) {
+    $updated = $update->rowCount();
+    $update->closeCursor();
+    if ($updated < 1) {
         try {
             $pdo->prepare(
                 'INSERT INTO network_observations (opaque_id,key_version) VALUES (?,?)'
@@ -366,6 +368,7 @@ function network_moderation_record_context(
     );
     $existing->execute([$contextKey]);
     $publicId = $existing->fetchColumn();
+    $existing->closeCursor();
     $retentionUntil = gmdate(
         'Y-m-d H:i:s',
         time() + (NETWORK_MODERATION_CONTEXT_RETENTION_DAYS * 86400)

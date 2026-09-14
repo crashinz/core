@@ -1,0 +1,131 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "battleship",
+  "name": "Battleship",
+  "version": "1.0.14",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.private-media",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative",
+    "game.presentation.private-media"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_b60c0a04",
+    "name": "Battleship",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_b60c0a04",
+    "gameId": 61,
+    "path": "battleship-first-party",
+    "entry": "index.html",
+    "icon": "battleship-first-party-icon.svg",
+    "profile": "versus",
+    "minPlayers": 2,
+    "practiceMinPlayers": 2,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 2,
+    "seats": [
+      "Fleet 1",
+      "Fleet 2"
+    ],
+    "adaptationVersion": "1.0.4",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_b60c0a04",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      },
+      {
+        "id": "classic",
+        "label": "Classic"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": true,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.3125,
+      "minimumReadableWidth": 640,
+      "minimumReadableHeight": 488
+    },
+    "rulesHelp": {
+      "label": "Battleship rules",
+      "description": "Private 10 by 10 fleets with one ship of each length from 1 through 5 and alternating attacks."
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "includes/battleship_extension.php": "8923debe44337bb62182ce794170b9a7c4501f812a915dbece375a66f81dc477",
+      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "assets/images/battleship-first-party-icon.svg": "d5ed447292bfc5dc80436bb0c86e54000146b8d577e444ad2b8b1783edbb9023",
+      "assets/images/battleship-modern/broken-missile-miss.png": "dd756279023bb39bdc08346af3582019e6a5504ae944f17fef8acb4ed039abfc",
+      "assets/images/battleship-modern/naval-attack-craft-1-destroyed.png": "15f87340ed3b240dbc3e184bba418a7ce3eb260b7b3ceab6799001c63db12db6",
+      "assets/images/battleship-modern/naval-attack-craft-1.png": "f75b9e99de88f7e8cfe08b7d759d606d00457da73e3e0a2b772bceacbbf817fc",
+      "assets/images/battleship-modern/naval-command-ship-destroyed.png": "210d6f156084e397d4a82da2784ef45921d838ded4142932754fab1ca8722351",
+      "assets/images/battleship-modern/naval-command-ship.png": "aad08c41964484988f16b43f318ea77e0f31395ec13592ffa8927ed0c2cf8941",
+      "assets/images/battleship-modern/naval-corvette-2-destroyed.png": "7b7eba07d3b97249b268e56ced63b6db6089ee7741bea26bcfd4db91d4f21bb3",
+      "assets/images/battleship-modern/naval-corvette-2.png": "9f003e7b32e1f843fe22378e7a2e0810e435ab03bed6577f63e25fd6c89eeed4",
+      "assets/images/battleship-modern/naval-cruiser-4-destroyed.png": "e50d7ecd256d8051503b68f58b5e5ac1747528736d383f98d0c53eed24454d2b",
+      "assets/images/battleship-modern/naval-cruiser-4.png": "b968f6bde79192a863389f90064ab80c8256664fbc234570ff7cdb833d1609be",
+      "assets/images/battleship-modern/naval-fire-plume-v2.png": "98616630e3af98f84c6cb1b6909acd0ebdaadb67e7e3a0939bd29da355c23f21",
+      "assets/images/battleship-modern/naval-frigate-3-destroyed.png": "f7a4120ace09794706f1ad31b9329d126867f6aebdfe64f666c4443fdfc87d58",
+      "assets/images/battleship-modern/naval-frigate-3.png": "eda20e6caf388757d2a473f0a6d58392d64cbc9ec3ddeb7227eaa09bc959d14e",
+      "assets/audio/built-in-games/game-success.ogg": "33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c",
+      "assets/audio/built-in-games/game-loss.ogg": "a97513d7fd2b12b1210c423be943b4c1ab0e899b11db95855e9b74836e646ae0",
+      "assets/audio/built-in-games/ship-place.ogg": "1723a9fd25103ed41af06054814e84e65f4a772bac86ab2dc927da93d9592ff5",
+      "assets/audio/built-in-games/ship-shot.ogg": "e07045693e4a2b3d165c424e3dab4c781d9ff8880a386880ac89a51315d7f831",
+      "assets/audio/built-in-games/ship-miss.ogg": "7d3ba0bb5e60a11b5d3e558c141303dcf494256675fbf753c0d252d2cf0481e3",
+      "assets/audio/built-in-games/ship-hit.ogg": "a96f879fec0864a8938e0c745b6996a6c5679c16a234ce31a01cc995e8401003",
+      "assets/audio/built-in-games/ship-sink.ogg": "6d65b463c0555dd5be16b8db6d2cbe23a94e07a4637779b8ad17d0db3e500a87",
+      "assets/audio/built-in-games/battleship-placement.wav": "a1d417e30cbc8c3cb79084853a68d7355875a19ed0da745f147db90dcb543c7e",
+      "assets/audio/built-in-games/battleship-rotation.wav": "57cb9edb543d1c0de2c7e5453688a46fb808e38d41c7ca290630ca026820d36d",
+      "assets/audio/built-in-games/battleship-invalid-placement.wav": "07df308752c9449d4612ef333124864639e5bac743e1106944a62692d124df00",
+      "assets/audio/built-in-games/battleship-fleet-ready.wav": "284601687716a8986d1c1ea219caabf3ef82acffc08295f6be5b980eeee30d5b",
+      "assets/audio/built-in-games/battleship-victory.wav": "4b45178073535aa19a9fc18ae95c402e613076fec619b9adec29d6d012136064",
+      "assets/audio/built-in-games/battleship-defeat.wav": "97437c9f8a5e316f146e4174197eb8e32b3adac38cc4c0b4f417593090906c0f",
+      "assets/audio/built-in-games/ship-missile-launch.wav": "ad0b772e29505e4bccbc1e82fcdafca26f616ff3ea240aac3cb7e1f8bb3db529",
+      "assets/audio/built-in-games/ship-fire-hit.wav": "e8ac5dc5e0d4d9135b19b6eb24a83b0cd96df6474a3a36293d025f057f814d49",
+      "assets/audio/built-in-games/ship-water-miss.wav": "b50f1e210b80ccc232d2b67c01cd4f4ecb63fd641dbabf2bd733a12f4a3f1d69",
+      "assets/audio/built-in-games/ship-sinking-sequence.wav": "9dc83503785a5cf3d06ca28c2b57bc7627c0bd9a340c37b832dcacbb0014bd19",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/battleship-first-party/index.html": "a43aad9f3af93a348bf38e87b515548431aa482814f53b7ae3323318a9ab55b9",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+    }
+  }
+}

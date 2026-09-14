@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/message_centre.php';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'POST required'], 405);
 $body = input_json();
 $pdo = db();
+corechat_chat_post_rate_install_api_handler($pdo);
 $sessionId = resolve_session_id($pdo, $body['session_id'] ?? '');
 $participant = auth_participant($pdo, $sessionId, $body['join_token'] ?? '');
 $authorContext = author_context_for_participant($pdo, $sessionId, $participant);
@@ -343,6 +344,16 @@ $gestureRequestKey = '';
 $incomingProtectionEnvelope = is_array($body['protection_envelope'] ?? null)
     ? $body['protection_envelope']
     : null;
+$importantRequested = !empty($body['important']);
+if ($importantRequested) {
+    if ($messageType !== 'text') json_out(['error' => 'Important messages must be text'], 400);
+    if (!in_array($channel, ['room', 'community'], true)) json_out(['error' => 'Important messages are available only in room or community chat'], 400);
+    if (!can_send_important_message($pdo, $authorContext, $channel)) {
+        json_out(['error' => 'Your role is not permitted to send an important message in this chat'], 403);
+    }
+    if ($incomingProtectionEnvelope !== null) json_out(['error' => 'Important messages cannot use a private-message protection envelope'], 409);
+    $messageType = 'important';
+}
 if ($messageType === 'gif') {
     $content = trim((string)($body['gif_url'] ?? ''));
     $originalName = trim((string)($body['title'] ?? 'GIF'));
@@ -366,20 +377,11 @@ if ($content === '' && (($incomingProtectionEnvelope['mode'] ?? '') !== 'e2ee-pr
     json_out(['error' => 'Message required'], 400);
 }
 $contentLength = function_exists('mb_strlen') ? mb_strlen($content, 'UTF-8') : strlen($content);
-if ($messageType === 'text' && $contentLength > 1000) json_out(['error' => 'Message too long'], 400);
-$urlPreview = $messageType === 'text' && $content !== '' ? url_preview_for_text($content) : null;
+if (in_array($messageType, ['text', 'important'], true) && $contentLength > 1000) json_out(['error' => 'Message too long'], 400);
+$urlPreview = in_array($messageType, ['text', 'important'], true) && $content !== '' ? url_preview_for_text($content) : null;
 $urlPreviewJson = $urlPreview ? json_encode($urlPreview, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
 $replyTo = null;
 $replyToJson = null;
-$maxPerSecond = app_setting_float($pdo, 'chat_posts_per_second', 3);
-$rateCutoff = gmdate('Y-m-d H:i:s', time() - 1);
-$roomRecent = $pdo->prepare("SELECT COUNT(*) FROM messages WHERE participant_id = ? AND sent_at >= ?");
-$roomRecent->execute([(int)$participant['id'], $rateCutoff]);
-$communityRecent = $pdo->prepare("SELECT COUNT(*) FROM community_messages WHERE participant_id = ? AND sent_at >= ?");
-$communityRecent->execute([(int)$participant['id'], $rateCutoff]);
-if (((int)$roomRecent->fetchColumn() + (int)$communityRecent->fetchColumn()) >= $maxPerSecond) {
-    json_out(['error' => 'You are sending messages too quickly.'], 429);
-}
 
 if ($channel === 'link') {
     $targetId = (int)($body['target_participant_id'] ?? 0);
@@ -417,7 +419,7 @@ if ($channel === 'link') {
             $replyToJson = $replyTo
                 ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
                 : null;
-            $message = create_message($pdo, 'link', $messageType, [
+            $message = corechat_create_rate_limited_message($pdo, 'link', $messageType, [
                 'session_id' => $sessionId,
                 'participant' => $participant,
                 'author_context' => $authorContext,
@@ -476,7 +478,7 @@ $replyTo = reply_snapshot($pdo, $body, $channel, $sessionId, $participant);
 $replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
 
 try {
-    $msg = create_message($pdo, $channel, $messageType, [
+    $msg = corechat_create_rate_limited_message($pdo, $channel, $messageType, [
         'session_id' => $sessionId,
         'participant' => $participant,
         'author_context' => $authorContext,

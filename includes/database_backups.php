@@ -503,7 +503,7 @@ function backup_portable_validate_bundle(PDO $pdo, array $bundle): array {
             || ($version >= 3 && isset($publicProfileIds[$publicProfileId]))
             || ($version >= 3 && $discordVisible && $discordUsername === '')
             || password_get_info($passwordHash)['algoName'] === 'unknown'
-            || !in_array((string)($user['role'] ?? 'user'), ['user', 'guide', 'developer', 'admin'], true)) {
+            || !in_array((string)($user['role'] ?? 'user'), array_keys(moderation_identity_role_catalog()), true)) {
             throw new RuntimeException('Portable bundle contains an invalid or duplicate user identity.');
         }
         $existing = $pdo->prepare(
@@ -630,6 +630,18 @@ function backup_portable_validate_bundle(PDO $pdo, array $bundle): array {
     ];
 }
 
+function backup_portable_new_row_timestamp(mixed $value): ?string {
+    // Unusable or legacy-omitted values retain the existing INSERT-time default.
+    // Do not coerce types, normalize calendar dates, or reinterpret timezones.
+    if (!is_string($value) || strlen($value) !== 19
+        || preg_match('/\A([1-9][0-9]{3})-([0-9]{2})-([0-9]{2}) ([0-9]{2}):([0-9]{2}):([0-9]{2})\z/', $value, $parts) !== 1
+        || !checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1])
+        || (int)$parts[4] > 23 || (int)$parts[5] > 59 || (int)$parts[6] > 59) {
+        return null;
+    }
+    return $value;
+}
+
 function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): array {
     backup_portable_reconcile_attempts($pdo);
     $preflight = backup_portable_validate_bundle($pdo, $bundle);
@@ -659,7 +671,7 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
                 $user['display_name'] ?? ''
             );
             $hash = (string)($user['password_hash'] ?? '');
-            $role = in_array(($user['role'] ?? 'user'), ['user', 'guide', 'developer', 'admin'], true) ? (string)$user['role'] : 'user';
+            $role = in_array(($user['role'] ?? 'user'), array_keys(moderation_identity_role_catalog()), true) ? (string)$user['role'] : 'user';
             $avatarPath = (string)($user['avatar_path'] ?? 'preset:Default');
             $requestedAura = trim((string)($user['aura_effect'] ?? ''));
             $auraEffect = $requestedAura !== '' ? normalize_aura_key($requestedAura) : null;
@@ -681,11 +693,12 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
                 );
                 $pdo->prepare(
                     'INSERT INTO users '
-                    . '(email, username, password_hash, display_name, role, avatar_path, aura_effect) '
-                    . 'VALUES (?,?,?,?,?,?,?)'
+                    . '(email, username, password_hash, display_name, role, avatar_path, aura_effect, created_at) '
+                    . 'VALUES (?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))'
                 )->execute([
                     $email, $identity['username'], $hash, $identity['display_name'],
                     $role, $avatarPath, $auraEffect,
+                    backup_portable_new_row_timestamp($user['created_at'] ?? null),
                 ]);
                 $id = (int)$pdo->lastInsertId();
                 member_profiles_initialize_user($pdo, $id);
@@ -699,6 +712,7 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
                 $newAccount,
                 $portableVersion
             );
+            moderation_safety_project_default_staff_grants($pdo, $id);
             $userMap[(int)($user['source_id'] ?? 0)] = $id;
             $userMap[$email] = $id;
         }
@@ -734,9 +748,16 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
                 $pdo->prepare('UPDATE gestures SET owner_user_id = ?, name = ?, gesture_text = ?, gif_path = ?, audio_path = ?, audio_is_silent = ?, is_public = ?, file_size = ?, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
                     ->execute([...$values, $gestureId]);
             } else {
-                $pdo->prepare('INSERT INTO gestures (public_id, owner_user_id, name, gesture_text, gif_path, audio_path, audio_is_silent, is_public, file_size) VALUES (?,?,?,?,?,?,?,?,?)')
-                    ->execute([$publicId, ...$values]);
+                $pdo->prepare('INSERT INTO gestures (public_id, owner_user_id, name, gesture_text, gif_path, audio_path, audio_is_silent, is_public, file_size, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),COALESCE(?,CURRENT_TIMESTAMP))')
+                    ->execute([
+                        $publicId, ...$values,
+                        backup_portable_new_row_timestamp($gesture['created_at'] ?? null),
+                        backup_portable_new_row_timestamp($gesture['updated_at'] ?? null),
+                    ]);
             }
+        }
+        if (array_key_exists('gestures', $sections)) {
+            gesture_package_backfill($pdo);
         }
 
         foreach (($sections['rooms'] ?? []) as $room) {
@@ -766,8 +787,11 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
                 $pdo->prepare('UPDATE rooms SET owner_id = ?, name = ?, background_path = ?, background_mime = ?, background_thumb_path = ?, import_url = ?, import_layout_json = ?, music_playlist_json = ? WHERE id = ?')
                     ->execute([...$values, $roomId]);
             } else {
-                $pdo->prepare('INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path, import_url, import_layout_json, music_playlist_json) VALUES (?,?,?,?,?,?,?,?,?)')
-                    ->execute([$publicId, ...$values]);
+                $pdo->prepare('INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path, import_url, import_layout_json, music_playlist_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))')
+                    ->execute([
+                        $publicId, ...$values,
+                        backup_portable_new_row_timestamp($room['created_at'] ?? null),
+                    ]);
                 $roomId = (int)$pdo->lastInsertId();
             }
             active_session_for_room($pdo, $roomId);
@@ -794,7 +818,15 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
         }
         database_transaction_commit($pdo, $transaction);
     } catch (Throwable $e) {
+        $ownedRollback = !empty($transaction['owned']) && !empty($transaction['active']);
         database_transaction_rollback($pdo, $transaction);
+        if ($ownedRollback && empty($transaction['active'])) {
+            try {
+                member_profiles_record_limit_rejection_after_rollback($pdo, $e);
+            } catch (Throwable) {
+                // Diagnostic recording must not replace the original import failure.
+            }
+        }
         backup_portable_rollback_promoted($attempt);
         try {
             backup_portable_attempt_cleanup($attempt);

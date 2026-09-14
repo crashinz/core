@@ -46,19 +46,19 @@ import {
 
     ImportedRoomLayoutRenderer
 
-} from "./renderers/imported-room-layout-renderer.js";
+} from "./renderers/imported-room-layout-renderer.js?v=20260913-regression";
 
 import {
 
     ImportedRoomMusicService
 
-} from "./services/imported-room-music-service.js";
+} from "./services/imported-room-music-service.js?v=20260913-player-capability";
 
 import {
 
     ImportedRoomWebsiteCompatibilityService
 
-} from "./services/imported-room-website-compatibility-service.js";
+} from "./services/imported-room-website-compatibility-service.js?v=20260913-player-capability";
 
 //--------------------------------------------------
 // Imported Room Runtime

@@ -453,17 +453,13 @@ function gesture_catalog_install_part5_schema(PDO $pdo): void
 
 function gesture_catalog_transaction(PDO $pdo, callable $callback): mixed
 {
-    $owned = !$pdo->inTransaction();
-    if ($owned) {
-        if (db_driver($pdo) === 'sqlite') $pdo->exec('BEGIN IMMEDIATE');
-        else $pdo->beginTransaction();
-    }
+    $transaction = database_transaction_begin($pdo, true);
     try {
         $result = $callback();
-        if ($owned) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         return $result;
     } catch (Throwable $error) {
-        if ($owned && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 }
@@ -1052,14 +1048,15 @@ function gesture_catalog_row_payload(array $row, int $viewerUserId, bool $admin 
 {
     $mine = (int)$row['owner_user_id'] === $viewerUserId;
     $mediaPurpose = $admin ? 'admin' : 'catalog';
+    $mediaScope = $admin ? null : ($mine ? 'personal' : 'server');
     $animationUrl = function_exists('gesture_package_media_url')
-        ? gesture_package_media_url($row, 'animation', $mediaPurpose)
+        ? gesture_package_media_url($row, 'animation', $mediaPurpose, $mediaScope)
         : media_url((string)$row['gif_path']);
     $posterUrl = function_exists('gesture_package_media_url')
-        ? gesture_package_media_url($row, 'poster', $mediaPurpose)
+        ? gesture_package_media_url($row, 'poster', $mediaPurpose, $mediaScope)
         : null;
     $audioUrl = !empty($row['audio_path'])
-        ? (function_exists('gesture_package_media_url') ? gesture_package_media_url($row, 'audio', $mediaPurpose) : media_url((string)$row['audio_path']))
+        ? (function_exists('gesture_package_media_url') ? gesture_package_media_url($row, 'audio', $mediaPurpose, $mediaScope) : media_url((string)$row['audio_path']))
         : null;
     $payload = [
         'id' => (int)$row['id'],

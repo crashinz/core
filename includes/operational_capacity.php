@@ -235,6 +235,26 @@ function operational_capacity_values(PDO $pdo): array
     return operational_capacity_validate_values($values);
 }
 
+function operational_capacity_runtime_values(PDO $pdo): array
+{
+    $saved = operational_capacity_values($pdo);
+    $definitions = operational_capacity_definitions();
+    $runtime = [];
+    foreach ($saved as $key => $value) {
+        if (corechat_limit_is_enforced($pdo, $key)) {
+            $runtime[$key] = $value;
+            continue;
+        }
+        $runtime[$key] = in_array($key, [
+            'capacity_event_batch_limit',
+            'capacity_event_replay_window',
+            'capacity_maintenance_batch_size',
+            'capacity_diagnostic_cleanup_batch_size',
+        ], true) ? (int)$definitions[$key]['maximum'] : null;
+    }
+    return $runtime;
+}
+
 function operational_capacity_profile_match(array $values): string
 {
     foreach (operational_capacity_profiles() as $id => $profile) {
@@ -291,25 +311,37 @@ function operational_capacity_projection(PDO $pdo): array
     if ($storedProfile !== 'custom' && operational_capacity_profiles()[$storedProfile]['values'] !== $values) $storedProfile = 'custom';
     $counts = operational_capacity_counts($pdo);
     $definitions = operational_capacity_definitions();
+    $runtimeValues = operational_capacity_runtime_values($pdo);
+    $limitEnforcement = [];
+    foreach (array_keys($values) as $key) $limitEnforcement[$key] = corechat_limit_is_enforced($pdo, $key);
     $utilization = [
         'activeRooms' => [
             'current' => $counts['activeRooms'],
-            'target' => $values['capacity_active_rooms_target'],
+            'target' => $runtimeValues['capacity_active_rooms_target'],
         ],
         'activeUsers' => [
             'current' => $counts['activeUsers'],
-            'target' => $values['capacity_active_users_target'],
+            'target' => $runtimeValues['capacity_active_users_target'],
         ],
         'activeParticipants' => [
             'current' => $counts['activeParticipants'],
-            'target' => $values['capacity_active_participants_target'],
+            'target' => $runtimeValues['capacity_active_participants_target'],
         ],
     ];
     foreach ($utilization as &$row) {
-        $row['percent'] = $row['target'] > 0 ? min(999, (int)round(($row['current'] / $row['target']) * 100)) : 0;
-        $row['warning'] = $row['current'] > $row['target'];
+        $row['percent'] = $row['target'] !== null && $row['target'] > 0 ? min(999, (int)round(($row['current'] / $row['target']) * 100)) : null;
+        $row['warning'] = $row['target'] !== null && $row['current'] > $row['target'];
     }
     unset($row);
+    foreach ([
+        'activeRooms' => 'capacity_active_rooms_target',
+        'activeUsers' => 'capacity_active_users_target',
+        'activeParticipants' => 'capacity_active_participants_target',
+    ] as $metric => $settingId) {
+        if (!empty($utilization[$metric]['warning'])) {
+            limit_event_record_reached($pdo, $settingId, 'installation', 'capacity:' . $metric, 'warned', ['current' => (int)$utilization[$metric]['current']]);
+        }
+    }
     $profiles = [];
     foreach (operational_capacity_profiles() as $id => $profile) {
         $profiles[] = [
@@ -327,6 +359,8 @@ function operational_capacity_projection(PDO $pdo): array
         'selectedProfile' => $storedProfile,
         'selectedProfileLabel' => operational_capacity_profiles()[$storedProfile]['label'],
         'values' => $values,
+        'runtimeValues' => $runtimeValues,
+        'limitEnforcement' => $limitEnforcement,
         'definitions' => $definitions,
         'profiles' => $profiles,
         'provenance' => OPERATIONAL_CAPACITY_PROVENANCE,

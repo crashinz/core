@@ -21,8 +21,11 @@ function save_room_background_upload(array $upload, ?array $thumbUpload = null):
         throw new RuntimeException('Unsupported background type');
     }
     $isVideo = str_starts_with($mime, 'video/');
-    $maxBytes = $isVideo ? app_setting_bytes($pdo, 'room_video_max_size_mb', 200) : app_setting_bytes($pdo, 'room_image_max_size_mb', 10);
-    if ((int)($upload['size'] ?? 0) > $maxBytes) {
+    $limitId = $isVideo ? 'room_video_max_size_mb' : 'room_image_max_size_mb';
+    $maxMb = corechat_limit_value($pdo, $limitId, $isVideo ? 200.0 : 10.0);
+    $maxBytes = $maxMb === null ? null : (int)round($maxMb * 1024 * 1024);
+    if ($maxBytes !== null && (int)($upload['size'] ?? 0) > $maxBytes) {
+        limit_event_record_reached($pdo, $limitId, 'installation', 'room-background:' . ($isVideo ? 'video' : 'image'), 'rejected', ['submittedBytes' => (int)($upload['size'] ?? 0)]);
         throw new RuntimeException('Background file is too large');
     }
     $ext = match ($mime) {

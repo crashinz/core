@@ -1,0 +1,138 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "five-dice",
+  "name": "Five Dice",
+  "version": "1.0.7",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.private-media",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative",
+    "game.presentation.private-media"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_4f8c2d71",
+    "name": "Five Dice",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_4f8c2d71",
+    "gameId": 58,
+    "path": "five-dice",
+    "entry": "index.html",
+    "icon": "five-dice-icon.svg",
+    "profile": "versus",
+    "minPlayers": 1,
+    "practiceMinPlayers": 1,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 4,
+    "seats": [
+      "Player 1",
+      "Player 2",
+      "Player 3",
+      "Player 4"
+    ],
+    "adaptationVersion": "1.0.4",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_4f8c2d71",
+    "defaultPresentationPack": "classic",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      },
+      {
+        "id": "classic",
+        "label": "Classic"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": true,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.4,
+      "minimumReadableWidth": 560,
+      "minimumReadableHeight": 320
+    },
+    "rulesHelp": {
+      "label": "How to play",
+      "description": "Roll at most three times. After rolling, select a die to keep it; hold or release dice only between rolls one and two or rolls two and three. After roll three, score all five dice in one unused category. Every player completes the same thirteen-category scorecard."
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "includes/five_dice_identity.php": "bd640ae753bb7560dc8ce59f540ac4b29c50bcb5420615989e0536d682efbab4",
+      "includes/five_dice_extension.php": "646b02ba373af1bf9d0fa399e3e57d9e194ceef251db8a96edfab7b597918651",
+      "includes/five_dice_media_pack.php": "8314009fc4ee7b51e1423370a4bb1cc4679b05bdbdfc383788239c1cdf6b73e2",
+      "api/five_dice_media.php": "bcfe992463f081a6142c9fb6361f20a82ef55852c2ca1f4a2559a24f594a886e",
+      "api/five_dice_media_pack_admin.php": "c75396ff16be391f085f578b9886b318076f2473dbada4e0406a8160a6c29131",
+      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "assets/images/five-dice-icon.svg": "a48c7af13b8af9cb9725ec7677eca2ec65db5034e179b209c7aeb201a47c7f9c",
+      "assets/images/five-dice-modern/five-dice-approved-board-background-v1.png": "81584203a61d2faefb2d39280312a22555495f3498fdac2494e6e68e738d0872",
+      "assets/images/five-dice-modern/jazz-lounge-decor.png": "07c78c1d2862506556a642b38872379a05cb30144abad1cdb4321137e7acb610",
+      "assets/images/five-dice-modern/roll-drum-states.png": "03a695cb63bb0f1a165a0f5ef04bc6e3b5b10c08cea84714f6fe5f7f29f65562",
+      "assets/images/five-dice-modern/scorecard-states.png": "978f1066ab0140e2ea0c46fa2242fb3dba252d0acd0882a894349e41dc6a4d96",
+      "assets/images/five-dice-modern/materials-and-effects.png": "e36af2ab26d40e0f0c5b0cc211d3a4e3cb6060721ee39c1b4453698ae78ee1d5",
+      "assets/images/five-dice-modern/sculpted-dice-faces.png": "ef6fab849b0dfa77187f756f7fdca1f67fdaab5395b24d4b7c181f2bed63d52a",
+      "assets/images/five-dice-crisp-normal-70.png": "abaa67d59d7cd6e2f521ee678e2790f49ed8b7117b63c9421c9790146d244398",
+      "assets/images/five-dice-crisp-held-70.png": "5e16f3ac903f1f33c8327a41fdfc4abf95d13bf5f998572e54b37b24a08003c4",
+      "assets/images/five-dice-crisp-normal-84.png": "e1ee3e2e3073779ca024adb5515fc0c4afbbba7bd66ff949f1cb11a8e0e38fd3",
+      "assets/images/five-dice-crisp-held-84.png": "e188b346c80ca7e8b652647b46bed74be1e0c4956d80778b89bd618e9a428516",
+      "assets/images/five-dice-crisp-normal-98.png": "b79abb18ffbab90b7606f8b6844e4208753855d80ad3a00419911e4f1adad182",
+      "assets/images/five-dice-crisp-held-98.png": "5f2693dad7d792ddb09374a36dfd460363c0224f02bbd949c5b873f4e7d0289a",
+      "assets/images/five-dice-crisp-normal-112.png": "8d7e53496dedac3978ae2fb77743e7d49ef5d9df4d8abf6800488c12bc4e1cbb",
+      "assets/images/five-dice-crisp-held-112.png": "fb251dfd80a8c50ca2bedc89a0217b8c7e57c7e922081fdc3e7b89397eea46c3",
+      "assets/audio/built-in-games/ui-select.ogg": "aec0c31ea934a35936ae0d2ab8fac8123c93aa5647f935853a58dbaf90278b7a",
+      "assets/audio/built-in-games/game-error.ogg": "885b28175c7b511118bcffab95675b48bbac9005cf6514656ebdad979276b3ab",
+      "assets/audio/built-in-games/game-success.ogg": "33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c",
+      "assets/audio/built-in-games/game-loss.ogg": "a97513d7fd2b12b1210c423be943b4c1ab0e899b11db95855e9b74836e646ae0",
+      "assets/audio/built-in-games/dice-roll.ogg": "4e6581c73465cdd7ec32e86a709b4ea5c682e819c9bdb7989d1df1880ba67886",
+      "assets/audio/built-in-games/five-dice-roll.wav": "c9f28a8aca057dec70aedd5eee7fdd329ec1cccca9d79eb78b5bdb7981b2b675",
+      "assets/audio/built-in-games/five-dice-hold.wav": "33f7b5d55059f81e7c6c03fe0f55c752a2d126ce2929af8e39c40b0b28b7c468",
+      "assets/audio/built-in-games/five-dice-release.wav": "14a1f5ffc70fd8e6cb957897663442c7c60ac745bcec4fed561d33bcc9c68175",
+      "assets/audio/built-in-games/five-dice-score-commit.wav": "1ce19c72cfed83c2bcf2f67c485276b71c7d0294671d38ed9bbf0e4c04a48e60",
+      "assets/audio/built-in-games/five-dice-upper-bonus.wav": "bbaa3ca0d3829903d1e9cb2e08bd814bf8532ec8c98fbeea78fea5e1f41f299d",
+      "assets/audio/built-in-games/five-dice-celebration.wav": "04a361e7def5ebe4f7133970db8df3fde11fd04092a9cf1381c6ea44dc613d4a",
+      "assets/audio/built-in-games/five-dice-invalid.wav": "7900503abc56506cf2ec51e3a95c893936e1edb0104980ab7aa0e44e5db91716",
+      "assets/audio/built-in-games/five-dice-turn-start.wav": "1011befb706a1b3ecbdd25682a63e974a01b5982cd16d475e819be93868e891e",
+      "assets/audio/built-in-games/five-dice-victory.wav": "97e66a38893dbab85798e155254711195549fc512e91083abc39de7bf93be680",
+      "assets/audio/built-in-games/five-dice-loss.wav": "de481acc593f7a73f9133fc5a699148fd7ebf63f09f9b5c451450fbe0c92568e",
+      "assets/audio/built-in-games/five-dice-draw.wav": "7ec792a10435d0c7e598d44aa52ac07198ad74396c9425214afcbfcb29ba39fb",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
+      "games/five-dice/five-dice.css": "f9a5c9f0a1350f9ef07fff7050ed18d9906c29c43a401c7b41c38794694f7a37",
+      "games/five-dice/five-dice.js": "23113946f657ab846bf2df5a82e0e592b6fa09971aba724cac9f0b1c708b0407",
+      "games/five-dice/index.html": "18faa6e07ae4ffc3d60846e4417d3d51472dadc1878609cc310fb2b1a402eff3"
+    }
+  }
+}

@@ -506,12 +506,12 @@ export class ChatPrivateChatService {
                 id,
 
                 display_name:
-                    payload.user_id === context.getConfig().myUserId
-                        ? "Friend"
+                    Number(payload.user_id) === Number(context.getConfig().myUserId)
+                        ? undefined
                         : payload.display_name,
 
                 avatar_url:
-                    payload.avatar_url
+                    Number(payload.user_id) === Number(context.getConfig().myUserId) ? undefined : payload.avatar_url
 
             });
 

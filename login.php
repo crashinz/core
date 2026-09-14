@@ -5,6 +5,9 @@ $notice = ($_GET['account'] ?? '') === 'deleted'
     ? 'Your account has been deleted. Required shared history now appears under Deleted User.'
     : '';
 $pdo = db();
+if (!moderation_identity_policy_acceptance_storage_ready($pdo)) {
+    redirect_to('/database-update.php');
+}
 $branding = private_site_branding_projection($pdo, 'login');
 $brandingUtilityLinks = private_site_branding_utility_links($pdo);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -17,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?) LIMIT 1');
         $stmt->execute([$login, $login, $login]);
         $user = $stmt->fetch();
+        $stmt->closeCursor();
         if ($user && account_deletion_is_deleted($pdo, (int)$user['id'])) $user = false;
         if ($user && password_verify($password, $user['password_hash'])) {
             try {
@@ -83,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endforeach; ?>
       </div>
     </form>
-    <?php if ($branding['has_custom_logo']): ?>
+    <?php if ($branding['has_custom_logo'] && ($branding['show_powered_logo'] ?? true)): ?>
       <div class="powered-by auth-powered-by">
         <span>Powered by</span>
         <img src="<?= e(app_url($branding['powered_logo_path'])) ?>" alt="ChatSpace Community Edition">

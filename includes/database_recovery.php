@@ -1217,11 +1217,12 @@ function database_recovery_reconcile_interrupted(
 function database_recovery_run_update(
     PDO $pdo,
     int $actorUserId,
-    string $requestPublicId
+    string $requestPublicId,
+    array $upgradeContext = []
 ): array {
     $state = database_recovery_state();
     if (empty($state['maintenance']) || empty($state['active_recovery_set_id'])) {
-        return database_migrations_run($pdo, $actorUserId, false, $requestPublicId);
+        return database_migrations_run($pdo, $actorUserId, false, $requestPublicId, null, $upgradeContext);
     }
     $claim = database_recovery_claim($pdo);
     try {
@@ -1239,7 +1240,8 @@ function database_recovery_run_update(
             $actorUserId,
             false,
             $requestPublicId,
-            (array)$manifest['database_recovery_point']['backup']
+            (array)$manifest['database_recovery_point']['backup'],
+            $upgradeContext
         );
         $status = database_migration_status($pdo);
         if (empty($status['current'])) {
@@ -1869,10 +1871,12 @@ function database_recovery_status(PDO $pdo): array
     $state = database_recovery_state();
     $release = null;
     $releaseError = null;
+    $releaseErrorMessage = null;
     try {
         $release = database_recovery_release_manifest(true);
     } catch (CoreMigrationException $error) {
         $releaseError = $error->errorCode;
+        $releaseErrorMessage = $error->getMessage();
     }
     $set = null;
     $setError = null;
@@ -1916,6 +1920,7 @@ function database_recovery_status(PDO $pdo): array
             'verified' => true,
         ],
         'installed_release_error_code' => $releaseError,
+        'installed_release_error_message' => $releaseErrorMessage,
         'recovery_set' => $set,
         'recovery_set_error_code' => $setError,
         'automatic_restore' => $automaticRestore,

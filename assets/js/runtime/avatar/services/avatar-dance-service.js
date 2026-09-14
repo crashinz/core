@@ -1,6 +1,8 @@
 import { SynchronizedSwayDance } from "../dances/synchronized-sway-dance.js";
 import { SynchronizedBounceDance } from "../dances/synchronized-bounce-dance.js";
 import { LapDance } from "../dances/lap-dance.js";
+import { getAvatarMotionPreference, AVATAR_MOTION_CHANGED } from "../../../core/avatar-motion-preference.js?v=20260913-r1";
+import { animationElapsedMs, animationMonotonicNow } from "../../../core/animation-server-clock.js?v=20260913-r2";
 import { LapBounce } from "../dances/lap-bounce.js";
 
 const APPROVED_DANCES = Object.freeze([
@@ -92,6 +94,7 @@ export class AvatarDanceService {
         mutations: 0
     };
     #lastOperation = null;
+    #motionPreferenceWindow = null;
 
     constructor(runtime) {
         this.#runtime = runtime;
@@ -113,6 +116,8 @@ export class AvatarDanceService {
             : null;
         this.#motionQueryListener = () => this.#reconcileMotionPreference();
         this.#motionQuery?.addEventListener?.("change", this.#motionQueryListener);
+        this.#motionPreferenceWindow = context.window || globalThis;
+        this.#motionPreferenceWindow.addEventListener?.(AVATAR_MOTION_CHANGED, this.#motionQueryListener);
     }
 
     destroy() {
@@ -231,6 +236,7 @@ export class AvatarDanceService {
             generation,
             danceId,
             startedAtMs,
+            observedAtMs: animationMonotonicNow(),
             frameHandle: null,
             suspended: false
         };
@@ -568,6 +574,7 @@ export class AvatarDanceService {
                 mode,
                 generation,
                 startedAtMs,
+                observedAtMs: animationMonotonicNow(),
                 geometry,
                 frameHandle: null
             };
@@ -654,10 +661,9 @@ export class AvatarDanceService {
             this.#applyLapSample(operation, Object.freeze({ translateY: 0, rotateDegrees: 0 }));
             return;
         }
-        const now = Number.isFinite(Number(timestamp))
-            ? Number(this.#context?.epochNow?.() ?? Date.now())
-            : Date.now();
-        const elapsedMs = Math.max(0, now - operation.startedAtMs);
+        const elapsedMs = this.#context?.epochNow
+            ? Math.max(0, Number(this.#context.epochNow()) - operation.startedAtMs)
+            : animationElapsedMs(operation.startedAtMs, operation.observedAtMs);
         const sample = operation.mode === "lap_dance"
             ? LapDance.sample({ elapsedMs })
             : LapBounce.sample({
@@ -752,6 +758,8 @@ export class AvatarDanceService {
     }
 
     #removeMotionPreferenceListener() {
+        this.#motionPreferenceWindow?.removeEventListener?.(AVATAR_MOTION_CHANGED, this.#motionQueryListener);
+        this.#motionPreferenceWindow = null;
         if (this.#motionQuery && this.#motionQueryListener) {
             this.#motionQuery.removeEventListener?.("change", this.#motionQueryListener);
         }
@@ -760,6 +768,9 @@ export class AvatarDanceService {
     }
 
     #reducedMotion() {
+        const preference = getAvatarMotionPreference();
+        if (preference === 'on') return false;
+        if (preference === 'reduced') return true;
         return Boolean(this.#motionQuery?.matches);
     }
 
@@ -814,11 +825,11 @@ export class AvatarDanceService {
         const participants = presentation.visibleMemberIds
             .map(participantId => this.#runtime.state?.get?.(participantId))
             .filter(Boolean);
-        const now = Number.isFinite(Number(timestamp))
-            ? Number(this.#context?.epochNow?.() ?? Date.now())
-            : Date.now();
         const strategy = this.#registry.get(operation.danceId);
-        const requested = strategy.offset({ elapsedMs: Math.max(0, now - operation.startedAtMs) });
+        const elapsedMs = this.#context?.epochNow
+            ? Math.max(0, Number(this.#context.epochNow()) - operation.startedAtMs)
+            : animationElapsedMs(operation.startedAtMs, operation.observedAtMs);
+        const requested = strategy.offset({ elapsedMs });
         const stage = this.#context?.getStageDimensions?.()
             || this.#context?.stageSize?.()
             || {};

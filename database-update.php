@@ -100,6 +100,65 @@ function database_update_admin_login_candidate(PDO $pdo, string $login): ?array
     return is_array($candidate) ? $candidate : null;
 }
 
+function database_update_installation_owner_label(array $candidate): string
+{
+    $displayName = trim((string)($candidate['display_name'] ?? ''));
+    $username = trim((string)($candidate['username'] ?? ''));
+    $email = trim((string)($candidate['email'] ?? ''));
+    if ($displayName !== '' && $username !== '' && strcasecmp($displayName, $username) !== 0) {
+        return $displayName . ' (' . $username . ')';
+    }
+    if ($displayName !== '') return $displayName;
+    if ($username !== '') return $username;
+    if ($email !== '') return $email;
+    return 'Administrator ' . (int)$candidate['user_id'];
+}
+
+function database_update_installation_owner_selection_required(PDO $pdo, array $status): bool
+{
+    if (moderation_identity_owner($pdo) !== null) return false;
+    $identityPending = false;
+    foreach ((array)($status['pending'] ?? []) as $migration) {
+        if (($migration['id'] ?? '') === '2026-07-27-002-build-000051-identity-policy-trust') {
+            $identityPending = true;
+            break;
+        }
+    }
+    return $identityPending && count(database_migration_installation_owner_candidates($pdo)) > 1;
+}
+
+function database_update_schema_diagnostic(PDO $pdo, array $status): array
+{
+    $engine = db_driver($pdo) === 'mysql' ? 'mysql' : 'sqlite';
+    $tables = [];
+    foreach (database_migration_table_names($pdo) as $table) {
+        $tables[$table] = [
+            'columns' => database_migration_columns($pdo, $table),
+            'unique_keys' => database_migration_unique_key_sets($pdo, $table),
+            'foreign_keys' => database_migration_foreign_keys($pdo, $table),
+        ];
+    }
+    $candidates = [];
+    foreach (database_migration_supported_predecessor_registry() as $candidate) {
+        $candidates[] = [
+            'id' => (string)$candidate['id'],
+            'stored_schema_version' => $candidate['stored_schema_version'],
+            'inventory_sha256' => (string)($candidate['inventory_sha256'][$engine] ?? ''),
+        ];
+    }
+    return [
+        'schema' => 'corechat-owner-database-schema-diagnostic-v1',
+        'engine' => $engine,
+        'stored_schema_version' => $status['stored_schema_version'] ?? null,
+        'required_schema_version' => $status['required_schema_version'] ?? null,
+        'variant' => $status['variant'] ?? null,
+        'inventory_sha256' => database_migration_inventory_fingerprint($pdo),
+        'migration_state_present' => database_migration_read_setting($pdo, CORE_MIGRATION_STATE_KEY) !== null,
+        'supported_predecessor_candidates' => $candidates,
+        'tables' => $tables,
+    ];
+}
+
 $actor = database_update_actor($pdo);
 $requestMethod = (string)($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $requestAction = (string)($_POST['action'] ?? '');
@@ -118,7 +177,7 @@ if ($requestMethod === 'POST') {
                 throw new CoreMigrationException('Administrator sign-in was not accepted.', 'MIGRATION_LOGIN_FAILED', 403);
             }
             auth_rate_clear_identifier($pdo, 'database-update-login', $login);
-            authenticate_user((int)$candidate['id']);
+            security_mark_authenticated((int)$candidate['id']);
             $actor = $candidate;
             $notice = 'Administrator authentication confirmed. Review the update status before continuing.';
         } elseif ($action === 'compatibility_policy') {
@@ -142,10 +201,25 @@ if ($requestMethod === 'POST') {
                 : 'Database/release compatibility enforcement was ' . (!empty($policy['enabled']) ? 'enabled.' : 'disabled.');
         } elseif ($action === 'update') {
             $actor = database_update_require_admin($pdo);
+            $upgradeContext = [];
+            $installationOwnerUserId = (int)($_POST['installation_owner_user_id'] ?? 0);
+            $preActionStatus = database_migration_status($pdo);
+            if (database_update_installation_owner_selection_required($pdo, $preActionStatus)
+                && $installationOwnerUserId < 1) {
+                throw new CoreMigrationException(
+                    'Choose the existing Administrator who will become the Installation Owner before resuming the database update.',
+                    'INSTALLATION_OWNER_SELECTION_REQUIRED',
+                    409
+                );
+            }
+            if ($installationOwnerUserId > 0) {
+                $upgradeContext['installation_owner_user_id'] = $installationOwnerUserId;
+            }
             $result = database_recovery_run_update(
                 $pdo,
                 (int)$actor['id'],
-                (string)($_POST['request_public_id'] ?? '')
+                (string)($_POST['request_public_id'] ?? ''),
+                $upgradeContext
             );
             $notice = !empty($result['no_op'])
                 ? 'The database was already current. No database update ran.'
@@ -179,7 +253,7 @@ if ($requestMethod === 'POST') {
                 (int)$actor['id'],
                 (string)($_POST['recovery_set_id'] ?? '')
             );
-            $notice = 'Prepared maintenance was exited safely. The verified recovery set remains preserved.';
+            redirect_to('/login.php');
         } elseif ($action === 'reconcile_recovery') {
             $actor = database_update_require_admin($pdo);
             database_recovery_reconcile_interrupted(
@@ -297,8 +371,11 @@ if (empty($status['backup_readiness']['ok'])) {
 }
 $automaticUpdateBlockers = [];
 if ($installedRelease === null) {
-    $automaticUpdateBlockers[] = 'The installed application release is not certified: '
-        . (string)($recoveryStatus['installed_release_error_code'] ?? 'INSTALLED_RELEASE_UNAVAILABLE') . '.';
+    $releaseErrorDetail = trim((string)($recoveryStatus['installed_release_error_message'] ?? ''));
+    $automaticUpdateBlockers[] = $releaseErrorDetail !== ''
+        ? $releaseErrorDetail
+        : 'The installed application release is not certified: '
+            . (string)($recoveryStatus['installed_release_error_code'] ?? 'INSTALLED_RELEASE_UNAVAILABLE') . '.';
 }
 if (!$status['release_complete']) {
     $automaticUpdateBlockers[] = 'The ordered database update package is incomplete.';
@@ -319,6 +396,9 @@ if (empty($status['backup_readiness']['ok'])) {
 if ($recoveryPairUnavailable) {
     $automaticUpdateBlockers[] = 'The active private recovery-set record is incomplete or unavailable.';
 }
+$databaseSchemaDiagnostic = $isAdmin && (string)$status['kind'] === 'unknown'
+    ? database_update_schema_diagnostic($pdo, $status)
+    : null;
 $applicationFilesChangedAfterPrepare = $preparedMaintenance
     && $recoverySet !== null
     && $installedRelease !== null
@@ -327,6 +407,8 @@ $applicationFilesChangedAfterPrepare = $preparedMaintenance
         (string)$installedRelease['release_id']
     );
 $hasVerifiedRecoveryBackup = is_array($status['migration_state']['backup'] ?? null);
+$installationOwnerCandidates = database_migration_installation_owner_candidates($pdo);
+$installationOwnerSelectionRequired = database_update_installation_owner_selection_required($pdo, $status);
 $updateActionLabel = $status['kind'] === 'failed'
     ? ($hasVerifiedRecoveryBackup
         ? 'Resume Verified Database Recovery'
@@ -380,6 +462,7 @@ $updateActionLabel = $status['kind'] === 'failed'
         <dt>Required version</dt><dd><?= e((string)$status['required_schema_version']) ?></dd>
         <dt>Detected database state</dt><dd><?= e(database_update_public_variant_label((array)$status['variant'])) ?></dd>
         <dt>Pending database updates</dt><dd><?= (int)$status['pending_count'] ?></dd>
+        <dt>Protected data repairs</dt><dd><?= (int)($status['repairable_completed_count'] ?? 0) ?></dd>
         <dt>Database update package</dt><dd><?= $status['release_complete'] ? 'Complete' : 'Blocked' ?></dd>
         <dt>Exclusive lock</dt><dd><?= e((string)$status['lock_status']) ?></dd>
         <dt>Backup readiness</dt><dd><?= !empty($status['backup_readiness']['ok']) ? 'Ready' : 'Blocked' ?></dd>
@@ -411,9 +494,12 @@ $updateActionLabel = $status['kind'] === 'failed'
         <?php endif; ?>
       </dl>
 
-      <?php if ($status['pending']): ?>
+      <?php if ($status['pending'] || !empty($status['repairable_completed'])): ?>
         <h2>Ordered update</h2>
         <ol>
+          <?php foreach (($status['repairable_completed'] ?? []) as $repair): ?>
+            <li><?= e(database_update_public_migration_title((string)$repair['title'])) ?> data repair</li>
+          <?php endforeach; ?>
           <?php foreach ($status['pending'] as $migration): ?>
             <li><?= e(database_update_public_migration_title((string)$migration['title'])) ?></li>
           <?php endforeach; ?>
@@ -502,11 +588,17 @@ $updateActionLabel = $status['kind'] === 'failed'
           </form>
         <?php endif; ?>
         <?php if (!$maintenanceRequired): ?>
+          <div class="settings-warning" role="status">
+            <strong>CoreChat is ready.</strong>
+            <p>The application files and database are compatible. No further update action is required.</p>
+            <a class="btn btn-primary" href="<?= e(app_url('/login.php')) ?>">Continue to CoreChat</a>
+          </div>
+          <h2>Optional future file update preparation</h2>
           <div class="settings-warning">
-            Prepare for Update is optional. It enters maintenance and creates one verified private recovery set pairing
-            a transaction-consistent database recovery point with an inventory-driven snapshot of this installed
-            deployable application release. Configuration, databases, uploads, private storage, and other
-            installation-specific content are excluded from the application snapshot.
+            Use this only before uploading a different future application release. It enters maintenance and creates
+            one verified private recovery set pairing a transaction-consistent database recovery point with an
+            inventory-driven snapshot of this installed deployable application release. Configuration, databases,
+            uploads, private storage, and other installation-specific content are excluded from the application snapshot.
           </div>
           <form class="form-grid" method="post">
             <?= csrf_input() ?>
@@ -520,10 +612,10 @@ $updateActionLabel = $status['kind'] === 'failed'
               class="btn btn-primary"
               type="submit"
               <?= !$prepareAllowed ? 'disabled aria-disabled="true" aria-describedby="database-prepare-prerequisites"' : '' ?>
-            >Prepare for Update</button>
+            >Prepare Recovery Set for a Future File Update</button>
             <?php if (!$prepareAllowed): ?>
               <div class="settings-warning database-update-prerequisites" id="database-prepare-prerequisites" role="status">
-                <strong>Prepare for Update is unavailable.</strong>
+                <strong>Future file-update preparation is unavailable.</strong>
                 <ul>
                   <?php foreach ($prepareBlockers as $blocker): ?><li><?= e($blocker) ?></li><?php endforeach; ?>
                 </ul>
@@ -559,7 +651,7 @@ $updateActionLabel = $status['kind'] === 'failed'
               <?= csrf_input() ?>
               <input type="hidden" name="action" value="exit_prepared">
               <input type="hidden" name="recovery_set_id" value="<?= e((string)$recoveryStatus['active_recovery_set_id']) ?>">
-              <button class="btn" type="submit">Exit Prepared Maintenance</button>
+              <button class="btn" type="submit">Exit Maintenance and Return to CoreChat</button>
             </form>
           <?php endif; ?>
         <?php elseif ($recoveryPairUnavailable): ?>
@@ -590,7 +682,7 @@ $updateActionLabel = $status['kind'] === 'failed'
             <?= csrf_input() ?>
             <input type="hidden" name="action" value="verify_recovery">
             <input type="hidden" name="recovery_set_id" value="<?= e((string)$recoverySet['recovery_set_id']) ?>">
-            <button class="btn" type="submit">Verify Again</button>
+            <button class="btn" type="submit">Verify Recovery Set Again</button>
           </form>
           <form class="form-grid" method="post">
             <?= csrf_input() ?>
@@ -608,7 +700,7 @@ $updateActionLabel = $status['kind'] === 'failed'
             <?= $preparedMaintenance
               ? ($applicationFilesChangedAfterPrepare
                   ? 'The deployable application release changed after preparation. This action revalidates the paired recovery set, applies each pending database update exactly once, and releases maintenance only after the uploaded release and database are compatible.'
-                  : 'The paired recovery set is prepared. Overwrite only the deployable application files, then reopen this page. You may exit prepared maintenance safely while the application and database remain unchanged.')
+                  : 'The paired recovery set is prepared for a future application-file upload. If you are not uploading another release now, exit maintenance and return to CoreChat.')
               : 'This action first creates and independently verifies a private database backup, then applies every pending database update in order. MariaDB backups stream directly into private server-side storage; the browser never downloads or re-uploads them.' ?>
           </div>
           <?php if (!$preparedMaintenance || $applicationFilesChangedAfterPrepare): ?>
@@ -616,6 +708,24 @@ $updateActionLabel = $status['kind'] === 'failed'
               <?= csrf_input() ?>
               <input type="hidden" name="action" value="update">
               <input type="hidden" name="request_public_id" value="<?= e($updateRequestPublicId) ?>">
+              <?php if ($installationOwnerSelectionRequired): ?>
+                <div class="settings-warning" role="status">
+                  <strong>Installation Owner selection required</strong>
+                  <p>
+                    Choose which existing Administrator will become the unique Installation Owner. This choice is
+                    applied only after the existing private database backup is revalidated.
+                  </p>
+                </div>
+                <label>
+                  Installation Owner
+                  <select name="installation_owner_user_id" required>
+                    <option value="">Choose an Administrator</option>
+                    <?php foreach ($installationOwnerCandidates as $candidate): ?>
+                      <option value="<?= (int)$candidate['user_id'] ?>"><?= e(database_update_installation_owner_label($candidate)) ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </label>
+              <?php endif; ?>
               <button
                 class="btn btn-primary"
                 type="submit"
@@ -630,20 +740,30 @@ $updateActionLabel = $status['kind'] === 'failed'
                 </div>
               <?php endif; ?>
             </form>
+            <?php if ($databaseSchemaDiagnostic !== null): ?>
+              <details class="settings-warning">
+                <summary>Owner database schema diagnostic</summary>
+                <p>This read-only diagnostic contains database structure names and fingerprints only. It contains no account, message, gesture, or other row content.</p>
+                <pre class="policy-document-content"><?= e((string)json_encode(
+                  $databaseSchemaDiagnostic,
+                  JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
+                )) ?></pre>
+              </details>
+            <?php endif; ?>
           <?php endif; ?>
           <?php if ($preparedMaintenance && $recoverySet !== null): ?>
             <form class="form-grid" method="post">
               <?= csrf_input() ?>
               <input type="hidden" name="action" value="verify_recovery">
               <input type="hidden" name="recovery_set_id" value="<?= e((string)$recoverySet['recovery_set_id']) ?>">
-              <button class="btn" type="submit">Verify Again</button>
+              <button class="btn" type="submit">Verify Recovery Set Again (Stay in Maintenance)</button>
             </form>
             <?php if (!$applicationFilesChangedAfterPrepare): ?>
               <form class="form-grid" method="post">
                 <?= csrf_input() ?>
                 <input type="hidden" name="action" value="exit_prepared">
                 <input type="hidden" name="recovery_set_id" value="<?= e((string)$recoverySet['recovery_set_id']) ?>">
-                <button class="btn" type="submit">Exit Prepared Maintenance</button>
+                <button class="btn btn-primary" type="submit">Exit Maintenance and Return to CoreChat</button>
               </form>
             <?php endif; ?>
           <?php endif; ?>

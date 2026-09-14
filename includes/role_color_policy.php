@@ -11,6 +11,7 @@ function role_color_default_palette(): array
         'admin' => ['background' => '#560819', 'text' => '#ffffff'],
         'developer' => ['background' => '#142d74', 'text' => '#ffffff'],
         'guide' => ['background' => '#095e3a', 'text' => '#ffffff'],
+        'moderator' => ['background' => '#65388f', 'text' => '#ffffff'],
         'owner' => ['background' => '#9a6914', 'text' => '#ffffff'],
         'user' => ['background' => '#232630', 'text' => '#ffffff'],
     ];

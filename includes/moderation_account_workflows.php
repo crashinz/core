@@ -7,6 +7,8 @@ declare(strict_types=1);
  */
 
 const MODERATION_ACCOUNT_OUTSIDE_MODE_SETTING = 'moderation_trust_outside_content_confirmation_mode';
+const MODERATION_ACCOUNT_OUTSIDE_APPROVAL_ID = 'account-content-approval-v1';
+const MODERATION_ACCOUNT_OUTSIDE_APPROVAL_OPERATION = 'account-content-approval';
 const MODERATION_ACCOUNT_OUTSIDE_MODES = [
     'every-upload-import',
     'public-only',
@@ -662,15 +664,10 @@ function moderation_account_decide_case(PDO $pdo, int $actorUserId, array $input
 
 function moderation_account_outside_confirmation_text(string $operation): array
 {
-    $website = str_contains($operation, 'room_import');
-    return $website ? [
+    return [
         'title' => 'Content permission and safety confirmation',
-        'body' => "By continuing, you confirm that you own this website content or have permission from the rights holder to copy and store it on this Chatspace server. You also confirm that the website and its assets do not contain unlawful, sexually explicit, exploitative, abusive, or otherwise prohibited material, and that importing them will not violate copyright, privacy, or other people's rights.",
-        'checkbox' => 'I confirm that I am authorized to import and store this content and that it complies with the community rules.',
-    ] : [
-        'title' => 'Upload confirmation',
-        'body' => "By uploading this file, you confirm that you own it or have permission to use and store it on this server. You also confirm that it does not contain unlawful, sexually explicit, exploitative, abusive, or otherwise prohibited content and does not violate copyright, privacy, or other people's rights.",
-        'checkbox' => 'I confirm that I am permitted to upload this content and that it complies with the community rules.',
+        'body' => "This is a one-time approval for your account, covering website imports, avatars, and other outside content. For every upload or import, you remain responsible for owning the content or having permission to use, copy, and store it on this server. Content must not be unlawful, sexually explicit, exploitative, abusive, or otherwise prohibited, and must not violate copyright, privacy, or other people's rights. Approval does not bypass community permissions, validation, or moderation.",
+        'checkbox' => 'I agree to these content permission and safety requirements for my account.',
     ];
 }
 
@@ -699,6 +696,7 @@ function moderation_account_outside_policy(PDO $pdo, string $operation, array $c
         'storedMode' => $stored,
         'effectiveMode' => $effective,
         'required' => $required,
+        'approvalScope' => 'account',
         'reminder' => $effective === 'reminder',
         'becomesPublic' => $becomesPublic,
         'termsAndRulesRemainMandatory' => true,
@@ -709,6 +707,49 @@ function moderation_account_outside_policy(PDO $pdo, string $operation, array $c
     ];
 }
 
+function moderation_account_outside_approval_token(int $actorUserId): string
+{
+    return strtoupper(hash('sha256', implode('|', [
+        MODERATION_ACCOUNT_OUTSIDE_APPROVAL_ID,
+        (string)$actorUserId,
+        MODERATION_ACCOUNT_OUTSIDE_APPROVAL_OPERATION,
+        'once-per-account',
+    ])));
+}
+
+function moderation_account_has_outside_approval(PDO $pdo, int $actorUserId): bool
+{
+    $statement = $pdo->prepare(
+        'SELECT token_sha256 FROM outside_content_confirmations
+         WHERE confirmation_id=? AND actor_user_id=? AND operation=?'
+    );
+    $statement->execute([
+        MODERATION_ACCOUNT_OUTSIDE_APPROVAL_ID, $actorUserId,
+        MODERATION_ACCOUNT_OUTSIDE_APPROVAL_OPERATION,
+    ]);
+    $token = $statement->fetchColumn();
+    return is_string($token) && hash_equals(moderation_account_outside_approval_token($actorUserId), $token);
+}
+
+function moderation_account_remember_outside_approval(PDO $pdo, int $actorUserId): void
+{
+    try {
+        $pdo->prepare(
+            'INSERT INTO outside_content_confirmations
+             (confirmation_id,actor_user_id,operation,mode,token_sha256)
+             VALUES (?,?,?,?,?)'
+        )->execute([
+            MODERATION_ACCOUNT_OUTSIDE_APPROVAL_ID, $actorUserId,
+            MODERATION_ACCOUNT_OUTSIDE_APPROVAL_OPERATION, 'once-per-account',
+            moderation_account_outside_approval_token($actorUserId),
+        ]);
+    } catch (PDOException $error) {
+        // A concurrent confirmed request may already have stored the same receipt.
+        // Other database errors must remain visible, not silently grant approval.
+        if (!moderation_account_has_outside_approval($pdo, $actorUserId)) throw $error;
+    }
+}
+
 function moderation_account_authorize_outside_content(
     PDO $pdo,
     int $actorUserId,
@@ -717,6 +758,41 @@ function moderation_account_authorize_outside_content(
 ): array {
     $policy = moderation_account_outside_policy($pdo, $operation, $context);
     if (!$policy['required']) return $policy;
+    if ($actorUserId < 1) {
+        throw new ModerationAccountWorkflowException('Authentication is required.', 'AUTHENTICATION_REQUIRED', 401);
+    }
+    $approvedPolicy = array_replace($policy, [
+        'required' => false,
+        'approved' => true,
+        'confirmationId' => MODERATION_ACCOUNT_OUTSIDE_APPROVAL_ID,
+        'idempotentReplay' => true,
+    ]);
+    if (moderation_account_has_outside_approval($pdo, $actorUserId)) return $approvedPolicy;
+
+    // Preserve genuine approvals recorded before account-wide persistence.
+    // Role, account creation, and an unverified/corrupt row never imply consent.
+    $previous = $pdo->prepare(
+        'SELECT confirmation_id,operation,mode,token_sha256 FROM outside_content_confirmations
+         WHERE actor_user_id=? AND operation<>?'
+    );
+    $previous->execute([$actorUserId, MODERATION_ACCOUNT_OUTSIDE_APPROVAL_OPERATION]);
+    $legacyApproved = false;
+    while ($row = $previous->fetch(PDO::FETCH_ASSOC)) {
+        if (!in_array($row['mode'], ['every-upload-import', 'public-only'], true)) continue;
+        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/', (string)$row['confirmation_id'])) continue;
+        $expected = strtoupper(hash('sha256', implode('|', [
+            $row['confirmation_id'], (string)$actorUserId, $row['operation'], $row['mode'],
+        ])));
+        if (hash_equals($expected, (string)$row['token_sha256'])) {
+            $legacyApproved = true;
+            break;
+        }
+    }
+    $previous->closeCursor();
+    if ($legacyApproved) {
+        moderation_account_remember_outside_approval($pdo, $actorUserId);
+        return $approvedPolicy;
+    }
     $confirmed = !empty($context['outside_content_confirmed'])
         || (string)($_SERVER['HTTP_X_OUTSIDE_CONTENT_CONFIRMED'] ?? '') === '1'
         || (string)($_POST['outside_content_confirmed'] ?? '') === '1';
@@ -734,32 +810,8 @@ function moderation_account_authorize_outside_content(
             ['confirmation' => $policy]
         );
     }
-    $token = strtoupper(hash('sha256', implode('|', [
-        $confirmationId, (string)$actorUserId, $operation, (string)$policy['effectiveMode'],
-    ])));
-    $existing = $pdo->prepare(
-        'SELECT token_sha256,created_at FROM outside_content_confirmations
-         WHERE confirmation_id=? AND actor_user_id=? AND operation=?'
-    );
-    $existing->execute([$confirmationId, $actorUserId, $operation]);
-    $row = $existing->fetch();
-    if (is_array($row)) {
-        if (!hash_equals((string)$row['token_sha256'], $token)
-            || strtotime((string)$row['created_at']) < time() - 900) {
-            throw new ModerationAccountWorkflowException(
-                'The outside-content confirmation is stale or does not match this transaction.',
-                'OUTSIDE_CONTENT_CONFIRMATION_STALE',
-                409
-            );
-        }
-        return $policy + ['confirmationId' => $confirmationId, 'idempotentReplay' => true];
-    }
-    $pdo->prepare(
-        'INSERT INTO outside_content_confirmations
-         (confirmation_id,actor_user_id,operation,mode,token_sha256)
-         VALUES (?,?,?,?,?)'
-    )->execute([$confirmationId, $actorUserId, $operation, $policy['effectiveMode'], $token]);
-    return $policy + ['confirmationId' => $confirmationId, 'idempotentReplay' => false];
+    moderation_account_remember_outside_approval($pdo, $actorUserId);
+    return array_replace($approvedPolicy, ['idempotentReplay' => false]);
 }
 
 function moderation_account_session_authorization(PDO $pdo, int $userId): array

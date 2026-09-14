@@ -12,7 +12,7 @@ import {
 
     ChatPollAdapter
 
-} from "./chat-poll-adapter.js";
+} from "./chat-poll-adapter.js?v=20260913-background-chime";
 
 import {
 

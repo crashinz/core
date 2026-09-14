@@ -290,11 +290,14 @@ function gesture_capability_hydrate_snapshot(PDO $pdo, array $gesture): array
         }
 
         if (function_exists('gesture_package_media_url')) {
-            $hydrated['gif_path'] = gesture_package_media_url($source, 'animation', 'message');
+            $messageScope = in_array(($gesture['scope'] ?? null), ['server', 'personal'], true)
+                ? (string)$gesture['scope']
+                : null;
+            $hydrated['gif_path'] = gesture_package_media_url($source, 'animation', 'message', $messageScope);
             $hydrated['gif_url'] = $hydrated['gif_path'];
-            $hydrated['poster_path'] = gesture_package_media_url($source, 'poster', 'message');
+            $hydrated['poster_path'] = gesture_package_media_url($source, 'poster', 'message', $messageScope);
             $hydrated['poster_url'] = $hydrated['poster_path'];
-            $hydrated['audio_path'] = gesture_package_media_url($source, 'audio', 'message');
+            $hydrated['audio_path'] = gesture_package_media_url($source, 'audio', 'message', $messageScope);
             $hydrated['audio_url'] = $hydrated['audio_path'];
         }
     } catch (Throwable) {
@@ -345,11 +348,11 @@ function gesture_capability_hydrate_local_match(PDO $pdo, int $viewerUserId, arr
             return $hydrated;
         }
         if (function_exists('gesture_package_media_url')) {
-            $hydrated['gif_path'] = gesture_package_media_url($source, 'animation', 'message');
+            $hydrated['gif_path'] = gesture_package_media_url($source, 'animation', 'message', 'personal');
             $hydrated['gif_url'] = $hydrated['gif_path'];
-            $hydrated['poster_path'] = gesture_package_media_url($source, 'poster', 'message');
+            $hydrated['poster_path'] = gesture_package_media_url($source, 'poster', 'message', 'personal');
             $hydrated['poster_url'] = $hydrated['poster_path'];
-            $hydrated['audio_path'] = gesture_package_media_url($source, 'audio', 'message');
+            $hydrated['audio_path'] = gesture_package_media_url($source, 'audio', 'message', 'personal');
             $hydrated['audio_url'] = $hydrated['audio_path'];
         }
     } catch (Throwable) {

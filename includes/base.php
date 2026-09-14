@@ -7,13 +7,28 @@ const CHATSPACE_LEGACY_SCHEMA_VERSION = '2026-07-19-avatar-visibility-policy';
 const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
     '2026-07-23-build-000048-part-1',
     '2026-07-24-build-000048-part-3',
+    '2026-07-26-post-build-000050-part-1',
     '2026-07-27-build-000051-part-7',
     '2026-07-31-post-build-000052-settings-terminology',
     '2026-07-31-post-build-000052-optional-core-voice-webcam',
     '2026-07-31-build-000053-delete-account',
+    '2026-08-02-post-build-000055-direct-p2p-file-sharing',
+    '2026-08-03-build-000056-multiplayer-game-framework',
+    '2026-08-03-build-000059-five-dice-extension',
+    '2026-08-04-build-000060-later-ocx-game-conversions',
+    '2026-08-05-build-000061-backgammon',
+    '2026-08-24-build-000063-live-website-rooms',
+    '2026-08-24-build-000063-live-website-capability-catalog',
+    '2026-08-25-post-build-000063-first-party-canvas',
+    '2026-08-30-owner-identity-nameplates',
+    '2026-09-01-runtime-audit-runs',
+    '2026-09-12-live-website-official-successors',
+    '2026-09-13-avatar-exact-display-size',
 ];
-const CHATSPACE_SCHEMA_VERSION = '2026-08-02-post-build-000055-direct-p2p-file-sharing';
-const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 250;
+const CHATSPACE_SCHEMA_VERSION = '2026-09-14-shared-game-recording';
+const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 5000;
+const CHATSPACE_SQLITE_POLL_BUSY_TIMEOUT_MS = 100;
+const CHATSPACE_SQLITE_POLL_RETRY_BUDGET_MS = 1500;
 
 function chatspace_application_version(): string {
     $path = dirname(__DIR__) . '/VERSION';
@@ -27,7 +42,9 @@ if (!defined('CHATSPACE_DB_DRIVER') && is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
 }
 require_once __DIR__ . '/network_privacy.php';
-security_bootstrap();
+if (!chatspace_canonical_metadata_bootstrap_enabled()) {
+    security_bootstrap();
+}
 
 require_once __DIR__ . '/first_party_extensions.php';
 require_once __DIR__ . '/private_site_branding.php';
@@ -41,10 +58,12 @@ require_once __DIR__ . '/optional_core_voice_webcam.php';
 require_once __DIR__ . '/room_background_upload.php';
 require_once __DIR__ . '/server_events.php';
 require_once __DIR__ . '/tool_log.php';
+require_once __DIR__ . '/canvas_extension.php';
 require_once __DIR__ . '/role_color_policy.php';
 require_once __DIR__ . '/gesture_capability_policy.php';
 require_once __DIR__ . '/moderation_trust.php';
 require_once __DIR__ . '/moderation_identity_policy.php';
+require_once __DIR__ . '/live_website_rooms.php';
 require_once __DIR__ . '/moderation_account_workflows.php';
 require_once __DIR__ . '/moderation_safety.php';
 require_once __DIR__ . '/p2p_transport_policy.php';
@@ -52,6 +71,11 @@ require_once __DIR__ . '/p2p_avatar_policy.php';
 require_once __DIR__ . '/server_media.php';
 require_once __DIR__ . '/p2p_transfer.php';
 require_once __DIR__ . '/message_protection.php';
+require_once __DIR__ . '/multiplayer_game_framework.php';
+require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/five_dice_identity.php';
+require_once __DIR__ . '/five_dice_media_pack.php';
+require_once __DIR__ . '/ocx_game_media_pack.php';
 require_once __DIR__ . '/retention_lifecycle.php';
 require_once __DIR__ . '/network_moderation.php';
 require_once __DIR__ . '/operational_capacity.php';
@@ -61,6 +85,8 @@ require_once __DIR__ . '/transport_policy.php';
 require_once __DIR__ . '/system_health.php';
 require_once __DIR__ . '/settings_registry.php';
 require_once __DIR__ . '/runtime_issue_service.php';
+require_once __DIR__ . '/runtime_audit_service.php';
+require_once __DIR__ . '/limit_event_service.php';
 require_once __DIR__ . '/gesture_catalog_service.php';
 require_once __DIR__ . '/gesture_package_service.php';
 require_once __DIR__ . '/media_signal_service.php';
@@ -122,7 +148,7 @@ function chatspace_configured(): bool {
     return defined('CHATSPACE_DB_DRIVER');
 }
 
-if (!chatspace_configured() && !chatspace_is_setup_request()) {
+if (!chatspace_canonical_metadata_bootstrap_enabled() && !chatspace_configured() && !chatspace_is_setup_request()) {
     redirect_to('/setup.php');
 }
 
@@ -162,7 +188,16 @@ function db_open_configured_connection(): PDO {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->exec('PRAGMA foreign_keys = ON');
-        $pdo->exec('PRAGMA busy_timeout = ' . CHATSPACE_SQLITE_BUSY_TIMEOUT_MS);
+        // Poll connections can encounter contention during compatibility and
+        // reconciliation, before their operation-level retry wrapper begins.
+        $busyTimeoutMs = defined('CHATSPACE_SQLITE_POLL_REQUEST') && CHATSPACE_SQLITE_POLL_REQUEST
+            ? CHATSPACE_SQLITE_POLL_BUSY_TIMEOUT_MS
+            : CHATSPACE_SQLITE_BUSY_TIMEOUT_MS;
+        $pdo->exec('PRAGMA busy_timeout = ' . $busyTimeoutMs);
+        $journalMode = strtolower((string)$pdo->query('PRAGMA journal_mode')->fetchColumn());
+        if ($journalMode !== 'memory') {
+            $pdo->exec('PRAGMA synchronous = NORMAL');
+        }
     }
     return $pdo;
 }
@@ -188,13 +223,18 @@ function db(): PDO {
     $candidate = db_migration_connection();
     database_compatibility_require_runtime($candidate);
     $GLOBALS['CHATSPACE_RUNTIME_PDO'] = $candidate;
-    if (function_exists('account_deletion_reconcile_file_journals')) {
-        account_deletion_reconcile_file_journals($candidate);
-    }
-    if (function_exists('server_media_schema_valid')
-        && server_media_schema_valid($candidate)
-        && function_exists('server_media_runtime_reconcile')) {
-        server_media_runtime_reconcile($candidate);
+    try {
+        if (function_exists('account_deletion_reconcile_file_journals')) {
+            account_deletion_reconcile_file_journals($candidate);
+        }
+        if (function_exists('server_media_schema_valid')
+            && server_media_schema_valid($candidate)
+            && function_exists('server_media_runtime_reconcile')) {
+            server_media_runtime_reconcile($candidate);
+        }
+    } catch (Throwable $error) {
+        unset($GLOBALS['CHATSPACE_RUNTIME_PDO']);
+        throw $error;
     }
     return $GLOBALS['CHATSPACE_RUNTIME_PDO'];
 }
@@ -345,18 +385,129 @@ function db_is_transient_lock_error(Throwable $error): bool {
         || str_contains($message, 'lock wait timeout');
 }
 
-function db_with_sqlite_lock_retry(PDO $pdo, callable $operation, string $operationName): mixed {
+function db_with_sqlite_lock_retry(
+    PDO $pdo,
+    callable $operation,
+    string $operationName,
+    ?int $retryBudgetMs = null,
+    ?int $busyTimeoutMs = null
+): mixed {
     if (db_driver($pdo) !== 'sqlite') return $operation();
-    $delaysMs = [25, 75, 150];
-    foreach ($delaysMs as $attempt => $delayMs) {
+    static $deadlineByConnection = [];
+    $connectionId = spl_object_id($pdo);
+    $previousDeadline = $deadlineByConnection[$connectionId] ?? null;
+    $ownsDeadline = $retryBudgetMs !== null;
+    $previousBusyTimeoutMs = null;
+    $busyTimeoutChanged = false;
+    $delaysMs = [50, 150, 300, 600, 1200];
+    $attempt = 0;
+
+    try {
+        if ($ownsDeadline) {
+            $requestedDeadline = hrtime(true) + (max(1, $retryBudgetMs) * 1000000);
+            $deadlineByConnection[$connectionId] = $previousDeadline === null
+                ? $requestedDeadline
+                : min($previousDeadline, $requestedDeadline);
+        }
+        if ($busyTimeoutMs !== null) {
+            $previousBusyTimeoutMs = (int)$pdo->query('PRAGMA busy_timeout')->fetchColumn();
+            $boundedBusyTimeoutMs = max(0, min(60000, $busyTimeoutMs));
+            if ($boundedBusyTimeoutMs !== $previousBusyTimeoutMs) {
+                $pdo->exec('PRAGMA busy_timeout = ' . $boundedBusyTimeoutMs);
+                $busyTimeoutChanged = true;
+            }
+        }
+
+        while (true) {
+            try {
+                return $operation();
+            } catch (Throwable $error) {
+                if (!db_is_transient_lock_error($error) || !isset($delaysMs[$attempt])) throw $error;
+                $sleepMs = $delaysMs[$attempt++] + random_int(0, 15);
+                $deadline = $deadlineByConnection[$connectionId] ?? null;
+                if ($deadline !== null && ($deadline - hrtime(true)) <= ($sleepMs * 1000000)) {
+                    throw $error;
+                }
+                usleep($sleepMs * 1000);
+            }
+        }
+    } finally {
         try {
-            return $operation();
-        } catch (Throwable $error) {
-            if (!db_is_transient_lock_error($error) || $attempt === array_key_last($delaysMs)) throw $error;
-            usleep(($delayMs + random_int(0, 15)) * 1000);
+            if ($busyTimeoutChanged && $previousBusyTimeoutMs !== null) {
+                $pdo->exec('PRAGMA busy_timeout = ' . max(0, min(60000, $previousBusyTimeoutMs)));
+            }
+        } finally {
+            if ($ownsDeadline) {
+                if ($previousDeadline === null) unset($deadlineByConnection[$connectionId]);
+                else $deadlineByConnection[$connectionId] = $previousDeadline;
+            }
         }
     }
-    throw new RuntimeException('SQLite retry exhausted for ' . $operationName . '.');
+}
+
+function db_with_sqlite_poll_retry(PDO $pdo, callable $operation, string $operationName): mixed {
+    return db_with_sqlite_lock_retry(
+        $pdo,
+        $operation,
+        $operationName,
+        CHATSPACE_SQLITE_POLL_RETRY_BUDGET_MS,
+        CHATSPACE_SQLITE_POLL_BUSY_TIMEOUT_MS
+    );
+}
+
+function db_immediate_transaction_active(PDO $pdo, ?bool $setActive = null): bool {
+    static $activeByConnection = [];
+    $connectionId = spl_object_id($pdo);
+    if ($setActive !== null) {
+        if ($setActive) $activeByConnection[$connectionId] = true;
+        else unset($activeByConnection[$connectionId]);
+    }
+    return !empty($activeByConnection[$connectionId]);
+}
+
+function db_begin_write_transaction(PDO $pdo): bool {
+    if ($pdo->inTransaction() || db_immediate_transaction_active($pdo)) return false;
+    if (db_uses_mysql_syntax($pdo)) {
+        $pdo->beginTransaction();
+    } else {
+        try {
+            $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        } catch (PDOException $error) {
+            // PDO_SQLITE can report false from inTransaction() for a raw
+            // transaction. Join only its exact nested-BEGIN rejection; all
+            // other write failures remain fail-closed.
+            if (!str_contains(strtolower($error->getMessage()), 'cannot start a transaction within a transaction')) {
+                throw $error;
+            }
+            return false;
+        }
+        db_immediate_transaction_active($pdo, true);
+    }
+    return true;
+}
+
+function db_commit_write_transaction(PDO $pdo, bool $ownsTransaction): void {
+    if (!$ownsTransaction) return;
+    if (db_immediate_transaction_active($pdo)) {
+        // A failed SQLite COMMIT can leave the transaction open for rollback.
+        $pdo->exec('COMMIT');
+        db_immediate_transaction_active($pdo, false);
+        return;
+    }
+    if ($pdo->inTransaction()) $pdo->commit();
+}
+
+function db_rollback_write_transaction(PDO $pdo, bool $ownsTransaction): void {
+    if (!$ownsTransaction) return;
+    if (db_immediate_transaction_active($pdo)) {
+        try {
+            $pdo->exec('ROLLBACK');
+        } finally {
+            db_immediate_transaction_active($pdo, false);
+        }
+        return;
+    }
+    if ($pdo->inTransaction()) $pdo->rollBack();
 }
 
 function migrate_avatar_relationship_group_schema(PDO $pdo): void {
@@ -1513,7 +1664,7 @@ function seed_app_settings(PDO $pdo): void {
         'community_logo_path' => '',
         'diagnostic_screenshots_enabled' => '0',
         'diagnostic_screenshot_retention_days' => '0',
-    ], first_party_extension_setting_defaults(), private_site_branding_setting_defaults(), avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), optional_core_voice_webcam_setting_defaults(), p2p_avatar_setting_defaults(), server_media_setting_defaults(), p2p_transfer_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), transport_policy_setting_defaults(), settings_registry_setting_defaults());
+    ], first_party_extension_setting_defaults(), private_site_branding_setting_defaults(), avatar_size_policy_setting_defaults(), avatar_relationship_capacity_setting_defaults(), avatar_dance_capability_setting_defaults(), webcam_policy_setting_defaults(), optional_core_voice_webcam_runtime_setting_defaults(), p2p_avatar_setting_defaults(), server_media_setting_defaults(), p2p_transfer_setting_defaults(), role_color_setting_defaults(), gesture_capability_setting_defaults(), gesture_catalog_setting_defaults(), member_profiles_limit_setting_defaults(), transport_policy_setting_defaults(), settings_registry_setting_defaults(), flood_protection_setting_defaults());
     $stmt = $pdo->prepare(db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?,?)'
@@ -1796,6 +1947,16 @@ function authenticate_user(int $userId): void {
 function require_user(): array {
     $user = current_user();
     if (!$user) {
+        $isApi = str_contains(
+            str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? '')),
+            '/api/'
+        );
+        if ($isApi) {
+            json_out([
+                'error' => 'Authentication required.',
+                'code' => 'AUTH_REQUIRED',
+            ], 401);
+        }
         redirect_to('/login.php');
     }
     if (function_exists('moderation_identity_policy_acceptance_current')
@@ -1883,9 +2044,31 @@ function require_staff(array $roles = ['admin', 'developer']): array {
 }
 
 function json_out(array $data, int $status = 200): never {
+    try {
+        $encoded = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+    } catch (JsonException $error) {
+        $requestId = function_exists('api_exception_request_id') ? api_exception_request_id() : bin2hex(random_bytes(16));
+        $code = 'JSON_RESPONSE_ENCODING_FAILED';
+        $message = 'The server could not encode this response. Please try again.';
+        error_log(json_encode(['event' => 'json_response_encoding_failed', 'request_id' => $requestId, 'json_error' => $error->getCode()]));
+        if (function_exists('runtime_issue_queue_deferred')) {
+            try {
+                runtime_issue_queue_deferred((int)($_SESSION['user_id'] ?? 0), [
+                    'category' => 'server', 'component' => 'json-response', 'error_code' => $code,
+                    'message' => $message, 'severity' => 'error', 'request_correlation' => $requestId,
+                    'evidence' => ['requestId' => $requestId, 'jsonError' => $error->getCode()],
+                ]);
+            } catch (Throwable) { /* The correlated server log remains available. */ }
+        }
+        while (ob_get_level() > 0) ob_end_clean();
+        $status = 500;
+        header('X-Request-ID: ' . $requestId);
+        header('Cache-Control: no-store');
+        $encoded = json_encode(['error' => $message, 'code' => $code, 'request_id' => $requestId], JSON_UNESCAPED_SLASHES);
+    }
     http_response_code($status);
     header('Content-Type: application/json');
-    echo json_encode($data, JSON_UNESCAPED_SLASHES);
+    echo $encoded;
     exit;
 }
 
@@ -1954,8 +2137,10 @@ function csrf_input(): string {
     return '<input type="hidden" name="_csrf" value="' . e(csrf_token()) . '">';
 }
 
-csrf_protect_post();
-runtime_issue_install_server_capture();
+if (!chatspace_canonical_metadata_bootstrap_enabled()) {
+    csrf_protect_post();
+    runtime_issue_install_server_capture();
+}
 
 function avatar_relationship_migrate_group_foundation(PDO $pdo): void {
     $relationshipCount = (int)$pdo->query('SELECT COUNT(*) FROM avatar_relationships')->fetchColumn();
@@ -3126,17 +3311,9 @@ function avatar_relationship_create_pair_atomic(
     array $positions = [],
     ?string $lapSide = null
 ): array {
-    $ownsTransaction = !$pdo->inTransaction();
+    $ownsTransaction = db_begin_write_transaction($pdo);
 
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) {
-                $pdo->beginTransaction();
-            } else {
-                $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-            }
-        }
-
         $eligibility = avatar_relationship_creation_eligibility(
             $pdo,
             $sessionId,
@@ -3146,14 +3323,14 @@ function avatar_relationship_create_pair_atomic(
         );
 
         if (empty($eligibility['allowed'])) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            db_rollback_write_transaction($pdo, $ownsTransaction);
             return ['ok' => false, 'code' => 'RELATIONSHIP_CONFLICT'] + $eligibility;
         }
 
         $mode = avatar_relationship_mode($mode);
         $lapSide = $mode === 'lap' ? avatar_relationship_normalize_lap_side($lapSide) : null;
         if ($mode === 'lap' && $lapSide === null) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            db_rollback_write_transaction($pdo, $ownsTransaction);
             return avatar_relationship_operation_error(
                 'RELATIONSHIP_CONFLICT',
                 'Choose an available lap side.',
@@ -3164,7 +3341,7 @@ function avatar_relationship_create_pair_atomic(
         $initiator = avatar_relationship_locked_participant($pdo, $sessionId, $initiatorId);
         $target = avatar_relationship_locked_participant($pdo, $sessionId, $targetId);
         if (!$initiator || !$target) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            db_rollback_write_transaction($pdo, $ownsTransaction);
             return avatar_relationship_operation_error(
                 'RELATIONSHIP_CONFLICT',
                 'That participant is no longer available.',
@@ -3180,7 +3357,7 @@ function avatar_relationship_create_pair_atomic(
             $lapSide
         );
         if (empty($admission['ok'])) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            db_rollback_write_transaction($pdo, $ownsTransaction);
             return $admission;
         }
         $pdo->prepare(
@@ -3251,7 +3428,7 @@ function avatar_relationship_create_pair_atomic(
 
         emit_event($pdo, $sessionId, 'link', $payload);
 
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        db_commit_write_transaction($pdo, $ownsTransaction);
 
         return [
             'ok' => true,
@@ -3260,7 +3437,7 @@ function avatar_relationship_create_pair_atomic(
             'relationship' => $relationship,
         ];
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        db_rollback_write_transaction($pdo, $ownsTransaction);
         throw $error;
     }
 }
@@ -3437,22 +3614,22 @@ function avatar_relationship_operation_error(string $code, string $message, stri
 }
 
 function avatar_relationship_transaction(PDO $pdo, callable $operation): array {
-    $ownsTransaction = !$pdo->inTransaction();
-    try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) {
-                $pdo->beginTransaction();
-            } else {
-                $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-            }
+    $transaction = static function() use ($pdo, $operation): array {
+        $ownsTransaction = db_begin_write_transaction($pdo);
+        try {
+            $result = $operation();
+            db_commit_write_transaction($pdo, $ownsTransaction);
+            return $result;
+        } catch (Throwable $error) {
+            db_rollback_write_transaction($pdo, $ownsTransaction);
+            throw $error;
         }
-        $result = $operation();
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
-        return $result;
-    } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
-        throw $error;
+    };
+
+    if (db_immediate_transaction_active($pdo) || $pdo->inTransaction()) {
+        return $transaction();
     }
+    return db_with_sqlite_lock_retry($pdo, $transaction, 'avatar-relationship-transaction');
 }
 
 function avatar_relationship_chat_legacy_keys(PDO $pdo, array $relationship): array {
@@ -6205,6 +6382,7 @@ function avatar_relationship_dissolve_locked(
     )->execute([$nextVersion, $endedAt, (int)$relationship['id']]);
     $relationship['version'] = $nextVersion;
     $relationship['status'] = 'dissolved';
+    avatar_size_restore_detached_members_locked($pdo, $members);
     avatar_relationship_close_pending_requests_locked($pdo, $sessionId, $relationship, 'relationship-dissolved');
     $tombstone = avatar_relationship_payload($pdo, (int)$relationship['id'], $actorParticipantId);
     $eventTombstone = avatar_relationship_public_event_snapshot($pdo, (int)$relationship['id']);
@@ -6559,6 +6737,7 @@ function avatar_relationship_mutate_member(
             "DELETE FROM avatar_relationship_members
               WHERE relationship_id = ? AND participant_id IN ($departingPlaceholders)"
         )->execute(array_merge([(int)$relationship['id']], $departingIds));
+        avatar_size_restore_detached_members_locked($pdo, $departingMembers);
         $formationNormalization = (string)$targetMember['relationship_role'] === 'normal'
             ? avatar_relationship_normalize_permanently_invalid_formation_locked(
                 $pdo,
@@ -7237,7 +7416,11 @@ function active_ejection_sql(string $alias = 're'): string {
 }
 
 function stale_cutoff(PDO $pdo, ?float $minutes = null): string {
-    $minutes = $minutes ?? app_setting_float($pdo, 'participant_idle_timeout_minutes', 2);
+    if ($minutes === null) {
+        $configured = corechat_limit_value($pdo, 'participant_idle_timeout_minutes', 2.0);
+        if ($configured === null) return '1970-01-01 00:00:00';
+        $minutes = (float)$configured;
+    }
     $minutes = max(0.5, min(120, $minutes));
     return gmdate('Y-m-d H:i:s', time() - (int)round($minutes * 60));
 }
@@ -7249,45 +7432,104 @@ function touch_participant_presence(PDO $pdo, array $participant, int $coalesceS
     if ($participantId <= 0 || $userId <= 0 || $sessionId <= 0) return false;
     $refreshBefore = gmdate('Y-m-d H:i:s', time() - max(1, $coalesceSeconds));
 
-    return db_with_sqlite_lock_retry($pdo, function () use (
-        $pdo, $participantId, $userId, $sessionId, $refreshBefore
-    ): bool {
-        $ownsTransaction = !$pdo->inTransaction();
-        try {
-            if ($ownsTransaction) {
-                if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-                else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-            }
-            $roomStmt = $pdo->prepare('SELECT room_id FROM room_sessions WHERE id = ? LIMIT 1');
-            $roomStmt->execute([$sessionId]);
-            $roomId = (int)($roomStmt->fetchColumn() ?: 0);
-            if ($roomId <= 0) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
-                return false;
-            }
+    // Most room requests arrive well inside the coalescing window. Avoiding a
+    // write transaction for that healthy path prevents simultaneous reloads
+    // and game polling from contending for SQLite's single writer slot.
+    $freshStmt = $pdo->prepare(
+        'SELECT rs.room_id,
+                p.last_seen_at AS participant_last_seen_at,
+                u.current_room_id,
+                u.last_seen_at AS user_last_seen_at
+           FROM room_sessions rs
+           JOIN participants p ON p.id = ? AND p.session_id = rs.id
+           JOIN users u ON u.id = ?
+          WHERE rs.id = ?
+          LIMIT 1'
+    );
+    $freshStmt->execute([$participantId, $userId, $sessionId]);
+    $fresh = $freshStmt->fetch();
+    if ($fresh
+        && (int)($fresh['room_id'] ?? 0) > 0
+        && (int)($fresh['current_room_id'] ?? 0) === (int)$fresh['room_id']
+        && (string)($fresh['participant_last_seen_at'] ?? '') >= $refreshBefore
+        && (string)($fresh['user_last_seen_at'] ?? '') >= $refreshBefore
+    ) {
+        return false;
+    }
 
-            $participantUpdate = $pdo->prepare(
-                'UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP
-                  WHERE id = ? AND session_id = ?
-                    AND (last_seen_at IS NULL OR last_seen_at < ?)'
-            );
-            $participantUpdate->execute([$participantId, $sessionId, $refreshBefore]);
-            $userUpdate = $pdo->prepare(
-                'UPDATE users SET current_room_id = ?, last_seen_at = CURRENT_TIMESTAMP
-                  WHERE id = ? AND (
-                        current_room_id IS NULL OR current_room_id <> ?
-                        OR last_seen_at IS NULL OR last_seen_at < ?
-                  )'
-            );
-            $userUpdate->execute([$roomId, $userId, $roomId, $refreshBefore]);
-            $changed = $participantUpdate->rowCount() > 0 || $userUpdate->rowCount() > 0;
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
-            return $changed;
-        } catch (Throwable $error) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
-            throw $error;
+    $presenceBusyTimeout = null;
+    if (db_driver($pdo) === 'sqlite') {
+        try {
+            $presenceBusyTimeout = (int)$pdo->query('PRAGMA busy_timeout')->fetchColumn();
+            $pdo->exec('PRAGMA busy_timeout = 25');
+        } catch (Throwable) {
+            $presenceBusyTimeout = null;
         }
-    }, 'participant-presence');
+    }
+
+    try {
+        return db_with_sqlite_lock_retry($pdo, function () use (
+            $pdo, $participantId, $userId, $sessionId, $refreshBefore
+        ): bool {
+            $ownsTransaction = db_begin_write_transaction($pdo);
+            try {
+                $roomStmt = $pdo->prepare('SELECT room_id FROM room_sessions WHERE id = ? LIMIT 1');
+                $roomStmt->execute([$sessionId]);
+                $roomId = (int)($roomStmt->fetchColumn() ?: 0);
+                if ($roomId <= 0) {
+                    db_rollback_write_transaction($pdo, $ownsTransaction);
+                    return false;
+                }
+
+                $participantUpdate = $pdo->prepare(
+                    'UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP
+                      WHERE id = ? AND session_id = ?
+                        AND (last_seen_at IS NULL OR last_seen_at < ?)'
+                );
+                $participantUpdate->execute([$participantId, $sessionId, $refreshBefore]);
+                $userUpdate = $pdo->prepare(
+                    'UPDATE users SET current_room_id = ?, last_seen_at = CURRENT_TIMESTAMP
+                      WHERE id = ? AND (
+                            current_room_id IS NULL OR current_room_id <> ?
+                            OR last_seen_at IS NULL OR last_seen_at < ?
+                      )'
+                );
+                $userUpdate->execute([$roomId, $userId, $roomId, $refreshBefore]);
+                $changed = $participantUpdate->rowCount() > 0 || $userUpdate->rowCount() > 0;
+                db_commit_write_transaction($pdo, $ownsTransaction);
+                return $changed;
+            } catch (Throwable $error) {
+                db_rollback_write_transaction($pdo, $ownsTransaction);
+                throw $error;
+            }
+        }, 'participant-presence');
+    } catch (Throwable $error) {
+        if (!db_is_transient_lock_error($error)) throw $error;
+        if (function_exists('runtime_issue_queue_deferred')) {
+            runtime_issue_queue_deferred($userId, [
+                'category' => 'server',
+                'component' => 'participant-presence',
+                'error_code' => 'DATABASE_LOCK_RETRY_EXHAUSTED',
+                'message' => 'Participant presence refresh was deferred after database lock retry exhaustion.',
+                'severity' => 'error',
+                'evidence' => [
+                    'operation' => 'participant-presence',
+                    'recoverable' => true,
+                    'requestMethod' => (string)($_SERVER['REQUEST_METHOD'] ?? 'CLI'),
+                ],
+            ]);
+        }
+        error_log('CoreChat participant presence refresh deferred after SQLite lock retry exhaustion.');
+        return false;
+    } finally {
+        if ($presenceBusyTimeout !== null) {
+            try {
+                $pdo->exec('PRAGMA busy_timeout = ' . max(0, min(60000, $presenceBusyTimeout)));
+            } catch (Throwable) {
+                // Presence refresh must not alter the original request outcome.
+            }
+        }
+    }
 }
 
 function runtime_maintenance_acquire(PDO $pdo, string $taskKey, int $cadenceSeconds = 15, int $leaseSeconds = 10): ?string {
@@ -7331,37 +7573,79 @@ function runtime_maintenance_acquire(PDO $pdo, string $taskKey, int $cadenceSeco
     }, 'runtime-maintenance-lease');
 }
 
-function runtime_maintenance_for_session(PDO $pdo, int $sessionId): bool {
+function runtime_maintenance_for_session(PDO $pdo, int $sessionId, ?array &$warnings = null): bool {
+    if ($warnings === null) $warnings = [];
     if ($sessionId <= 0) return false;
     $taskKey = 'room-session:' . $sessionId;
-    $ownerToken = runtime_maintenance_acquire($pdo, $taskKey);
-    if ($ownerToken === null) return false;
     try {
-        cleanup_stale_participants($pdo, $sessionId);
-        cleanup_room_effects($pdo, $sessionId);
-        media_signal_cleanup_expired($pdo, $sessionId);
+        $ownerToken = runtime_maintenance_acquire($pdo, $taskKey);
+    } catch (Throwable $error) {
+        $reference = strtoupper(substr(hash('sha256', 'lease|' . get_class($error) . '|' . $error->getMessage()), 0, 16));
+        error_log(sprintf('runtime maintenance failure [%s] phase=lease session=%d %s: %s', $reference, $sessionId, get_class($error), $error->getMessage()));
+        $warnings[] = ['phase' => 'lease', 'reference' => $reference];
+        return false;
+    }
+    if ($ownerToken === null) return false;
+
+    $completed = true;
+    $maintenance = [
+        'stale-participants' => static function () use ($pdo, $sessionId): array {
+            cleanup_stale_participants($pdo, $sessionId);
+            return [];
+        },
+        'stale-games' => static function () use ($pdo, $sessionId): array {
+            $result = multiplayer_game_reconcile_stale_connections($pdo, $sessionId);
+            foreach ((array)($result['sessions'] ?? []) as $gameSession) {
+                emit_event($pdo, $sessionId, 'game_update', ['lobby_code' => (string)$gameSession['publicId']]);
+            }
+            return (array)($result['warnings'] ?? []);
+        },
+        'room-effects' => static function () use ($pdo, $sessionId): array {
+            cleanup_room_effects($pdo, $sessionId);
+            return [];
+        },
+        'media-signals' => static function () use ($pdo, $sessionId): array {
+            media_signal_cleanup_expired($pdo, $sessionId);
+            return [];
+        },
+    ];
+    foreach ($maintenance as $phase => $operation) {
+        try {
+            foreach ($operation() as $warning) {
+                if (!is_array($warning) || empty($warning['reference'])) continue;
+                $warnings[] = [
+                    'phase' => (string)($warning['phase'] ?? $phase),
+                    'reference' => (string)$warning['reference'],
+                ];
+                $completed = false;
+            }
+        } catch (Throwable $error) {
+            $reference = strtoupper(substr(hash('sha256', $phase . '|' . get_class($error) . '|' . $error->getMessage()), 0, 16));
+            error_log(sprintf('runtime maintenance failure [%s] phase=%s session=%d %s: %s', $reference, $phase, $sessionId, get_class($error), $error->getMessage()));
+            $warnings[] = ['phase' => $phase, 'reference' => $reference];
+            $completed = false;
+        }
+    }
+
+    try {
         $pdo->prepare(
             'UPDATE runtime_maintenance_leases
                 SET locked_until = CURRENT_TIMESTAMP, last_completed_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
               WHERE task_key = ? AND owner_token = ?'
         )->execute([$taskKey, $ownerToken]);
-        return true;
     } catch (Throwable $error) {
-        try {
-            $pdo->prepare(
-                'UPDATE runtime_maintenance_leases SET locked_until = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                  WHERE task_key = ? AND owner_token = ?'
-            )->execute([$taskKey, $ownerToken]);
-        } catch (Throwable $releaseError) {
-            error_log('runtime-maintenance lease release failed: ' . $releaseError->getMessage());
-        }
-        throw $error;
+        $reference = strtoupper(substr(hash('sha256', 'lease-release|' . get_class($error) . '|' . $error->getMessage()), 0, 16));
+        error_log(sprintf('runtime maintenance failure [%s] phase=lease-release session=%d %s: %s', $reference, $sessionId, get_class($error), $error->getMessage()));
+        $warnings[] = ['phase' => 'lease-release', 'reference' => $reference];
+        return false;
     }
+    return $completed;
 }
 
 function cleanup_stale_participants(PDO $pdo, ?int $sessionId = null): void {
     $cutoff = stale_cutoff($pdo);
+    $maintenanceBatch = max(1, (int)operational_capacity_runtime_values($pdo)['capacity_maintenance_batch_size']);
     $sql = 'SELECT p.id, p.session_id, p.user_id, rs.room_id, u.current_room_id
               FROM participants p
               JOIN room_sessions rs ON rs.id = p.session_id
@@ -7373,14 +7657,18 @@ function cleanup_stale_participants(PDO $pdo, ?int $sessionId = null): void {
         $sql .= ' AND p.session_id = ?';
         $params[] = $sessionId;
     }
+    $sql .= ' ORDER BY p.id ASC LIMIT ' . ($maintenanceBatch + 1);
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $stale = $stmt->fetchAll();
     if (!$stale) return;
+    $maintenanceBounded = count($stale) > $maintenanceBatch;
+    if ($maintenanceBounded) $stale = array_slice($stale, 0, $maintenanceBatch);
 
+    $cleaned = 0;
     foreach ($stale as $row) {
         $participantId = (int)$row['id'];
-        avatar_relationship_transaction($pdo, function () use ($pdo, $row, $participantId, $cutoff): array {
+        $cleanup = avatar_relationship_transaction($pdo, function () use ($pdo, $row, $participantId, $cutoff): array {
             $recheckSql = 'SELECT id FROM participants WHERE id = ? AND last_seen_at IS NOT NULL AND last_seen_at < ?';
             if (db_uses_mysql_syntax($pdo)) $recheckSql .= ' FOR UPDATE';
             $recheck = $pdo->prepare($recheckSql);
@@ -7417,6 +7705,41 @@ function cleanup_stale_participants(PDO $pdo, ?int $sessionId = null): void {
             );
             return ['ok' => true, 'skipped' => false];
         });
+        if (empty($cleanup['ok']) || !empty($cleanup['skipped'])) continue;
+        $cleaned++;
+
+        try {
+            $gameDisconnect = multiplayer_game_disconnect_room_participant(
+                $pdo,
+                (int)$row['session_id'],
+                $participantId,
+                (int)$row['user_id'],
+                'stale-participant-cleanup'
+            );
+            foreach ((array)($gameDisconnect['sessions'] ?? []) as $gameSession) {
+                emit_event(
+                    $pdo,
+                    (int)$row['session_id'],
+                    'game_update',
+                    ['lobby_code' => (string)$gameSession['publicId']]
+                );
+            }
+        } catch (Throwable $error) {
+            error_log(sprintf(
+                'stale participant game disconnect failed [session=%d participant=%d user=%d] %s: %s',
+                (int)$row['session_id'],
+                $participantId,
+                (int)$row['user_id'],
+                get_class($error),
+                $error->getMessage()
+            ));
+        }
+    }
+    if ($cleaned > 0) {
+        limit_event_record_reached($pdo, 'participant_idle_timeout_minutes', 'room-session', 'session:' . ($sessionId ?? 0), 'cleaned', ['participantCount' => $cleaned]);
+    }
+    if ($maintenanceBounded) {
+        limit_event_record_reached($pdo, 'capacity_maintenance_batch_size', 'room-session', 'session:' . ($sessionId ?? 0), 'truncated', ['processedCount' => $cleaned]);
     }
 }
 
@@ -7467,7 +7790,36 @@ function author_context_for_participant(PDO $pdo, int $sessionId, array $partici
     return [
         'role' => $row['role'] ?? 'user',
         'is_owner' => !empty($row['owner_id']) && (int)$row['owner_id'] === (int)($participant['user_id'] ?? 0),
+        'is_installation_owner' => moderation_identity_is_owner($pdo, (int)($participant['user_id'] ?? 0)),
     ];
+}
+
+const IMPORTANT_MESSAGE_MODERATOR_PERMISSION_SETTING = 'important_messages_allow_moderator';
+const IMPORTANT_MESSAGE_GUIDE_PERMISSION_SETTING = 'important_messages_allow_guide';
+const IMPORTANT_MESSAGE_ROOM_OWNER_PERMISSION_SETTING = 'important_messages_allow_room_owner';
+
+function important_message_role_permissions(PDO $pdo): array {
+    return [
+        'moderator' => app_setting($pdo, IMPORTANT_MESSAGE_MODERATOR_PERMISSION_SETTING, '1') === '1',
+        'guide' => app_setting($pdo, IMPORTANT_MESSAGE_GUIDE_PERMISSION_SETTING, '1') === '1',
+        'room_owner' => app_setting($pdo, IMPORTANT_MESSAGE_ROOM_OWNER_PERMISSION_SETTING, '0') === '1',
+    ];
+}
+
+function can_send_important_message(PDO $pdo, array $authorContext, string $channel): bool {
+    if (!in_array($channel, ['room', 'community'], true)) return false;
+    if (!empty($authorContext['is_installation_owner'])) return true;
+
+    $role = (string)($authorContext['role'] ?? 'user');
+    if ($role === 'admin') return true;
+
+    $permissions = important_message_role_permissions($pdo);
+    if ($role === 'moderator') return $permissions['moderator'];
+    if ($role === 'guide') return $permissions['guide'];
+
+    return $channel === 'room'
+        && !empty($authorContext['is_owner'])
+        && $permissions['room_owner'];
 }
 
 function link_key_for(int $a, int $b): string {
@@ -7499,6 +7851,14 @@ function resolve_avatar(?string $path): string {
         return $presets[$key] ?? $presets['Default'];
     }
     return $path;
+}
+
+function resolve_nameplate(?string $path): ?string {
+    $path = trim((string)$path);
+    if ($path === '' || preg_match('#^/assets/uploads/(?:avatars|nameplates)/nameplate-[A-Za-z0-9._-]+$#', $path) !== 1) {
+        return null;
+    }
+    return app_url($path);
 }
 
 function avatar_orientation_values(): array {
@@ -7549,19 +7909,15 @@ function avatar_orientation_update(
             'http_status' => 400,
         ];
     }
-    $ownsTransaction = !$pdo->inTransaction();
+    $ownsTransaction = db_begin_write_transaction($pdo);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         $sql = 'SELECT avatar_path, avatar_orientation, avatar_orientation_version FROM users WHERE id = ? LIMIT 1';
         if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$userId]);
         $user = $stmt->fetch();
         if (!$user) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            db_rollback_write_transaction($pdo, $ownsTransaction);
             return [
                 'ok' => false,
                 'code' => 'AVATAR_ORIENTATION_USER_NOT_FOUND',
@@ -7572,7 +7928,7 @@ function avatar_orientation_update(
         $currentOrientation = avatar_orientation_normalize($user['avatar_orientation'] ?? null);
         $currentVersion = max(1, (int)($user['avatar_orientation_version'] ?? 1));
         if ($currentOrientation === $requestedOrientation) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+            db_commit_write_transaction($pdo, $ownsTransaction);
             return [
                 'ok' => true,
                 'idempotent' => true,
@@ -7585,7 +7941,7 @@ function avatar_orientation_update(
             ? $currentVersion !== (int)$expectedVersion
             : $currentOrientation !== $legacyExpectedOrientation;
         if ($stale) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            db_rollback_write_transaction($pdo, $ownsTransaction);
             return [
                 'ok' => false,
                 'code' => 'AVATAR_ORIENTATION_STALE',
@@ -7600,7 +7956,7 @@ function avatar_orientation_update(
             ->execute([$requestedOrientation, $nextVersion, $userId]);
         $pdo->prepare('UPDATE participants SET avatar_orientation = ?, avatar_orientation_version = ? WHERE user_id = ?')
             ->execute([$requestedOrientation, $nextVersion, $userId]);
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        db_commit_write_transaction($pdo, $ownsTransaction);
         return [
             'ok' => true,
             'idempotent' => false,
@@ -7609,7 +7965,7 @@ function avatar_orientation_update(
             'avatar_path' => (string)($user['avatar_path'] ?? 'preset:Default'),
         ];
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        db_rollback_write_transaction($pdo, $ownsTransaction);
         throw $error;
     }
 }
@@ -7663,7 +8019,7 @@ function resolve_session_id(PDO $pdo, mixed $sessionKey): int {
     $stmt = $pdo->prepare('SELECT id FROM room_sessions WHERE public_id = ? LIMIT 1');
     $stmt->execute([$key]);
     $id = (int)($stmt->fetchColumn() ?: 0);
-    if (!$id) json_out(['error' => 'Session not found'], 404);
+    if (!$id) json_out(['error' => 'Session not found', 'code' => 'ROOM_SESSION_NOT_FOUND'], 404);
     return $id;
 }
 
@@ -7688,7 +8044,7 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
             || (int)($participant['avatar_source_height_px'] ?? 0) !== (int)$user['avatar_source_height_px']
             || $participantSize !== $userSize) {
             $pdo->prepare(
-                'UPDATE participants SET avatar_identity = ?, avatar_source_width_px = ?, avatar_source_height_px = ?, avatar_orientation = ?, avatar_orientation_version = ?, avatar_display_size_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
+                'UPDATE participants SET avatar_identity = ?, avatar_source_width_px = ?, avatar_source_height_px = ?, avatar_orientation = ?, avatar_orientation_version = ?, avatar_display_size_px = ?, avatar_display_width_px = ?, avatar_display_height_px = ?, webcam_display_width_px = ?, webcam_display_height_px = ?, avatar_size_version = ? WHERE id = ?'
             )->execute([
                 $user['avatar_identity'],
                 $user['avatar_source_width_px'],
@@ -7696,6 +8052,8 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
                 $userOrientation,
                 $userOrientationVersion,
                 $userSize['avatarDisplayPreferencePx'],
+                $userSize['avatarDisplayWidthPreferencePx'],
+                $userSize['avatarDisplayHeightPreferencePx'],
                 $userSize['webcamDisplayWidthPreferencePx'],
                 $userSize['webcamDisplayHeightPreferencePx'],
                 $userSize['displayPreferenceVersion'],
@@ -7707,6 +8065,8 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
             $participant['avatar_orientation'] = $userOrientation;
             $participant['avatar_orientation_version'] = $userOrientationVersion;
             $participant['avatar_display_size_px'] = $userSize['avatarDisplayPreferencePx'];
+            $participant['avatar_display_width_px'] = $userSize['avatarDisplayWidthPreferencePx'];
+            $participant['avatar_display_height_px'] = $userSize['avatarDisplayHeightPreferencePx'];
             $participant['webcam_display_width_px'] = $userSize['webcamDisplayWidthPreferencePx'];
             $participant['webcam_display_height_px'] = $userSize['webcamDisplayHeightPreferencePx'];
             $participant['avatar_size_version'] = $userSize['displayPreferenceVersion'];
@@ -7734,19 +8094,22 @@ function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
     $orientationVersion = max(1, (int)($user['avatar_orientation_version'] ?? 1));
     $size = avatar_size_preferences_from_row($user);
     $pdo->prepare(
-        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, avatar_identity, avatar_source_width_px, avatar_source_height_px, avatar_orientation, avatar_orientation_version, avatar_display_size_px, webcam_display_width_px, webcam_display_height_px, avatar_size_version, aura_effect, join_token, position_x, position_y, last_seen_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
+        'INSERT INTO participants (session_id, user_id, display_name, avatar_path, nameplate_path, avatar_identity, avatar_source_width_px, avatar_source_height_px, avatar_orientation, avatar_orientation_version, avatar_display_size_px, avatar_display_width_px, avatar_display_height_px, webcam_display_width_px, webcam_display_height_px, avatar_size_version, aura_effect, join_token, position_x, position_y, last_seen_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)'
     )->execute([
         $sessionId,
         (int)$user['id'],
         $user['display_name'],
         $user['avatar_path'] ?: 'preset:Default',
+        $user['nameplate_path'] ?? null,
         $user['avatar_identity'],
         $user['avatar_source_width_px'],
         $user['avatar_source_height_px'],
         $orientation,
         $orientationVersion,
         $size['avatarDisplayPreferencePx'],
+        $size['avatarDisplayWidthPreferencePx'],
+        $size['avatarDisplayHeightPreferencePx'],
         $size['webcamDisplayWidthPreferencePx'],
         $size['webcamDisplayHeightPreferencePx'],
         $size['displayPreferenceVersion'],
@@ -7771,4 +8134,36 @@ function auth_participant(PDO $pdo, int|string $sessionId, ?string $joinToken = 
 
 function e(string $value): string {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * Opt-in declaration loading for the private canonical metadata adapter only.
+ * This is not a request parameter, environment switch, or normal runtime mode.
+ */
+function chatspace_canonical_metadata_bootstrap_enabled(): bool {
+    if (!defined('CHATSPACE_CANONICAL_METADATA_ONLY')) return false;
+    $requested = constant('CHATSPACE_CANONICAL_METADATA_ONLY');
+    if ($requested === false) return false;
+    if ($requested !== true || PHP_SAPI !== 'cli') {
+        throw new RuntimeException('Canonical metadata bootstrap requires an explicit CLI-only boolean.');
+    }
+    $disabledClasses = array_map('trim', explode(',', (string)ini_get('disable_classes')));
+    foreach (['PDO', 'SQLite3', 'mysqli', 'FFI'] as $class) {
+        if (!in_array($class, $disabledClasses, true)) {
+            throw new RuntimeException('Canonical metadata bootstrap requires database/native class prohibitions.');
+        }
+    }
+    $disabledFunctions = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+    foreach (['exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen', 'fsockopen', 'pfsockopen', 'stream_socket_client', 'stream_socket_server', 'curl_init', 'file_put_contents', 'fopen', 'fwrite', 'fputs', 'mkdir', 'rmdir', 'unlink', 'rename', 'copy', 'touch', 'chmod', 'chown', 'chgrp', 'link', 'symlink'] as $function) {
+        if (!in_array($function, $disabledFunctions, true)) {
+            throw new RuntimeException('Canonical metadata bootstrap requires process/network/write prohibitions.');
+        }
+    }
+    if ((string)ini_get('session.auto_start') !== '0'
+        || trim((string)ini_get('auto_prepend_file')) !== ''
+        || trim((string)ini_get('auto_append_file')) !== ''
+        || session_status() !== PHP_SESSION_NONE) {
+        throw new RuntimeException('Canonical metadata bootstrap requires no automatic includes or active session.');
+    }
+    return true;
 }

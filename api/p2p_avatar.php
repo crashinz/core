@@ -29,13 +29,20 @@ try {
         header('Cache-Control: no-store');
         json_out([
             'ok' => true,
-            'p2pAvatar' => [
+            'p2pAvatar' => p2p_avatar_pair_asset_allowed($pdo, $claims, 'avatar') ? [
                 'identity' => (string)$claims['avatar_identity'],
                 'width' => (int)$claims['width'],
                 'height' => (int)$claims['height'],
                 'authorization' => p2p_avatar_issue_token($pdo, $claims),
                 'expiresInSeconds' => P2P_AVATAR_TOKEN_SECONDS,
-            ],
+            ] : null,
+            'p2pNameplate' => p2p_avatar_pair_asset_allowed($pdo, $claims, 'nameplate') ? [
+                'identity' => (string)$claims['nameplate_asset']['identity'],
+                'width' => (int)$claims['nameplate_asset']['width'],
+                'height' => (int)$claims['nameplate_asset']['height'],
+                'authorization' => p2p_avatar_issue_token($pdo, $claims),
+                'expiresInSeconds' => P2P_AVATAR_TOKEN_SECONDS,
+            ] : null,
         ]);
     }
     if ($action !== 'authorize_source') {
@@ -49,7 +56,8 @@ try {
         $pdo,
         $participant,
         $sessionId,
-        trim((string)($body['authorization'] ?? ''))
+        trim((string)($body['authorization'] ?? '')),
+        trim((string)($body['asset_kind'] ?? 'avatar'))
     );
     header('Cache-Control: no-store');
     json_out($result);

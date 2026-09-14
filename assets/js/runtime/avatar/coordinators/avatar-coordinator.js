@@ -2022,10 +2022,10 @@ export class AvatarCoordinator {
         const expectedPresentIds = presentation.members
             .filter(member => {
                 const participant = this.#participant(member.participantId);
-                if (!participant || participant.online === false || participant.exiting) return false;
+                if (!participant || participant.exiting) return false;
                 if (String(member.relationshipRole || member.role || "normal") !== "lap") return true;
                 const host = this.#participant(member.lapHostParticipantId);
-                return Boolean(host && host.online !== false && !host.exiting);
+                return Boolean(host && !host.exiting);
             })
             .map(member => Number(member.participantId));
         const seen = new Set();
@@ -2083,7 +2083,14 @@ export class AvatarCoordinator {
                 y: Number(firstNormal.position_y || 0)
             }));
         }
-        changed.forEach(member => this.#context?.positionAvatar?.(member));
+        // Remote coordinates belong to the sender's canvas. Rebuild the group
+        // from its anchor using this viewer's dimensions before painting it;
+        // clamping each member separately can stack avatars at the right edge.
+        this.refreshRelationshipsForParticipant(firstNormal || changed[0], {
+            animate: false,
+            persist: false,
+            reason: "remote-group-movement"
+        });
         this.#relationshipMovementEventIds.set(relationshipId, eventId);
         this.#relationshipMovementDiagnostics.reconciled += 1;
         return true;
@@ -2627,10 +2634,10 @@ export class AvatarCoordinator {
         const expectedPresentIds = relationship.members
             .filter(member => {
                 const participant = this.#participant(member.participantId);
-                if (!participant || participant.online === false || participant.exiting) return false;
+                if (!participant || participant.exiting) return false;
                 if (String(member.relationshipRole || "normal") !== "lap") return true;
                 const host = this.#participant(member.lapHostParticipantId);
-                return Boolean(host && host.online !== false && !host.exiting);
+                return Boolean(host && !host.exiting);
             })
             .map(member => Number(member.participantId));
         const seen = new Set();
@@ -2684,7 +2691,7 @@ export class AvatarCoordinator {
 
         const participants = relationship.members
             .map(member => this.#participant(member.participantId))
-            .filter(participant => participant && participant.online !== false && !participant.exiting);
+            .filter(participant => participant && !participant.exiting);
         const positionsChanged = positions.some(position => {
             const participant = this.#participant(position?.participant_id);
             if (!participant) return false;
@@ -2990,7 +2997,7 @@ export class AvatarCoordinator {
             .map(participantId => this.#participant(participantId))
             .filter(Boolean);
         const occupiedParticipants = Array.from(this.#participants.values())
-            .filter(participant => participant?.online !== false && !participant?.exiting);
+            .filter(participant => participant && !participant.exiting);
         const stageSize = this.#stageSize();
         const changed = this.#layout.restoreIndependentLayout({
             participants,

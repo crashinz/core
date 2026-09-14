@@ -1,0 +1,9 @@
+/*
+ * Acey Deucy's lower source reserve is 29 px wide while its checker art is
+ * 25 px wide. Keep a near-source-native footprint with a half-source-pixel
+ * inward rasterization allowance, so a full 15-checker stack remains visibly
+ * complete inside the lower-right reserve aperture at responsive scales.
+ */
+.acey-classic .classic-reserve-zone.is-player-2 .classic-checker {
+  width: 84.482759%;
+}

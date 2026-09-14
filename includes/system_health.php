@@ -85,6 +85,13 @@ function system_health_migration(PDO $pdo): array
 function system_health_projection(PDO $pdo): array
 {
     $capacity = operational_capacity_projection($pdo);
+    $requestStartedAt = isset($_SERVER['REQUEST_TIME_FLOAT']) ? (float)$_SERVER['REQUEST_TIME_FLOAT'] : microtime(true);
+    $requestDurationMs = max(0, (int)round((microtime(true) - $requestStartedAt) * 1000));
+    $slowThresholdMs = $capacity['runtimeValues']['capacity_slow_request_ms'];
+    $slowRequestReached = $slowThresholdMs !== null && $requestDurationMs >= (int)$slowThresholdMs;
+    if ($slowRequestReached) {
+        limit_event_record_reached($pdo, 'capacity_slow_request_ms', 'request', 'system-health', 'warned', ['durationMs' => $requestDurationMs]);
+    }
     $capabilities = host_capabilities_public_projection(host_capabilities($pdo));
     $transport = transport_policy_projection($pdo);
     $diagnosticPolicy = runtime_diagnostic_policy_projection($pdo);
@@ -149,8 +156,10 @@ function system_health_projection(PDO $pdo): array
             'pathsIncluded' => false,
         ],
         'operationalSignals' => [
-            'slowRequestThresholdMs' => $capacity['values']['capacity_slow_request_ms'],
-            'slowRequestCount' => 0,
+            'slowRequestThresholdMs' => $capacity['runtimeValues']['capacity_slow_request_ms'],
+            'slowRequestThresholdEnforced' => $capacity['limitEnforcement']['capacity_slow_request_ms'],
+            'slowRequestCount' => $slowRequestReached ? 1 : 0,
+            'currentRequestDurationMs' => $requestDurationMs,
             'retryCount' => 0,
             'delayCount' => 0,
             'pollLagStatus' => 'not separately persisted',

@@ -4,6 +4,8 @@ declare(strict_types=1);
 const AVATAR_VISIBILITY_SCOPE_EXACT = 'avatar';
 const AVATAR_VISIBILITY_SCOPE_USER = 'user';
 const AVATAR_VISIBILITY_PLACEHOLDER_LABEL = 'Avatar hidden by you';
+const NAMEPLATE_VISIBILITY_SCOPE_EXACT = 'nameplate';
+const NAMEPLATE_VISIBILITY_SCOPE_USER = 'nameplate_user';
 
 function avatar_visibility_cache_clear(?int $viewerUserId = null, ?int $targetUserId = null): void {
     $cache = &$GLOBALS['chatspace_avatar_visibility_cache'];
@@ -149,6 +151,7 @@ function avatar_identity_apply(
     );
     foreach ($staleViewers as $viewerUserId) $increment->execute([$viewerUserId]);
     avatar_visibility_cache_clear(null, $userId);
+    nameplate_visibility_cache_clear(null, $userId);
 }
 
 function avatar_visibility_version(PDO $pdo, int $viewerUserId): int {
@@ -162,10 +165,10 @@ function avatar_visibility_preferences(PDO $pdo, int $viewerUserId): array {
         'SELECT hp.id, hp.target_user_id, hp.scope, hp.avatar_identity, u.display_name
            FROM avatar_hidden_preferences hp
            JOIN users u ON u.id = hp.target_user_id
-          WHERE hp.viewer_user_id = ?
+          WHERE hp.viewer_user_id = ? AND hp.scope IN (?, ?)
           ORDER BY LOWER(u.display_name) ASC, hp.scope ASC, hp.id ASC'
     );
-    $stmt->execute([$viewerUserId]);
+    $stmt->execute([$viewerUserId, AVATAR_VISIBILITY_SCOPE_EXACT, AVATAR_VISIBILITY_SCOPE_USER]);
     $entries = array_map(static function(array $row): array {
         $scope = (string)$row['scope'];
         return [
@@ -302,13 +305,10 @@ function avatar_visibility_mutate(PDO $pdo, int $viewerUserId, array $input): ar
         return ['ok' => false, 'code' => 'AVATAR_VISIBILITY_TARGET_INVALID', 'error' => 'Choose another user.', 'http_status' => 400];
     }
 
-    $ownsTransaction = !$pdo->inTransaction();
+    $ownsTransaction = false;
     $revealTargets = [];
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
+        $ownsTransaction = db_begin_write_transaction($pdo);
         $sql = 'SELECT avatar_visibility_version FROM users WHERE id = ? LIMIT 1';
         if (db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
         $stmt = $pdo->prepare($sql);
@@ -337,17 +337,17 @@ function avatar_visibility_mutate(PDO $pdo, int $viewerUserId, array $input): ar
         }
         $desiredPresent = str_starts_with($action, 'hide_');
         $alreadyDesired = $action === 'show_all'
-            ? !(bool)$pdo->query('SELECT 1 FROM avatar_hidden_preferences WHERE viewer_user_id = ' . $viewerUserId . ' LIMIT 1')->fetchColumn()
+            ? !(bool)$pdo->query("SELECT 1 FROM avatar_hidden_preferences WHERE viewer_user_id = " . $viewerUserId . " AND scope IN ('avatar','user') LIMIT 1")->fetchColumn()
             : $existing === $desiredPresent;
         if ($action === 'show_all') {
-            $targetStmt = $pdo->prepare('SELECT DISTINCT target_user_id FROM avatar_hidden_preferences WHERE viewer_user_id = ?');
-            $targetStmt->execute([$viewerUserId]);
+            $targetStmt = $pdo->prepare('SELECT DISTINCT target_user_id FROM avatar_hidden_preferences WHERE viewer_user_id = ? AND scope IN (?, ?)');
+            $targetStmt->execute([$viewerUserId, AVATAR_VISIBILITY_SCOPE_EXACT, AVATAR_VISIBILITY_SCOPE_USER]);
             $revealTargets = array_map('intval', $targetStmt->fetchAll(PDO::FETCH_COLUMN));
         } elseif (str_starts_with($action, 'show_')) {
             $revealTargets = [$targetUserId];
         }
         if ($currentVersion !== (int)$expected && !$alreadyDesired) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            db_rollback_write_transaction($pdo, $ownsTransaction);
             return [
                 'ok' => false,
                 'code' => 'AVATAR_VISIBILITY_STALE',
@@ -360,8 +360,8 @@ function avatar_visibility_mutate(PDO $pdo, int $viewerUserId, array $input): ar
         $changed = false;
         if (!$alreadyDesired) {
             if ($action === 'show_all') {
-                $delete = $pdo->prepare('DELETE FROM avatar_hidden_preferences WHERE viewer_user_id = ?');
-                $delete->execute([$viewerUserId]);
+                $delete = $pdo->prepare('DELETE FROM avatar_hidden_preferences WHERE viewer_user_id = ? AND scope IN (?, ?)');
+                $delete->execute([$viewerUserId, AVATAR_VISIBILITY_SCOPE_EXACT, AVATAR_VISIBILITY_SCOPE_USER]);
                 $changed = $delete->rowCount() > 0;
             } elseif ($desiredPresent) {
                 $pdo->prepare(
@@ -390,8 +390,9 @@ function avatar_visibility_mutate(PDO $pdo, int $viewerUserId, array $input): ar
             $pdo->prepare('UPDATE users SET avatar_visibility_version = ? WHERE id = ?')
                 ->execute([$nextVersion, $viewerUserId]);
             avatar_visibility_cache_clear($viewerUserId, $action === 'show_all' ? null : $targetUserId);
+            nameplate_visibility_cache_clear($viewerUserId, $action === 'show_all' ? null : $targetUserId);
         }
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        db_commit_write_transaction($pdo, $ownsTransaction);
         return [
             'ok' => true,
             'idempotent' => !$changed,
@@ -399,7 +400,138 @@ function avatar_visibility_mutate(PDO $pdo, int $viewerUserId, array $input): ar
             'revealedAvatars' => avatar_visibility_revealed_avatars($pdo, $viewerUserId, $revealTargets),
         ];
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        db_rollback_write_transaction($pdo, $ownsTransaction);
         throw $error;
     }
+}
+
+function nameplate_visibility_cache_clear(?int $viewerUserId = null, ?int $targetUserId = null): void {
+    $cache = &$GLOBALS['chatspace_nameplate_visibility_cache'];
+    if (!is_array($cache)) $cache = [];
+    if ($viewerUserId === null && $targetUserId === null) { $cache = []; return; }
+    foreach (array_keys($cache) as $key) {
+        [, $viewer, $target] = array_map('intval', explode(':', (string)$key));
+        if (($viewerUserId === null || $viewer === $viewerUserId)
+            && ($targetUserId === null || $target === $targetUserId)) unset($cache[$key]);
+    }
+}
+
+function nameplate_identity_for_user(PDO $pdo, int $userId): string {
+    $stmt = $pdo->prepare('SELECT nameplate_path FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $path = (string)($stmt->fetchColumn() ?: '');
+    if ($path === '') return '';
+    $file = avatar_source_file($path);
+    $identity = $file ? hash_file('sha256', $file) : false;
+    return is_string($identity) && avatar_identity_is_valid($identity)
+        ? $identity : hash('sha256', "chatspace-nameplate\0" . $path);
+}
+
+function nameplate_visibility_source_changed(PDO $pdo, int $targetUserId): void {
+    $identity = nameplate_identity_for_user($pdo, $targetUserId);
+    $stmt = $pdo->prepare(
+        'SELECT DISTINCT viewer_user_id FROM avatar_hidden_preferences
+          WHERE target_user_id=? AND scope=? AND (avatar_identity IS NULL OR avatar_identity<>?)'
+    );
+    $stmt->execute([$targetUserId, NAMEPLATE_VISIBILITY_SCOPE_EXACT, $identity]);
+    $viewers = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    $pdo->prepare(
+        'DELETE FROM avatar_hidden_preferences
+          WHERE target_user_id=? AND scope=? AND (avatar_identity IS NULL OR avatar_identity<>?)'
+    )->execute([$targetUserId, NAMEPLATE_VISIBILITY_SCOPE_EXACT, $identity]);
+    $increment = $pdo->prepare('UPDATE users SET avatar_visibility_version=avatar_visibility_version+1 WHERE id=?');
+    foreach ($viewers as $viewerUserId) {
+        $increment->execute([$viewerUserId]);
+        avatar_visibility_cache_clear($viewerUserId, $targetUserId);
+        nameplate_visibility_cache_clear($viewerUserId, $targetUserId);
+    }
+}
+
+function nameplate_visibility_preferences(PDO $pdo, int $viewerUserId): array {
+    $stmt = $pdo->prepare(
+        'SELECT hp.id,hp.target_user_id,hp.scope,hp.avatar_identity,u.display_name
+           FROM avatar_hidden_preferences hp JOIN users u ON u.id=hp.target_user_id
+          WHERE hp.viewer_user_id=? AND hp.scope IN (?,?)
+          ORDER BY LOWER(u.display_name),hp.scope,hp.id'
+    );
+    $stmt->execute([$viewerUserId, NAMEPLATE_VISIBILITY_SCOPE_EXACT, NAMEPLATE_VISIBILITY_SCOPE_USER]);
+    return ['version'=>avatar_visibility_version($pdo,$viewerUserId),'entries'=>array_map(static function(array $row): array {
+        $exact = (string)$row['scope'] === NAMEPLATE_VISIBILITY_SCOPE_EXACT;
+        return [
+            'id'=>(int)$row['id'],'targetUserId'=>(int)$row['target_user_id'],
+            'displayName'=>(string)$row['display_name'],'scope'=>(string)$row['scope'],
+            'nameplateIdentity'=>$exact?(string)($row['avatar_identity']??''):null,
+            'notice'=>$exact
+                ? 'Nameplate hidden — You chose to hide this nameplate until it changes.'
+                : 'Nameplate hidden — You chose to hide nameplates from this user.',
+        ];
+    },$stmt->fetchAll())];
+}
+
+function nameplate_visibility_effective(PDO $pdo, int $viewerUserId, int $targetUserId): array {
+    $cache = &$GLOBALS['chatspace_nameplate_visibility_cache'];
+    if (!is_array($cache)) $cache = [];
+    if ($viewerUserId<=0 || $targetUserId<=0 || $viewerUserId===$targetUserId) return ['hidden'=>false,'scope'=>null,'notice'=>null];
+    $key=spl_object_id($pdo).':'.$viewerUserId.':'.$targetUserId;
+    if(isset($cache[$key])) return $cache[$key];
+    $identity=nameplate_identity_for_user($pdo,$targetUserId);
+    $stmt=$pdo->prepare('SELECT scope FROM avatar_hidden_preferences WHERE viewer_user_id=? AND target_user_id=? AND (scope=? OR (scope=? AND avatar_identity=?)) ORDER BY CASE WHEN scope=? THEN 0 ELSE 1 END LIMIT 1');
+    $stmt->execute([$viewerUserId,$targetUserId,NAMEPLATE_VISIBILITY_SCOPE_USER,NAMEPLATE_VISIBILITY_SCOPE_EXACT,$identity,NAMEPLATE_VISIBILITY_SCOPE_USER]);
+    $scope=$stmt->fetchColumn();
+    if($scope===false) return $cache[$key]=['hidden'=>false,'scope'=>null,'notice'=>null];
+    return $cache[$key]=['hidden'=>true,'scope'=>(string)$scope,'notice'=>$scope===NAMEPLATE_VISIBILITY_SCOPE_USER
+        ? 'Nameplate hidden — You chose to hide nameplates from this user.'
+        : 'Nameplate hidden — You chose to hide this nameplate until it changes.'];
+}
+
+function nameplate_visibility_project_payload(PDO $pdo, int $viewerUserId, array $payload): array {
+    $targetUserId=(int)($payload['user_id']??0);
+    if($targetUserId<=0 && isset($payload['participant_id'])) $targetUserId=avatar_visibility_participant_user_id($pdo,(int)$payload['participant_id']);
+    if($targetUserId>0 && (array_key_exists('nameplate_url',$payload)||array_key_exists('nameplate_path',$payload))){
+        $policy=nameplate_visibility_effective($pdo,$viewerUserId,$targetUserId);
+        $payload['nameplate_identity']=nameplate_identity_for_user($pdo,$targetUserId);
+        $payload['nameplate_hidden']=$policy['hidden'];
+        $payload['nameplate_hidden_scope']=$policy['scope'];
+        $payload['nameplate_hidden_notice']=$policy['notice'];
+        if($policy['hidden']) { if(array_key_exists('nameplate_url',$payload))$payload['nameplate_url']=null; if(array_key_exists('nameplate_path',$payload))$payload['nameplate_path']=null; }
+    }
+    return $payload;
+}
+
+function nameplate_visibility_revealed(PDO $pdo,int $viewerUserId,array $targetUserIds):array{
+    $targetUserIds=array_values(array_unique(array_filter(array_map('intval',$targetUserIds))));
+    if(!$targetUserIds)return[];
+    $stmt=$pdo->prepare('SELECT id,display_name,nameplate_path FROM users WHERE id IN ('.implode(',',array_fill(0,count($targetUserIds),'?')).')');
+    $stmt->execute($targetUserIds);$result=[];
+    foreach($stmt->fetchAll() as $row){$id=(int)$row['id'];if(nameplate_visibility_effective($pdo,$viewerUserId,$id)['hidden'])continue;$path=(string)($row['nameplate_path']??'');$result[]=['user_id'=>$id,'display_name'=>(string)$row['display_name'],'nameplate_path'=>$path!==''?resolve_nameplate($path):null,'nameplate_url'=>$path!==''?resolve_nameplate($path):null,'nameplate_identity'=>nameplate_identity_for_user($pdo,$id),'nameplate_hidden'=>false,'nameplate_hidden_scope'=>null,'nameplate_hidden_notice'=>null];}
+    return$result;
+}
+
+function nameplate_visibility_mutate(PDO $pdo,int $viewerUserId,array $input):array{
+    $action=(string)($input['action']??'');$allowed=['hide_nameplate','show_nameplate','hide_nameplate_user','show_nameplate_user','show_all_nameplates'];
+    if(!in_array($action,$allowed,true))return['ok'=>false,'code'=>'NAMEPLATE_VISIBILITY_ACTION_INVALID','error'=>'Unknown nameplate visibility action.','http_status'=>400];
+    $expected=filter_var($input['expected_version']??null,FILTER_VALIDATE_INT);
+    if($expected===false||(int)$expected<1)return['ok'=>false,'code'=>'NAMEPLATE_VISIBILITY_VERSION_REQUIRED','error'=>'Hidden nameplate preferences changed. Refresh and try again.','http_status'=>409];
+    $target=(int)($input['target_user_id']??0);$showAll=$action==='show_all_nameplates';
+    if(!$showAll&&($target<=0||$target===$viewerUserId))return['ok'=>false,'code'=>'NAMEPLATE_VISIBILITY_TARGET_INVALID','error'=>'Choose another user.','http_status'=>400];
+    $transaction=[];
+    try{
+        $transaction=database_transaction_begin($pdo,true);
+        $stmt=$pdo->prepare('SELECT avatar_visibility_version FROM users WHERE id=? LIMIT 1');$stmt->execute([$viewerUserId]);$current=max(1,(int)($stmt->fetchColumn()?:1));
+        $userScope=str_contains($action,'_user');$scope=$userScope?NAMEPLATE_VISIBILITY_SCOPE_USER:NAMEPLATE_VISIBILITY_SCOPE_EXACT;$identity=$showAll||$userScope?null:nameplate_identity_for_user($pdo,$target);$desired=str_starts_with($action,'hide_');
+        $existing=false;$hasAny=false;
+        if(!$showAll){$find=$pdo->prepare('SELECT id FROM avatar_hidden_preferences WHERE viewer_user_id=? AND target_user_id=? AND scope=? AND ((avatar_identity IS NULL AND ? IS NULL) OR avatar_identity=?) LIMIT 1');$find->execute([$viewerUserId,$target,$scope,$identity,$identity]);$existing=$find->fetchColumn()!==false;}
+        else{$find=$pdo->prepare('SELECT 1 FROM avatar_hidden_preferences WHERE viewer_user_id=? AND scope IN (?,?) LIMIT 1');$find->execute([$viewerUserId,NAMEPLATE_VISIBILITY_SCOPE_EXACT,NAMEPLATE_VISIBILITY_SCOPE_USER]);$hasAny=(bool)$find->fetchColumn();}
+        $already=$showAll?!$hasAny:$existing===$desired;
+        if($current!==(int)$expected&&!$already){database_transaction_rollback($pdo,$transaction);return['ok'=>false,'code'=>'NAMEPLATE_VISIBILITY_STALE','error'=>'Hidden nameplate preferences changed. Refresh and try again.','preferences'=>nameplate_visibility_preferences($pdo,$viewerUserId),'http_status'=>409];}
+        $changed=false;$reveal=[];
+        if(!$already){
+            if($showAll){$targets=$pdo->prepare('SELECT DISTINCT target_user_id FROM avatar_hidden_preferences WHERE viewer_user_id=? AND scope IN (?,?)');$targets->execute([$viewerUserId,NAMEPLATE_VISIBILITY_SCOPE_EXACT,NAMEPLATE_VISIBILITY_SCOPE_USER]);$reveal=array_map('intval',$targets->fetchAll(PDO::FETCH_COLUMN));$delete=$pdo->prepare('DELETE FROM avatar_hidden_preferences WHERE viewer_user_id=? AND scope IN (?,?)');$delete->execute([$viewerUserId,NAMEPLATE_VISIBILITY_SCOPE_EXACT,NAMEPLATE_VISIBILITY_SCOPE_USER]);$changed=$delete->rowCount()>0;}
+            elseif($desired){$pdo->prepare('INSERT INTO avatar_hidden_preferences (viewer_user_id,target_user_id,scope,avatar_identity,preference_key) VALUES (?,?,?,?,?)')->execute([$viewerUserId,$target,$scope,$identity,$userScope?'nameplate_user':'nameplate:'.$identity]);$changed=true;}
+            else{$delete=$pdo->prepare('DELETE FROM avatar_hidden_preferences WHERE viewer_user_id=? AND target_user_id=? AND scope=? AND ((avatar_identity IS NULL AND ? IS NULL) OR avatar_identity=?)');$delete->execute([$viewerUserId,$target,$scope,$identity,$identity]);$changed=$delete->rowCount()>0;$reveal=[$target];}
+        }
+        if($changed){$pdo->prepare('UPDATE users SET avatar_visibility_version=avatar_visibility_version+1 WHERE id=?')->execute([$viewerUserId]);avatar_visibility_cache_clear($viewerUserId,$showAll?null:$target);nameplate_visibility_cache_clear($viewerUserId,$showAll?null:$target);}
+        database_transaction_commit($pdo,$transaction);
+        return['ok'=>true,'idempotent'=>!$changed,'preferences'=>nameplate_visibility_preferences($pdo,$viewerUserId),'revealedNameplates'=>nameplate_visibility_revealed($pdo,$viewerUserId,$reveal)];
+    }catch(Throwable $error){database_transaction_rollback($pdo,$transaction);throw$error;}
 }

@@ -67,20 +67,20 @@ if ($action === 'transfer_installation_owner') {
 }
 
 if ($action === 'decide_moderation_case') {
+    $transaction = [];
     try {
         moderation_safety_require_staff_capability($pdo, (int)$me['id'], 'review-reports');
-        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        $transaction = database_transaction_begin($pdo, true);
         $result = moderation_account_decide_case($pdo, (int)$me['id'], $body);
-        $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         json_out(['ok' => true, 'decision' => $result, 'moderationCases' => moderation_account_staff_cases($pdo)]);
     } catch (ModerationAccountWorkflowException|ModerationTrustPolicyException $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         $code = property_exists($error, 'errorCode') ? $error->errorCode : 'MODERATION_CASE_DECISION_FAILED';
         $status = property_exists($error, 'httpStatus') ? $error->httpStatus : 409;
         json_out(['error' => $error->getMessage(), 'code' => $code], $status);
     } catch (Throwable) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         json_out(['error' => 'The case decision could not be stored safely.', 'code' => 'MODERATION_CASE_DECISION_FAILED'], 500);
     }
 }
@@ -95,9 +95,9 @@ if ($action === 'create') {
         json_out(['error' => 'Username, email, and password are required'], 400);
     }
     if (!in_array($role, $roles, true)) json_out(['error' => 'Invalid role'], 400);
+    $transaction = [];
     try {
-        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        $transaction = database_transaction_begin($pdo, true);
         $created = moderation_identity_register_account($pdo, [
             'username' => $username,
             'email' => $email,
@@ -107,13 +107,16 @@ if ($action === 'create') {
             'avatar_path' => 'preset:Default',
         ], 'administrator-created', (int)$me['id']);
         $userId = (int)$created['userId'];
-        $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         json_out(['ok' => true]);
     } catch (MemberProfileException $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        moderation_identity_rollback_after_error($pdo, $transaction, $error);
+        json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
+    } catch (ModerationIdentityPolicyException $error) {
+        moderation_identity_rollback_after_error($pdo, $transaction, $error);
         json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
     } catch (PDOException) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         json_out(['error' => 'That email, Username, or Display name is already in use.'], 409);
     }
 }

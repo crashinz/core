@@ -1,0 +1,115 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "blackjack",
+  "name": "Blackjack",
+  "version": "1.0.23",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_b63c0a01",
+    "name": "Blackjack",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_b63c0a01",
+    "gameId": 64,
+    "path": "blackjack-first-party",
+    "entry": "index.html",
+    "icon": "blackjack-first-party-icon.svg",
+    "profile": "versus",
+    "minPlayers": 2,
+    "practiceMinPlayers": 2,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 5,
+    "seats": [
+      "Player 1",
+      "Player 2",
+      "Player 3",
+      "Player 4",
+      "Player 5"
+    ],
+    "adaptationVersion": "1.0.11",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_b63c0a01",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in Cards"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": true,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.55,
+      "minimumReadableWidth": 700,
+      "minimumReadableHeight": 520
+    },
+    "rulesHelp": {
+      "label": "Blackjack rules",
+      "description": "Two to five players against an automated dealer with a six-deck shoe and session-only chips."
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "includes/blackjack_extension.php": "face6ac0344e445db6f22f8bf2bb9aa364270a51fa105eeaebde7d501f757935",
+      "games/blackjack-first-party/index.html": "6c2d863e342225c21bbfe2b7d2b60914e54a23724ae641f466a5b8c98e000667",
+      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "assets/images/blackjack-first-party-icon.svg": "e1f365609bb10c7da4d97117245d80975eb90aeda65c57ace75a0446ab1688a1",
+      "assets/audio/blackjack/card-deal-1.mp3": "5bc7b9144b29688fc1cb8c66334c70eb2e34a165e6c59157cbe6cc2e410cc30a",
+      "assets/audio/blackjack/card-deal-2.mp3": "c85faca1c7286c9b16ab4abe9bcf19a4ae69019ab83c0a841e0e422a589ee7f6",
+      "assets/audio/blackjack/card-deal-3.mp3": "6a34df70af432759d40945b43a229904e26d3ece5fbbd76c6162134322e43ac4",
+      "assets/audio/blackjack/card-deal-4.mp3": "dd0b9d84e04d6ce1f1f519ef4d8142d2303618f8874d58d63bc7c83246e7a00d",
+      "assets/audio/blackjack/card-reveal.mp3": "c59d2212da93cb94338e495934fde3db614da82d81953feac15aa680c2557080",
+      "assets/audio/blackjack/card-shuffle.mp3": "7b70777fea6421a1b6bcc37b2794112e780205c7414c69fa448ffcaf3d283679",
+      "assets/audio/blackjack/chip-adjust.mp3": "bf0569eb754c15c76b4c92984468aa14b8c185fc8e435d844736ead171eba753",
+      "assets/audio/blackjack/chip-payout.mp3": "ce59f55b7d4df8d10acc300e7038d2d2a16168cb603d8e1c192f79fb96e0213c",
+      "assets/audio/blackjack/chip-wager-1.mp3": "d08bcfbc04faa090f88e2d802cc47045494d4799a70d73bd9b191106eb316e4c",
+      "assets/audio/blackjack/chip-wager-2.mp3": "6427166eb07d3c81efded8417c65200adb839ef2196d168593df69a9f3bc1663",
+      "assets/audio/blackjack/hand-surrender.mp3": "9f8dde79196f1938f71cdfad6e29b85bec4a869b73b9d710beec3e2218b12fb7",
+      "assets/audio/blackjack/result-loss.mp3": "1f7850160a12b178ce1a7700548c9f3a0f31b61cbbaaf1cf4fb0c8ded625b515",
+      "assets/audio/blackjack/result-push.mp3": "2b5275ad7977df1f67b6da018feee33f845ba62121f3edafc43ab57ba1141bcf",
+      "assets/audio/blackjack/result-win.mp3": "8c2c84c2ad60a6aaae28de6efed2ffe9eb46b955c6948177623d3dda33315069",
+      "assets/audio/blackjack/turn-stand.mp3": "05c4db985a439758c1c025cde7857a3f6d6174606e7684a841d1fef7e9963da6",
+      "assets/audio/blackjack/ui-button.mp3": "11658397b40f67789d43ac8cb71c0635adeb44008a1eccff92f7a9172871d1f4",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+    }
+  }
+}

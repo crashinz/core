@@ -75,9 +75,31 @@ function setup_requirements(): array {
     ];
 }
 
+function setup_protected_diagnostic(Throwable $error): string {
+    try {
+        $reference = bin2hex(random_bytes(8));
+    } catch (Throwable) {
+        $reference = substr(hash('sha256', uniqid('corechat-setup-', true)), 0, 16);
+    }
+    $record = [
+        'event' => 'setup_failure',
+        'reference' => $reference,
+        'exception_class' => get_class($error),
+        'exception_code' => (string)$error->getCode(),
+        'message' => $error->getMessage(),
+    ];
+    $encoded = json_encode($record, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    @error_log(is_string($encoded) ? $encoded : '{"event":"setup_failure","encoding":"failed"}');
+    return $reference;
+}
+
 function setup_error_message(Throwable $error): string {
     if ($error instanceof CoreMigrationException) {
         return $error->getMessage() . ' [' . $error->errorCode . ']';
+    }
+    if ($error instanceof PDOException || preg_match('/(?:SQLSTATE\[[A-Z0-9]+\]|PDOException)/i', $error->getMessage()) === 1) {
+        $reference = setup_protected_diagnostic($error);
+        return 'CoreChat could not complete the database setup operation. Verify the database settings and try again. Diagnostic reference: ' . $reference . '.';
     }
     return $error->getMessage();
 }
@@ -821,6 +843,7 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
                     'operation' => 'set_many',
                     'values' => $registryValues,
                     'confirmed' => true,
+                    'authentication_protection_disable_confirmed' => !empty($_POST['authentication_protection_disable_confirmed']),
                     'request_id' => uuid_v4(),
                 ],
                 $_POST['settings_registry_revision'] ?? null,
@@ -848,7 +871,7 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
         authenticate_user($adminUserId);
         redirect_to('/setup.php?done=1');
     } catch (Throwable $e) {
-        $error = $e->getMessage();
+        $error = setup_error_message($e);
         $step = 'admin';
     }
 }
@@ -871,10 +894,11 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
         setup_response(['ok' => true, 'redirect' => app_url('/setup.php?done=1&restored=1')]);
     } catch (Throwable $e) {
         $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
+        $publicError = setup_error_message($e);
         if (str_contains($accept, 'application/json') || (string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
-            setup_response(['error' => $e->getMessage()], 400);
+            setup_response(['error' => $publicError], 400);
         }
-        $error = $e->getMessage();
+        $error = $publicError;
         $step = 'admin';
     }
 }
@@ -891,7 +915,7 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Setup - ChatSpace CE</title>
-  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css?v=20260824-settings-cards-r1')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>">
 <main class="setup-shell">
@@ -990,6 +1014,7 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
             <label class="check-label"><input type="checkbox" name="accept_rules" value="1" required> I accept the complete current Community Rules.</label>
           </div>
           <input id="setup-settings-registry-values" type="hidden" name="settings_registry_values" value="">
+          <input id="setup-authentication-protection-disable-confirmed" type="hidden" name="authentication_protection_disable_confirmed" value="0">
           <input type="hidden" name="settings_registry_revision" value="<?= e((string)($setupSettingsRegistry['revision'] ?? 1)) ?>">
           <script id="setup-settings-registry-data" type="application/json"><?= json_encode($setupSettingsRegistry, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
           <div class="setup-branding-fields settings-registry-setup" data-settings-scroll-owner tabindex="0" role="region" aria-label="Complete Setup installation settings">
@@ -1052,7 +1077,7 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
   </section>
 </main>
 <script src="<?= e(app_url('/assets/js/avatar-processing.js')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260913-unlock-popup')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/setup.js')) ?>"></script>
 </body>
 </html>

@@ -51,6 +51,7 @@ export class AvatarVisibilityService {
 
     applyServerProjection(projection = {}, reason = "server-projection") {
         const version = Math.max(1, Number(projection?.version || 1));
+        if (this.#configured && version < this.#version) return false;
         const entries = Array.isArray(projection?.entries)
             ? projection.entries.filter(entry => (
                 Number.isInteger(Number(entry?.targetUserId))

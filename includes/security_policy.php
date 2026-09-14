@@ -18,26 +18,60 @@ function security_request_is_https(): bool
         || (string)($_SERVER['SERVER_PORT'] ?? '') === '443';
 }
 
-function security_content_security_policy(): string
+function security_csp_https_origin(string $url): ?string
 {
+    $parts = parse_url(trim($url));
+    if (!is_array($parts) || strtolower((string)($parts['scheme'] ?? '')) !== 'https') return null;
+    $host = strtolower(rtrim((string)($parts['host'] ?? ''), '.'));
+    if ($host === '') return null;
+    if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $host = '[' . $host . ']';
+    } elseif (!filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
+        && !preg_match('/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/D', $host)) {
+        return null;
+    }
+    $port = isset($parts['port']) ? (int)$parts['port'] : 443;
+    if ($port < 1 || $port > 65535) return null;
+    return 'https://' . $host . ($port === 443 ? '' : ':' . $port);
+}
+
+function security_content_security_policy(array $additionalFrameUrls = []): string
+{
+    $frameSources = [
+        "'self'",
+        'https://www.youtube-nocookie.com',
+        'https://www.youtube.com',
+        'https://open.spotify.com',
+        'https://w.soundcloud.com',
+    ];
+    foreach ($additionalFrameUrls as $url) {
+        $origin = security_csp_https_origin((string)$url);
+        if ($origin !== null) $frameSources[] = $origin;
+    }
+    $frameSourceList = implode(' ', array_values(array_unique($frameSources)));
     return "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; "
         . "script-src 'self' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com; "
         . "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; "
         . "media-src 'self' data: blob: https://*.giphy.com https://*.klipy.com https://api.klipy.com https://*.tenor.com https://tenor.googleapis.com https://media.tenor.com; "
         . "font-src 'self'; connect-src 'self' https://api.giphy.com https://*.giphy.com https://api.klipy.com https://*.klipy.com https://tenor.googleapis.com https://*.tenor.com; "
-        . "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://open.spotify.com https://w.soundcloud.com; "
-        . "child-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://open.spotify.com https://w.soundcloud.com; "
+        . "frame-src {$frameSourceList}; child-src {$frameSourceList}; "
         . "worker-src 'self' blob:; manifest-src 'self'";
 }
 
-function security_send_browser_headers(): void
+function security_send_content_security_policy(array $additionalFrameUrls = []): void
+{
+    if (PHP_SAPI === 'cli' || headers_sent()) return;
+    header('Content-Security-Policy: ' . security_content_security_policy($additionalFrameUrls));
+}
+
+function security_send_browser_headers(array $additionalFrameUrls = []): void
 {
     if (PHP_SAPI === 'cli' || headers_sent()) return;
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), browsing-topics=()');
-    header('Content-Security-Policy: ' . security_content_security_policy());
+    security_send_content_security_policy($additionalFrameUrls);
     if (function_exists('network_privacy_should_send_hsts') && network_privacy_should_send_hsts()) {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
     }
@@ -142,6 +176,8 @@ function security_outside_content_catalog(): array
 {
     return [
         'avatar_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/avatars/', 'archive' => false],
+        'nameplate_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/nameplates/', 'archive' => false],
+        'custom_emoji_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/emojis/', 'archive' => false],
         'registration_avatar' => ['auth' => 'registration', 'storage' => '/assets/uploads/avatars/', 'archive' => false],
         'setup_avatar' => ['auth' => 'setup', 'storage' => '/assets/uploads/avatars/', 'archive' => false],
         'setup_branding' => ['auth' => 'setup', 'storage' => '/assets/uploads/branding/', 'archive' => false],
@@ -154,6 +190,7 @@ function security_outside_content_catalog(): array
         'room_background_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/backgrounds/', 'archive' => false],
         'room_import_preview' => ['auth' => 'user', 'storage' => null, 'archive' => false],
         'room_import_create' => ['auth' => 'user', 'storage' => '/assets/uploads/imported-rooms/', 'archive' => false],
+        'live_website_room_create' => ['auth' => 'user', 'storage' => null, 'archive' => false],
         'admin_link_icon_upload' => ['auth' => 'user', 'storage' => '/assets/uploads/link-icons/', 'archive' => false],
         'diagnostic_screenshot' => ['auth' => 'user', 'storage' => 'private', 'archive' => false],
         'database_import' => ['auth' => 'user', 'storage' => 'private', 'archive' => 'backup'],
@@ -202,6 +239,7 @@ function security_authorize_outside_content(?PDO $pdo, ?array $actor, string $op
                 'room_background_upload' => 'upload-room-background-video',
                 'room_import_preview' => 'import-website-room',
                 'room_import_create' => 'import-website-room',
+                'live_website_room_create' => 'create-temporary-live-website-room',
             ];
             if (isset($capabilityMap[$operation])) {
                 moderation_identity_require_capability($pdo, $actorUserId, $capabilityMap[$operation]);
@@ -496,6 +534,7 @@ function security_fetch_remote_url(string $url, int $maxBytes, string $accept, a
             'content_type' => $contentType,
             'status' => $status,
             'primary_ip' => $primaryIp,
+            'headers' => array_values(array_filter($responseHeaders, static fn(string $header): bool => $header !== '')),
         ];
     }
     throw new SecurityPolicyViolation('The remote URL could not be fetched safely.', 400);

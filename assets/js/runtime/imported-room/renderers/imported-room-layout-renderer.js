@@ -257,6 +257,9 @@ export class ImportedRoomLayoutRenderer {
      */
     clear() {
 
+        this.#syncAudioPlayerColors({});
+        this.#syncImportedSizing({});
+
         const layoutEl =
             this.#layoutElement();
 
@@ -298,6 +301,9 @@ export class ImportedRoomLayoutRenderer {
             "--vp-import-mobile-image-width"
         );
 
+        for (const property of ['--vp-import-poem-image-width', '--vp-import-poem-image-max-width', '--vp-import-mobile-poem-image-width']) {
+            stage?.style.removeProperty(property);
+        }
         this.#lastSectionCount = 0;
         this.#lastRendered = false;
         this.#lastInnerTranquillity = false;
@@ -493,6 +499,32 @@ export class ImportedRoomLayoutRenderer {
         const stage =
             this.#stageElement();
 
+        if (stage) {
+            for (const [field, property] of [
+                ['poem_image_width', '--vp-import-poem-image-width'],
+                ['poem_image_max_width', '--vp-import-poem-image-max-width'],
+                ['mobile_poem_image_width', '--vp-import-mobile-poem-image-width']
+            ]) {
+                const raw = String(layout?.[field] || '').trim();
+                const value = raw === 'auto' && field !== 'poem_image_max_width'
+                    ? 'auto' : this.#safeCssSize(raw);
+                if (value) stage.style.setProperty(property, value);
+                else stage.style.removeProperty(property);
+            }
+
+            stage.classList.toggle('vp-import-audio-frame-hidden', Boolean(layout.hide_audio_iframe));
+            for (const name of JSON.parse(stage.dataset.importPlayerProperties || '[]')) stage.style.removeProperty(name);
+            const applied = [];
+            for (const [name, value] of Object.entries(layout.player_style || {})) {
+                if (!/^--(?:audio-player-[a-z-]+|player-(?:width|height|accent|overlay-size|symbol-size|replay-size|tooltip-(?:bg|border|text))|(?:play|pause)-icon-(?:width|height))$/.test(name)) continue;
+                const safe = this.#safeCssColor(value) || this.#safeCssSize(value);
+                if (!safe) continue;
+                stage.style.setProperty(name, safe);
+                applied.push(name);
+            }
+            stage.dataset.importPlayerProperties = JSON.stringify(applied);
+        }
+
         const textSize =
             this.#safeCssSize(
                 layout.text_size
@@ -514,7 +546,7 @@ export class ImportedRoomLayoutRenderer {
         }
 
         const mainImageWidth =
-            this.#safeCssSize(
+            String(layout.main_image_width || '').trim().toLowerCase() === 'auto' ? 'auto' : this.#safeCssSize(
                 layout.main_image_width
             );
 
@@ -554,7 +586,7 @@ export class ImportedRoomLayoutRenderer {
         }
 
         const mobileImageWidth =
-            this.#safeCssSize(
+            String(layout.mobile_image_width || '').trim().toLowerCase() === 'auto' ? 'auto' : this.#safeCssSize(
                 layout.mobile_image_width
             );
 
@@ -614,7 +646,8 @@ export class ImportedRoomLayoutRenderer {
 
                 const inlinePlayer =
                     this.#music?.inlinePlayerHtml(
-                        firstTrack
+                        firstTrack,
+                        playerCapability
                     ) || "";
 
                 if (inlinePlayer) {
@@ -679,6 +712,11 @@ export class ImportedRoomLayoutRenderer {
 
         flushAvatarRow();
 
+        const accessibleText = this.#config()?.importLayout?.accessible_text;
+        if (Array.isArray(accessibleText) && accessibleText.length) {
+            chunks.push(`<div class="vp-import-accessible-text" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap">${accessibleText.slice(0, 80).map(text => this.#esc(String(text))).join("<br>")}</div>`);
+        }
+
         return chunks;
 
     }
@@ -696,6 +734,35 @@ export class ImportedRoomLayoutRenderer {
 
     }
 
+    #imagePresentationStyle(section) {
+        const source = section.image_style || {};
+        const css = [];
+        const modes = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
+        if (modes.includes(source.blend_mode)) css.push('mix-blend-mode:' + source.blend_mode);
+        if (/^(?:0(?:\.[0-9]+)?|1(?:\.0+)?|\.[0-9]+)$/.test(String(source.opacity ?? ''))) css.push('opacity:' + source.opacity);
+        const stop = '(?:transparent|black|white|#000(?:000)?|#fff(?:fff)?)(?:\\s+(?:100|[0-9]{1,2})(?:\\.[0-9]+)?%)?';
+        const gradient = 'linear-gradient\\(\\s*to\\s+(?:left|right|top|bottom)\\s*,\\s*' + stop + '(?:\\s*,\\s*' + stop + '){1,7}\\s*\\)';
+        const mask = String(source.mask_image || '');
+        if (mask === 'none' || (mask.length <= 800 && new RegExp('^' + gradient + '(?:\\s*,\\s*' + gradient + '){0,3}$', 'i').test(mask))) {
+            css.push('mask-image:' + mask, '-webkit-mask-image:' + mask);
+        }
+        const composites = {add: 'source-over', subtract: 'source-out', intersect: 'source-in', exclude: 'xor'};
+        if (Object.hasOwn(composites, source.mask_composite)) css.push('mask-composite:' + source.mask_composite, '-webkit-mask-composite:' + composites[source.mask_composite]);
+        if (css.length) css.push('filter:none');
+        return css.join(';');
+    }
+
+    #detailMask(section) {
+        const mask = String(section.image_style?.detail_mask_image || '');
+        if (!mask || mask.length > 800) return '';
+        const percent = '(?:100|[0-9]{1,2})(?:\\.[0-9]+)?%';
+        const stop = '(?:transparent|black|white|#000(?:000)?|#fff(?:fff)?)(?:\\s+' + percent + ')?';
+        const gradient = 'radial-gradient\\(\\s*ellipse\\s+' + percent + '\\s+' + percent
+            + '\\s+at\\s+' + percent + '\\s+' + percent + '\\s*,\\s*'
+            + stop + '(?:\\s*,\\s*' + stop + '){1,7}\\s*\\)';
+        return new RegExp('^' + gradient + '(?:\\s*,\\s*' + gradient + '){0,3}$', 'i').test(mask) ? mask : '';
+    }
+
     #imageHtml(section) {
 
         const roleClass =
@@ -704,7 +771,15 @@ export class ImportedRoomLayoutRenderer {
         const headerClass =
             section.role === "header" ? " vp-import-header" : "";
 
-        return `<figure class="vp-import-section vp-import-image${headerClass}${roleClass}"><img src="${this.#esc(this.#mediaUrl(section.path))}" alt="${this.#esc(section.alt || "")}"></figure>`;
+        const imageStyle = this.#imagePresentationStyle(section);
+        const source = this.#esc(this.#mediaUrl(section.path));
+        const baseImage = `<img style="${this.#esc(imageStyle)}" src="${source}" alt="${this.#esc(section.alt || "")}">`;
+        const detailMask = this.#detailMask(section);
+        const detailImage = detailMask
+            ? `<img class="vp-import-artwork-detail" src="${source}" alt="" aria-hidden="true" draggable="false" style="mask-image:${this.#esc(detailMask)};-webkit-mask-image:${this.#esc(detailMask)}">`
+            : '';
+        const content = detailImage ? `<span class="vp-import-artwork-composite">${baseImage}${detailImage}</span>` : baseImage;
+        return `<figure class="vp-import-section vp-import-image${headerClass}${roleClass}">${content}</figure>`;
 
     }
 
@@ -714,6 +789,14 @@ export class ImportedRoomLayoutRenderer {
             section.path &&
             ["avatar-left", "avatar-right"].includes(section.role);
 
+    }
+
+    #safeTextLink(value) {
+        if (typeof value !== 'string' || /[\x00-\x20\x7f]/.test(value)) return '';
+        try {
+            const url = new URL(value);
+            return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : '';
+        } catch { return ''; }
     }
 
     #textHtml(section) {
@@ -728,7 +811,20 @@ export class ImportedRoomLayoutRenderer {
                 ["left", "center", "right"].includes(style.text_align) ? `text-align:${style.text_align}` : ""
             ].filter(Boolean).join(";");
 
-        return `<div class="vp-import-section vp-import-text"${inline ? ` style="${this.#esc(inline)}"` : ""}>${this.#esc(section.text).replace(/\n/g, "<br>")}</div>`;
+        const runs = Array.isArray(section.runs) && section.runs.length ? section.runs.slice(0, 1800) : [section];
+        const content = runs.map(run => {
+            if (!run || typeof run.text !== 'string') return '';
+            const runStyle = run.style || {};
+            const runCss = [
+                this.#safeCssColor(runStyle.color) ? `color:${this.#safeCssColor(runStyle.color)}` : '',
+                this.#safeCssSize(runStyle.font_size) ? `font-size:${this.#safeCssSize(runStyle.font_size)}` : ''
+            ].filter(Boolean).join(';');
+            const text = this.#esc(run.text).replace(/\n/g, '<br>');
+            const href = this.#safeTextLink(runStyle.link_href);
+            const value = href ? `<a href="${this.#esc(href)}" target="_blank" rel="noopener noreferrer" style="color:inherit;font:inherit">${text}</a>` : text;
+            return `<span${runCss ? ` style="${this.#esc(runCss)}"` : ''}>${value}</span>`;
+        }).join('');
+        return `<div class="vp-import-section vp-import-text"${inline ? ` style="${this.#esc(inline)}"` : ""}>${content}</div>`;
 
     }
 

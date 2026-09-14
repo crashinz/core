@@ -1,0 +1,527 @@
+:root{--spm-gold:#e0b84e;--spm-cyan:#52ddff}.spm-board{position:relative;width:100%;min-width:0;min-height:980px;overflow:hidden;background:#020713 url("../../assets/images/spades-modern/table-room.png") center/cover no-repeat;color:#fff;font-family:Georgia,"Times New Roman",serif;user-select:none}.spm-board:after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 55%,transparent 35%,#0008 100%)}.spm-seat{position:absolute;z-index:5;width:clamp(126px,12vw,180px);height:clamp(158px,24vh,238px);text-align:center;filter:drop-shadow(0 7px 8px #000a)}.spm-avatar{display:block;width:100%;height:calc(100% - 56px);object-fit:cover;border:3px solid var(--spm-gold);border-radius:12px 12px 0 0;background:#13244b}.spm-seat strong,.spm-seat span{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border:1px solid var(--spm-gold);background:#0a1e4de8;padding:5px}.spm-seat span{border-top:0;color:#e8f377;font:700 clamp(9px,.75vw,12px) sans-serif}.spm-seat-bottom{left:50%;bottom:-4%;transform:translateX(-50%)}.spm-seat-left{left:3%;top:39%}.spm-seat-top{left:50%;top:2%;transform:translateX(-50%)}.spm-seat-right{right:3%;top:39%}.spm-table{position:absolute;z-index:3;left:50%;top:48%;width:min(50vw,680px);height:min(47vh,470px);transform:translate(-50%,-50%);border:1px solid #58adff66;border-radius:48%;background:radial-gradient(ellipse,#194ad06b,transparent 66%)}.spm-trick{position:absolute;inset:8% 16%}.spm-card{position:relative;width:clamp(54px,5vw,76px);aspect-ratio:.7;border:1px solid #bda96b;border-radius:8px;background:#fffdf4;color:#111;box-shadow:0 4px 8px #0008;font:700 clamp(15px,1.4vw,22px) Georgia;cursor:pointer}.spm-card.is-red{color:#b6242a}.spm-card span{position:absolute;left:7px;top:5px}.spm-card i{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:1.7em;font-style:normal}.spm-card small{position:absolute;right:7px;bottom:5px;transform:rotate(180deg);font-size:inherit}.spm-card.is-unplayable{opacity:1;filter:grayscale(1) brightness(.42);cursor:not-allowed}.spm-card.is-selected{outline:4px solid #62e6ff;outline-offset:3px;box-shadow:0 0 20px #48ddff}.spm-played{position:absolute;width:clamp(66px,6vw,88px);transform:translate(-50%,-50%);pointer-events:none}.spm-played-bottom{left:50%;top:73%}.spm-played-left{left:28%;top:50%}.spm-played-top{left:50%;top:27%}.spm-played-right{left:72%;top:50%}.spm-card-owner{position:absolute;left:auto;right:3px;top:3px;bottom:auto;transform:none;border-radius:4px;background:#0a1e4d;color:#fff;padding:2px 4px;font:700 7px sans-serif}.spm-turn{position:absolute;left:50%;bottom:5%;transform:translateX(-50%);border-radius:999px;background:#061438e8;padding:7px 20px;color:#fff;font:12px sans-serif;white-space:nowrap}.spm-scoreboard{position:absolute;z-index:6;left:1.5%;top:2%;width:clamp(300px,30vw,430px);border:1px solid var(--spm-gold);border-radius:12px;background:#071735e8;padding:10px 12px;box-shadow:0 8px 26px #0008;font-family:sans-serif}.spm-scoreboard h2{margin:0 0 6px;color:#f8d873;font:700 15px Georgia}.spm-score-team{display:grid;grid-template-columns:1fr auto;gap:2px 10px;border-top:1px solid #b6914b66;padding:5px 0;font-size:10px;line-height:1.25}.spm-score-team strong,.spm-score-team b{color:#6ee7ff}.spm-score-team span{white-space:nowrap}.spm-hand-area{position:absolute;z-index:8;left:8%;right:8%;bottom:0;height:31vh}.spm-round-history{position:absolute;z-index:4;left:50%;top:0;transform:translateX(-50%);padding:7px 20px;border:1px solid var(--spm-gold);border-radius:999px;background:#071b42;color:#fff}.spm-hand{position:absolute;left:50%;bottom:-21%;width:min(88vw,1100px);height:100%;transform:translateX(-50%)}.spm-hand>.spm-card{position:absolute;left:calc(50% + var(--card-offset));bottom:0;width:clamp(68px,7vw,102px);transform:translateX(-50%) rotate(var(--card-angle));transform-origin:50% 130%;transition:bottom .15s,filter .15s;z-index:calc(var(--card-index) + 1)}.spm-hand>.spm-card:not(:disabled):hover,.spm-hand>.spm-card:not(:disabled):focus-visible{bottom:12%;z-index:30}.spm-hand>.spm-card:disabled:not(.is-unplayable){opacity:1;filter:none;cursor:default}.spm-history,.spm-bid-dialog{position:fixed;z-index:50;left:50%;top:12%;width:min(560px,calc(100vw - 24px));max-height:74vh;overflow:auto;transform:translateX(-50%);border:1px solid var(--spm-gold);border-radius:15px;background:#071735f2;padding:14px;box-shadow:0 20px 70px #0009}.spm-history-head{display:flex;justify-content:space-between;align-items:center}.spm-history button,.spm-bid-dialog button{border:1px solid var(--spm-gold);border-radius:7px;background:#102858;color:#fff;padding:7px 12px}.spm-history-row{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;border-top:1px solid #987b42;padding:10px;font:12px sans-serif}.spm-history-row strong,.spm-history-row b{color:#f5dc78}.spm-bid-dialog{text-align:center}.spm-bid-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}@media(max-width:780px){.spm-board{min-height:900px}.spm-scoreboard{top:1%;left:1%;width:235px;padding:6px}.spm-score-team{font-size:8px}.spm-seat{width:92px;height:138px}.spm-seat-left{left:1%;top:37%}.spm-seat-right{right:1%;top:37%}.spm-seat-bottom{bottom:-2%}.spm-table{top:45%;width:78vw;height:42vh}.spm-hand-area{left:1%;right:1%;height:28vh}.spm-hand{width:98vw;bottom:-20%}.spm-hand>.spm-card{width:74px}.spm-round-history{top:-6px;font-size:10px}.spm-played-left{left:22%}.spm-played-right{left:78%}}
+@media(max-width:480px){.spm-board{min-height:820px}.spm-played-left{left:26%}.spm-played-right{left:74%}}
+
+/* Owner-approved compass trick alignment and unobstructed hand controls. */
+.spm-table{top:48%;width:270px;height:240px;border:1px solid rgba(111,216,243,.38);border-radius:34px;background:url("../../assets/images/spades-modern/spade-emblem.svg") center/78px 78px no-repeat!important;box-shadow:none}
+.spm-trick{inset:0!important}
+.spm-played{position:absolute!important;width:68px!important;right:auto!important;bottom:auto!important;transform:none!important;rotate:0deg!important}
+.spm-played-top{left:101px!important;top:4px!important}
+.spm-played-right{left:194px!important;top:72px!important}
+.spm-played-bottom{left:101px!important;top:140px!important}
+.spm-played-left{left:8px!important;top:72px!important}
+.spm-seat-bottom{bottom:14px!important}
+.spm-round-history{position:relative!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;display:block;margin:0 auto 28px;transform:none!important;z-index:2}
+.spm-scoreboard,.spm-score-team{box-sizing:border-box;min-width:0}
+.spm-score-team>div{min-width:0;overflow-wrap:anywhere}
+@media(max-width:480px){.spm-table{width:238px;height:208px}.spm-played{width:62px!important}.spm-played-top{left:88px!important;top:2px!important}.spm-played-right{left:176px!important;top:60px!important}.spm-played-bottom{left:88px!important;top:118px!important}.spm-played-left{left:0!important;top:60px!important}}
+/* Approved played-card faces and separate hand strip. */
+.spm-board{min-height:820px!important}
+.spm-played{display:block!important;aspect-ratio:.7!important;border:1px solid #d3bf97!important;border-radius:9px!important;background:linear-gradient(135deg,rgba(223,194,129,.26),transparent 28%),#fffaf0!important;color:#111!important;box-shadow:0 7px 18px rgba(0,0,0,.48)!important;font:700 16px Georgia,serif!important;writing-mode:horizontal-tb!important}
+.spm-played.is-red{color:#b6242a!important}
+.spm-played>span{writing-mode:horizontal-tb!important}
+.spm-played>span:nth-of-type(1){left:6px!important;right:auto!important;top:5px!important;bottom:auto!important;transform:none!important}
+.spm-played>span:nth-of-type(2){left:50%!important;right:auto!important;top:50%!important;bottom:auto!important;transform:translate(-50%,-50%)!important;font-size:1.75em!important}
+.spm-played>span:nth-of-type(3){left:auto!important;right:6px!important;top:auto!important;bottom:5px!important;transform:rotate(180deg)!important}
+.spm-played>.spm-card-owner{left:auto!important;right:3px!important;top:3px!important;bottom:auto!important;max-width:46px!important;overflow:hidden!important;padding:2px 3px!important;transform:none!important;color:#fff!important;background:#0a2d64!important;font:900 7px/1 sans-serif!important;text-overflow:ellipsis!important;white-space:nowrap!important}
+.spm-hand-area{position:relative!important;left:auto!important;right:auto!important;bottom:auto!important;width:100%!important;height:240px!important;padding-top:12px!important;overflow:visible!important;background:linear-gradient(180deg,#071a36,#020712)!important}
+.spm-round-history{margin:0 auto 38px!important}
+.spm-hand{top:52px!important;bottom:auto!important;height:176px!important}
+@media(max-width:480px){.spm-board{min-height:760px!important}.spm-hand-area{height:220px!important}.spm-hand{top:50px!important;height:158px!important}}
+/* Keep the interactive hand inside the board event boundary. */
+.spm-board{min-height:1120px!important}
+.spm-seat-bottom{bottom:250px!important}
+.spm-hand-area{position:absolute!important;left:1%!important;right:1%!important;bottom:0!important;width:auto!important;height:240px!important;padding-top:12px!important}
+.spm-round-history{margin:0 auto 38px!important}
+.spm-hand{top:52px!important;bottom:auto!important;height:176px!important}
+@media(max-width:480px){.spm-board{min-height:980px!important}.spm-seat-bottom{bottom:230px!important}.spm-hand-area{height:220px!important}.spm-hand{top:50px!important;height:158px!important}}
+/* Remove redundant played-card owner badges and clear the viewer seat. */
+.spm-table{top:42%!important}
+.spm-played>.spm-card-owner{display:none!important}
+
+/* Keep turn ownership clear of the trick and compact short screens to a readable floor. */
+.spm-turn{top:calc(100% + 9px)!important;bottom:auto!important;z-index:7}
+.spm-board{min-height:clamp(780px,100vh,1120px)!important}
+@media (min-width:481px) and (max-height:920px){
+  .spm-board{min-height:clamp(780px,100vh,920px)!important}
+  .spm-scoreboard{transform:scale(.88);transform-origin:top left}
+  .spm-seat{width:clamp(110px,11vw,150px);height:clamp(146px,21vh,190px)}
+  .spm-seat-left,.spm-seat-right{top:37%}
+  .spm-seat-bottom{bottom:190px!important}
+  .spm-table{top:38%!important;width:238px;height:208px}
+  .spm-played{width:62px!important}
+  .spm-played-top{left:88px!important;top:2px!important}
+  .spm-played-right{left:176px!important;top:60px!important}
+  .spm-played-bottom{left:88px!important;top:118px!important}
+  .spm-played-left{left:0!important;top:60px!important}
+  .spm-hand-area{height:190px!important}
+  .spm-hand{top:44px!important;height:136px!important}
+  .spm-hand>.spm-card{width:clamp(62px,6.4vw,88px)}
+}
+@media (max-height:680px){
+  .spm-board{min-height:640px!important}
+  .spm-scoreboard{transform:scale(.74);transform-origin:top left}
+  .spm-seat{width:104px;height:130px}
+  .spm-seat-left,.spm-seat-right{top:34%}
+  .spm-seat-bottom{bottom:170px!important}
+  .spm-table{top:34%!important;width:210px;height:180px}
+  .spm-played{width:54px!important}
+  .spm-played-top{left:78px!important;top:0!important}
+  .spm-played-right{left:156px!important;top:51px!important}
+  .spm-played-bottom{left:78px!important;top:102px!important}
+  .spm-played-left{left:0!important;top:51px!important}
+  .spm-turn{top:calc(100% + 5px)!important;padding:5px 14px!important;font-size:11px!important}
+  .spm-hand-area{height:170px!important}
+  .spm-hand{top:40px!important;height:122px!important}
+  .spm-hand>.spm-card{width:58px}
+}
+
+/* Approved production score rail and stable two-click card play presentation. */
+.spm-scoreboard{
+  position:relative!important;
+  z-index:10;
+  left:auto!important;
+  top:auto!important;
+  width:min(1100px,calc(100% - 24px))!important;
+  margin:12px auto 0;
+  padding:8px!important;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  border-color:rgba(224,184,78,.8)!important;
+  background:linear-gradient(180deg,rgba(7,23,53,.96),rgba(2,10,29,.94))!important;
+  transform:none!important;
+}
+.spm-scoreboard h2{
+  grid-column:1/-1;
+  margin:0!important;
+  color:#f8d873;
+  font:700 11px/1.2 Georgia,"Times New Roman",serif!important;
+  letter-spacing:.14em;
+  text-align:center;
+  text-transform:uppercase;
+}
+.spm-score-team{
+  display:block!important;
+  min-width:0;
+  padding:0!important;
+  overflow:hidden;
+  border:1px solid rgba(224,184,78,.52)!important;
+  border-radius:9px;
+  background:linear-gradient(145deg,rgba(19,49,91,.92),rgba(6,24,55,.96));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07);
+  font-family:Arial,sans-serif;
+}
+.spm-score-head{
+  display:grid;
+  grid-template-columns:minmax(104px,1.35fr) repeat(3,minmax(54px,.7fr));
+  align-items:stretch;
+  min-width:0;
+  border-bottom:1px solid rgba(224,184,78,.42);
+}
+.spm-team-title,.spm-score-stat{
+  min-width:0;
+  padding:7px 8px;
+}
+.spm-team-title strong,.spm-team-title small,.spm-score-stat span,.spm-score-stat b{
+  display:block;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.spm-team-title strong{color:#f8d873!important;font:700 14px/1.1 Georgia,"Times New Roman",serif}
+.spm-team-title small{margin-top:3px;color:#6ee7ff;font:700 9px/1.2 Arial,sans-serif;text-transform:uppercase;white-space:normal;overflow:visible;text-overflow:clip}
+.spm-team-title small{display:grid!important;gap:2px}
+.spm-player-bid{display:flex!important;min-width:0;align-items:center;justify-content:space-between;gap:5px;white-space:nowrap!important}
+.spm-player-bid-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spm-player-bid b{flex:0 0 auto;color:#f8d873!important;font:700 8px/1.2 Arial,sans-serif;white-space:nowrap}
+.spm-score-stat{border-left:1px solid rgba(224,184,78,.3);text-align:center}
+.spm-score-stat span{color:#b7c8df;font:700 8px/1.1 Arial,sans-serif;text-transform:uppercase}
+.spm-score-stat b{box-sizing:border-box;min-height:20px;margin-top:3px;padding:2px 1px;color:#fff!important;font:700 13px/1.25 Arial,sans-serif;font-variant-numeric:tabular-nums;overflow:visible;text-overflow:clip}
+.spm-score-math{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  min-width:0;
+}
+.spm-score-math>div{min-width:0;padding:6px 4px;text-align:center;border-right:1px solid rgba(95,142,190,.2)}
+.spm-score-math>div:last-child{border-right:0}
+.spm-score-math span,.spm-score-math b{display:block;min-width:0;overflow-wrap:anywhere}
+.spm-score-math span{min-height:18px;color:#9fb3ce;font:700 7px/1.15 Arial,sans-serif;text-transform:uppercase}
+.spm-score-math b{margin-top:2px;color:#e9f3ff!important;font:700 10px/1.1 Arial,sans-serif}
+.spm-score-math .is-bonus b,.spm-score-math .is-total b{color:#7ee5a7!important}
+.spm-score-math .is-warning b,.spm-score-team.has-bag-warning .spm-score-stat:last-child b{color:#ffcb63!important}
+.spm-bag-meter{display:none}
+.spm-bag-meter span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#51ddff,#e0b84e);box-shadow:0 0 8px rgba(82,221,255,.55)}
+.spm-hand>.spm-card.is-selected,.spm-hand>.spm-card[aria-busy="true"]{bottom:12%!important;z-index:31!important}
+.spm-hand>.spm-card[aria-busy="true"]{cursor:progress}
+.spm-seat-top{top:164px!important}
+
+@media(max-width:700px){
+  .spm-scoreboard{grid-template-columns:1fr;width:calc(100% - 12px)!important;margin-top:6px;padding:6px!important}
+  .spm-scoreboard h2{grid-column:1}
+  .spm-score-head{grid-template-columns:minmax(90px,1.25fr) repeat(3,minmax(46px,.7fr))}
+  .spm-team-title,.spm-score-stat{padding:6px 5px}
+  .spm-score-math>div{padding:5px 2px}
+  .spm-score-math span{font-size:6px}
+  .spm-score-math b{font-size:9px}
+  .spm-seat-top{top:292px!important}
+  .spm-seat-left,.spm-seat-right{top:49%!important}
+  .spm-table{top:58%!important}
+  .spm-board{min-height:1180px!important}
+}
+
+@media(max-width:420px){
+  .spm-score-head{grid-template-columns:minmax(82px,1.2fr) repeat(3,minmax(40px,.65fr))}
+  .spm-team-title strong{font-size:12px}
+  .spm-team-title small{font-size:8px}
+  .spm-score-stat span{font-size:7px}
+  .spm-score-stat b{font-size:11px}
+  .spm-score-math{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .spm-score-math>div:nth-child(n+5){border-top:1px solid rgba(95,142,190,.2)}
+  .spm-seat-top{top:332px!important}
+  .spm-board{min-height:1240px!important}
+}
+
+/* Keep the two-team rail readable without crowding the upper player seats. */
+@media(max-width:960px){
+  .spm-scoreboard{
+    left:auto!important;
+    top:16px!important;
+    width:min(840px,calc(100% - 28px))!important;
+    transform:none!important;
+    grid-template-columns:minmax(0,1fr) clamp(142px,18vw,190px) minmax(0,1fr)!important;
+    gap:10px!important;
+    padding:0!important;
+    overflow:visible;
+    border:0!important;
+    background:transparent!important;
+    box-shadow:none!important;
+  }
+  .spm-scoreboard h2{position:absolute;left:50%;top:-24px;width:max-content;transform:translateX(-50%)}
+  .spm-score-team:first-of-type{grid-column:1}
+  .spm-score-team:last-of-type{grid-column:3}
+  .spm-score-head{
+    grid-template-columns:minmax(112px,1.3fr) repeat(3,minmax(48px,.7fr))!important;
+  }
+  .spm-team-title,.spm-score-stat{padding:6px 5px!important}
+  .spm-score-math{grid-template-columns:repeat(7,minmax(0,1fr))!important}
+  .spm-score-math>div:nth-child(n+5){border-top:0}
+  .spm-score-math span{min-height:14px;font-size:0!important;line-height:1.15;white-space:nowrap}
+  .spm-score-math span::after{font:700 5.5px/1.15 Arial,sans-serif;white-space:nowrap}
+  .spm-score-math>div:nth-child(1) span::after{content:"Contract"}
+  .spm-score-math>div:nth-child(2) span::after{content:"Tricks"}
+  .spm-score-math>div:nth-child(3) span::after{content:"Bid pts"}
+  .spm-score-math>div:nth-child(4) span::after{content:"Over"}
+  .spm-score-math>div:nth-child(5) span::after{content:"Nil +/-"}
+  .spm-score-math>div:nth-child(6) span::after{content:"Bag pen."}
+  .spm-score-math>div:nth-child(7) span::after{content:"Round"}
+}
+
+@media(max-width:700px){
+  .spm-scoreboard{
+    width:calc(100% - 20px)!important;
+    grid-template-columns:minmax(0,1fr) 112px minmax(0,1fr)!important;
+    gap:6px!important;
+  }
+  .spm-score-head{grid-template-columns:minmax(70px,1.2fr) repeat(3,minmax(32px,.7fr))!important}
+  .spm-team-title,.spm-score-stat{padding:5px 3px!important}
+}
+
+@media(max-width:960px){
+  .spm-seat-top{top:28px!important}
+}
+
+/* Preserve partnership identity across seats and score panels. */
+.spm-seat-bottom,.spm-seat-top{--spm-team-color:var(--spm-gold)}
+.spm-seat-left,.spm-seat-right{--spm-team-color:var(--spm-cyan)}
+.spm-seat .spm-avatar,.spm-seat strong,.spm-seat span{border-color:var(--spm-team-color)!important}
+.spm-seat-bottom,.spm-seat-top{filter:drop-shadow(0 7px 8px #000a) drop-shadow(0 0 6px rgba(224,184,78,.24))}
+.spm-seat-left,.spm-seat-right{filter:drop-shadow(0 7px 8px #000a) drop-shadow(0 0 6px rgba(82,221,255,.28))}
+.spm-score-team:first-of-type{--spm-team-color:var(--spm-gold);border-color:rgba(224,184,78,.72)!important}
+.spm-score-team:last-of-type{--spm-team-color:var(--spm-cyan);border-color:rgba(82,221,255,.72)!important}
+.spm-score-team .spm-team-title strong,.spm-score-team .spm-player-bid-name,.spm-score-team .spm-player-bid b{color:var(--spm-team-color)!important}
+.spm-score-team:first-of-type .spm-bag-meter span{background:linear-gradient(90deg,#8f6b25,var(--spm-gold))}
+.spm-score-team:last-of-type .spm-score-head{border-bottom-color:rgba(82,221,255,.42)}
+.spm-score-team:last-of-type .spm-score-stat{border-left-color:rgba(82,221,255,.26)}
+.spm-score-team:last-of-type .spm-bag-meter span{background:linear-gradient(90deg,#238fa9,var(--spm-cyan))}
+/* Keep the complete table, partner seat, and hand visible in compact game panes. */
+@media (max-width: 960px) {
+  .player-status-strip {
+    display: none !important;
+  }
+
+  .spm-board {
+    height: 560px !important;
+    min-height: 560px !important;
+  }
+
+  .spm-seat {
+    width: 104px !important;
+    height: 120px !important;
+  }
+
+  .spm-avatar {
+    height: 80px !important;
+  }
+
+  .spm-seat strong {
+    padding: 2px 3px !important;
+    font-size: clamp(10px, 1.45vw, 12px) !important;
+    line-height: 15px !important;
+    letter-spacing: -.15px;
+  }
+
+  .spm-seat span {
+    padding: 2px !important;
+    font-size: 9px !important;
+    line-height: 12px !important;
+  }
+
+  .spm-seat-top {
+    top: 8px !important;
+  }
+
+  .spm-seat-left,
+  .spm-seat-right {
+    top: 150px !important;
+  }
+
+  .spm-seat-bottom {
+    bottom: 120px !important;
+  }
+
+  .spm-table {
+    top: 207px !important;
+    width: 188px !important;
+    height: 120px !important;
+  }
+
+  .spm-played {
+    width: 48px !important;
+  }
+
+  .spm-played-top {
+    left: 70px !important;
+    top: 0 !important;
+  }
+
+  .spm-played-right {
+    left: 140px !important;
+    top: 26px !important;
+  }
+
+  .spm-played-bottom {
+    left: 70px !important;
+    top: 70px !important;
+  }
+
+  .spm-played-left {
+    left: 0 !important;
+    top: 26px !important;
+  }
+
+  .spm-turn {
+    top: calc(100% + 24px) !important;
+    padding: 5px 14px !important;
+    font-size: 11px !important;
+  }
+
+  .spm-hand-area {
+    height: 124px !important;
+  }
+
+  .spm-round-history {
+    position: absolute !important;
+    top: 8px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: auto !important;
+    height: 30px !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    margin-bottom: 0 !important;
+    padding: 3px 12px !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+  }
+
+  .spm-scoreboard h2 {
+    position: absolute !important;
+    top: -18px !important;
+    left: 50% !important;
+    transform: translate(-50%, -26px) !important;
+    white-space: nowrap !important;
+  }
+
+  .spm-hand {
+    top: 40px !important;
+    bottom: auto !important;
+    width: 96% !important;
+    height: 80px !important;
+  }
+
+  .spm-hand > .spm-card {
+    bottom: 6px !important;
+    width: 52px !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .spm-scoreboard {
+    top: 0 !important;
+  }
+
+  .spm-score-head {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .spm-team-title {
+    grid-column: 1 / -1 !important;
+  }
+
+  .spm-score-stat {
+    min-width: 0 !important;
+    padding: 2px !important;
+  }
+
+  .spm-score-stat span {
+    white-space: normal !important;
+    font-size: 7px !important;
+    line-height: 1.05 !important;
+  }
+
+  .spm-score-math {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .spm-score-math > div {
+    min-width: 0 !important;
+    padding: 2px 1px !important;
+  }
+
+  .spm-score-math span {
+    white-space: normal !important;
+    font-size: 6px !important;
+    line-height: 1.05 !important;
+  }
+
+  .spm-score-math b {
+    font-size: 9px !important;
+  }
+
+  .spm-seat-left,
+  .spm-seat-right {
+    top: 185px !important;
+  }
+}
+.spm-completed-trick{z-index:6!important;pointer-events:none!important}
+
+/* Preserve the trick square when the host browser has limited vertical space. */
+.spm-played{opacity:1!important;filter:none!important}
+.spm-board.spm-host-compact .spm-seat{width:112px!important;height:142px!important}
+.spm-board.spm-host-compact .spm-avatar{height:calc(100% - 44px)!important}
+.spm-board.spm-host-compact .spm-seat strong{padding:3px!important;font-size:11px!important;line-height:15px!important;letter-spacing:-.15px}
+.spm-board.spm-host-compact .spm-seat span{padding:2px!important;font-size:9px!important;line-height:12px!important}
+.spm-board.spm-host-compact .spm-seat-top{top:142px!important}
+
+/* A short host must not collapse the trick into the upper seat while the
+   embedded frame is measuring its initial height. Keep distinct vertical
+   lanes for the seat, trick, turn label, viewer seat, and raised hand. */
+@media(min-width:961px){
+  .spm-board.spm-host-compact{min-height:980px!important}
+  .spm-board.spm-host-compact .spm-table{top:max(42%,420px)!important}
+  .spm-board.spm-host-compact .spm-seat-bottom{bottom:240px!important}
+  .spm-board.spm-host-compact .spm-hand-area{height:220px!important}
+  .spm-board.spm-host-compact .spm-hand{top:72px!important;height:144px!important}
+}
+
+@media(max-width:960px){
+  .spm-board.spm-host-compact .spm-seat{width:96px!important;height:112px!important}
+  .spm-board.spm-host-compact .spm-avatar{height:72px!important}
+  .spm-board.spm-host-compact .spm-seat-top{top:8px!important}
+}
+
+/* R30 responsive repair: keep every scoring label and partnership identity
+   readable instead of substituting abbreviated pseudo-labels or ellipsis. */
+@media(max-width:960px){
+  .spm-player-bid{align-items:flex-start;white-space:normal!important}
+  .spm-player-bid-name{overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere}
+  .spm-score-math span{
+    min-height:20px;
+    overflow:visible;
+    font-size:7px!important;
+    line-height:1.15!important;
+    white-space:normal!important;
+    overflow-wrap:normal;
+  }
+  .spm-score-math>div:nth-child(n) span::after{content:none!important}
+}
+
+@media(max-width:600px){
+  .spm-board,
+  .spm-board.spm-host-compact{height:auto!important;min-height:820px!important}
+  .spm-scoreboard{
+    position:relative!important;
+    top:auto!important;
+    width:calc(100% - 16px)!important;
+    margin:24px auto 0!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    gap:7px!important;
+    padding:6px!important;
+    border:1px solid rgba(224,184,78,.8)!important;
+    background:linear-gradient(180deg,rgba(7,23,53,.96),rgba(2,10,29,.94))!important;
+  }
+  .spm-scoreboard h2{
+    position:static!important;
+    width:auto!important;
+    margin:0 0 2px!important;
+    transform:none!important;
+  }
+  .spm-score-team:first-of-type,
+  .spm-score-team:last-of-type{grid-column:1!important}
+  .spm-score-head{grid-template-columns:minmax(116px,1.25fr) repeat(3,minmax(48px,.68fr))!important}
+  .spm-team-title{grid-column:auto!important;padding:6px!important}
+  .spm-team-title strong{font-size:13px!important}
+  .spm-team-title small{font-size:9px!important}
+  .spm-score-stat{padding:5px 3px!important}
+  .spm-score-stat span{font-size:8px!important;line-height:1.1!important}
+  .spm-score-stat b{font-size:12px!important}
+  .spm-score-math{grid-template-columns:repeat(7,minmax(0,1fr))!important}
+  .spm-score-math>div{padding:4px 2px!important}
+  .spm-score-math span{min-height:22px;font-size:7px!important;line-height:1.1!important}
+  .spm-score-math b{font-size:10px!important}
+  .spm-seat-top,
+  .spm-board.spm-host-compact .spm-seat-top{top:230px!important}
+  .spm-seat-left,
+  .spm-seat-right{top:360px!important}
+  .spm-table{top:410px!important}
+  .spm-seat-bottom{bottom:120px!important}
+}
+
+/* Keep the compact partner seat between the score rail and the trick without
+   changing its lower boundary or the regular-width seat geometry. */
+@media(min-width:961px){
+  .spm-board.spm-host-compact .spm-seat-top{top:154px!important;height:130px!important}
+  .spm-board.spm-host-compact .spm-seat-top .spm-avatar{height:86px!important}
+}
+
+.spm-history-section-title{margin:12px 0 4px;color:#f8d873;font:700 13px/1.2 Georgia,"Times New Roman",serif}
+.spm-trick-history-row{grid-template-columns:1fr auto}
+.spm-history{display:flex!important;flex-direction:column;overflow:hidden!important}
+.spm-history-head{flex:0 0 auto;gap:12px}
+.spm-history-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:4px}
+.spm-trick-cards{grid-column:1/-1;line-height:1.5;color:#dbeaff;overflow-wrap:anywhere}
+
+/* Illustrated Joker faces are full cards in both the hand and trick area. */
+.spm-card.is-joker{overflow:hidden;background:#081630;color:#f8d873}
+.spm-card.is-joker>img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit}
+
+/* Score headers must fit their panel, including height-fitted narrow boards. */
+.spm-score-head{grid-template-columns:minmax(0,1.6fr) repeat(3,minmax(0,1fr))!important}
+.spm-score-head>*{min-width:0!important}
+.spm-score-head .spm-team-title{grid-column:auto!important}
+.spm-score-stat span,.spm-score-stat b{white-space:normal;overflow-wrap:anywhere}
+.spm-score-math span{white-space:normal!important;overflow-wrap:anywhere;min-height:22px;height:auto;display:flex;align-items:center;justify-content:center}
+.spm-score-math b{white-space:normal;overflow-wrap:anywhere}
+/* The 75% height-fit floor must retain a 24px history-button target. */
+.spm-round-history{min-height:32px!important;min-width:32px!important}

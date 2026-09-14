@@ -13,6 +13,98 @@ function appUrl(path) {
   return `${APP_BASE}${path}`;
 }
 
+let lobbyServerClock = null;
+let lobbyRuntimeIssueCaptureService = null;
+const lobbyRuntimeIssueCaptureReady = CSRF_TOKEN
+  ? import(appUrl('/assets/js/core/runtime-issue-capture-service.js?v=20260913-local-failure-recovery'))
+      .then(({ RuntimeIssueCaptureService }) => {
+        lobbyRuntimeIssueCaptureService = new RuntimeIssueCaptureService({
+          endpoint: appUrl('/api/runtime_issues.php'),
+          csrfToken: CSRF_TOKEN,
+          buildId: '000063-admin-game-diagnostics',
+        }).start();
+        return lobbyRuntimeIssueCaptureService;
+      })
+      .catch(() => null)
+  : Promise.resolve(null);
+
+function captureLobbyRuntimeIssue(error, component, evidence = {}) {
+  void lobbyRuntimeIssueCaptureReady
+    .then(service => service?.capture(error, {
+      category: 'request',
+      component,
+      title: error?.code === 'ADMIN_API_HTML_RESPONSE'
+        ? 'Admin API returned HTML instead of JSON'
+        : 'Admin API response failed',
+      severity: 'error',
+    }, evidence))
+    .catch(() => null);
+}
+
+function lobbyResponseMetadata(response) {
+  let path = '';
+  try { path = new URL(response?.url || '', window.location.href).pathname; } catch {}
+  return {
+    path: path || null,
+    status: Number(response?.status) || 0,
+    redirected: Boolean(response?.redirected),
+    contentType: String(response?.headers?.get?.('content-type') || '').slice(0, 120) || null,
+  };
+}
+
+function lobbyInvalidJsonError(code, message, metadata, cause = null, component = 'admin-dashboard-api') {
+  const error = new Error(message, cause ? { cause } : undefined);
+  error.code = code;
+  captureLobbyRuntimeIssue(error, component, { ...metadata, source: 'admin-json-response' });
+  return error;
+}
+
+async function lobbyReadJsonResponse(response, fallbackMessage = 'The server returned an invalid response.') {
+  lobbyServerClock ||= await import(appUrl('/assets/js/core/animation-server-clock.js?v=20260913-r2'));
+  lobbyServerClock.observeAnimationServerDate(response.headers.get('Date'));
+  const metadata = lobbyResponseMetadata(response);
+  const text = await response.text();
+  const trimmed = text.trim();
+  if (/^(?:<!doctype\s+html|<html\b|<br\s*\/?\s*>|<b\b)/i.test(trimmed)
+      || String(metadata.contentType || '').toLowerCase().includes('text/html')) {
+    throw lobbyInvalidJsonError(
+      'ADMIN_API_HTML_RESPONSE',
+      'The Admin API returned an HTML error document instead of JSON.',
+      metadata,
+    );
+  }
+  if (!trimmed) {
+    throw lobbyInvalidJsonError('ADMIN_API_EMPTY_RESPONSE', 'The Admin API returned an empty response.', metadata);
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (cause) {
+    throw lobbyInvalidJsonError('ADMIN_API_INVALID_JSON', fallbackMessage, metadata, cause);
+  }
+  if (data?.reauthentication_required === true) {
+    window.dispatchEvent(new Event('corechat:reauthentication-required'));
+  }
+  if (!response.ok && Number(response.status) >= 500) {
+    const error = new Error(String(data?.error || fallbackMessage));
+    error.code = 'ADMIN_API_HTTP_ERROR';
+    captureLobbyRuntimeIssue(error, 'admin-dashboard-api', { ...metadata, source: 'admin-http-response' });
+  }
+  return data;
+}
+
+function lobbyParseJsonText(text, fallbackMessage, component = 'admin-upload-api', metadata = {}) {
+  const trimmed = String(text || '').trim();
+  if (/^(?:<!doctype\s+html|<html\b|<br\s*\/?\s*>|<b\b)/i.test(trimmed)) {
+    throw lobbyInvalidJsonError('ADMIN_API_HTML_RESPONSE', 'The Admin API returned an HTML error document instead of JSON.', metadata, null, component);
+  }
+  try {
+    return JSON.parse(trimmed || '{}');
+  } catch (cause) {
+    throw lobbyInvalidJsonError('ADMIN_API_INVALID_JSON', fallbackMessage, metadata, cause, component);
+  }
+}
+
 const backgroundInput = document.getElementById('room-background-input');
 const backgroundName = document.getElementById('room-background-name');
 const createRoomForm = document.getElementById('create-room-form');
@@ -22,6 +114,10 @@ const roomImportUrl = document.getElementById('room-import-url');
 const roomImportPreviewBtn = document.getElementById('room-import-preview');
 const roomImportStatus = document.getElementById('room-import-status');
 const roomImportPreviewCard = document.getElementById('room-import-preview-card');
+const roomLiveWebsiteUrl = document.getElementById('room-live-website-url');
+const roomLiveWebsiteName = document.getElementById('room-live-website-name');
+const roomLiveWebsiteCreate = document.getElementById('room-live-website-create');
+const roomLiveWebsiteStatus = document.getElementById('room-live-website-status');
 const roomGrid = document.getElementById('room-grid');
 const lobbyRoomIds = new Set([...document.querySelectorAll('.room-card[data-room-id]')].map(card => card.dataset.roomId));
 let lobbyPollTimer = null;
@@ -36,13 +132,20 @@ if (backgroundInput && backgroundName) {
 
 function setRoomCreateTab(tab) {
   createTabButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.createTab === tab));
-  document.getElementById('room-create-manual')?.classList.toggle('active', tab === 'manual');
-  document.getElementById('room-create-import')?.classList.toggle('active', tab === 'import');
+  ['manual', 'import', 'live'].forEach(panelName => {
+    const panel = document.getElementById(`room-create-${panelName}`);
+    const active = tab === panelName;
+    panel?.classList.toggle('active', active);
+    panel?.querySelectorAll('input, select, textarea, button').forEach(control => {
+      control.disabled = !active;
+    });
+  });
 }
 
 createTabButtons.forEach(btn => {
   btn.addEventListener('click', () => setRoomCreateTab(btn.dataset.createTab || 'manual'));
 });
+setRoomCreateTab('manual');
 
 const lobbyMenu = document.getElementById('lobby-menu');
 const lobbyMenuBtn = document.getElementById('lobby-menu-btn');
@@ -101,16 +204,21 @@ function roomVideoPlaceholder(room) {
 
 function roomCardHtml(room) {
   const bg = room.tile_background_url ? ` style="background-image:url('${esc(room.tile_background_url)}')"` : '';
+  const liveDomain = room.live_website_target_host
+    ? `<div class="live-website-room-domain"><span>Live Website</span>${esc(room.live_website_target_host)}</div>`
+    : '';
   const edit = room.can_edit
     ? `<button class="btn btn-primary room-edit-open" type="button" data-room-id="${esc(room.public_id)}" data-room-name="${esc(room.name)}" data-room-bg="${esc(room.background_url || '')}" data-room-thumb="${esc(room.thumb_url || '')}" data-room-mime="${esc(room.background_mime || '')}">Edit</button>`
     : '';
   return `<div class="room-card-media"${bg}>${roomVideoPlaceholder(room)}</div>
     <div class="room-card-body">
       <h2 class="room-card-name">${esc(room.name)}</h2>
+      ${liveDomain}
       <div class="minor room-card-meta"><span class="room-card-count">${Number(room.online_count || 0)}</span> online · made by <span class="room-card-owner">${esc(room.owner_name)}</span></div>
       <p class="room-card-actions">
         <a class="btn btn-primary" href="${esc(room.enter_url)}">Enter</a>
         ${edit}
+        ${room.can_refresh_preview ? `<button class="btn room-preview-refresh" type="button" data-room-id="${esc(room.public_id)}">Refresh Preview</button><span class="minor room-preview-status" role="status"></span>` : ''}
       </p>
     </div>`;
 }
@@ -134,6 +242,13 @@ function updateRoomCard(card, room) {
   const owner = card.querySelector('.room-card-owner');
   const enter = card.querySelector('.room-card-actions a');
   const edit = card.querySelector('.room-edit-open');
+  const media = card.querySelector('.room-card-media');
+  if (media) {
+    const image = room.tile_background_url ? `url(${JSON.stringify(String(room.tile_background_url))})` : '';
+    if (media.style.backgroundImage !== image) media.style.backgroundImage = image;
+    if (!room.video_without_thumb) media.querySelector('.room-video-placeholder')?.remove();
+    else if (!media.querySelector('.room-video-placeholder')) media.insertAdjacentHTML('beforeend', roomVideoPlaceholder(room));
+  }
   if (name && name.textContent !== room.name) name.textContent = room.name;
   if (count && count.textContent !== String(Number(room.online_count || 0))) count.textContent = String(Number(room.online_count || 0));
   if (owner && owner.textContent !== room.owner_name) owner.textContent = room.owner_name;
@@ -185,7 +300,7 @@ async function pollLobbyRooms() {
       redirectToLogin();
       return;
     }
-    const data = await resp.json().catch(() => ({}));
+    const data = await lobbyReadJsonResponse(resp);
     if (data.redirect_url) {
       window.location.href = data.redirect_url;
       return;
@@ -253,14 +368,55 @@ function setLobbyRoomPreview(path, mime = '') {
 
 async function lobbyApiPost(url, body) {
   const payload = Object.assign({}, body || {}, { _csrf: CSRF_TOKEN });
-  const resp = await fetch(appUrl(url), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
-    body: JSON.stringify(payload),
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || data.error) throw new Error(data.error || 'Request failed');
-  return data;
+  const send = async (confirmationHeaders = {}) => {
+    const resp = await fetch(appUrl(url), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': CSRF_TOKEN,
+        ...confirmationHeaders,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await lobbyReadJsonResponse(resp);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('The server returned an invalid response.');
+    }
+    if (!resp.ok || data.error) {
+      if (Number(resp.status) === 403 && data.code === 'CAPABILITY_NOT_GRANTED'
+          && data.capabilityId === 'import-website-room') {
+        data.error = 'Import Website Room permission is not enabled for your account. Trusted status alone does not enable imports. Open Account > Requests & Notices to request this permission; an administrator can review it in Manage Users > Roles & Requests.';
+      }
+      const error = new Error(data.error || 'Request failed');
+      error.details = { status: Number(resp.status) };
+      // Keep the policy available to this interaction, not serialized into logs.
+      Object.defineProperty(error, 'responsePayload', { value: data });
+      throw error;
+    }
+    return data;
+  };
+  try {
+    return await send();
+  } catch (error) {
+    if (error?.details?.status !== 428
+        || error?.responsePayload?.code !== 'OUTSIDE_CONTENT_CONFIRMATION_REQUIRED') throw error;
+    const { outsideContentChallenge, confirmOutsideContent } = await import(
+      appUrl('/assets/js/core/outside-content-upload.js?v=20260913-consent-r2')
+    );
+    const policy = outsideContentChallenge(error);
+    if (!policy) throw error;
+    if (await confirmOutsideContent(policy) !== true) {
+      const cancelled = new Error('Cancelled. No content was imported.');
+      cancelled.code = 'OUTSIDE_CONTENT_CANCELLED';
+      throw cancelled;
+    }
+    // JSON endpoints read consent from these headers, not JSON body fields.
+    // One retry only, after the user confirms this operation's statement.
+    return send({
+      'X-Outside-Content-Confirmed': '1',
+      'X-Outside-Content-Confirmation-Id': globalThis.crypto.randomUUID(),
+    });
+  }
 }
 
 function importSectionThumb(section) {
@@ -354,6 +510,42 @@ roomImportUrl?.addEventListener('keydown', e => {
     e.preventDefault();
     previewRoomImport();
   }
+});
+
+function setLiveWebsiteStatus(message, busy = false) {
+  if (!roomLiveWebsiteStatus) return;
+  roomLiveWebsiteStatus.innerHTML = message
+    ? `<span class="${busy ? 'spinner-inline' : ''}"></span><span>${esc(message)}</span>`
+    : '';
+}
+
+async function createLiveWebsiteRoom() {
+  const url = roomLiveWebsiteUrl?.value.trim() || '';
+  const name = roomLiveWebsiteName?.value.trim() || '';
+  if (!url) {
+    setLiveWebsiteStatus('Enter an HTTPS website URL first.');
+    roomLiveWebsiteUrl?.focus();
+    return;
+  }
+  if (roomLiveWebsiteCreate) roomLiveWebsiteCreate.disabled = true;
+  setLiveWebsiteStatus('Checking whether the website can open safely...', true);
+  try {
+    const data = await lobbyApiPost('/api/live_website_rooms.php', { action: 'create', url, name });
+    if (!data.room?.enterUrl) throw new Error('The Live Website Room was created without an entry URL.');
+    setLiveWebsiteStatus(`Opening ${data.room.targetHost || 'website'}...`, true);
+    window.location.href = data.room.enterUrl;
+  } catch (err) {
+    setLiveWebsiteStatus(err.message || 'Live Website Room creation failed.');
+  } finally {
+    if (roomLiveWebsiteCreate) roomLiveWebsiteCreate.disabled = false;
+  }
+}
+
+roomLiveWebsiteCreate?.addEventListener('click', createLiveWebsiteRoom);
+roomLiveWebsiteUrl?.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  createLiveWebsiteRoom();
 });
 
 function setUploadProgress(progressEl, pct, message) {
@@ -530,7 +722,8 @@ async function loadLobbyRoomEjections(roomPublicId) {
   lobbyRoomEjectionList.innerHTML = '<div class="minor">Loading...</div>';
   try {
     const qs = new URLSearchParams({ action: 'ejections', room_public_id: roomPublicId });
-    const data = await fetch(appUrl('/api/room_admin.php?' + qs)).then(r => r.json());
+    const response = await fetch(appUrl('/api/room_admin.php?' + qs));
+    const data = await lobbyReadJsonResponse(response, 'Room administration data could not be loaded.');
     lobbyRoomEjectionList.innerHTML = '';
     if (!(data.ejections || []).length) {
       lobbyRoomEjectionList.innerHTML = '<div class="minor">No active kicks.</div>';
@@ -556,7 +749,7 @@ createRoomForm?.addEventListener('submit', async e => {
   e.preventDefault();
   try {
     const resp = await uploadFormWithProgress(createRoomForm, appUrl('/api/lobby_rooms.php'), createRoomProgress);
-    const data = JSON.parse(resp.responseText || '{}');
+    const data = lobbyParseJsonText(resp.responseText, 'The server returned invalid JSON.', 'lobby-upload-api', { status: Number(resp.status) || 0 });
     if (data.error) throw new Error(data.error);
     if (data.room) insertRoomCard(data.room, true);
     else applyLobbyRooms(data.rooms || []);
@@ -569,7 +762,24 @@ createRoomForm?.addEventListener('submit', async e => {
   }
 });
 
-roomGrid?.addEventListener('click', e => {
+roomGrid?.addEventListener('click', async e => {
+  const previewButton = e.target.closest('.room-preview-refresh');
+  if (previewButton) {
+    if (previewButton.disabled) return;
+    const status = previewButton.closest('.room-card')?.querySelector('.room-preview-status');
+    previewButton.disabled = true;
+    if (status) status.textContent = 'Capturing preview...';
+    try {
+      const result = await lobbyApiPost('/api/live_website_rooms.php', { action: 'refresh_preview', room_public_id: previewButton.dataset.roomId });
+      if (status) status.textContent = result.message || 'Preview updated.';
+      await pollLobbyRooms();
+    } catch (error) {
+      if (status) status.textContent = error?.message || 'Could not refresh the preview.';
+    } finally {
+      previewButton.disabled = false;
+    }
+    return;
+  }
   const btn = e.target.closest('.room-edit-open');
   if (!btn) return;
   lobbyRoomEditId.value = btn.dataset.roomId || '';
@@ -609,7 +819,7 @@ document.getElementById('lobby-room-delete-confirm')?.addEventListener('click', 
     fd.append('room_public_id', lobbyRoomEditId.value);
     fd.append('_csrf', CSRF_TOKEN);
     const resp = await fetch(appUrl('/api/room_admin.php'), { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN }, body: fd });
-    const data = await resp.json();
+    const data = await lobbyReadJsonResponse(resp);
     if (!resp.ok || data.error) throw new Error(data.error || 'Room delete failed');
     window.location.href = appUrl('/lobby.php?room_deleted=1');
   } catch (err) {
@@ -655,7 +865,7 @@ lobbyRoomEditForm?.addEventListener('submit', async e => {
       lobbyRoomEditForm.appendChild(hidden);
     }
     const resp = await uploadFormWithProgress(lobbyRoomEditForm, appUrl('/api/room_admin.php'), lobbyRoomEditProgress);
-    const data = JSON.parse(resp.responseText || '{}');
+    const data = lobbyParseJsonText(resp.responseText, 'The server returned invalid JSON.', 'lobby-upload-api', { status: Number(resp.status) || 0 });
     if (data.error) throw new Error(data.error);
     window.location.reload();
   } catch (err) {
@@ -839,6 +1049,8 @@ const adminCounts = {
   summaryModeration: document.getElementById('admin-summary-moderation'),
   healthWarnings: document.getElementById('admin-health-warning-count'),
 };
+const adminToolLogSeenKey = `chatspace.admin-tool-logs.seen:${document.body.dataset.appBase || '/'}:${Number(document.body.dataset.userId || 0)}`;
+const adminUnresolvedIssueStatuses = new Set(['new', 'confirmed', 'investigating', 'fixed-pending-verification', 'regressed']);
 const adminModerationTotals = { blocks: 0, roomEjections: 0, communityEjections: 0 };
 let adminSystemHealth = null;
 let capacityProfileImpact = null;
@@ -940,6 +1152,20 @@ function restoreAdminLocationFromHash() {
   const adminDestination = Object.keys(adminExactDestinations)
     .find(id => adminExactDestinations[id].fragment === hash);
   if (adminDestination) return showAdminExactDestination(adminDestination, false);
+  if (hash === 'settings-errors') return showAdminSection('errors');
+  if (hash.startsWith('settings-')) {
+    const settingsView = hash.replace(/^settings-/, '');
+    const hasSettingsView = Array.from(document.querySelectorAll('[data-settings-view]'))
+      .some(control => control.dataset.settingsView === settingsView);
+    if (hasSettingsView && showAdminSection('settings')) {
+      window.requestAnimationFrame(() => adminSettingsRegistryUI?.selectView?.(settingsView));
+      return true;
+    }
+  }
+  const directSection = hash.replace(/^admin-/, '');
+  if (directSection && document.getElementById(`admin-section-${directSection}`)) {
+    return showAdminSection(directSection);
+  }
   if (!hash.startsWith('manage-users-')) return false;
   const sectionId = hash.replace(/^manage-users-/, '');
   if (!showAdminSection('users')) return false;
@@ -1057,6 +1283,7 @@ function initializeAdminInformationArchitecture() {
 }
 
 window.addEventListener('popstate', event => {
+  if (restoreAdminLocationFromHash()) return;
   const hash = String(window.location.hash || '').replace(/^#/, '');
   const adminDestination = event.state?.adminDestination
     || Object.keys(adminExactDestinations).find(id => adminExactDestinations[id].fragment === hash);
@@ -1083,7 +1310,9 @@ function refreshAdminModerationCount() {
 }
 
 function setAdminFormStatus(form, message, type = '') {
-  const status = form?.querySelector?.('.admin-row-status, .admin-form-status');
+  const status = form?.id === 'lobby-admin-settings-registry-form'
+    ? document.getElementById('lobby-admin-settings-status')
+    : form?.querySelector?.('.admin-row-status, .admin-form-status');
   if (!status) return;
   status.textContent = message || '';
   status.className = `${status.classList.contains('admin-form-status') ? 'admin-form-status' : 'admin-row-status'} ${type}`.trim();
@@ -1097,17 +1326,38 @@ function showAdminSection(id) {
   document.querySelectorAll('.admin-section').forEach(section => {
     section.classList.toggle('active', section.id === `admin-section-${id}`);
   });
+  let selectedNavigation = null;
   document.querySelectorAll('.admin-nav-item[data-admin-section]').forEach(btn => {
     const selected = btn.dataset.adminSection === id;
     btn.classList.toggle('active', selected);
     btn.setAttribute('aria-current', selected ? 'page' : 'false');
+    if (selected) selectedNavigation = btn;
   });
+  window.requestAnimationFrame(() => selectedNavigation?.scrollIntoView({ block: 'nearest', inline: 'center' }));
   focusAdminOwnedHeading(`#admin-section-${id} .admin-section-title`);
   if (id === 'gestures') loadAdminGestures().catch(error => setAdminGestureStatus(error.message || 'Gesture catalog could not be loaded.', 'error'));
   if (id === 'system-health') loadAdminSystemHealth().catch(error => setSystemHealthStatus(error.message || 'System Health could not be loaded.', 'error'));
   if (id === 'storage') loadAdminStorage().catch(error => setAdminStorageStatus(error.message || 'Storage records could not be loaded.', 'error'));
+  if (id === 'logs') loadAdminLogs({ markSeen: true }).catch(error => setCanonicalAdminStatus(error.message || 'Tool Logs could not be loaded.', 'error'));
   return true;
 }
+
+const adminOverviewSearch = document.getElementById('admin-overview-search');
+
+function filterAdminOverviewDirectory() {
+  const query = String(adminOverviewSearch?.value || '').trim().toLocaleLowerCase();
+  const cards = [...document.querySelectorAll('#admin-overview-directory .admin-summary-card')];
+  let visible = 0;
+  for (const card of cards) {
+    const haystack = `${card.textContent || ''} ${card.dataset.adminSearch || ''}`.toLocaleLowerCase();
+    card.hidden = query !== '' && !haystack.includes(query);
+    if (!card.hidden) visible += 1;
+  }
+  const empty = document.getElementById('admin-overview-directory-empty');
+  if (empty) empty.hidden = visible > 0;
+}
+
+adminOverviewSearch?.addEventListener('input', filterAdminOverviewDirectory);
 
 document.addEventListener('click', e => {
   const nav = e.target.closest('.admin-nav-item[data-admin-section]');
@@ -1129,6 +1379,44 @@ document.addEventListener('click', e => {
   }
 });
 
+async function adminGetJson(path, fallbackMessage = 'Admin data could not be loaded.') {
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(appUrl(path), { cache: 'no-store' });
+      if (response.redirected || response.status === 401 || response.status === 403) {
+        throw new Error('Authentication is required to continue in Admin.');
+      }
+      const data = await lobbyReadJsonResponse(response, fallbackMessage);
+      if (!response.ok || data?.error) {
+        const error = new Error(data?.error || fallbackMessage);
+        error.code = response.status >= 500 ? 'ADMIN_API_HTTP_ERROR' : 'ADMIN_API_REQUEST_REJECTED';
+        if (response.status >= 500) {
+          captureLobbyRuntimeIssue(error, 'admin-dashboard-api', {
+            ...lobbyResponseMetadata(response),
+            source: 'admin-http-response',
+          });
+        }
+        if (attempt < 2 && response.status >= 500) {
+          lastError = error;
+          await new Promise(resolve => window.setTimeout(resolve, 180 * (attempt + 1)));
+          continue;
+        }
+        throw error;
+      }
+      return data;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(fallbackMessage);
+      if (attempt < 2 && !/Authentication is required/i.test(lastError.message)) {
+        await new Promise(resolve => window.setTimeout(resolve, 180 * (attempt + 1)));
+        continue;
+      }
+      throw lastError;
+    }
+  }
+  throw lastError || new Error(fallbackMessage);
+}
+
 async function adminRequest(body) {
   const payload = Object.assign({}, body || {}, { _csrf: CSRF_TOKEN });
   const resp = await fetch(appUrl('/api/admin_users.php'), {
@@ -1136,7 +1424,7 @@ async function adminRequest(body) {
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
     body: JSON.stringify(payload),
   });
-  const data = await resp.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(resp);
   if (!resp.ok || data.error) throw new Error(data.error || 'Admin request failed');
   return data;
 }
@@ -1148,7 +1436,7 @@ async function adminSystemRequest(body) {
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
     body: JSON.stringify(payload),
   });
-  const data = await resp.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(resp);
   if (resp.redirected || resp.status === 401 || resp.status === 403) {
     adminSettingsUnlock?.setAuthorized(false, 'You are no longer authorized to change these settings.');
   }
@@ -1168,7 +1456,7 @@ async function adminNetworkRequest(body = null) {
     options.body = JSON.stringify({ ...body, _csrf: CSRF_TOKEN });
   }
   const response = await fetch(appUrl('/api/admin_network.php'), options);
-  const data = await response.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(response);
   if (!response.ok || data.error) {
     const error = new Error(data.error || 'Network privacy request failed.');
     error.data = data;
@@ -1279,14 +1567,14 @@ async function adminRetentionRequest(payload) {
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
     body: JSON.stringify({ ...payload, _csrf: CSRF_TOKEN }),
   });
-  const data = await response.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(response);
   if (!response.ok || data.error) throw new Error(data.error || 'Retention request failed.');
   return data;
 }
 
 async function adminRetentionProjection() {
   const response = await fetch(appUrl('/api/admin_retention.php'), { cache: 'no-store' });
-  const data = await response.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(response);
   if (!response.ok || data.error) throw new Error(data.error || 'Retention policy could not load.');
   return data;
 }
@@ -1488,7 +1776,7 @@ async function uploadPrivateSiteBrandingAsset(entry, file) {
       method: 'POST',
       body: data,
     });
-    const result = await response.json().catch(() => ({}));
+    const result = await lobbyReadJsonResponse(response);
     if (!response.ok || result.error || result.ok === false) {
       throw new Error(result.error || 'The private community logo could not be saved.');
     }
@@ -1505,14 +1793,92 @@ async function uploadPrivateSiteBrandingAsset(entry, file) {
 async function adminLinkIconRequest(formData) {
   if (formData && !formData.has('_csrf')) formData.append('_csrf', CSRF_TOKEN);
   const resp = await fetch(appUrl('/api/admin_link_icons.php'), { method: 'POST', headers: { 'X-CSRF-Token': CSRF_TOKEN }, body: formData });
-  const data = await resp.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(resp);
   if (!resp.ok || data.error) throw new Error(data.error || 'Link icon request failed');
   return data;
 }
 
+async function openAdminUserPermissions(row, user) {
+  const button = row.querySelector('[data-account-access]');
+  const existing = row.querySelector('.admin-account-permissions');
+  if (existing) { existing.remove(); button.setAttribute('aria-expanded', 'false'); return; }
+  const panel = document.createElement('section');
+  panel.className = 'admin-account-permissions';
+  panel.setAttribute('aria-label', `Permissions for ${user.display_name || user.username}`);
+  // This panel is inside the account form. Its text field must not submit
+  // that form's separate role/password Save action on Enter.
+  panel.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && event.target.matches?.('[data-permission-reason]')) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+  panel.textContent = 'Loading permissions...';
+  row.appendChild(panel);
+  button.setAttribute('aria-expanded', 'true');
+  button.disabled = true;
+  const request = async body => {
+    const response = await fetch(appUrl('/api/admin_user_permissions.php' + (body ? '' : `?id=${Number(user.id)}`)), body ? {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+      body: JSON.stringify({ ...body, id: Number(user.id), _csrf: CSRF_TOKEN }),
+    } : {});
+    const data = await lobbyReadJsonResponse(response);
+    if (!response.ok || data.error) throw new Error(data.error || 'Permissions could not be loaded.');
+    return data.permissions;
+  };
+  const render = (state, message = '') => {
+    panel.innerHTML = `<h4>Access &amp; Permissions</h4>
+      <p class="minor">Grant or revoke content access directly. No member request is required. Trust, site-wide restrictions and outside-content consent still apply.</p>
+      <p class="minor">Trust: ${esc(state.trustState)}${state.isInstallationOwner ? '. Installation Owner: all available permissions are inherited.' : ''}</p>
+      <fieldset class="admin-permission-options"><legend>Content permissions</legend>${(state.capabilities || []).map(cap => `
+        <div class="admin-permission-row">
+        <span class="admin-permission-description">${esc(cap.label)}<small data-permission-detail>${cap.effectiveEnabled ? 'Active' : cap.available ? cap.storedEnabled ? 'Granted; currently limited by account or site policy' : 'Not granted' : 'Unavailable'}</small></span>
+        <button type="button" class="admin-permission-toggle" role="switch" aria-label="${esc(cap.label)}" aria-checked="${Boolean(cap.storedEnabled || state.isInstallationOwner && cap.available)}" data-content-permission="${esc(cap.id)}" ${state.isInstallationOwner || !cap.available ? 'disabled' : ''}>${cap.storedEnabled || state.isInstallationOwner && cap.available ? 'On' : 'Off'}</button>
+        </div>`).join('')}</fieldset>
+      <label>Reason shown to the member<input type="text" data-permission-reason maxlength="300" placeholder="Optional reason"></label>
+      <button class="btn btn-primary" type="button" data-save-permissions ${state.isInstallationOwner ? 'disabled' : ''}>Save Permissions</button>
+      <p class="minor" data-permission-status role="status">${esc(message)}</p>`;
+    panel.querySelectorAll('[data-content-permission]').forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        const enabled = toggle.getAttribute('aria-checked') !== 'true';
+        toggle.setAttribute('aria-checked', String(enabled));
+        toggle.textContent = enabled ? 'On' : 'Off';
+        const cap = state.capabilities.find(cap => cap.id === toggle.dataset.contentPermission);
+        toggle.closest('.admin-permission-row').querySelector('[data-permission-detail]').textContent = enabled !== Boolean(cap.storedEnabled)
+          ? 'Unsaved change. Select Save Permissions to apply.'
+          : cap.effectiveEnabled ? 'Active' : cap.storedEnabled ? 'Granted; currently limited by account or site policy' : 'Not granted';
+      });
+    });
+    panel.querySelector('[data-save-permissions]').addEventListener('click', async () => {
+      const status = panel.querySelector('[data-permission-status]');
+      const changes = [...panel.querySelectorAll('[data-content-permission]')].filter(input => !input.disabled).map(input => {
+        const cap = state.capabilities.find(cap => cap.id === input.dataset.contentPermission);
+        return { id: cap.id, enabled: input.getAttribute('aria-checked') === 'true', revision: cap.revision, previous: cap.storedEnabled };
+      }).filter(cap => cap.enabled !== cap.previous).map(({ previous, ...change }) => change);
+      if (!changes.length) { status.textContent = 'No permissions changed.'; return; }
+      const save = panel.querySelector('[data-save-permissions]');
+      save.disabled = true;
+      panel.querySelector('fieldset').disabled = true;
+      button.disabled = true;
+      status.textContent = 'Saving permissions...';
+      try {
+        const next = await request({ changes, reason: panel.querySelector('[data-permission-reason]').value });
+        render(next, 'Permissions saved. The member does not need to submit a request.');
+      } catch (error) {
+        status.textContent = error.message || 'Permissions were not saved.';
+        save.disabled = false;
+        panel.querySelector('fieldset').disabled = false;
+      } finally { button.disabled = false; }
+    });
+  };
+  try { render(await request()); }
+  catch (error) { panel.textContent = error.message || 'Permissions could not be loaded.'; }
+  finally { button.disabled = false; }
+}
+
 async function loadAdminUsers() {
   if (!adminUsers) return;
-  const data = await fetch(appUrl('/api/admin_users.php')).then(r => r.json());
+  const data = await adminGetJson('/api/admin_users.php', 'Admin users could not be loaded.');
   adminUsers.innerHTML = '';
   setAdminCount(adminCounts.users, (data.users || []).length);
   setAdminCount(adminCounts.summaryUsers, (data.users || []).length);
@@ -1562,10 +1928,12 @@ async function loadAdminUsers() {
       <input name="password" type="password" placeholder="New password">
       <div class="admin-user-actions">
         <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn" type="button" data-account-access>Access &amp; Permissions</button>
         <button class="btn" type="button" disabled title="Account deletion is not available here. Use Actions for suspension or session revocation.">Delete unavailable</button>
       </div>
       <div class="admin-row-status" aria-live="polite"></div>`;
     row.querySelector('select').value = user.role || 'user';
+    row.querySelector('[data-account-access]').addEventListener('click', () => openAdminUserPermissions(row, user));
     row.querySelector('select').addEventListener('change', () => {
       row.dataset.accountSearch = [
         user.display_name,
@@ -1774,7 +2142,7 @@ async function loadAdminModerationUsers() {
     per_page: adminModerationSearch.elements.per_page.value,
   });
   const response = await fetch(appUrl(`/api/moderation.php?${params}`));
-  const data = await response.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(response);
   if (!response.ok || data.error) {
     adminModerationUsers.innerHTML = `<p class="minor">${esc(data.error || 'Moderation users are unavailable.')}</p>`;
     return;
@@ -1790,8 +2158,8 @@ async function loadAdminModerationUsers() {
       <label class="admin-moderation-field"><span>Action</span><select name="action_type"><option value="warn">Warn</option><option value="temporarily-restrict">Temporarily Restrict</option><option value="suspend-account">Suspend Account</option><option value="undo-eligible-restriction">Undo Eligible Restriction</option></select></label>
       <label class="admin-moderation-field"><span>Duration</span><select name="duration"><option value="60">1 hour</option><option value="1440">24 hours</option><option value="10080">7 days</option><option value="43200">30 days</option><option value="indefinite">Indefinite suspension</option></select></label>
       <label class="admin-moderation-field admin-moderation-field-wide"><span>Public reason</span><input name="public_reason" maxlength="500" placeholder="Required public reason"></label>
-      <label class="admin-moderation-field admin-moderation-field-wide"><span>Private note</span><textarea name="internal_note" maxlength="2000" placeholder="Optional private internal note"></textarea></label>
-      <button class="btn btn-primary" type="submit">Open Moderation Action</button>
+      <label class="admin-moderation-field admin-moderation-field-wide"><span>Private note</span><textarea name="internal_note" rows="1" wrap="off" maxlength="2000" placeholder="Optional private internal note"></textarea></label>
+      <button class="btn btn-primary" type="submit" aria-label="Open Moderation Action">Open action</button>
       <div class="admin-row-status" aria-live="polite"></div>`;
     row.addEventListener('submit', async event => {
       event.preventDefault();
@@ -1834,8 +2202,7 @@ document.getElementById('admin-moderation-next')?.addEventListener('click', () =
 
 async function loadAdminSettings() {
   if (!adminSettings) return;
-  const data = await fetch(appUrl('/api/admin_system.php?action=settings')).then(r => r.json());
-  if (data.error) throw new Error(data.error);
+  const data = await adminGetJson('/api/admin_system.php?action=settings', 'Admin settings could not be loaded.');
   adminSettingsRegistry = data.settingsRegistry;
   clearLobbyAdminProfileLimitConfirmation();
   if (!adminSettingsUnlock) {
@@ -1865,6 +2232,7 @@ async function loadAdminSettings() {
       locked: !adminSettingsUnlock.isUnlocked(),
       onOperation: handleLobbyAdminSettingsOperation,
       onAssetChange: uploadPrivateSiteBrandingAsset,
+      onMediaPackAction: handleFiveDiceMediaPackAction,
       onDraftChange: state => {
         clearLobbyAdminProfileLimitConfirmation();
         const summary = document.getElementById('lobby-admin-settings-dirty-summary');
@@ -1973,6 +2341,74 @@ function setAdminGestureStatus(message, type = '') {
   reason.textContent = String(message || 'The request did not complete.');
   technical.append(summary, reason);
   adminGestureStatus.append(copy, retry, technical);
+}
+
+async function handleFiveDiceMediaPackAction(action, details = {}) {
+  if (!IS_INSTALLATION_OWNER) throw new Error('Only the Installation Owner can manage Classic artwork and sound.');
+  if (!adminSettingsUnlock?.requireUnlocked()) throw new Error('Unlock settings changes before managing Classic artwork and sound.');
+  const extensionId = String(details.game || '');
+  const endpoint = extensionId ? '/api/game_media_pack_admin.php' : '/api/five_dice_media_pack_admin.php';
+  const statusSelector = extensionId
+    ? `[data-game-media-status="${CSS.escape(extensionId)}"]`
+    : '.settings-five-dice-media-action-status';
+  const batchSize = extensionId ? 50 : 10;
+  const request = async (requestAction, requestDetails = {}) => {
+    const form = new FormData();
+    form.append('action', requestAction);
+    form.append('_csrf', CSRF_TOKEN);
+    if (extensionId) form.append('game', extensionId);
+    if (requestDetails.confirmed) form.append('confirmed', '1');
+    if (requestDetails.attemptId) form.append('attemptId', requestDetails.attemptId);
+    for (const file of requestDetails.files || []) form.append('files[]', file, file.name);
+    const response = await fetch(appUrl(endpoint), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+      body: form,
+    });
+    const data = await lobbyReadJsonResponse(response);
+    if (!response.ok || data.error) {
+      const error = new Error(data.error || 'The Classic artwork and sound action failed safely.');
+      error.code = data.code || '';
+      error.reauthenticationRequired = Boolean(data.reauthentication_required);
+      throw error;
+    }
+    return data;
+  };
+  let data;
+  if (action === 'install' || action === 'replace') {
+    const files = [...(details.files || [])];
+    let attemptId = '';
+    try {
+      const begun = await request('begin');
+      attemptId = String(begun.attemptId || '');
+      if (!attemptId) throw new Error('The private validation attempt did not start.');
+      for (let offset = 0; offset < files.length; offset += batchSize) {
+        const staged = await request('stage', { attemptId, files: files.slice(offset, offset + batchSize) });
+        const count = Number(staged.progress?.stagedCount || 0);
+        const total = Number(staged.progress?.requiredCount || files.length);
+        const status = document.querySelector(statusSelector);
+        if (status) status.textContent = `Validated ${count}/${total} private media slots…`;
+      }
+      data = await request('activate', { attemptId });
+      attemptId = '';
+    } catch (error) {
+      if (attemptId) await request('abort', { attemptId }).catch(() => {});
+      throw error;
+    }
+  } else {
+    data = await request(action, details);
+  }
+  if (details.deferRefresh) return data;
+  await loadAdminSettings();
+  await loadAdminLogs();
+  const verbs = { installed: 'installed', replaced: 'replaced', verified: 'verified', removed: 'removed' };
+  const message = `Classic artwork and sound ${verbs[data.operation] || 'updated'}.`;
+  const mediaStatus = document.querySelector(statusSelector);
+  if (mediaStatus) mediaStatus.textContent = message;
+  setAdminFormStatus(adminSettings, message, 'ok');
+  adminSettingsUnlock?.announce(message, 'ok');
+  return data;
 }
 
 function healthElement(tag, className = '', text = '') {
@@ -2131,7 +2567,13 @@ function renderDiagnosticPolicy(policy, retention) {
     return;
   }
   const render = () => {
-    const remaining = Math.max(0, Math.floor((Date.parse(policy.verboseUntil) - Date.now()) / 1000));
+    const serverNow = lobbyServerClock?.serverEpochNow();
+    if (serverNow == null) {
+      countdown.hidden = false;
+      countdown.textContent = 'Verbose diagnostics active; awaiting server timing.';
+      return;
+    }
+    const remaining = Math.max(0, Math.floor((lobbyServerClock.parseServerTimestamp(policy.verboseUntil) - serverNow) / 1000));
     countdown.hidden = false;
     countdown.textContent = `Verbose ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} remaining`;
     if (remaining <= 0) {
@@ -2146,9 +2588,7 @@ function renderDiagnosticPolicy(policy, retention) {
 
 async function loadAdminSystemHealth() {
   if (!document.getElementById('admin-section-system-health')) return;
-  const response = await fetch(appUrl('/api/admin_system.php?action=system_health'));
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.error) throw new Error(data.error || 'System Health could not be loaded.');
+  const data = await adminGetJson('/api/admin_system.php?action=system_health', 'System Health could not be loaded.');
   adminSystemHealth = data.systemHealth;
   renderAdminSystemHealth();
 }
@@ -2162,7 +2602,7 @@ function setAdminStorageStatus(message, type = '') {
 
 function adminStorageReviewId() {
   if (!adminFileReviewSession?.id) return '';
-  if (Date.parse(`${adminFileReviewSession.expiresAt}Z`) <= Date.now()) {
+  if (lobbyServerClock?.serverDeadlineExpired(adminFileReviewSession.expiresAt)) {
     adminFileReviewSession = null;
     return '';
   }
@@ -2252,13 +2692,13 @@ async function loadAdminStoragePreview(asset, panel, trigger) {
       headers: {'Cache-Control': 'no-store'},
     });
     if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
+      const data = await lobbyReadJsonResponse(response);
       throw new Error(data.error || 'The safe preview is unavailable.');
     }
     panel.replaceChildren();
     const contentType = String(response.headers.get('content-type') || '').toLowerCase();
     if (contentType.includes('application/json')) {
-      const data = await response.json();
+      const data = await lobbyReadJsonResponse(response);
       const summary = document.createElement('p');
       summary.textContent = `${data.preview?.detail || 'Metadata-only preview.'} ${data.preview?.malwareStatus || 'Not scanned for malware.'}`;
       panel.appendChild(summary);
@@ -2387,7 +2827,7 @@ async function loadAdminStorage() {
   setAdminStorageStatus('Loading storage records…', 'working');
   const params = new URLSearchParams({view: 'admin', section, query, sort, direction, extension, detected_mime: detectedMime, uploader, status: statusFilter, pinned, references, page: String(adminStoragePage), page_size: '25'});
   const response = await fetch(appUrl(`/api/server_media.php?${params}`), {headers: {'Cache-Control': 'no-store'}});
-  const data = await response.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(response);
   if (!response.ok || data.error) throw new Error(data.error || 'Storage records could not be loaded.');
   const list = data.list || {};
   const usageRoot = document.getElementById('admin-storage-usage');
@@ -2541,7 +2981,7 @@ document.getElementById('capacity-profile-review')?.addEventListener('click', as
   try {
     const profile = document.getElementById('capacity-profile-select')?.value || '';
     const response = await fetch(appUrl(`/api/admin_system.php?action=capacity_profile_preview&profile=${encodeURIComponent(profile)}`));
-    const data = await response.json().catch(() => ({}));
+    const data = await lobbyReadJsonResponse(response);
     if (!response.ok || data.error) throw new Error(data.error || 'Capacity impact could not be reviewed.');
     capacityProfileImpact = data.impactPreview;
     const panel = document.getElementById('capacity-profile-impact');
@@ -2618,10 +3058,18 @@ document.getElementById('diagnostic-policy-apply')?.addEventListener('click', as
       confirmed: 1,
     });
     document.getElementById('diagnostic-policy-impact').hidden = true;
-    if (status) status.textContent = result.idempotent ? 'Diagnostic mode was already effective.' : 'Diagnostic collection mode updated.';
+    if (status) {
+      status.textContent = result.idempotent ? 'Diagnostic mode was already effective.' : 'Diagnostic collection mode updated.';
+      status.className = 'admin-form-status ok';
+      status.setAttribute('role', 'status');
+    }
     await Promise.all([loadAdminSystemHealth(), loadAdminSettings(), loadAdminLogs()]);
   } catch (error) {
-    if (status) status.textContent = error.message || 'Diagnostic policy could not be updated.';
+    if (status) {
+      status.textContent = error.message || 'Diagnostic policy could not be updated.';
+      status.className = 'admin-form-status error';
+      status.setAttribute('role', 'alert');
+    }
   }
 });
 
@@ -2629,14 +3077,22 @@ document.getElementById('diagnostic-cleanup-preview')?.addEventListener('click',
   const status = document.getElementById('diagnostic-policy-status');
   try {
     const response = await fetch(appUrl('/api/runtime_issues.php?action=retention'));
-    const data = await response.json().catch(() => ({}));
+    const data = await lobbyReadJsonResponse(response);
     if (!response.ok || data.error) throw new Error(data.error || 'Retention impact could not be reviewed.');
     const preview = data.impactPreview || {};
-    if (status) status.textContent = `${preview.eligibleIssueCount || 0} issue records are eligible; the next bounded batch is at most ${preview.nextBatchMaximum || 0}. Holds and investigations remain preserved.`;
+    if (status) {
+      status.textContent = `${preview.eligibleIssueCount || 0} issue records are eligible; the next bounded batch is at most ${preview.nextBatchMaximum || 0}. Holds and investigations remain preserved.`;
+      status.className = 'admin-form-status ok';
+      status.setAttribute('role', 'status');
+    }
     const run = document.getElementById('diagnostic-cleanup-run');
     if (run) run.hidden = false;
   } catch (error) {
-    if (status) status.textContent = error.message || 'Retention impact could not be reviewed.';
+    if (status) {
+      status.textContent = error.message || 'Retention impact could not be reviewed.';
+      status.className = 'admin-form-status error';
+      status.setAttribute('role', 'alert');
+    }
   }
 });
 
@@ -2644,11 +3100,19 @@ document.getElementById('diagnostic-cleanup-run')?.addEventListener('click', asy
   const status = document.getElementById('diagnostic-policy-status');
   try {
     const result = await adminIssuePost({ action: 'cleanup', confirmed: 1 });
-    if (status) status.textContent = `Bounded cleanup passed: scanned ${result.scanned || 0}, cleaned ${result.deleted || 0}.`;
+    if (status) {
+      status.textContent = `Bounded cleanup passed: scanned ${result.scanned || 0}, cleaned ${result.deleted || 0}.`;
+      status.className = 'admin-form-status ok';
+      status.setAttribute('role', 'status');
+    }
     document.getElementById('diagnostic-cleanup-run').hidden = true;
     await Promise.all([loadAdminSystemHealth(), loadAdminIssues(), loadAdminLogs()]);
   } catch (error) {
-    if (status) status.textContent = error.message || 'Bounded cleanup failed.';
+    if (status) {
+      status.textContent = error.message || 'Bounded cleanup failed.';
+      status.className = 'admin-form-status error';
+      status.setAttribute('role', 'alert');
+    }
   }
 });
 
@@ -2706,8 +3170,9 @@ function adminGestureCell(role, text, className = '', label = '') {
 
 function adminGestureEditorCell(item, field, label, multiline = false) {
   const cell = adminGestureCell('cell', '', 'admin-gesture-editor-cell', label);
-  const control = document.createElement(multiline ? 'textarea' : 'input');
-  if (!multiline) control.type = 'text';
+  const control = document.createElement('textarea');
+  control.rows = 1;
+  control.wrap = 'off';
   control.maxLength = field === 'text' ? 180 : 120;
   control.value = String(item[field] ?? '');
   control.defaultValue = control.value;
@@ -2732,37 +3197,17 @@ function adminGestureEditorCell(item, field, label, multiline = false) {
 }
 
 function adminGesturePackageCell(item) {
-  const media = Object.keys(item.package?.media || {});
   const cell = adminGestureCell('cell', '', 'admin-gesture-package', 'Package');
   const packageStatus = String(item.package_status || item.package?.status || 'unknown').toLowerCase();
   const status = document.createElement('strong');
   status.textContent = ({
     valid: 'Ready',
-    missing: 'Package information unavailable',
+    missing: 'Info unavailable',
     invalid: 'Needs review',
     'legacy-unverified': 'Not yet verified',
   })[packageStatus] || 'Needs review';
-  const contents = document.createElement('span');
-  contents.textContent = media.length
-    ? `Includes ${media.map(name => name.replaceAll('_', ' ')).join(', ')}`
-    : 'No media summary available.';
-  const original = document.createElement('span');
-  original.textContent = `Package file: ${item.original_filename || 'Unavailable'}`;
-  const technical = document.createElement('details');
-  const technicalSummary = document.createElement('summary');
-  technicalSummary.textContent = 'Technical details';
-  const technicalStatus = document.createElement('span');
-  technicalStatus.textContent = `Internal status: ${packageStatus}`;
-  const technicalVersion = document.createElement('span');
-  technicalVersion.textContent = `Package version: ${Number(item.package_version || item.package?.version || 0)}`;
-  const technicalGeneration = document.createElement('span');
-  technicalGeneration.textContent = `Package generation: ${Number(item.package_generation || item.package?.generation || 0)}`;
-  const compatibility = document.createElement('span');
-  compatibility.textContent = `Compatibility: ${item.package?.compatibility || (item.legacy_metadata ? 'legacy' : 'native')}`;
-  const identity = document.createElement('span');
-  identity.textContent = `Stable ID: ${item.public_id || 'unknown'}`;
-  technical.append(technicalSummary, technicalStatus, technicalVersion, technicalGeneration, compatibility, identity);
-  cell.append(status, contents, original, technical);
+  cell.title = status.textContent;
+  cell.appendChild(status);
   return cell;
 }
 
@@ -2772,7 +3217,7 @@ async function adminGestureRequest(body) {
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
     body: JSON.stringify({ ...body, _csrf: CSRF_TOKEN }),
   });
-  const data = await response.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(response);
   if (!response.ok || data.error) {
     const error = new Error(data.error || 'Admin gesture update failed.');
     error.code = data.error_code || '';
@@ -2867,24 +3312,30 @@ function renderAdminGestureCatalog(data) {
     row.dataset.resultState = '';
     const uploaded = adminGestureCell(
       'cell',
-      `${item.uploaded_by || 'Unknown uploader'} · ${adminCreatedOnText(item.last_uploaded_at)}`,
+      `${item.uploaded_by || 'Unknown uploader'} · ${parseServerDate(item.last_uploaded_at)?.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) || 'Unknown'}`,
       'admin-gesture-uploaded',
       'Uploaded by'
     );
+    uploaded.title = uploaded.textContent;
     const actions = adminGestureCell('cell', '', 'admin-gesture-actions', 'Actions');
     const save = document.createElement('button');
     save.type = 'button';
     save.className = 'btn btn-primary';
-    save.textContent = 'Save Gesture';
+    save.textContent = 'Save';
+    save.setAttribute('aria-label', 'Save gesture');
     save.dataset.adminGestureSave = '';
     save.disabled = true;
     save.addEventListener('click', () => saveAdminGestureRow(row, item, save));
     const manage = document.createElement('button');
-    manage.type = 'button'; manage.className = 'btn'; manage.textContent = 'Manage package';
+    manage.type = 'button'; manage.className = 'btn'; manage.textContent = 'Manage';
+    manage.title = 'Manage package';
+    manage.setAttribute('aria-label', 'Manage package');
     manage.disabled = adminGestureState.features.admin_package_inspection === false;
     manage.addEventListener('click', () => openAdminGestureEditor(item));
     const download = document.createElement('a');
-    download.className = 'btn'; download.textContent = 'Download package';
+    download.className = 'btn'; download.textContent = 'Download';
+    download.title = 'Download package';
+    download.setAttribute('aria-label', 'Download package');
     download.setAttribute('role', 'button');
     if (adminGestureState.features.admin_package_inspection === false) download.setAttribute('aria-disabled', 'true');
     else download.href = appUrl(`/api/gesture_packages.php?action=download&admin=1&id=${encodeURIComponent(item.public_id)}&request_id=admin-${Date.now().toString(36)}`);
@@ -2976,7 +3427,7 @@ async function loadAdminGestures({ allowDiscard = false, reason = 'Refreshing th
       sort: adminGestureSort?.value || 'last_uploaded',
     });
     const response = await fetch(appUrl(`/api/admin_gestures.php?${params.toString()}`), { headers: { Accept: 'application/json' } });
-    const data = await response.json().catch(() => ({}));
+    const data = await lobbyReadJsonResponse(response);
     if (!response.ok || data.error) throw new Error(data.error || 'Gesture catalog request failed.');
     if (request !== adminGestureState.request) return;
     adminGestureState.page = Math.max(1, Number(data.page || 1));
@@ -3025,7 +3476,7 @@ window.addEventListener('storage', event => {
 
 async function loadAdminLinkIcons() {
   if (!adminLinkIcons) return;
-  const data = await fetch(appUrl('/api/admin_link_icons.php')).then(r => r.json());
+  const data = await adminGetJson('/api/admin_link_icons.php', 'Link icons could not be loaded.');
   adminLinkIcons.innerHTML = '';
   setAdminCount(adminCounts.linkIcons, (data.icons || []).length);
   if (!(data.icons || []).length) {
@@ -3081,23 +3532,46 @@ function adminRow(main, detail, buttonText, onClick) {
   return row;
 }
 
-async function loadAdminLogs() {
+function readAdminToolLogSeenId() {
+  try {
+    return Math.max(0, Number.parseInt(localStorage.getItem(adminToolLogSeenKey) || '0', 10) || 0);
+  } catch (_) {
+    return 0;
+  }
+}
+
+function writeAdminToolLogSeenId(id) {
+  try {
+    localStorage.setItem(adminToolLogSeenKey, String(Math.max(0, Number(id) || 0)));
+  } catch (_) {}
+}
+
+async function loadAdminLogs({ markSeen = false } = {}) {
   if (!adminToolLogs) return;
-  const data = await fetch(appUrl('/api/admin_system.php?action=logs')).then(r => r.json());
+  const data = await adminGetJson('/api/admin_system.php?action=logs', 'Tool logs could not be loaded.');
+  const logs = data.logs || [];
+  const newestId = logs.reduce((highest, log) => Math.max(highest, Number(log.id) || 0), 0);
+  let seenId = readAdminToolLogSeenId();
+  if (markSeen) {
+    seenId = Math.max(seenId, newestId);
+    writeAdminToolLogSeenId(seenId);
+  }
+  const unreadCount = logs.reduce((count, log) => count + ((Number(log.id) || 0) > seenId ? 1 : 0), 0);
   adminToolLogs.innerHTML = '';
-  setAdminCount(adminCounts.logs, (data.logs || []).length);
-  if (!(data.logs || []).length) {
+  setAdminCount(adminCounts.logs, unreadCount);
+  adminCounts.logs?.setAttribute('aria-label', `${unreadCount} new tool log${unreadCount === 1 ? '' : 's'} since last visit`);
+  if (!logs.length) {
     adminToolLogs.innerHTML = '<div class="minor">No tool logs yet.</div>';
     return;
   }
-  (data.logs || []).forEach(log => {
+  logs.forEach(log => {
     adminToolLogs.appendChild(adminRow(`${log.action} · ${log.actor_name}`, `${log.target_name || 'No target'} ${log.room_name ? '· ' + log.room_name : ''} · ${log.created_at}${log.detail ? ' · ' + log.detail : ''}`));
   });
 }
 
 async function loadAdminBlocks() {
   if (!adminBlocks) return;
-  const data = await fetch(appUrl('/api/admin_system.php?action=blocks')).then(r => r.json());
+  const data = await adminGetJson('/api/admin_system.php?action=blocks', 'User blocks could not be loaded.');
   adminBlocks.innerHTML = '';
   adminModerationTotals.blocks = (data.blocks || []).length;
   refreshAdminModerationCount();
@@ -3116,7 +3590,7 @@ async function loadAdminBlocks() {
 
 async function loadAdminCommunityEjections() {
   if (!adminCommunityEjections) return;
-  const data = await fetch(appUrl('/api/admin_system.php?action=community_ejections')).then(r => r.json());
+  const data = await adminGetJson('/api/admin_system.php?action=community_ejections', 'Community ejections could not be loaded.');
   adminCommunityEjections.innerHTML = '';
   adminModerationTotals.communityEjections = (data.ejections || []).length;
   refreshAdminModerationCount();
@@ -3136,7 +3610,7 @@ async function loadAdminCommunityEjections() {
 
 async function loadAdminRoomEjections() {
   if (!adminRoomEjections) return;
-  const data = await fetch(appUrl('/api/admin_system.php?action=room_ejections')).then(r => r.json());
+  const data = await adminGetJson('/api/admin_system.php?action=room_ejections', 'Room ejections could not be loaded.');
   adminRoomEjections.innerHTML = '';
   adminModerationTotals.roomEjections = (data.ejections || []).length;
   refreshAdminModerationCount();
@@ -3163,7 +3637,7 @@ function setCanonicalAdminStatus(message, type = '') {
 
 async function adminIssueRequest(path, options = {}) {
   const response = await fetch(appUrl(path), { credentials: 'same-origin', ...options });
-  const data = await response.json().catch(() => ({}));
+  const data = await lobbyReadJsonResponse(response);
   if (!response.ok || data.error) {
     const error = new Error(data.error || 'Runtime issue request failed.');
     error.data = data;
@@ -3190,9 +3664,9 @@ async function legacyLoadAdminIssues() {
   const data = await adminIssueRequest(`/api/runtime_issues.php?action=list${filter ? `&status=${encodeURIComponent(filter)}` : ''}`);
   const countData = filter ? await adminIssueRequest('/api/runtime_issues.php?action=list') : data;
   list.textContent = '';
-  const issueCount = (countData.issues || []).length;
+  const issueCount = (countData.issues || []).filter(issue => adminUnresolvedIssueStatuses.has(String(issue.status || ''))).length;
   badge.textContent = String(issueCount);
-  badge.setAttribute('aria-label', `${issueCount} issue${issueCount === 1 ? '' : 's'}`);
+  badge.setAttribute('aria-label', `${issueCount} unresolved issue${issueCount === 1 ? '' : 's'}`);
   for (const issue of data.issues || []) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -3247,7 +3721,7 @@ async function legacyLoadAdminIssueDetail(issueId) {
     const form = event.currentTarget;
     try {
       await adminIssuePost({ action: 'update_status', issue_id: issueId, status: form.elements.status.value, reason: form.elements.reason.value, verification_reference: form.elements.verification_reference.value });
-      await Promise.all([loadAdminIssues(), loadAdminIssueDetail(issueId)]);
+      await Promise.all([loadAdminIssues(), loadAdminIssueDetail(issueId), loadAdminLogs()]);
       setCanonicalAdminStatus('Issue status updated.', 'ok');
     } catch (error) {
       setCanonicalAdminStatus(error.message, 'error');
@@ -3274,6 +3748,11 @@ async function legacyLoadAdminIssueDetail(issueId) {
 let adminIssuePage = 1;
 let adminIssueCapabilities = null;
 let adminIssueSelectedId = 0;
+let adminIssueCollectionPreview = null;
+let adminIssueAuditBaseline = null;
+let adminIssueLoadGeneration = 0;
+let adminAuditRunSelectedId = '';
+let adminAuditRunPreview = null;
 
 function issueOperationId(prefix) {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
@@ -3288,6 +3767,125 @@ function issueDownloadArtifact(artifact, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function showDiagnosticView(view) {
+  const audits = view === 'audits';
+  document.getElementById('diagnostic-issues-pane')?.toggleAttribute('hidden', audits);
+  document.getElementById('diagnostic-audits-pane')?.toggleAttribute('hidden', !audits);
+  const issueButton = document.getElementById('diagnostic-view-issues');
+  const auditButton = document.getElementById('diagnostic-view-audits');
+  issueButton?.setAttribute('aria-pressed', String(!audits));
+  auditButton?.setAttribute('aria-pressed', String(audits));
+  issueButton?.classList.toggle('btn-primary', !audits);
+  auditButton?.classList.toggle('btn-primary', audits);
+  if (audits) loadAdminAuditRuns();
+}
+
+function auditRunStatus(message, type = '') {
+  const output = document.getElementById('audit-run-list-status');
+  if (!output) return;
+  output.textContent = message || '';
+  output.className = `minor ${type}`.trim();
+}
+
+async function loadAdminAuditRuns() {
+  const list = document.getElementById('audit-run-list');
+  if (!list) return;
+  list.replaceChildren();
+  auditRunStatus('Loading audit runs...', 'working');
+  try {
+    const data = await adminIssueRequest('/api/runtime_issues.php?action=audit_runs&limit=50');
+    const start = document.getElementById('audit-run-start');
+    if (start) start.disabled = Boolean(data.activeAuditRun);
+    for (const run of data.runs || []) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'issue-list-item';
+      button.classList.toggle('active', run.publicId === adminAuditRunSelectedId);
+      const counts = run.summary?.checkCounts || {};
+      button.innerHTML = `<strong>${esc(run.environment)} audit · ${esc(run.status)}</strong><span>${esc(run.startedAt)} · ${Number(run.summary?.totalChecks || 0)} checks</span><small>${Number(counts.failed || 0)} failed · ${Number(counts.warning || 0)} warning · ${Number(counts.blocked || 0)} blocked</small>`;
+      button.addEventListener('click', () => loadAdminAuditRunDetail(run.publicId));
+      list.appendChild(button);
+    }
+    if (!list.children.length) list.innerHTML = '<p class="minor">No audit runs have been recorded.</p>';
+    auditRunStatus(data.activeAuditRun ? `Audit ${data.activeAuditRun.publicId} is active. Reload each test tab once.` : `${(data.runs || []).length} audit run${(data.runs || []).length === 1 ? '' : 's'}.`, 'ok');
+  } catch (error) {
+    auditRunStatus(error.message || 'Audit runs could not be loaded.', 'error');
+  }
+}
+
+async function startAdminAuditRun() {
+  const environment = document.getElementById('audit-run-environment')?.value || 'local';
+  auditRunStatus('Starting audit run...', 'working');
+  const result = await adminIssuePost({
+    action: 'audit_run_start', environment, initiated_from: 'admin-errors-diagnostics',
+    conditions: { viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio || 1 },
+  });
+  adminAuditRunSelectedId = result.run?.publicId || '';
+  await Promise.all([loadAdminAuditRuns(), adminAuditRunSelectedId ? loadAdminAuditRunDetail(adminAuditRunSelectedId) : Promise.resolve()]);
+  auditRunStatus('Audit started. Reload each open game test tab once, then perform the audit.', 'ok');
+}
+
+function auditEvidenceDetails(check) {
+  const evidence = {
+    expected: check.expected, actual: check.actual, gameplay: check.gameplay, performance: check.performance,
+    reconnect: check.reconnect, visual: check.visual, integrity: check.integrity, impact: check.impact,
+    privacy: check.privacy, closure: check.closure, evidenceReference: check.evidenceReference, issueId: check.issueId,
+  };
+  const details = document.createElement('details');
+  details.innerHTML = '<summary>Evidence</summary><pre></pre>';
+  details.querySelector('pre').textContent = JSON.stringify(evidence, null, 2);
+  return details;
+}
+
+async function loadAdminAuditRunDetail(publicId) {
+  const detail = document.getElementById('audit-run-detail');
+  if (!detail) return;
+  detail.innerHTML = '<p class="minor">Loading audit run...</p>';
+  try {
+    const data = await adminIssueRequest(`/api/runtime_issues.php?action=audit_run_detail&audit_run_id=${encodeURIComponent(publicId)}`);
+    const run = data.run;
+    adminAuditRunSelectedId = run.publicId;
+    adminAuditRunPreview = null;
+    const counts = run.summary?.checkCounts || {};
+    detail.innerHTML = `
+      <header><div><span class="issue-severity severity-${run.status === 'failed' ? 'critical' : 'info'}">${esc(run.status)}</span><h2>${esc(run.environment)} audit run</h2></div><code>${esc(run.publicId)}</code></header>
+      <div class="audit-run-summary"><span>${Number(counts.passed || 0)} passed</span><span>${Number(counts.failed || 0)} failed</span><span>${Number(counts.warning || 0)} warning</span><span>${Number(counts.blocked || 0)} blocked</span><span>${Number(run.summary?.linkedIssueCount || 0)} linked issues</span></div>
+      <dl class="issue-summary-grid"><dt>Started</dt><dd>${esc(run.startedAt)}</dd><dt>Completed</dt><dd>${esc(run.completedAt || 'Running')}</dd><dt>Release</dt><dd>${esc(run.releaseId || 'Private development')}</dd><dt>Manifest SHA-256</dt><dd>${esc(run.manifestSha256 || 'Unavailable')}</dd><dt>Schema</dt><dd>${esc(run.databaseSchemaVersion || run.schemaVersion)}</dd><dt>Conditions</dt><dd>${esc(JSON.stringify(run.conditions || {}))}</dd></dl>
+      <div class="shared-form-actions"><button class="btn btn-primary" id="audit-run-finish" type="button"${run.status === 'running' ? '' : ' disabled'}>Complete audit</button><button class="btn" id="audit-run-export-preview" type="button">Review export</button><button class="btn" id="audit-run-export" type="button" disabled>Download audit bundle</button></div>
+      <pre id="audit-run-export-output" hidden></pre>
+      <section><h3>Checks</h3><div class="audit-run-checks" id="audit-run-checks"></div></section>`;
+    const checks = detail.querySelector('#audit-run-checks');
+    for (const check of data.checks || []) {
+      const article = document.createElement('article');
+      article.className = 'audit-run-check';
+      article.innerHTML = `<header><h4>${esc(check.description)}</h4><span class="audit-check-status ${esc(check.status)}">${esc(check.status)}</span></header><code>${esc(check.checkId)}</code>${check.durationMs === null ? '' : `<p class="minor">${Number(check.durationMs)} ms</p>`}`;
+      article.appendChild(auditEvidenceDetails(check));
+      checks.appendChild(article);
+    }
+    detail.querySelector('#audit-run-finish')?.addEventListener('click', async () => {
+      await adminIssuePost({ action: 'audit_run_finish', audit_run_id: publicId, verification_method: 'CoreChat browser and server audit', retest_result: 'Audit execution complete; owner review pending.', owner_review_required: true });
+      await Promise.all([loadAdminAuditRuns(), loadAdminAuditRunDetail(publicId), loadAdminIssues()]);
+    });
+    detail.querySelector('#audit-run-export-preview')?.addEventListener('click', async () => {
+      const result = await adminIssueRequest(`/api/runtime_issues.php?action=audit_run_export_preview&audit_run_id=${encodeURIComponent(publicId)}`);
+      adminAuditRunPreview = result.preview;
+      const output = detail.querySelector('#audit-run-export-output');
+      output.hidden = false;
+      output.textContent = `${result.preview.checkCount} checks and ${result.preview.linkedIssueCount} linked issues.\n\nIncludes:\n- ${(result.preview.includes || []).join('\n- ')}\n\nExcludes:\n- ${(result.preview.excludes || []).join('\n- ')}`;
+      detail.querySelector('#audit-run-export').disabled = false;
+    });
+    detail.querySelector('#audit-run-export')?.addEventListener('click', async () => {
+      if (!adminAuditRunPreview) return;
+      const result = await adminIssuePost({ action: 'audit_run_export', audit_run_id: publicId, request_id: issueOperationId('audit-run'), preview_token: adminAuditRunPreview.previewToken });
+      issueDownloadArtifact(result.artifact, `corechat-audit-${publicId}.json`);
+    });
+    await loadAdminAuditRuns();
+  } catch (error) {
+    detail.innerHTML = '<p class="error-text">Audit run details could not be loaded.</p>';
+    auditRunStatus(error.message || 'Audit run details could not be loaded.', 'error');
+  }
+}
+
 function issueSetListStatus(message, type = '') {
   const status = document.getElementById('issue-list-status');
   if (!status) return;
@@ -3295,7 +3893,81 @@ function issueSetListStatus(message, type = '') {
   status.className = `minor ${type}`.trim();
 }
 
+function issueCollectionFilters() {
+  return {
+    status: document.getElementById('issue-status-filter')?.value || '',
+    severity: document.getElementById('issue-severity-filter')?.value || '',
+    sinceBaseline: document.getElementById('issue-activity-filter')?.value === 'since-audit',
+  };
+}
+
+function renderIssueAuditBaseline() {
+  const output = document.getElementById('issue-audit-baseline-status');
+  if (!output) return;
+  if (!adminIssueAuditBaseline?.configured) {
+    output.textContent = 'No audit baseline has been set. Set one after the current checks are clean.';
+    return;
+  }
+  const parsed = new Date(adminIssueAuditBaseline.setAt);
+  const label = Number.isNaN(parsed.getTime()) ? adminIssueAuditBaseline.setAt : parsed.toLocaleString();
+  output.textContent = `Audit baseline: ${label}. New and recurring activity is compared with this point.`;
+}
+
+async function setIssueAuditBaseline() {
+  issueSetListStatus('Setting the diagnostics audit baseline...', 'working');
+  const result = await adminIssuePost({ action: 'set_audit_baseline' });
+  adminIssueAuditBaseline = result.auditBaseline;
+  renderIssueAuditBaseline();
+  const activity = document.getElementById('issue-activity-filter');
+  if (activity) activity.value = 'since-audit';
+  adminIssuePage = 1;
+  resetIssueCollectionPreview();
+  await loadAdminIssues();
+  issueSetListStatus('Audit baseline set. No issues were deleted or reclassified.', 'ok');
+}
+
+function resetIssueCollectionPreview() {
+  adminIssueCollectionPreview = null;
+  const output = document.getElementById('issue-collection-export-preview');
+  const button = document.getElementById('issue-collection-export');
+  if (output) { output.hidden = true; output.textContent = ''; }
+  if (button) button.disabled = true;
+}
+
+async function previewIssueCollectionExport() {
+  const filters = issueCollectionFilters();
+  const params = new URLSearchParams({ action: 'collection_export_preview' });
+  if (filters.status) params.set('status', filters.status);
+  if (filters.severity) params.set('severity', filters.severity);
+  if (filters.sinceBaseline) params.set('since_baseline', '1');
+  const result = await adminIssueRequest(`/api/runtime_issues.php?${params.toString()}`);
+  adminIssueCollectionPreview = result.preview;
+  const output = document.getElementById('issue-collection-export-preview');
+  if (output) {
+    output.hidden = false;
+    output.textContent = `${result.preview.issueCount} matching issue${Number(result.preview.issueCount) === 1 ? '' : 's'} will be exported.\n\nIncludes:\n- ${(result.preview.includes || []).join('\n- ')}\n\nExcludes:\n- ${(result.preview.excludes || []).join('\n- ')}`;
+  }
+  const button = document.getElementById('issue-collection-export');
+  if (button) button.disabled = false;
+}
+
+async function exportIssueCollection() {
+  if (!adminIssueCollectionPreview) throw new Error('Review the current diagnostics export first.');
+  const filters = issueCollectionFilters();
+  const result = await adminIssuePost({
+    action: 'export_collection',
+    status: filters.status,
+    severity: filters.severity,
+    since_baseline: filters.sinceBaseline,
+    request_id: issueOperationId('filtered-diagnostics'),
+    preview_token: adminIssueCollectionPreview.previewToken,
+  });
+  issueDownloadArtifact(result.artifact, `corechat-diagnostics-${new Date().toISOString().slice(0, 10)}.json`);
+  issueSetListStatus(`Exported ${result.artifact?.summary?.exportedIssueCount || 0} sanitized diagnostic issues.`, 'ok');
+}
+
 async function loadAdminIssues() {
+  const loadGeneration = ++adminIssueLoadGeneration;
   const statusInput = document.getElementById('issue-status-filter');
   const severityInput = document.getElementById('issue-severity-filter');
   const list = document.getElementById('issue-list');
@@ -3310,6 +3982,8 @@ async function loadAdminIssues() {
     if (!adminIssueCapabilities) {
       const config = await adminIssueRequest('/api/runtime_issues.php?action=config');
       adminIssueCapabilities = config.capabilities || {};
+      adminIssueAuditBaseline = config.auditBaseline || null;
+      renderIssueAuditBaseline();
     }
     const params = new URLSearchParams({
       action: 'list',
@@ -3318,10 +3992,16 @@ async function loadAdminIssues() {
     });
     if (statusInput.value) params.set('status', statusInput.value);
     if (severityInput.value) params.set('severity', severityInput.value);
+    const activityInput = document.getElementById('issue-activity-filter');
+    if (activityInput?.value === 'since-audit') params.set('since_baseline', '1');
     const data = await adminIssueRequest(`/api/runtime_issues.php?${params.toString()}`);
-    const issueCount = Number(data.totals?.all ?? data.total ?? 0);
+    if (loadGeneration !== adminIssueLoadGeneration) return;
+    const issueCount = [...adminUnresolvedIssueStatuses].reduce(
+      (count, status) => count + Number(data.totals?.byStatus?.[status] || 0),
+      0
+    );
     badge.textContent = String(issueCount);
-    badge.setAttribute('aria-label', `${issueCount} issue${issueCount === 1 ? '' : 's'}`);
+    badge.setAttribute('aria-label', `${issueCount} unresolved issue${issueCount === 1 ? '' : 's'}`);
     totals.replaceChildren();
     for (const [label, value] of [
       ['All', data.totals?.all || 0],
@@ -3346,7 +4026,11 @@ async function loadAdminIssues() {
     if (!list.children.length) {
       const empty = document.createElement('p');
       empty.className = 'minor';
-      empty.textContent = 'No runtime issues match the selected filters.';
+      empty.textContent = activityInput?.value === 'since-audit'
+        ? (data.auditBaseline?.configured
+          ? 'No new or recurring runtime issues have appeared since the audit baseline.'
+          : 'Set an audit baseline before using this activity filter.')
+        : 'No runtime issues match the selected filters.';
       list.appendChild(empty);
     }
     const previous = document.createElement('button');
@@ -3372,6 +4056,7 @@ async function loadAdminIssues() {
     pager.append(previous, page, next);
     issueSetListStatus(`${data.total || 0} matching issue${Number(data.total || 0) === 1 ? '' : 's'}.`, 'ok');
   } catch (error) {
+    if (loadGeneration !== adminIssueLoadGeneration) return;
     issueSetListStatus(error.message || 'Runtime issues could not be loaded.', 'error');
     const retry = document.createElement('button');
     retry.type = 'button';
@@ -3496,7 +4181,7 @@ async function loadAdminIssueDetail(issueId) {
           verification_reference: form.elements.verification_reference.value,
           expected_revision: issue.revision,
         });
-        await Promise.all([loadAdminIssues(), loadAdminIssueDetail(issueId)]);
+        await Promise.all([loadAdminIssues(), loadAdminIssueDetail(issueId), loadAdminLogs()]);
         setCanonicalAdminStatus('Issue state updated.', 'ok');
       } catch (error) {
         setCanonicalAdminStatus(error.message, 'error');
@@ -3585,11 +4270,35 @@ async function loadAdminIssueDetail(issueId) {
 
 document.getElementById('issue-status-filter')?.addEventListener('change', () => {
   adminIssuePage = 1;
+  resetIssueCollectionPreview();
   loadAdminIssues();
 });
 document.getElementById('issue-severity-filter')?.addEventListener('change', () => {
   adminIssuePage = 1;
+  resetIssueCollectionPreview();
   loadAdminIssues();
+});
+document.getElementById('issue-activity-filter')?.addEventListener('change', () => {
+  adminIssuePage = 1;
+  resetIssueCollectionPreview();
+  loadAdminIssues();
+});
+document.getElementById('issue-audit-baseline-set')?.addEventListener('click', () => {
+  setIssueAuditBaseline().catch(error => issueSetListStatus(error.message || 'The audit baseline could not be set.', 'error'));
+});
+document.getElementById('issue-collection-preview')?.addEventListener('click', () => {
+  previewIssueCollectionExport().catch(error => issueSetListStatus(error.message || 'The diagnostics export could not be reviewed.', 'error'));
+});
+document.getElementById('issue-collection-export')?.addEventListener('click', () => {
+  exportIssueCollection().catch(error => {
+    resetIssueCollectionPreview();
+    issueSetListStatus(error.message || 'The diagnostics export could not be downloaded.', 'error');
+  });
+});
+document.getElementById('diagnostic-view-issues')?.addEventListener('click', () => showDiagnosticView('issues'));
+document.getElementById('diagnostic-view-audits')?.addEventListener('click', () => showDiagnosticView('audits'));
+document.getElementById('audit-run-start')?.addEventListener('click', () => {
+  startAdminAuditRun().catch(error => auditRunStatus(error.message || 'Audit run could not be started.', 'error'));
 });
 
 async function loadAdminDashboard() {
@@ -3603,6 +4312,7 @@ async function loadAdminDashboard() {
     loadAdminCommunityEjections(),
     loadAdminLinkIcons(),
     loadAdminIssues(),
+    loadAdminAuditRuns(),
     loadAdminNetworkPolicy(),
     loadAdminRetention(),
     loadAdminSystemHealth(),
@@ -3666,10 +4376,14 @@ document.getElementById('admin-close')?.addEventListener('click', () => {
   adminSettingsUnlock?.relock('Settings changes locked because the Admin interface closed.', 'closure');
   const params = new URLSearchParams(window.location.search);
   if (params.get('admin') === '1' && params.get('return') === 'room') {
+    const returnRoomId = (params.get('id') || '').trim();
+    const fallbackUrl = returnRoomId
+      ? appUrl(`/chatroom.php?id=${encodeURIComponent(returnRoomId)}`)
+      : appUrl('/lobby.php');
     window.close();
     window.setTimeout(() => {
-      setCanonicalAdminStatus('Close this Admin tab to return to the still-running room. No rejoin is required.', 'ok');
-    }, 200);
+      if (!window.closed) window.location.assign(fallbackUrl);
+    }, 80);
     return;
   }
   adminModal.classList.remove('open');
@@ -3905,6 +4619,10 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
   if (!adminSettingsUnlock?.requireUnlocked()) return null;
   if (!CAN_ADMIN_SETTINGS_MUTATE) throw new Error('Administrator access is required to change settings.');
   details = { ...details };
+  if (details.values?.flood_authentication_protection_enabled === false
+      && adminSettingsRegistryUI?.authenticationProtectionDisableConfirmed) {
+    details.authentication_protection_disable_confirmed = 1;
+  }
   if (!details.request_id) details.request_id = settingsRegistryRequestId();
   const compatibilityPolicyId = 'database_release_compatibility_enforcement';
   const touchesCompatibilityPolicy = Object.prototype.hasOwnProperty.call(details.values || {}, compatibilityPolicyId)
@@ -3954,7 +4672,7 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
   if (operation === 'reset_category' && details.category_id === 'avatar-interactions') capacityTarget = Number(adminSettingsRegistryUI?.entryMap?.get(capacityId)?.defaultValue);
   if (Number.isFinite(capacityTarget) && !details.capacity_confirmed) {
     const response = await fetch(appUrl(`/api/admin_system.php?action=relationship_capacity_impact&value=${encodeURIComponent(capacityTarget)}`));
-    const impact = await response.json().catch(() => ({}));
+    const impact = await lobbyReadJsonResponse(response);
     if (!response.ok || impact.error) throw new Error(impact.error || 'Relationship limit could not be checked.');
     const affected = Number(impact.relationshipsAboveProposedLimit || 0);
     if (impact.isLowering && affected > 0) {
@@ -4015,6 +4733,7 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
   clearLobbyAdminModerationTrustConfirmation();
   adminSettingsRegistry = result.registry || result.settingsRegistry || adminSettingsRegistry;
   adminSettingsRegistryUI.setRegistry(adminSettingsRegistry);
+  adminSettingsRegistryUI.authenticationProtectionDisableConfirmed = false;
   renderLobbyAdminSettingsCompatibility();
   renderAdminGestureFeatureSummary();
   announceAdminSettingsRevision(adminSettingsRegistry.revision);
@@ -4258,7 +4977,7 @@ adminDbRestore?.addEventListener('submit', async e => {
   e.preventDefault();
   try {
     const xhr = await uploadPlainFormWithProgress(adminDbRestore, appUrl('/api/admin_database.php'), adminDbImportProgress);
-    const data = JSON.parse(xhr.responseText || '{}');
+    const data = lobbyParseJsonText(xhr.responseText, 'The server returned invalid JSON.', 'lobby-upload-api', { status: Number(xhr.status) || 0 });
     if (data.error) throw new Error(data.error);
     setUploadProgress(adminDbImportProgress, 100, 'Import complete. Reloading...');
     window.location.reload();
@@ -4573,7 +5292,7 @@ async function initializeLobbyP2PTransfers() {
   const userId = Number(document.body?.dataset.userId || 0);
   if (!userId || !document.getElementById('transfers-button')) return;
   const policy = JSON.parse(document.getElementById('lobby-p2p-policy')?.textContent || '{}');
-  const {P2PTransferService} = await import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js'));
+  const {P2PTransferService} = await import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js?v=3d3d08972ebe'));
   lobbyP2PTransferService = new P2PTransferService();
   lobbyP2PTransferService.configure({
     window,
@@ -4584,7 +5303,7 @@ async function initializeLobbyP2PTransfers() {
     apiPost: lobbyApiPost,
     async apiGet(url) {
       const response = await fetch(appUrl(url), {credentials: 'same-origin', cache: 'no-store'});
-      const data = await response.json().catch(() => ({}));
+      const data = await lobbyReadJsonResponse(response);
       if (!response.ok || data.error) {
         const error = new Error(data.error || 'Transfer status could not be loaded.');
         error.status = response.status;

@@ -36,6 +36,7 @@ export class ParticipantActionCatalogService {
         const own = Number(viewer?.id || 0) === Number(participant?.id || 0);
         if (!participant) return Object.freeze([]);
         const visibility = this.#context?.getAvatarVisibility?.(participant) || {};
+        const nameplateVisibility = this.#context?.getNameplateVisibility?.(participant) || {};
         const webcam = this.#context?.getWebcamPolicy?.(participant) || {};
         const blocked = Boolean(this.#context?.isBlocked?.(participant?.user_id));
         const webcamAllowed = this.#context?.webcamAllowed?.() !== false;
@@ -70,6 +71,20 @@ export class ParticipantActionCatalogService {
                 id: "avatar.user-visibility",
                 label: visibility.user ? "Show avatars from this user" : "Hide avatars from this user",
                 active: Boolean(visibility.user),
+                disabled: false,
+                applicable: true
+            },
+            {
+                id: "nameplate.current-visibility",
+                label: nameplateVisibility.exact ? "Show this nameplate" : "Hide this nameplate until it changes",
+                active: Boolean(nameplateVisibility.exact),
+                disabled: !nameplateVisibility.available && !nameplateVisibility.exact,
+                applicable: true
+            },
+            {
+                id: "nameplate.user-visibility",
+                label: nameplateVisibility.user ? "Show nameplates from this user" : "Hide nameplates from this user",
+                active: Boolean(nameplateVisibility.user),
                 disabled: false,
                 applicable: true
             },
@@ -131,7 +146,7 @@ export class ParticipantActionCatalogService {
         return Object.freeze({
             owner: "RoomRuntime",
             service: "ParticipantActionCatalogService",
-            actionDefinitionCount: 11,
+            actionDefinitionCount: 13,
             resolutionCount: this.#resolutionCount,
             duplicateCount: this.#duplicateCount
         });

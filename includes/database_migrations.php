@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-08-02-001-post-build-000055-direct-p2p-file-sharing';
+const CORE_MIGRATION_REQUIRED_ID = '2026-09-14-001-shared-game-recording';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -39,16 +39,33 @@ final class CoreMigrationException extends RuntimeException
  */
 function database_transaction_begin(PDO $pdo, bool $sqliteImmediate = false): array
 {
-    if ($pdo->inTransaction()) {
+    $trackedImmediate = function_exists('db_immediate_transaction_active')
+        && db_immediate_transaction_active($pdo);
+    if ($pdo->inTransaction() || $trackedImmediate) {
         return [
             'owned' => false,
             'active' => true,
-            'mode' => 'joined',
+            'mode' => $trackedImmediate ? 'joined-sqlite-sql' : 'joined',
         ];
     }
 
     if ($sqliteImmediate && db_driver($pdo) === 'sqlite') {
-        $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        try {
+            $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        } catch (PDOException $error) {
+            // PHP 8.2 PDO_SQLITE can return false from inTransaction() for a
+            // transaction opened with raw BEGIN IMMEDIATE. Treat only SQLite's
+            // exact nested-BEGIN rejection as an existing transaction owned by
+            // the caller; every other database error remains fail-closed.
+            if (!str_contains(strtolower($error->getMessage()), 'cannot start a transaction within a transaction')) {
+                throw $error;
+            }
+            return [
+                'owned' => false,
+                'active' => true,
+                'mode' => 'joined-sqlite-sql',
+            ];
+        }
         return [
             'owned' => true,
             'active' => true,
@@ -56,7 +73,19 @@ function database_transaction_begin(PDO $pdo, bool $sqliteImmediate = false): ar
         ];
     }
 
-    $pdo->beginTransaction();
+    try {
+        $pdo->beginTransaction();
+    } catch (PDOException $error) {
+        if (db_driver($pdo) !== 'sqlite'
+            || !str_contains(strtolower($error->getMessage()), 'cannot start a transaction within a transaction')) {
+            throw $error;
+        }
+        return [
+            'owned' => false,
+            'active' => true,
+            'mode' => 'joined-sqlite-sql',
+        ];
+    }
     return [
         'owned' => true,
         'active' => true,
@@ -84,6 +113,10 @@ function database_transaction_commit(PDO $pdo, array &$transaction): void
         );
     }
     $transaction['active'] = false;
+    if (function_exists('game_recording_flush') && !empty($GLOBALS['game_recording_pending'][spl_object_id($pdo)])) {
+        unset($GLOBALS['game_recording_pending'][spl_object_id($pdo)]);
+        game_recording_flush($pdo);
+    }
 }
 
 function database_transaction_rollback(PDO $pdo, array &$transaction): void
@@ -126,13 +159,40 @@ function database_migrations_canonical_json(array $value): string
     return $json;
 }
 
+function database_migrations_metadata_source_cache(?string $file = null): array
+{
+    if (PHP_SAPI !== 'cli' || !defined('CHATSPACE_CANONICAL_METADATA_ONLY') || CHATSPACE_CANONICAL_METADATA_ONLY !== true) {
+        throw new RuntimeException('Migration source cache is restricted to CLI metadata capture.');
+    }
+    static $snapshots = [];
+    if ($file === null) {
+        foreach ($snapshots as $path => $snapshot) {
+            $current = hash_file('sha256', $path);
+            if (!is_string($current) || !hash_equals($snapshot['sha256'], $current)) {
+                throw new RuntimeException('Migration source changed during metadata capture.');
+            }
+        }
+        return [];
+    }
+    if (!array_key_exists($file, $snapshots)) {
+        $bytes = file_get_contents($file);
+        if (!is_string($bytes)) throw new RuntimeException('Cannot read migration source snapshot.');
+        $lines = preg_split('/(?<=\n)/', $bytes);
+        if (!is_array($lines)) throw new RuntimeException('Cannot split migration source snapshot.');
+        $snapshots[$file] = ['lines' => $lines, 'sha256' => hash('sha256', $bytes)];
+    }
+    return $snapshots[$file]['lines'];
+}
+
 function database_migrations_function_source_checksum(string $function): string
 {
     if (!function_exists($function)) return '';
     $reflection = new ReflectionFunction($function);
     $file = $reflection->getFileName();
     if (!is_string($file) || !is_file($file)) return '';
-    $lines = file($file);
+    // One fresh file snapshot per source-only adapter process; its final guard rejects drift.
+    $metadataOnly = PHP_SAPI === 'cli' && defined('CHATSPACE_CANONICAL_METADATA_ONLY') && CHATSPACE_CANONICAL_METADATA_ONLY === true;
+    $lines = $metadataOnly ? database_migrations_metadata_source_cache($file) : file($file);
     if (!is_array($lines)) return '';
     $source = implode('', array_slice(
         $lines,
@@ -317,8 +377,9 @@ function database_migrations_manifest(): array
             ],
             'accepted_prior_checksums' => [
                 'D5328EE253A6A80C97F5B7D3F0A3A024DCAE3661B96F4D2963261C932AE5FECC',
+                '36BE58D00C9B8D24C9B841025D0901A919DD82A28B7C33A25F5D14A45D3A409D',
             ],
-            'expected_checksum' => '36BE58D00C9B8D24C9B841025D0901A919DD82A28B7C33A25F5D14A45D3A409D',
+            'expected_checksum' => '4A816F9F30D379E05E157E517AA97962A9F784E62D8D0F94074C188D70FF8175',
         ],
         [
             'id' => '2026-07-27-003-build-000051-account-workflows-confirmations',
@@ -546,7 +607,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => 'A64618E2F61B10F4993702BD2814FE01BB2368F24EE831F90518D8714F3C3BC5',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-08-02-001-post-build-000055-direct-p2p-file-sharing',
             'title' => 'Direct file sharing and authenticated server media',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb-with-hash-verified-private-file-copy',
@@ -572,6 +633,256 @@ function database_migrations_manifest(): array
                 'database_migration_validate_post_build_000055_direct_file_sharing',
             ],
             'expected_checksum' => '1F32DD4EE24078040CF00B5883CEA6B3B35C03DAB65DE11231EF26AD7D9AB6D8',
+        ],
+        [
+            'id' => '2026-08-03-001-build-000056-multiplayer-game-framework',
+            'title' => 'Reusable multiplayer game framework',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000056_multiplayer_game_framework',
+            'validate' => 'database_migration_validate_build_000056_multiplayer_game_framework',
+            'source_functions' => [
+                'multiplayer_game_build_000056_schema_valid',
+            ],
+            'accepted_prior_checksums' => [
+                '2D793B37EF64F483C96082DE4ABAEF090650B60DA1402B6DFA70D9B983ACF0EB',
+                '32A88FA6282D17DFD732F62FC59EE589630396165CC4CFC907398B25B47962DD',
+                '207EEDBE8A633D955B9D9D79085EE1686521E33B73F24F941D43D67299B89F3C',
+                '5478FAC7374B983FE3091646347CF2C1ED44BF81061C0DEA1C12A8CA17A959C5',
+                'C321C1E57ADC8D21351E13CB5ABB4B614B460463534550E87D1C330A9F00D6FC',
+            ],
+            'expected_checksum' => 'EB8D90DB46BE625271643D35258B2C534DD6E9C8E94A9E903E9BD3FEAACF5C7E',
+        ],
+        [
+            'id' => '2026-08-03-002-build-000059-five-dice-extension',
+            'title' => 'Five Dice first-party extension settings',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000059_five_dice_extension',
+            'validate' => 'database_migration_validate_build_000059_five_dice_extension',
+            'source_functions' => [
+                'five_dice_setting_defaults',
+                'five_dice_install_settings',
+                'five_dice_settings_valid',
+                'database_migration_apply_build_000059_five_dice_extension',
+                'database_migration_validate_build_000059_five_dice_extension',
+            ],
+            'accepted_prior_checksums' => [
+                '8F2682603F80BE953FEBA1CAC41B41B307483AEB2173261796F9715AFB93ECC5',
+            ],
+            'expected_checksum' => 'D6A242EFF7CD351071E0511605DD899013B1666D35A61AF6413ED4E0C3ADC52F',
+        ],
+        [
+            'id' => '2026-08-04-001-build-000060-later-ocx-game-conversions',
+            'title' => 'Later OCX first-party game extension settings and compatibility identities',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000060_ocx_game_extensions',
+            'validate' => 'database_migration_validate_build_000060_ocx_game_extensions',
+            'source_functions' => [
+                'ocx_game_extension_setting_defaults',
+                'ocx_game_extension_install_settings',
+                'ocx_game_extension_settings_valid',
+                'database_migration_apply_build_000060_ocx_game_extensions',
+                'database_migration_validate_build_000060_ocx_game_extensions',
+            ],
+            'accepted_prior_checksums' => [
+                'F97498A300E6526CC09A973C572823AC72F06C08A041EEE69DE0AC1357DAD8C1',
+            ],
+            'expected_checksum' => 'B2C1A94DFA3D2356CA0C75ABAE89414A63EB5E7F623A57E7CF7D0F94DF08B951',
+        ],
+        [
+            'id' => '2026-08-05-001-build-000061-backgammon',
+            'title' => 'Backgammon first-party extension settings and compatibility identity',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000061_backgammon',
+            'validate' => 'database_migration_validate_build_000061_backgammon',
+            'source_functions' => [
+                'backgammon_extension_setting_defaults',
+                'backgammon_extension_install_settings',
+                'backgammon_extension_settings_valid',
+                'database_migration_apply_build_000061_backgammon',
+                'database_migration_validate_build_000061_backgammon',
+            ],
+            'expected_checksum' => '1D9D5245966042B226570BF59C22C392387E341D95D20ED614A8BD89226EB166',
+        ],
+        [
+            'id' => '2026-08-24-001-build-000063-live-website-rooms',
+            'title' => 'Temporary Live Website Rooms',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000063_live_website_rooms',
+            'validate' => 'database_migration_validate_build_000063_live_website_rooms',
+            'source_functions' => [
+                'live_website_rooms_setting_defaults',
+                'live_website_rooms_schema_statements',
+                'live_website_rooms_install_schema',
+                'live_website_rooms_schema_valid',
+                'live_website_rooms_install_settings',
+                'live_website_rooms_settings_valid',
+                'live_website_rooms_frame_policy',
+                'database_migration_apply_build_000063_live_website_rooms',
+                'database_migration_validate_build_000063_live_website_rooms',
+            ],
+            'accepted_prior_checksums' => [
+                '62EB77BF41181444FC9266354EE761E839012AFCBD43D09EC16142AC020DDA04',
+            ],
+            'expected_checksum' => '474AB385020547BD2902F64441B778B5B12638F686F00C40A81CB039E650C941',
+        ],
+        [
+            'id' => '2026-08-24-002-build-000063-multiplayer-game-schema-completion',
+            'title' => 'Build 000063 multiplayer game schema completion',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000063_multiplayer_game_schema_completion',
+            'validate' => 'database_migration_validate_build_000063_multiplayer_game_schema_completion',
+            'source_functions' => [
+                'multiplayer_game_schema_statements',
+                'multiplayer_game_install_schema',
+                'multiplayer_game_install_game_chat_package_columns',
+                'multiplayer_game_schema_valid',
+            ],
+            'expected_checksum' => 'A007960D5A3EEBDC7FD458C09EA2CDEFC0C30D2EDDA12423BFAEC354DE74297D',
+        ],
+        [
+            'id' => '2026-08-24-003-build-000063-live-website-capability-catalog',
+            'title' => 'Build 000063 Live Website Room capability catalog completion',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_build_000063_live_website_capability_catalog',
+            'validate' => 'database_migration_validate_build_000063_live_website_capability_catalog',
+            'source_functions' => [
+                'moderation_trust_capability_catalog',
+                'moderation_identity_upsert_catalog',
+                'moderation_identity_owner',
+                'live_website_rooms_install_capability_catalog',
+                'live_website_rooms_capability_catalog_valid',
+                'database_migration_apply_build_000063_live_website_capability_catalog',
+                'database_migration_validate_build_000063_live_website_capability_catalog',
+            ],
+            'accepted_prior_checksums' => [
+                '1C47D79D177C838B1F5DF2E3E1915FD3671F45B0077149BED82581C6EF54C0EF',
+            ],
+            'expected_checksum' => '8A0A2FD7AA68E967048DF6D53429E3A17339FB5E10EBBFF162E2C432D337F0B5',
+        ],
+        [
+            'id' => '2026-08-25-001-post-build-000063-first-party-canvas',
+            'title' => 'Post-Build 000063 First-Party Canvas',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_post_build_000063_first_party_canvas',
+            'validate' => 'database_migration_validate_post_build_000063_first_party_canvas',
+            'source_functions' => [
+                'canvas_schema_statements',
+                'canvas_install_schema',
+                'canvas_schema_valid',
+                'database_migration_apply_post_build_000063_first_party_canvas',
+                'database_migration_validate_post_build_000063_first_party_canvas',
+            ],
+            'expected_checksum' => '8A7B9DB52F751787370F0DB09DF101E6B35EA17BC4BA215E1AA57796C863CD63',
+        ],
+        [
+            'id' => '2026-08-30-001-owner-identity-nameplates',
+            'title' => 'Owner-requested independent identity nameplates',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_owner_identity_nameplates',
+            'validate' => 'database_migration_validate_owner_identity_nameplates',
+            'source_functions' => [
+                'database_migration_identity_nameplate_columns',
+                'database_migration_apply_owner_identity_nameplates',
+                'database_migration_validate_owner_identity_nameplates',
+            ],
+            'expected_checksum' => 'F13FF363CCB1547C1F8799342A78B589ED92A5A92AD0E7348F9C513A567DF4A9',
+        ],
+        [
+            'id' => '2026-09-01-001-runtime-audit-runs',
+            'title' => 'Runtime diagnostic audit runs and privacy-safe exports',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_runtime_audit_runs',
+            'validate' => 'database_migration_validate_runtime_audit_runs',
+            'source_functions' => ['runtime_audit_schema_statements','runtime_audit_install_schema','runtime_audit_schema_valid','database_migration_apply_runtime_audit_runs','database_migration_validate_runtime_audit_runs'],
+            'expected_checksum' => '08DE964BB1B31F713A55A6BA7C6DB5B9DE7A8512F0DC396ADE2CC950A8B1C2A6',
+        ],
+        [
+            'id' => '2026-09-02-001-limit-events-and-enforcement-controls',
+            'title' => 'Privacy-safe Limit Events and independently enforceable limits',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_limit_events_and_enforcement_controls',
+            'validate' => 'database_migration_validate_limit_events_and_enforcement_controls',
+            'source_functions' => [
+                'limit_event_schema_statements',
+                'limit_event_install_schema',
+                'limit_event_schema_valid',
+                'settings_registry_entry',
+                'settings_registry_is_limit_definition',
+                'settings_registry_limit_section',
+                'settings_registry_limit_risk_warning',
+                'settings_registry_definitions',
+                'settings_registry_limit_definition_map',
+                'database_migration_apply_limit_events_and_enforcement_controls',
+                'database_migration_validate_limit_events_and_enforcement_controls',
+            ],
+            'accepted_prior_checksums' => [
+                '2BFEA00B9B257A1B589D7C62E05EF123DCDD7E68B6E69DC61270D6EB3E85D851',
+                '3A8211F5FAC4A489320BFFEEDB956B4707C2D6C28EE7651753BC8BAA57D72E18',
+            ],
+            'expected_checksum' => 'F0BC0647FFEC5D3DC54F223376FA920E0CBCB622FE2CE6ABA82AE29CE196F003',
+        ],
+        [
+            'id' => '2026-09-12-001-live-website-official-successors',
+            'title' => 'Permanent Live Website Room successors',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_live_website_official_successors',
+            'validate' => 'database_migration_validate_live_website_official_successors',
+            'source_functions' => [
+                'database_migration_live_website_official_column_definition',
+                'live_website_rooms_promote_successor',
+                'database_migration_apply_live_website_official_successors',
+                'database_migration_validate_live_website_official_successors',
+            ],
+            'expected_checksum' => '34394499F58E3AE1D9561C3C074D8428DCA2B12A9E86A6D988E47CE58821FAD9',
+        ],
+        [
+            'id' => '2026-09-13-001-avatar-exact-display-size',
+            'title' => 'Exact avatar display width and height',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_avatar_exact_display_size',
+            'validate' => 'database_migration_validate_avatar_exact_display_size',
+            'source_functions' => [
+                'database_migration_apply_avatar_exact_display_size',
+                'database_migration_validate_avatar_exact_display_size',
+            ],
+            'expected_checksum' => '9EF9C04BCE2CD227E6FD4C126AC8001F8A893BF818A8C27DF9D23A25279375C6',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Shared protected game recordings',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_game_recordings',
+            'validate' => 'database_migration_validate_game_recordings',
+            'source_functions' => ['database_migration_apply_game_recordings', 'database_migration_validate_game_recordings'],
+            'expected_checksum' => 'F70AA46D1640F5733F06FDB08AA77CCBF2F4D5B649C41D9FD1D4B9E1C2F6A9AC',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -654,6 +965,20 @@ function database_migration_table_exists(PDO $pdo, string $table): bool
     }
     $stmt = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1");
     $stmt->execute([$table]);
+    return (bool)$stmt->fetchColumn();
+}
+
+function database_migration_index_exists(PDO $pdo, string $table, string $index): bool
+{
+    if (!preg_match('/^[a-z][a-z0-9_]*$/', $table)
+        || !preg_match('/^[a-z][a-z0-9_]*$/', $index)) return false;
+    if (db_driver($pdo) === 'mysql') {
+        $stmt = $pdo->prepare('SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1');
+        $stmt->execute([$table, $index]);
+        return (bool)$stmt->fetchColumn();
+    }
+    $stmt = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND tbl_name = ? AND name = ? LIMIT 1");
+    $stmt->execute([$table, $index]);
     return (bool)$stmt->fetchColumn();
 }
 
@@ -1342,6 +1667,81 @@ function database_migration_validate_gesture_part4(PDO $pdo): bool
     )->fetchColumn() === 0;
 }
 
+function database_migration_gesture_part4_backfill_repairable(PDO $pdo): bool
+{
+    if (!database_migration_has_columns($pdo, 'gestures', [
+        'id', 'public_id', 'owner_user_id', 'name', 'gesture_text', 'gif_path',
+        'audio_path', 'updated_at', 'title', 'creator_credit', 'uploaded_by_user_id',
+        'package_generation', 'package_has_poster', 'package_status', 'package_version',
+        'package_sha256', 'content_sha256', 'media_access_token', 'package_updated_at',
+    ]) || !database_migration_has_columns($pdo, 'gesture_package_generations', [
+        'id', 'gesture_id', 'generation', 'package_version', 'manifest_json',
+        'animation_storage_name', 'animation_mime', 'poster_storage_name', 'poster_mime',
+        'audio_storage_name', 'audio_mime', 'media_access_token', 'compatibility',
+        'validation_status', 'created_by_user_id',
+    ]) || !database_migration_has_columns($pdo, 'users', ['id'])) return false;
+
+    try {
+        $invalid = (int)$pdo->query(
+            'SELECT COUNT(*) FROM gestures g '
+            . 'LEFT JOIN gesture_package_generations current_pg '
+            . 'ON current_pg.gesture_id = g.id AND current_pg.generation = g.package_generation '
+            . 'WHERE g.package_generation < 1 OR current_pg.id IS NULL'
+        )->fetchColumn();
+        if ($invalid < 1) return false;
+
+        $repairable = (int)$pdo->query(
+            'SELECT COUNT(*) FROM gestures g '
+            . 'JOIN users repair_owner ON repair_owner.id = '
+            . 'CASE WHEN COALESCE(g.uploaded_by_user_id, 0) > 0 THEN g.uploaded_by_user_id ELSE g.owner_user_id END '
+            . 'WHERE g.package_generation < 1 '
+            . 'AND NOT EXISTS (SELECT 1 FROM gesture_package_generations pg WHERE pg.gesture_id = g.id)'
+        )->fetchColumn();
+        return $repairable === $invalid;
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+function database_migration_member_profiles_backfill_repairable(PDO $pdo): bool
+{
+    $required = [
+        'member_identity_names' => ['canonical_name', 'user_id', 'name_kind', 'created_at'],
+        'member_profiles' => [
+            'user_id', 'profile_name', 'location', 'about_me', 'public_contact_email',
+            'website', 'interests', 'profile_version', 'created_at', 'updated_at',
+        ],
+        'member_display_name_history' => [
+            'id', 'user_id', 'former_display_name', 'change_request_id', 'changed_at',
+        ],
+        'member_profile_requests' => [
+            'user_id', 'request_id', 'request_sha256', 'result_json', 'created_at',
+        ],
+        'member_deleted_username_uses' => [
+            'id', 'username_normalized', 'deleted_identity_key', 'recorded_at',
+        ],
+        'game_chat_messages' => [
+            'id', 'lobby_code', 'participant_id', 'user_id', 'display_name', 'content', 'sent_at',
+        ],
+    ];
+    foreach ($required as $table => $columns) {
+        if (!database_migration_has_columns($pdo, $table, $columns)) return false;
+    }
+    if (!database_migration_has_columns($pdo, 'users', ['id', 'username', 'display_name'])
+        || (int)$pdo->query(
+            'SELECT COUNT(*) FROM users WHERE username IS NULL OR username = ""'
+        )->fetchColumn() !== 0) {
+        return false;
+    }
+    $collision = $pdo->query(
+        'SELECT canonical_name FROM ('
+        . 'SELECT LOWER(username) AS canonical_name, id AS user_id FROM users '
+        . 'UNION ALL SELECT LOWER(display_name) AS canonical_name, id AS user_id FROM users'
+        . ') names GROUP BY canonical_name HAVING COUNT(DISTINCT user_id) > 1 LIMIT 1'
+    )->fetchColumn();
+    return $collision === false;
+}
+
 function database_migration_validate_gesture_part5(PDO $pdo): bool
 {
     return database_migration_has_columns($pdo, 'gesture_preferences', ['sender_visibility_version'])
@@ -1587,6 +1987,189 @@ function database_migration_validate_build_000053_delete_account(PDO $pdo): bool
     return account_deletion_schema_valid($pdo);
 }
 
+function database_migration_apply_post_build_000063_first_party_canvas(PDO $pdo): void
+{
+    canvas_install_schema($pdo);
+    $insert = $pdo->prepare(db_uses_mysql_syntax($pdo)
+        ? 'INSERT IGNORE INTO app_settings (setting_key, value) VALUES (?, ?)'
+        : 'INSERT OR IGNORE INTO app_settings (setting_key, value) VALUES (?, ?)');
+    foreach (first_party_extension_setting_defaults() as $key => $value) {
+        if (str_starts_with($key, 'first_party_extension.canvas.')) {
+            $insert->execute([$key, $value]);
+        }
+    }
+}
+
+function database_migration_validate_post_build_000063_first_party_canvas(PDO $pdo): bool
+{
+    return canvas_schema_valid($pdo)
+        && app_setting($pdo, 'first_party_extension.canvas.storage_schema', '') === '1';
+}
+
+function database_migration_identity_nameplate_columns(PDO $pdo): array
+{
+    $definition = db_driver($pdo) === 'mysql'
+        ? 'VARCHAR(1024) DEFAULT NULL'
+        : 'TEXT DEFAULT NULL';
+    return [
+        'users' => ['nameplate_path' => $definition],
+        'participants' => ['nameplate_path' => $definition],
+    ];
+}
+
+function database_migration_apply_owner_identity_nameplates(PDO $pdo): void
+{
+    foreach (database_migration_identity_nameplate_columns($pdo) as $table => $definitions) {
+        $columns = database_migration_columns($pdo, $table);
+        foreach ($definitions as $column => $definition) {
+            if (!in_array($column, $columns, true)) {
+                $pdo->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
+            }
+        }
+    }
+}
+
+function database_migration_validate_owner_identity_nameplates(PDO $pdo): bool
+{
+    return database_migration_has_columns($pdo, 'users', ['nameplate_path'])
+        && database_migration_has_columns($pdo, 'participants', ['nameplate_path']);
+}
+
+function database_migration_apply_runtime_audit_runs(PDO $pdo): void
+{
+    runtime_audit_install_schema($pdo);
+    set_app_setting($pdo, 'runtime_audit_active_run', '');
+}
+
+function database_migration_validate_runtime_audit_runs(PDO $pdo): bool
+{
+    return runtime_audit_schema_valid($pdo);
+}
+
+function database_migration_apply_limit_events_and_enforcement_controls(PDO $pdo): void
+{
+    limit_event_install_schema($pdo);
+    set_app_setting($pdo, LIMIT_EVENT_RETENTION_SETTING, app_setting($pdo, LIMIT_EVENT_RETENTION_SETTING, '90'));
+    foreach (settings_registry_definitions() as $definition) {
+        if (empty($definition['limitEnforcementControl'])) continue;
+        $key = (string)$definition['settingKey'];
+        set_app_setting($pdo, $key, app_setting($pdo, $key, '1'));
+    }
+}
+
+function database_migration_validate_limit_events_and_enforcement_controls(PDO $pdo): bool
+{
+    if (!limit_event_schema_valid($pdo)) return false;
+    $keys = [LIMIT_EVENT_RETENTION_SETTING];
+    foreach (settings_registry_limit_definition_map() as $definition) {
+        $keys[] = (string)$definition['enforcementSettingId'];
+    }
+    $keys = array_values(array_unique($keys));
+    $statement = $pdo->prepare(
+        'SELECT setting_key,value FROM app_settings WHERE setting_key IN ('
+        . implode(',', array_fill(0, count($keys), '?')) . ')'
+    );
+    $statement->execute($keys);
+    $values = $statement->fetchAll(PDO::FETCH_KEY_PAIR);
+    foreach ($keys as $key) {
+        if (!array_key_exists($key, $values) || (string)$values[$key] === '') return false;
+    }
+    return true;
+}
+
+function database_migration_live_website_official_column_definition(PDO $pdo): string
+{
+    return db_uses_mysql_syntax($pdo)
+        ? 'TINYINT(1) NOT NULL DEFAULT 0'
+        : 'INTEGER NOT NULL DEFAULT 0';
+}
+
+function database_migration_apply_live_website_official_successors(PDO $pdo): void
+{
+    $columns = database_migration_columns($pdo, 'live_website_rooms');
+    if (!in_array('is_official', $columns, true)) {
+        $definition = database_migration_live_website_official_column_definition($pdo);
+        $pdo->exec("ALTER TABLE live_website_rooms ADD COLUMN is_official {$definition}");
+    }
+
+    $sources = $pdo->query(
+        'SELECT source.* FROM live_website_rooms source '
+        . 'JOIN rooms successor ON successor.id=source.successor_room_id '
+        . 'WHERE source.successor_room_id IS NOT NULL'
+    )->fetchAll();
+    foreach ($sources as $source) {
+        live_website_rooms_promote_successor($pdo, $source, (int)$source['successor_room_id']);
+    }
+}
+
+function database_migration_validate_live_website_official_successors(PDO $pdo): bool
+{
+    if (!database_migration_has_columns($pdo, 'live_website_rooms', ['is_official'])) return false;
+    $statement = $pdo->query(
+        'SELECT COUNT(*) FROM live_website_rooms source '
+        . 'JOIN rooms successor ON successor.id=source.successor_room_id '
+        . 'LEFT JOIN live_website_rooms promoted ON promoted.room_id=source.successor_room_id '
+        . 'WHERE source.successor_room_id IS NOT NULL '
+        . 'AND (promoted.room_id IS NULL OR promoted.is_official<>1)'
+    );
+    return (int)$statement->fetchColumn() === 0;
+}
+
+function database_migration_apply_avatar_exact_display_size(PDO $pdo): void
+{
+    foreach (['users', 'participants'] as $table) {
+        $columns = database_migration_columns($pdo, $table);
+        foreach (['avatar_display_width_px', 'avatar_display_height_px'] as $column) {
+            if (!in_array($column, $columns, true)) {
+                $pdo->exec("ALTER TABLE {$table} ADD COLUMN {$column} INTEGER DEFAULT NULL");
+            }
+        }
+    }
+}
+
+function database_migration_validate_avatar_exact_display_size(PDO $pdo): bool
+{
+    foreach (['users', 'participants'] as $table) {
+        if (!database_migration_has_columns($pdo, $table, ['avatar_display_width_px', 'avatar_display_height_px'])) return false;
+    }
+    return true;
+}
+
+function database_migration_apply_game_recordings(PDO $pdo): void
+{
+    $tail = db_uses_mysql_syntax($pdo) ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci' : '';
+    $largeText = db_uses_mysql_syntax($pdo) ? 'MEDIUMTEXT' : 'TEXT';
+    $pdo->exec("CREATE TABLE IF NOT EXISTS multiplayer_game_recordings (
+        id VARCHAR(64) PRIMARY KEY, session_public_id VARCHAR(96) NOT NULL UNIQUE,
+        game VARCHAR(32) NOT NULL, status VARCHAR(32) NOT NULL, metadata_json {$largeText} NOT NULL,
+        event_count INTEGER NOT NULL DEFAULT 0, archived_count INTEGER NOT NULL DEFAULT 0,
+        last_version INTEGER NOT NULL DEFAULT 0, last_event_key VARCHAR(64) NOT NULL DEFAULT '',
+        last_hash VARCHAR(64) NOT NULL DEFAULT '', part_number INTEGER NOT NULL DEFAULT 1,
+        part_bytes INTEGER NOT NULL DEFAULT 0, gap_count INTEGER NOT NULL DEFAULT 0,
+        error_code VARCHAR(64) NOT NULL DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ){$tail}");
+    // No session/user FK: replay retention must survive ordinary 31-day game cleanup.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS multiplayer_game_recording_events (
+        recording_id VARCHAR(64) NOT NULL, sequence_number INTEGER NOT NULL,
+        part_number INTEGER NOT NULL, payload_json {$largeText} NOT NULL, payload_bytes INTEGER NOT NULL,
+        PRIMARY KEY(recording_id,sequence_number)
+    ){$tail}");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS multiplayer_game_recording_control (
+        id INTEGER PRIMARY KEY, queue_bytes BIGINT NOT NULL DEFAULT 0,
+        capture_failures INTEGER NOT NULL DEFAULT 0, last_error VARCHAR(64) NOT NULL DEFAULT ''
+    ){$tail}");
+    $exists = $pdo->query('SELECT id FROM multiplayer_game_recording_control WHERE id=1')->fetchColumn();
+    if ($exists === false) $pdo->exec('INSERT INTO multiplayer_game_recording_control (id) VALUES (1)');
+}
+
+function database_migration_validate_game_recordings(PDO $pdo): bool
+{
+    return database_migration_has_columns($pdo, 'multiplayer_game_recordings', ['id','session_public_id','game','status','metadata_json','event_count','archived_count','last_version','last_event_key','last_hash','part_number','part_bytes','gap_count','error_code','deleted','created_at'])
+        && database_migration_has_columns($pdo, 'multiplayer_game_recording_events', ['recording_id','sequence_number','part_number','payload_json','payload_bytes'])
+        && database_migration_has_columns($pdo, 'multiplayer_game_recording_control', ['id','queue_bytes','capture_failures','last_error']);
+}
+
 function database_migrations_bootstrap_control_tables(PDO $pdo): void
 {
     if (db_driver($pdo) === 'mysql') {
@@ -1766,6 +2349,33 @@ function database_migration_checksum_is_accepted(array $migration, string $check
     return false;
 }
 
+/** Missing optional limit switches can be backfilled after a verified backup. */
+function database_migration_limit_controls_backfill_repairable(PDO $pdo): bool
+{
+    if (!limit_event_schema_valid($pdo)
+        || !database_migration_has_columns($pdo, 'app_settings', ['setting_key', 'value'])) return false;
+    $keys = [LIMIT_EVENT_RETENTION_SETTING];
+    foreach (settings_registry_limit_definition_map() as $definition) {
+        $key = (string)($definition['enforcementSettingId'] ?? '');
+        if (!str_starts_with($key, 'limit_enforce__')) return false;
+        $keys[] = $key;
+    }
+    $keys = array_values(array_unique($keys));
+    $statement = $pdo->prepare('SELECT setting_key,value FROM app_settings WHERE setting_key IN ('
+        . implode(',', array_fill(0, count($keys), '?')) . ')');
+    $statement->execute($keys);
+    $values = $statement->fetchAll(PDO::FETCH_KEY_PAIR);
+    // Do not classify a broken table, missing retention policy or malformed saved
+    // value as a missing-default repair. Existing explicit Off values stay Off.
+    if (!array_key_exists(LIMIT_EVENT_RETENTION_SETTING, $values)) return false;
+    $missing = false;
+    foreach ($keys as $key) {
+        if (!array_key_exists($key, $values)) $missing = true;
+        elseif ($values[$key] === null || (string)$values[$key] === '') return false;
+    }
+    return $missing;
+}
+
 function database_migration_status(PDO $pdo): array
 {
     $preflight = database_migrations_release_preflight();
@@ -1779,6 +2389,7 @@ function database_migration_status(PDO $pdo): array
     foreach ($manifest as $migration) $manifestById[(string)$migration['id']] = $migration;
     $releaseDefects = $preflight['defects'];
     $stateDefects = [];
+    $repairableCompleted = [];
     $seenPendingMigration = false;
     $newer = false;
     foreach ($byId as $id => $row) {
@@ -1792,7 +2403,36 @@ function database_migration_status(PDO $pdo): array
             continue;
         }
         if (!database_migration_validator_passes($pdo, $manifestById[$id])) {
-            $stateDefects[] = "Completed migration schema mismatch: {$id}.";
+            if ($id === '2026-07-21-002-gesture-protected-packages'
+                && database_migration_gesture_part4_backfill_repairable($pdo)) {
+                $repairableCompleted[] = [
+                    'id' => $id,
+                    'title' => (string)$manifestById[$id]['title'],
+                    'reason' => 'post-ledger-package-backfill',
+                ];
+            } elseif ($id === '2026-07-24-001-member-profiles'
+                && database_migration_member_profiles_backfill_repairable($pdo)) {
+                $repairableCompleted[] = [
+                    'id' => $id,
+                    'title' => (string)$manifestById[$id]['title'],
+                    'reason' => 'post-ledger-user-profile-backfill',
+                ];
+            } elseif ($id === '2026-09-02-001-limit-events-and-enforcement-controls'
+                && database_migration_limit_controls_backfill_repairable($pdo)) {
+                $repairableCompleted[] = [
+                    'id' => $id,
+                    'title' => 'Initialize missing limit controls without changing saved choices',
+                    'reason' => 'post-ledger-limit-control-defaults',
+                ];
+            } elseif ($id === '2026-08-24-003-build-000063-live-website-capability-catalog') {
+                $repairableCompleted[] = [
+                    'id' => $id,
+                    'title' => (string)$manifestById[$id]['title'],
+                    'reason' => 'post-ledger-owner-capability-catalog',
+                ];
+            } else {
+                $stateDefects[] = "Completed migration schema mismatch: {$id}.";
+            }
         }
     }
     $pending = [];
@@ -1826,6 +2466,7 @@ function database_migration_status(PDO $pdo): array
         $kind = strcmp($storedVersion, CHATSPACE_SCHEMA_VERSION) > 0 ? 'newer' : 'unknown';
     } elseif ($releaseDefects !== []) $kind = 'incomplete-release';
     elseif ($stateDefects !== []) $kind = 'inconsistent';
+    elseif ($repairableCompleted !== []) $kind = 'older';
     elseif ($pending !== []) $kind = 'older';
     elseif ($pending === [] && $storedVersion === CHATSPACE_SCHEMA_VERSION && database_migration_validate_control_plane($pdo)) $kind = 'current';
     $backupReadiness = $kind === 'current'
@@ -1842,6 +2483,8 @@ function database_migration_status(PDO $pdo): array
         'variant' => $variant,
         'pending' => $pending,
         'pending_count' => count($pending),
+        'repairable_completed' => $repairableCompleted,
+        'repairable_completed_count' => count($repairableCompleted),
         'release_complete' => $preflight['ok'],
         'defects' => array_values(array_unique(array_merge($releaseDefects, $stateDefects))),
         'migration_state' => $state,
@@ -1986,7 +2629,7 @@ function database_migration_mariadb_inventory(PDO $pdo): array
         foreach ($tableKeys as $key) {
             if ((string)$key['constraint_name'] === 'PRIMARY') $primary[] = (string)$key['column_name'];
         }
-        $tables[] = [
+        $table = [
             'name' => $name,
             'table' => $tableRow,
             'columns' => $tableColumns,
@@ -1997,6 +2640,21 @@ function database_migration_mariadb_inventory(PDO $pdo): array
             'primary_key' => $primary,
             'create_sql_base64' => base64_encode($create[1]),
         ];
+        if (database_migration_mariadb_is_retired_tombstone($table)) {
+            $emptyCheck = $pdo->query(
+                'SELECT 1 FROM ' . database_migration_mariadb_quote_identifier($name) . ' LIMIT 1'
+            );
+            $hasRows = $emptyCheck->fetchColumn() !== false;
+            $emptyCheck->closeCursor();
+            if ($hasRows) {
+                throw new CoreMigrationException(
+                    'The retired network reveal table must remain empty; backup is blocked without removing its data.',
+                    'MARIADB_BACKUP_RETIRED_TABLE_NOT_EMPTY',
+                    503
+                );
+            }
+        }
+        $tables[] = $table;
     }
     return [
         'database_identity_sha256' => strtoupper(hash('sha256', $database)),
@@ -2013,6 +2671,26 @@ function database_migration_mariadb_inventory_fingerprint(array $inventory): str
         'object_counts' => $inventory['object_counts'] ?? [],
         'tables' => $inventory['tables'] ?? [],
     ])));
+}
+
+function database_migration_mariadb_is_retired_tombstone(array $table): bool
+{
+    $columns = (array)($table['columns'] ?? []);
+    $metadata = (array)($table['table'] ?? []);
+    return ($table['name'] ?? '') === 'network_reveal_leases'
+        && ($metadata['table_type'] ?? '') === 'BASE TABLE'
+        && strcasecmp((string)($metadata['engine'] ?? ''), 'InnoDB') === 0
+        && (array)($table['primary_key'] ?? []) === []
+        && count($columns) === 1
+        && ($columns[0]['column_name'] ?? '') === 'retired_at'
+        && strtolower((string)($columns[0]['column_type'] ?? '')) === 'datetime'
+        && ($columns[0]['is_nullable'] ?? '') === 'NO'
+        && trim((string)($columns[0]['extra'] ?? '')) === ''
+        && trim((string)($columns[0]['generation_expression'] ?? '')) === ''
+        && (array)($table['indexes'] ?? []) === []
+        && (array)($table['constraints'] ?? []) === []
+        && (array)($table['key_columns'] ?? []) === []
+        && (array)($table['referential_constraints'] ?? []) === [];
 }
 
 function database_migration_mariadb_assert_supported_inventory(array $inventory): void
@@ -2042,7 +2720,8 @@ function database_migration_mariadb_assert_supported_inventory(array $inventory)
                 503
             );
         }
-        if ((array)($table['primary_key'] ?? []) === []) {
+        if ((array)($table['primary_key'] ?? []) === []
+            && !database_migration_mariadb_is_retired_tombstone($table)) {
             throw new CoreMigrationException(
                 'MariaDB table has no deterministic primary-key order: ' . $name . '.',
                 'MARIADB_BACKUP_PRIMARY_KEY_REQUIRED',
@@ -2114,6 +2793,8 @@ function database_migration_backup_readiness(PDO $pdo): array
 
 function database_migrations_require_runtime_compatible(PDO $pdo): void
 {
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+    if (str_ends_with($path, '/database-update.php')) return;
     if (function_exists('database_recovery_require_runtime_available')) {
         database_recovery_require_runtime_available();
     }
@@ -2126,7 +2807,6 @@ function database_migrations_require_runtime_compatible(PDO $pdo): void
         $status = database_migration_status($pdo);
     }
     if ($status['current']) return;
-    $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
     if (PHP_SAPI === 'cli') {
         throw new CoreMigrationException(
             'CoreChat database update is required before runtime access.',
@@ -2575,11 +3255,21 @@ function database_migration_mariadb_backup(PDO $pdo, string $attemptId, ?string 
             ]);
             $select = 'SELECT '
                 . implode(', ', array_map('database_migration_mariadb_quote_identifier', $columnNames))
-                . ' FROM ' . database_migration_mariadb_quote_identifier($nameValue)
-                . ' ORDER BY ' . implode(', ', array_map('database_migration_mariadb_quote_identifier', $primary));
+                . ' FROM ' . database_migration_mariadb_quote_identifier($nameValue);
+            $select .= $primary === []
+                ? ' LIMIT 1'
+                : ' ORDER BY ' . implode(', ', array_map('database_migration_mariadb_quote_identifier', $primary));
             $statement = $pdo->query($select);
             $count = 0;
             while (($row = $statement->fetch(PDO::FETCH_NUM)) !== false) {
+                if ($primary === []) {
+                    $statement->closeCursor();
+                    throw new CoreMigrationException(
+                        'The retired network reveal table acquired data during backup.',
+                        'MARIADB_BACKUP_RETIRED_TABLE_NOT_EMPTY',
+                        503
+                    );
+                }
                 $values = [];
                 foreach ($row as $value) $values[] = $value === null ? null : base64_encode((string)$value);
                 database_migration_backup_write_record($handle, $contentHash, [
@@ -2766,14 +3456,20 @@ function database_migration_verify_mariadb_logical_backup_file(string $path): ar
                 $columns = $record['columns'] ?? null;
                 $primary = $record['primary_key'] ?? null;
                 $create = $record['create_sql_base64'] ?? null;
+                $retiredTombstone = $columns === ['retired_at'] && $primary === []
+                    && database_migration_mariadb_is_retired_tombstone(array_merge(
+                        (array)($record['inventory'] ?? []),
+                        ['name' => $table, 'primary_key' => []]
+                    ));
                 if ($table === '' || isset($schemas[$table]) || !is_array($columns) || $columns === []
-                    || !is_array($primary) || $primary === [] || !is_string($create)
+                    || !is_array($primary) || ($primary === [] && !$retiredTombstone) || !is_string($create)
                     || base64_decode($create, true) === false) {
                     throw new CoreMigrationException('MariaDB logical backup schema record is invalid.', 'BACKUP_VERIFICATION_FAILED', 500);
                 }
                 $schemas[$table] = [
                     'columns' => array_values(array_map('strval', $columns)),
                     'primary_key' => array_values(array_map('strval', $primary)),
+                    'retired_tombstone' => $retiredTombstone,
                 ];
                 $schemaOrder[] = $table;
                 hash_update($schemaHash, $line);
@@ -2793,6 +3489,13 @@ function database_migration_verify_mariadb_logical_backup_file(string $path): ar
             if ($type === 'row') {
                 $table = (string)($record['table'] ?? '');
                 $values = $record['values'] ?? null;
+                if (!empty($schemas[$table]['retired_tombstone'])) {
+                    throw new CoreMigrationException(
+                        'MariaDB logical backup contains data for a retired network reveal table.',
+                        'BACKUP_VERIFICATION_FAILED',
+                        500
+                    );
+                }
                 if ($currentTable === null || !hash_equals($currentTable, $table)
                     || !is_array($values) || count($values) !== count($schemas[$table]['columns'])) {
                     throw new CoreMigrationException('MariaDB logical backup row framing is invalid.', 'BACKUP_VERIFICATION_FAILED', 500);
@@ -3014,6 +3717,14 @@ function database_migration_restore_mariadb_logical_backup(
             if ($type === 'row') {
                 $table = (string)($record['table'] ?? '');
                 $values = (array)($record['values'] ?? []);
+                if (isset($sourceTables[$table])
+                    && database_migration_mariadb_is_retired_tombstone($sourceTables[$table])) {
+                    throw new CoreMigrationException(
+                        'MariaDB restore refuses data for a retired network reveal table.',
+                        'MARIADB_BACKUP_RESTORE_RETIRED_TABLE_NOT_EMPTY',
+                        500
+                    );
+                }
                 if ($currentTable === null || !hash_equals($currentTable, $table)
                     || !$insert instanceof PDOStatement || count($values) !== count($schemas[$table])) {
                     throw new CoreMigrationException('MariaDB restore row framing is invalid.', 'MARIADB_BACKUP_RESTORE_FORMAT_FAILED', 500);
@@ -3352,12 +4063,46 @@ function database_migration_finish_attempt(PDO $pdo, string $attemptId, string $
     ]);
 }
 
+function database_migration_installation_owner_candidates(PDO $pdo): array
+{
+    if (!database_migration_table_exists($pdo, 'users')
+        || !database_migration_has_columns($pdo, 'users', ['id', 'role'])) {
+        return [];
+    }
+    $optional = [];
+    foreach (['username', 'display_name', 'email'] as $column) {
+        if (database_migration_has_columns($pdo, 'users', [$column])) $optional[] = $column;
+    }
+    $projection = array_merge(['id'], $optional);
+    $rows = $pdo->query(
+        'SELECT ' . implode(',', $projection) . " FROM users WHERE role = 'admin' ORDER BY id"
+    )->fetchAll(PDO::FETCH_ASSOC);
+    return array_map(static function (array $row) use ($optional): array {
+        $candidate = ['user_id' => (int)$row['id']];
+        foreach ($optional as $column) $candidate[$column] = trim((string)($row[$column] ?? ''));
+        return $candidate;
+    }, $rows);
+}
+
+function database_migration_validate_installation_owner_selection(PDO $pdo, int $userId): int
+{
+    foreach (database_migration_installation_owner_candidates($pdo) as $candidate) {
+        if ((int)$candidate['user_id'] === $userId) return $userId;
+    }
+    throw new CoreMigrationException(
+        'The selected Installation Owner must be an existing Administrator.',
+        'INSTALLATION_OWNER_SELECTION_INVALID',
+        409
+    );
+}
+
 function database_migrations_run(
     PDO $pdo,
     ?int $actorUserId,
     bool $cleanInstall = false,
     ?string $requestPublicId = null,
-    ?array $preparedBackup = null
+    ?array $preparedBackup = null,
+    array $upgradeContext = []
 ): array
 {
     if ($requestPublicId !== null && !preg_match('/^[a-f0-9-]{36}$/i', $requestPublicId)) {
@@ -3387,6 +4132,20 @@ function database_migrations_run(
         database_migration_apply_published_baseline($pdo);
         $variant = database_migration_variant($pdo);
         if (!$variant['recognized']) throw new CoreMigrationException('Clean baseline validation failed.', 'CLEAN_BASELINE_INVALID', 500);
+    }
+    $installationOwnerUserId = null;
+    if (array_key_exists('installation_owner_user_id', $upgradeContext)) {
+        if ($cleanInstall) {
+            throw new CoreMigrationException(
+                'Installation Owner upgrade selection is not valid for a clean installation.',
+                'INSTALLATION_OWNER_SELECTION_CONTEXT_INVALID',
+                400
+            );
+        }
+        $installationOwnerUserId = database_migration_validate_installation_owner_selection(
+            $pdo,
+            (int)$upgradeContext['installation_owner_user_id']
+        );
     }
     $status = database_migration_status($pdo);
     $priorState = is_array($status['migration_state'] ?? null) ? $status['migration_state'] : [];
@@ -3432,10 +4191,10 @@ function database_migrations_run(
     $attemptId = $requestPublicId ?? uuid_v4();
     $ownerToken = bin2hex(random_bytes(32));
     $claim = database_migration_claim($pdo, $attemptId, $ownerToken, $actorUserId);
-    $state = database_migration_state($pdo);
     $backup = null;
     $results = [];
     try {
+        $state = database_migration_state($pdo);
         if (!$cleanInstall) {
             if ($hasPreparedBackup) {
                 $backup = database_migration_verify_existing_backup($pdo, (array)$preparedBackup);
@@ -3465,6 +4224,13 @@ function database_migrations_run(
             }
         }
         database_migrations_bootstrap_control_tables($pdo);
+        if ($installationOwnerUserId !== null) {
+            set_app_setting(
+                $pdo,
+                MODERATION_IDENTITY_OWNER_SELECTION_SETTING,
+                (string)$installationOwnerUserId
+            );
+        }
         if (!empty($priorState['attempt_public_id'])
             && !hash_equals((string)$priorState['attempt_public_id'], $attemptId)
             && database_migration_table_exists($pdo, 'core_migration_attempts')) {

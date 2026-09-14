@@ -14,7 +14,12 @@ export class ChatPollAdapter {
 
     #failures = 0;
 
+    #generation = 0;
+
     configure(context = {}) {
+
+        this.#generation += 1;
+        this.#failures = 0;
 
         this.#context =
             context;
@@ -35,6 +40,8 @@ export class ChatPollAdapter {
     }
 
     stop() {
+
+        this.#generation += 1;
 
         this.#running =
             false;
@@ -58,16 +65,20 @@ export class ChatPollAdapter {
             return;
         }
 
+
         if (this.#requesting) {
-            this.#schedule(context.pollInterval ?? 25);
+            this.#schedule(this.#pollDelay(context));
             return;
         }
 
         this.#requesting =
             true;
 
-        let delay =
-            Number(context.pollInterval ?? 25);
+        const generation = this.#generation;
+
+        // Hidden rooms still receive DM/link messages and presence updates.
+        // Reduce request frequency, but never skip fetching because of focus.
+        let delay = this.#pollDelay(context);
 
         try {
 
@@ -76,12 +87,18 @@ export class ChatPollAdapter {
                     context.createQuery()
                 );
 
+            if (!this.#running || context.shouldStop?.()
+                || generation !== this.#generation || context !== this.#context) return;
+
             this.#failures =
                 0;
 
             await context.onBatch(batch, "polling");
 
         } catch (error) {
+
+            if (!this.#running || context.shouldStop?.()
+                || generation !== this.#generation || context !== this.#context) return;
 
             this.#failures += 1;
 
@@ -121,8 +138,9 @@ export class ChatPollAdapter {
             this.#requesting =
                 false;
 
-            if (this.#running && !context.shouldStop?.()) {
-                this.#schedule(delay);
+            if (this.#running && !this.#context?.shouldStop?.()) {
+                this.#schedule(generation === this.#generation
+                    ? Math.max(delay, this.#pollDelay()) : this.#pollDelay());
             }
 
         }
@@ -156,6 +174,13 @@ export class ChatPollAdapter {
 
         });
 
+    }
+
+    #pollDelay(context = this.#context) {
+        const normal = Math.max(25, Number(context?.pollInterval ?? 25) || 25);
+        return typeof document !== "undefined" && document.hidden
+            ? Math.max(normal, 1000, Number(context?.hiddenPollInterval ?? 2500) || 2500)
+            : normal;
     }
 
     #schedule(delay) {

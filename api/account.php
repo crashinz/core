@@ -32,14 +32,16 @@ function account_projection(PDO $pdo, array $user): array
             'trustState' => $authorization['trustState'],
             'trustRevision' => $authorization['trustRevision'],
             'isInstallationOwner' => $authorization['isInstallationOwner'],
-            'trustPolicyNote' => $authorization['trustState'] === 'trusted'
-                ? 'Trusted status does not itself grant content capabilities.'
-                : match ($authorization['trustState']) {
-                    'pending-approval' => 'Your account is awaiting approval. A Trusted account is required for protected capabilities.',
-                    'restricted' => 'Capabilities remain restricted until the current action expires or is changed.',
-                    'suspended' => 'Ordinary access is unavailable while this account is suspended.',
-                    default => 'Account policy is unavailable.',
-                },
+            'trustPolicyNote' => !empty($authorization['isInstallationOwner'])
+                ? 'The Installation Owner has full access to available capabilities. Installation settings and mandatory safeguards still apply.'
+                : ($authorization['trustState'] === 'trusted'
+                    ? 'Trusted status does not itself grant content capabilities.'
+                    : match ($authorization['trustState']) {
+                        'pending-approval' => 'Your account is awaiting approval. A Trusted account is required for protected capabilities.',
+                        'restricted' => 'Capabilities remain restricted until the current action expires or is changed.',
+                        'suspended' => 'Ordinary access is unavailable while this account is suspended.',
+                        default => 'Account policy is unavailable.',
+                    }),
             'temporaryRestriction' => $activeRestriction ? [
                 'permanent' => (bool)$activeRestriction['permanent'],
                 'expiresAt' => $activeRestriction['expires_at'],
@@ -69,19 +71,19 @@ if (in_array($action, ['request_trusted_review', 'request_capabilities', 'submit
         'request_capabilities' => 'capability-request',
         'submit_appeal' => 'appeal',
     };
+    $transaction = [];
     try {
-        if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-        else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        $transaction = database_transaction_begin($pdo, true);
         $result = moderation_account_submit_case($pdo, (int)$user['id'], $caseType, $body);
-        $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         json_out(['ok' => true, 'case' => $result] + account_projection($pdo, current_user() ?: $user));
     } catch (ModerationAccountWorkflowException|ModerationTrustPolicyException $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         $code = property_exists($error, 'errorCode') ? $error->errorCode : 'MODERATION_REQUEST_FAILED';
         $status = property_exists($error, 'httpStatus') ? $error->httpStatus : 409;
         json_out(['error' => $error->getMessage(), 'code' => $code], $status);
     } catch (Throwable) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         json_out(['error' => 'The request could not be stored safely.', 'code' => 'MODERATION_REQUEST_FAILED'], 500);
     }
 }

@@ -1,0 +1,101 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "space-invasion",
+  "name": "Space Invasion",
+  "version": "1.0.5",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 65536,
+    "uninstallPolicy": "explicit-cleanup-only",
+    "disablePolicy": "preserve"
+  },
+  "game": {
+    "key": "g_b64p3_space",
+    "name": "Space Invasion",
+    "displayNameSettingKey": "multiplayer_game_display_name_spaceinvasion",
+    "gameId": 106,
+    "path": "space-invasion-first-party",
+    "entry": "index.html",
+    "icon": "spaceinvasion-icon.png",
+    "profile": "one-player",
+    "minPlayers": 1,
+    "practiceMinPlayers": 1,
+    "recordedMinPlayers": 1,
+    "maxPlayers": 2,
+    "seats": [
+      "Player 1",
+      "Player 2"
+    ],
+    "adaptationVersion": "1.0.0",
+    "presentationSelectionOwner": "viewer",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "label": "Built-in",
+        "id": "built-in"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "presentationOnly": true,
+      "separate": true
+    },
+    "presentationSizing": {
+      "minimumReadableWidth": 480,
+      "preferredAspectRatio": 1.5,
+      "minimumReadableHeight": 320
+    },
+    "rulesHelp": {
+      "description": "Original arcade rules, with server-owned gameplay and shared lifecycle controls.",
+      "label": "Space Invasion rules"
+    }
+  },
+  "integrity": {
+    "files": {
+      "includes/arcade_extension_support.php": "b9d60d657c2ace2a66a6b371b0ce4c7d49d268ed86a35a447ed812c886f897f1",
+      "includes/space_arcade_extension.php": "a8b4a7b3c4b44b661a0ba2aba73b2ca2246a480bfc43005bee6255690c75bd6e",
+      "games/space-invasion-first-party/index.html": "0eab4aa741678a51d951c974620728fd4c498df9e49f2fd1ef0b464168a30253",
+      "games/arcade-first-party/app.js": "84bfff3e3492d65eccdc7d9f5626599f77be7b15ae916d6ba3ff5a164f472651",
+      "games/arcade-first-party/style.css": "636901afd9d6116c3f054f8d63508088c40d3f68a217daef1ae8b8ab30fa9eb2",
+      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "assets/images/spaceinvasion-icon.png": "055b4fd0cad00e5cb029518e7c852ef61106826bfac4c7d9278fe854fdbe2ab4",
+      "games/spaceinvasion/enemy.png": "ca819dc60013bdeccf630b58f60c8f629fc9ed1963f95db975c1d728a360411c",
+      "games/spaceinvasion/player1.png": "dbc91f4351aa606849c657244c5fb41b8473aaa0d41fd7b9c5685cbbe57ac170",
+      "games/arcade-first-party/space-view.js": "158d6a7e1281fb6e5756f2f6fd14cdaf33ec7b940b7f11b6ea709ae9fcc267dc",
+      "games/arcade-first-party/space-simulation.js": "194463e2259b0aab10c3adb2a508e035cb3d36f93fca9811801cb0f6001d32ed",
+      "games/arcade-first-party/space-frame-client.js": "751614b243952db36d21fa6723f1e88e912d636bdebe796136d8da9ec466bd63",
+      "includes/space_arcade_frame_input.php": "a44d0dae2dc7100cd2afcf73e234d26a4ed2088988e68fd51ea62bd30e0960b4",
+      "games/arcade-first-party/tetris-view.js": "29fc86bae5b54c5c3a7a71a738a46ad9c92870cb545cd7f512cb2bfee3ccb57c",
+      "includes/space_arcade_coop.php": "07b7e76bed46a8aedbcfb3e3d8d794ea29231bd50662b5315247a7ab7e937921",
+      "games/spaceinvasion/player2.png": "436658d86300de09c6587f39e5413351b03b09373dbd901bc58b0928b6ab236d",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+    },
+    "algorithm": "sha256"
+  }
+}

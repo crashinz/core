@@ -1,0 +1,64 @@
+/* Keep the width budget constant when run history or controls need scrolling. */
+:root { scrollbar-gutter:stable; }
+.arcade-stage { width:100%; min-width:0; color:#eef4ff; }
+body[data-extension="space-invasion"] .arcade-space-frame { box-sizing:border-box; width:calc(var(--arcade-board-width,960px) + 32px); max-width:100%; margin-inline:auto; padding:14px; border:1px solid rgba(255,255,255,.14); border-radius:12px; background:linear-gradient(rgba(255,255,255,.08),rgba(255,255,255,.02)),radial-gradient(120% 140% at 50% -20%,rgba(255,255,255,.08),transparent 60%),#15151a; box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 -1px 0 rgba(255,255,255,.03),0 18px 40px rgba(0,0,0,.45); }
+body[data-extension="space-invasion"] .arcade-scroll { border:1px solid rgba(255,255,255,.15); border-radius:8px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
+/* Arcade status already names both players; no turn strip is needed for real-time play. */
+body[data-extension="tetris-versus"] #player-status-strip,
+body[data-extension="space-invasion"] #player-status-strip { display:none !important; }
+.arcade-status { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; padding:8px; font:600 16px/1.5 Georgia,serif; }
+.arcade-summary { margin:0; color:#d8e5fb; }
+.arcade-control-guide { margin:4px 0 12px; padding:10px 14px; border:1px solid #739bb4; border-radius:8px; background:#14283a; color:#f3f8ff; font-size:15px; line-height:1.5; text-align:center; }
+.arcade-scroll { overflow-x:auto; overflow-y:hidden; max-width:100%; overscroll-behavior:contain; border:1px solid #415372; border-radius:12px; background:radial-gradient(ellipse at 50% 10%,#183546,#080d1a 70%); }
+.arcade-world { margin-inline:auto; width:960px; }
+body[data-extension="space-invasion"] .arcade-world { position:relative; container-type:inline-size; }
+.arcade-space-hud { position:absolute; inset:0; pointer-events:none; color:#fff; font:800 16px/1.2 "Segoe UI",system-ui,-apple-system,sans-serif; text-shadow:0 1px 3px #000; }
+.arcade-space-score { position:absolute; left:14px; top:10px; }
+.arcade-space-score-two { position:absolute; right:14px; top:10px; text-align:right; }
+.arcade-space-level { position:absolute; left:50%; top:10px; transform:translateX(-50%); white-space:nowrap; }
+.arcade-space-player { position:absolute; transform:translateX(-50%); white-space:nowrap; font-size:clamp(9px,1.4583cqw,14px); line-height:1.2; }
+body[data-extension="space-invasion"] .arcade-control-guide { position:absolute; top:94.0625%; bottom:0; left:0; right:0; display:flex; align-items:center; justify-content:center; margin:0; padding:0 6px; border:0; border-radius:0; background:transparent; pointer-events:none; white-space:nowrap; font:700 clamp(9px,1.5cqw,14px)/1.15 "Segoe UI",system-ui,-apple-system,sans-serif; }
+.arcade-world canvas { display:block; width:100%; height:auto; touch-action:none; outline-offset:-4px; }
+.arcade-world canvas:focus-visible { outline:3px solid #ffcf68; }
+.arcade-buttons { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; padding:12px 4px; }
+.arcade-buttons button,.arcade-option button { min-height:44px; min-width:50px; touch-action:none; border:1px solid #587790; border-radius:8px; background:linear-gradient(#223952,#132133); color:#fff; padding:8px 14px; }
+.arcade-buttons button:active { background:#365e7a; }
+.arcade-help { font:14px/1.5 Georgia,serif; max-width:70ch; margin:6px auto; }
+.arcade-help summary { cursor:pointer; padding:8px; color:#ffcf68; }
+.arcade-help p { margin:6px 12px 12px; }
+#game-settings .game-setting.arcade-option { display:flex !important; flex-wrap:wrap; align-items:center; gap:10px; }
+#game-settings .arcade-option > label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; }
+#game-settings .arcade-option > * { position:static; width:auto; max-width:100%; flex:0 1 auto; }
+.arcade-option select { min-height:44px; }
+.arcade-history { padding:12px; border:1px solid #597890; border-radius:8px; font-size:16px; }
+@media (prefers-reduced-motion:reduce) { .arcade-stage * { scroll-behavior:auto; } }
+/* Preserve the original Tetris side frames, board texture and boxed HUD. */
+body[data-extension="tetris-versus"] .arcade-scroll { border:0; border-radius:0; background:transparent; }
+body[data-extension="tetris-versus"] .arcade-world { position:relative; aspect-ratio:1080/638; --tetris-scale:1; }
+body[data-extension="tetris-versus"] .arcade-world canvas { display:none; }
+.arcade-tetris-versus { box-sizing:border-box; position:absolute; top:0; left:0; width:1080px; display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; transform:scale(var(--tetris-scale)); transform-origin:top left; color:#fff; font:16px "Segoe UI",system-ui,-apple-system,sans-serif; --tetris-weave:linear-gradient(45deg,rgba(255,255,255,.03) 25%,transparent 25%) 0 0/12px 12px,linear-gradient(45deg,transparent 75%,rgba(255,255,255,.03) 75%) 0 0/12px 12px,linear-gradient(-45deg,rgba(255,255,255,.02) 25%,transparent 25%) 0 0/12px 12px,linear-gradient(-45deg,transparent 75%,rgba(255,255,255,.02) 75%) 0 0/12px 12px; }
+.arcade-tetris-versus * { box-sizing:border-box; }
+.arcade-tetris-versus:focus-visible { outline:2px solid #ffd84d; outline-offset:-2px; }
+.arcade-tetris-side { background:linear-gradient(rgba(255,255,255,.08),rgba(255,255,255,.02)),#15151a; border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:14px; box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 18px 40px rgba(0,0,0,.45); }
+.arcade-tetris-player { min-height:38px; display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; padding:7px 9px; border:1px solid rgba(255,255,255,.1); border-radius:8px; background:rgba(8,8,14,.72); font-size:16px; font-weight:800; letter-spacing:.2px; }
+.arcade-tetris-role { flex:0 0 auto; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.72); }
+.arcade-tetris-wrap { display:flex; gap:14px; align-items:flex-start; }
+.arcade-tetris-board { display:grid; flex:0 0 auto; grid-template:repeat(20,28px)/repeat(10,28px); border:1px solid rgba(255,255,255,.15); border-radius:10px; overflow:hidden; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06),0 18px 36px rgba(0,0,0,.35); }
+.arcade-tetris-board,.arcade-tetris-next { background:none; }
+.arcade-tetris-cell { width:28px; height:28px; position:relative; box-shadow:inset 0 0 0 1px rgba(255,255,255,.02); }
+.arcade-tetris-ghost { outline:2px dashed rgba(255,255,255,.25); outline-offset:-3px; }
+.arcade-tetris-tile { width:100%; height:100%; box-shadow:0 8px 14px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.12),inset 0 0 10px rgba(255,255,255,.18),inset 0 -10px 16px rgba(0,0,0,.35); }
+.arcade-tetris-tile[hidden],.arcade-tetris-notice[hidden] { display:none; }
+.arcade-tetris-I { background:color-mix(in srgb,#5ad0ff 78%,#fff 22%); }
+.arcade-tetris-J { background:color-mix(in srgb,#6da0ff 78%,#fff 22%); }
+.arcade-tetris-L { background:color-mix(in srgb,#ff9f50 78%,#fff 22%); }
+.arcade-tetris-O { background:color-mix(in srgb,#ffd84d 78%,#fff 22%); }
+.arcade-tetris-S { background:color-mix(in srgb,#6fe67f 78%,#fff 22%); }
+.arcade-tetris-T { background:color-mix(in srgb,#b97bff 78%,#fff 22%); }
+.arcade-tetris-Z { background:color-mix(in srgb,#ff6f7a 78%,#fff 22%); }
+.arcade-tetris-hud { display:flex; flex-direction:column; gap:10px; }
+.arcade-tetris-panel { min-width:160px; padding:10px 12px; background:color-mix(in srgb,#1a1a1f 85%,#000 15%); border:1px solid rgba(255,255,255,.15); border-radius:10px; box-shadow:inset 0 1px 0 rgba(255,255,255,.08); }
+.arcade-tetris-panel h4 { font-size:13px; opacity:.9; margin:1.33em 0 6px; }
+.arcade-tetris-next { width:140px; height:140px; display:grid; grid-template:repeat(4,28px)/repeat(4,28px); border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,.12); }
+.arcade-tetris-kv { font-size:14px; display:flex; justify-content:space-between; margin:2px 0; }
+.arcade-tetris-notice { color:#ffd84d; font-weight:800; text-align:center; }

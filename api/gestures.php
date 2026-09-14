@@ -64,7 +64,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 'sort' => $_GET['sort'] ?? null,
             ]);
             $result['owned_count'] = (int)$pdo->query('SELECT COUNT(*) FROM gestures WHERE owner_user_id = ' . $userId . ' AND deleted_at IS NULL')->fetchColumn();
-            $result['owned_limit'] = max(0, (int)app_setting($pdo, 'gesture_upload_limit', '50'));
+            $result['owned_limit'] = corechat_limit_value($pdo, 'gesture_upload_limit', 50);
+            $result['owned_limit_enforced'] = $result['owned_limit'] !== null;
             json_out($result);
         } catch (GestureCatalogException $error) {
             json_out(gesture_catalog_exception_payload($error), $error->httpStatus);
@@ -77,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $ownedStmt = $pdo->prepare('SELECT COUNT(*) FROM gestures WHERE owner_user_id = ? AND deleted_at IS NULL');
     $ownedStmt->execute([$userId]);
     $ownedCount = (int)$ownedStmt->fetchColumn();
-    $ownedLimit = max(0, (int)app_setting($pdo, 'gesture_upload_limit', '50'));
+    $ownedLimit = corechat_limit_value($pdo, 'gesture_upload_limit', 50);
     $capability = gesture_capability_policy($pdo);
     if (empty($capability['effective']['allow_gestures'])) {
         json_out(
@@ -135,6 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'total' => $total,
         'owned_count' => $ownedCount,
         'owned_limit' => $ownedLimit,
+        'owned_limit_enforced' => $ownedLimit !== null,
         'has_more' => ($offset + $perPage) < $total,
     ]);
 }

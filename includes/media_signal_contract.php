@@ -140,6 +140,7 @@ function media_signal_normalize_payload(string $signalType, mixed $data): array 
             'media_reason',
             'webcam_operation',
             'avatar_authorization',
+            'asset_kind',
         ] as $key) {
             if (isset($data[$key]) && is_scalar($data[$key])) {
                 $payload[$key] = (string)$data[$key];
@@ -190,7 +191,7 @@ function media_signal_normalize_payload(string $signalType, mixed $data): array 
             ],
         ];
 
-        foreach (['generation', 'peer_instance_id', 'target_peer_instance_id', 'avatar_authorization'] as $key) {
+        foreach (['generation', 'peer_instance_id', 'target_peer_instance_id', 'avatar_authorization', 'asset_kind'] as $key) {
             if (isset($data[$key]) && is_scalar($data[$key])) {
                 $payload[$key] = (string)$data[$key];
             }

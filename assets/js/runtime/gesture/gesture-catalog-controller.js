@@ -7,6 +7,13 @@ function element(tag, className = "", text = "") {
     return node;
 }
 
+function catalogCapabilitiesKey(capabilities = {}) {
+    return JSON.stringify([
+        "allowGestures", "allowServerGestures", "allowPersonalGestures",
+        "allowUserGestureMutation",
+    ].map(key => capabilities[key] !== false));
+}
+
 export class GestureCatalogController {
     #options;
     #states;
@@ -18,6 +25,7 @@ export class GestureCatalogController {
     #suppressClick;
     #managementPage;
     #managementPages;
+    #tileRenderKeys;
 
     constructor(options) {
         this.#options = options;
@@ -40,6 +48,7 @@ export class GestureCatalogController {
         this.#suppressClick = new WeakSet();
         this.#managementPage = 1;
         this.#managementPages = 1;
+        this.#tileRenderKeys = new WeakMap();
     }
 
     features() {
@@ -55,7 +64,10 @@ export class GestureCatalogController {
     }
 
     applyCapabilities(capabilities = {}) {
+        const previousKey = catalogCapabilitiesKey(this.capabilities());
         this.#options.capabilities = capabilities;
+        if (previousKey === catalogCapabilitiesKey(capabilities)) return;
+        this.closeActionMenu();
         this.#applyFeatureVisibility();
         for (const scope of ["server", "personal"]) {
             const state = this.#states.get(scope);
@@ -64,6 +76,12 @@ export class GestureCatalogController {
     }
 
     initialize() {
+        // Viewport-positioned menus must be outside the picker's filtered containing block.
+        const actionMenu = this.#options.actionMenu;
+        if (actionMenu && actionMenu.parentElement !== document.body) {
+            actionMenu.hidden = true;
+            document.body.appendChild(actionMenu);
+        }
         for (const scope of ["server", "personal"]) {
             const refs = this.#refs(scope);
             refs.search?.addEventListener("input", () => {
@@ -260,12 +278,15 @@ export class GestureCatalogController {
         const state = this.#states.get(scope);
         const refs = this.#refs(scope);
         if (!state || !refs?.grid) return;
+        const requestVersion = (state.requestVersion || 0) + 1;
+        state.requestVersion = requestVersion;
         const capabilities = this.capabilities();
         const allowed = capabilities.allowGestures !== false
             && (scope === "personal"
                 ? capabilities.allowPersonalGestures !== false
                 : capabilities.allowServerGestures !== false);
         if (!allowed) {
+            if (this.#menuGesture?.scope === scope) this.closeActionMenu();
             state.items = [];
             state.total = 0;
             state.loaded = true;
@@ -277,9 +298,12 @@ export class GestureCatalogController {
             this.#announce(scope, `${scope === "personal" ? "Personal" : "Server"} Gestures are disabled.`);
             return;
         }
-        refs.grid.replaceChildren(element("div", "gif-loading", "Loading gestures…"));
+        if (!state.loaded) {
+            refs.grid.replaceChildren(element("div", "gif-loading", "Loading gestures…"));
+        }
         try {
             const data = await this.#options.getJson(`/api/gestures.php?${this.#query(scope)}`, `load-${scope}-gestures`);
+            if (requestVersion !== state.requestVersion) return;
             state.page = Math.max(1, Number(data.page || 1));
             state.pages = Math.max(1, Number(data.pages || 1));
             state.total = Math.max(0, Number(data.total || 0));
@@ -289,13 +313,16 @@ export class GestureCatalogController {
             state.loaded = true;
             if (scope === "personal") {
                 state.ownedCount = Number(data.owned_count || 0);
-                state.ownedLimit = Number(data.owned_limit ?? 50);
+                state.ownedLimit = data.owned_limit_enforced === false ? null : Number(data.owned_limit ?? 50);
             }
             this.#options.onPreferences?.(data.preferences || {}, `catalog-${scope}-load`);
             this.#render(scope);
             if (scope === "server" && this.features().hide_unhide !== false) this.loadHidden();
         } catch (error) {
-            refs.grid.replaceChildren(element("div", "minor", error.message || "Gestures could not load."));
+            if (requestVersion !== state.requestVersion) return;
+            if (!state.loaded) {
+                refs.grid.replaceChildren(element("div", "minor", error.message || "Gestures could not load."));
+            }
             this.#announce(scope, error.message || "Gestures could not load.");
         }
     }
@@ -303,10 +330,59 @@ export class GestureCatalogController {
     #render(scope) {
         const state = this.#states.get(scope);
         const refs = this.#refs(scope);
-        refs.grid.textContent = "";
-        if (scope === "personal") refs.grid.appendChild(this.#createTile(state));
-        for (const gesture of state.items) refs.grid.appendChild(this.#gestureTile(scope, gesture));
-        if (!state.items.length) refs.grid.appendChild(element("div", "gesture-empty", "No gestures found."));
+        const grid = refs.grid;
+        const scrollTop = grid.scrollTop;
+        const scrollLeft = grid.scrollLeft;
+        const focused = document.activeElement;
+        const focusedTile = grid.contains(focused) ? focused?.closest?.(".gesture-tile") : null;
+        const focusedId = focusedTile?.dataset.gesturePublicId;
+        const focusedPart = ["gesture-play", "gesture-actions", "gesture-star", "gesture-global", "gesture-audio"]
+            .find(name => focused?.classList?.contains(name));
+        const capabilityKey = catalogCapabilitiesKey(this.capabilities());
+        const existing = new Map([...grid.children]
+            .filter(tile => tile.dataset.gesturePublicId)
+            .map(tile => [tile.dataset.gesturePublicId, tile]));
+        const desired = [];
+        if (scope === "personal") {
+            const key = JSON.stringify([capabilityKey, state.ownedCount, state.ownedLimit]);
+            let tile = grid.querySelector(".gesture-upload-tile");
+            if (!tile || this.#tileRenderKeys.get(tile) !== key) {
+                tile = this.#createTile(state);
+                this.#tileRenderKeys.set(tile, key);
+            }
+            desired.push(tile);
+        }
+        for (const gesture of state.items) {
+            const key = JSON.stringify([capabilityKey, gesture]);
+            let tile = existing.get(String(gesture.public_id));
+            if (!tile || this.#tileRenderKeys.get(tile) !== key) {
+                tile = this.#gestureTile(scope, gesture);
+                this.#tileRenderKeys.set(tile, key);
+            }
+            desired.push(tile);
+        }
+        if (!state.items.length) {
+            desired.push(grid.querySelector(".gesture-empty") || element("div", "gesture-empty", "No gestures found."));
+        }
+        if (this.#menuGesture?.scope === scope) {
+            const current = state.items.find(item => item.public_id === this.#menuGesture.gesture.public_id);
+            if (!current || JSON.stringify(current) !== JSON.stringify(this.#menuGesture.gesture)) {
+                this.closeActionMenu();
+            }
+        }
+        const retained = new Set(desired);
+        for (const child of [...grid.children]) if (!retained.has(child)) child.remove();
+        let cursor = grid.firstChild;
+        for (const tile of desired) {
+            if (tile === cursor) cursor = cursor.nextSibling;
+            else grid.insertBefore(tile, cursor);
+        }
+        if (focusedId && focusedPart && !focused.isConnected) {
+            const replacement = desired.find(tile => tile.dataset.gesturePublicId === focusedId);
+            replacement?.querySelector(`.${focusedPart}`)?.focus({ preventScroll: true });
+        }
+        grid.scrollTop = scrollTop;
+        grid.scrollLeft = scrollLeft;
         if (refs.sort) refs.sort.value = state.sort;
         this.#renderPager(scope);
         this.#renderGuidance(scope);
@@ -316,7 +392,7 @@ export class GestureCatalogController {
     #createTile(state) {
         const button = element("button", "gesture-upload-tile");
         button.type = "button";
-        const limitReached = Number(state.ownedCount || 0) >= Number(state.ownedLimit ?? 50);
+        const limitReached = state.ownedLimit !== null && Number(state.ownedCount || 0) >= Number(state.ownedLimit);
         const editorDisabled = this.part4Features().editor === false;
         const mutationDisabled = this.capabilities().allowUserGestureMutation === false;
         button.disabled = limitReached || editorDisabled || mutationDisabled;
@@ -328,7 +404,7 @@ export class GestureCatalogController {
         button.append(
             element("span", "", "+"),
             element("small", "", "Create Gesture"),
-            element("em", "", `${Number(state.ownedCount || 0)}/${Number(state.ownedLimit ?? 50)}`),
+            element("em", "", state.ownedLimit === null ? `${Number(state.ownedCount || 0)} / no limit` : `${Number(state.ownedCount || 0)}/${Number(state.ownedLimit)}`),
             progress
         );
         button.addEventListener("click", () => this.#options.onCreate?.(button));

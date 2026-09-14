@@ -138,7 +138,13 @@ export class AvatarDragController {
     /**
      * Initializes the controller.
      */
+    #lifecycleBindings = null;
+
     initialize() {
+        this.#lifecycleBindings = new AbortController();
+        globalThis.addEventListener?.("blur", () => {
+            this.#attachedElements.forEach(element => this.#cancelPointerDrag(element, this.#dragStates.get(element)));
+        }, { signal: this.#lifecycleBindings.signal });
 
     }
 
@@ -146,6 +152,7 @@ export class AvatarDragController {
      * Releases controller-owned drag state.
      */
     destroy() {
+        this.#lifecycleBindings?.abort();
 
         this.#attachedElements.forEach(element => {
 
@@ -165,10 +172,10 @@ export class AvatarDragController {
                 state.handlers.pointermove
             );
 
-            element.removeEventListener(
-                "pointerup",
-                state.handlers.pointerup
-            );
+            element.removeEventListener("pointerup", state.handlers.pointerup);
+            element.removeEventListener("pointercancel", state.handlers.cancel);
+            element.removeEventListener("lostpointercapture", state.handlers.cancel);
+            this.#cancelPointerDrag(element, state, false);
 
         });
 
@@ -228,6 +235,7 @@ export class AvatarDragController {
         }
 
         const state = {
+            generation: 0,
 
             dragging:
                 false,
@@ -264,7 +272,8 @@ export class AvatarDragController {
                 event => this.#handlePointerMove(element, state, event),
 
             pointerup:
-                event => this.#handlePointerUp(element, state, event)
+                event => this.#handlePointerUp(element, state, event),
+            cancel: () => this.#cancelPointerDrag(element, state)
 
         };
 
@@ -283,10 +292,9 @@ export class AvatarDragController {
             state.handlers.pointermove
         );
 
-        element.addEventListener(
-            "pointerup",
-            state.handlers.pointerup
-        );
+        element.addEventListener("pointerup", state.handlers.pointerup);
+        element.addEventListener("pointercancel", state.handlers.cancel);
+        element.addEventListener("lostpointercapture", state.handlers.cancel);
 
         this.#attachedElements.add(element);
 
@@ -362,44 +370,48 @@ export class AvatarDragController {
      * @param {PointerEvent} event
      */
     async #handlePointerDown(element, state, event) {
-
-        if (event.button !== 0 || state.preparing || state.dragging) {
-            return;
-        }
-
+        if (event.button !== 0) return;
+        // A fresh press must be recoverable even if the previous release was lost.
+        if (state.preparing || state.dragging) this.#cancelPointerDrag(element, state);
         event.preventDefault();
         state.preparing = true;
         state.pointerId = event.pointerId;
-        element.setPointerCapture?.(event.pointerId);
-
-        const participant =
-            this.#currentParticipant();
-
-        const operation = await this.#coordinator?.beginDragOperation(participant);
-        if (!state.preparing || state.pointerId !== event.pointerId || !element.isConnected) {
-            element.releasePointerCapture?.(event.pointerId);
-            return;
-        }
-        if (!operation?.allowed) {
+        const generation = ++state.generation;
+        try {
+            element.setPointerCapture?.(event.pointerId);
+            const operation = await this.#coordinator?.beginDragOperation(this.#currentParticipant());
+            if (generation !== state.generation) return;
+            if (!state.preparing || !element.isConnected || !operation?.allowed) {
+                this.#cancelPointerDrag(element, state, false);
+                return;
+            }
             state.preparing = false;
-            state.pointerId = null;
-            element.releasePointerCapture?.(event.pointerId);
-            return;
+            state.dragging = true;
+            state.operation = operation;
+            state.relationshipBoundAtStart = Boolean(operation.relationshipId);
+            const rect = element.getBoundingClientRect();
+            state.offsetX = event.clientX - rect.left;
+            state.offsetY = event.clientY - rect.top;
+            element.style.cursor = "grabbing";
+        } catch (error) {
+            if (generation === state.generation) this.#cancelPointerDrag(element, state, false);
+            this.#context?.showWarning?.(error?.message || "Avatar movement could not start. Please try again.");
         }
+    }
 
-        state.preparing = false;
-        state.dragging = true;
-        state.operation = operation;
-        state.relationshipBoundAtStart = Boolean(
-            operation.relationshipId
-        );
-        state.offsetX =
-            event.clientX - element.getBoundingClientRect().left;
-        state.offsetY =
-            event.clientY - element.getBoundingClientRect().top;
-
-        element.style.cursor = "grabbing";
-
+    #cancelPointerDrag(element, state, persist = true) {
+        if (!state || (!state.preparing && !state.dragging)) return;
+        const operation = state.dragging ? state.operation : null;
+        const pointerId = state.pointerId;
+        this.#resetDragState(state);
+        element.style.cursor = "grab";
+        if (pointerId !== null && element.hasPointerCapture?.(pointerId)) {
+            element.releasePointerCapture?.(pointerId);
+        }
+        if (persist && operation) {
+            Promise.resolve(this.#coordinator?.persistDragEnd(this.#currentParticipant(), operation))
+                .catch(error => this.#context?.showWarning?.(error?.message || "Avatar movement could not be saved."));
+        }
     }
 
     /**
@@ -411,7 +423,9 @@ export class AvatarDragController {
      */
     #handlePointerMove(element, state, event) {
 
-        if (!state.dragging || !state.operation) {
+        if (!state.dragging || !state.operation || state.pointerId !== event.pointerId) return;
+        if (event.buttons === 0) {
+            this.#handlePointerUp(element, state, event);
             return;
         }
 
@@ -432,6 +446,7 @@ export class AvatarDragController {
      * @param {PointerEvent} event
      */
     #handlePointerUp(element, state, event) {
+        if (state.pointerId !== event.pointerId) return;
 
         if (state.preparing && state.pointerId === event.pointerId) {
             state.preparing = false;
@@ -728,6 +743,7 @@ export class AvatarDragController {
      * @param {Object} state
      */
     #resetDragState(state) {
+        state.generation += 1;
 
         state.preparing = false;
         state.dragging = false;

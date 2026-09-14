@@ -1527,6 +1527,26 @@ export class VoiceMediaService {
                 error
             );
 
+            const missingSession =
+                error?.code === "HTTP_ERROR" &&
+                Number(error?.details?.status) === 404 &&
+                String(
+                    error?.responsePayload?.error ||
+                    error?.responsePayload?.message ||
+                    error?.message ||
+                    ""
+                ).trim().toLowerCase() === "session not found";
+
+            if (missingSession) {
+
+                this.destroy();
+                return Object.freeze({
+                    status: "destroyed",
+                    reason: "session-not-found"
+                });
+
+            }
+
         } finally {
 
             this.#pollInProgress =
@@ -1536,8 +1556,9 @@ export class VoiceMediaService {
 
         if (!this.#lifecycle.isDestroyed()) {
 
+            const loopback = /^(localhost|127(?:\.\d+){3})$/i.test(globalThis.location?.hostname || "");
             this.startPolling(
-                this.shouldPollFast() ? 800 : 2000
+                loopback ? (this.shouldPollFast() ? 2000 : 5000) : (this.shouldPollFast() ? 800 : 2000)
             );
 
         }
@@ -1639,6 +1660,30 @@ export class VoiceMediaService {
      * Host-owned webcam capture and AvatarRenderer presentation are reported
      * separately and are not counted as voice-owned resources.
      */
+    getCanonicalWebcamPresentation(participantId) {
+
+        const normalizedParticipantId = Number(participantId);
+        const ownParticipantId = Number(this.#context?.getConfig?.()?.myParticipantId || 0);
+        const own = normalizedParticipantId > 0 && normalizedParticipantId === ownParticipantId;
+        const presentation = own
+            ? { stream: this.#webcamStream(), receiverIdentity: null, streamIdentity: "local-capture" }
+            : this.#remoteVideoPresentations.get(normalizedParticipantId);
+        const stream = presentation?.stream || null;
+        const track = stream?.getVideoTracks?.().find(candidate => candidate.readyState === "live") || null;
+        if (!stream || !track) return null;
+        if (!own && this.#context?.shouldReceiveRemoteWebcam?.(normalizedParticipantId) === false) return null;
+        return Object.freeze({
+            stream,
+            track,
+            trackId: track.id || null,
+            streamIdentity: presentation?.streamIdentity || stream.id || null,
+            receiverIdentity: presentation?.receiverIdentity || null,
+            own,
+            canonical: true,
+        });
+
+    }
+
     getResourceSnapshot() {
 
         const peers =
@@ -1868,7 +1913,7 @@ export class VoiceMediaService {
                     token.generation,
 
                 selectedInputDeviceId:
-                    this.#context?.getInputDeviceId?.() || null,
+                    this.#devices.getSnapshot()?.selectedInputId || null,
 
                 selectedOutputDeviceId:
                     this.#devices.selectedOutputDeviceId || null
@@ -1923,7 +1968,7 @@ export class VoiceMediaService {
                     this.#trackSnapshot(audioTrack),
 
                 selectedInputDeviceId:
-                    this.#context?.getInputDeviceId?.() || null
+                    this.#devices.getSnapshot()?.selectedInputId || null
 
             });
 
@@ -2234,6 +2279,57 @@ export class VoiceMediaService {
 
     }
 
+    #failedPeerRecoveryPlan(participantId) {
+
+        const id =
+            Number(participantId);
+
+        const participant =
+            this.#participants().get(id) || null;
+
+        const remoteWebcamActive =
+            Boolean(
+                participant?.webcam_enabled ||
+                participant?.webcam_path
+            ) && this.#shouldReceiveRemoteWebcam(id);
+
+        const localMediaActive =
+            this.mediaActive();
+
+        return Object.freeze({
+
+            required:
+                Boolean(localMediaActive || remoteWebcamActive),
+
+            receiveOnly:
+                Boolean(remoteWebcamActive && !localMediaActive),
+
+            remoteWebcamActive,
+
+            connectOptions:
+                Object.freeze({
+
+                    allowReceiveOnly:
+                        remoteWebcamActive,
+
+                    reason:
+                        "failed-peer-recovery",
+
+                    mediaReason:
+                        remoteWebcamActive ? "webcam" : "voice",
+
+                    webcamOperation:
+                        remoteWebcamActive ? "rebuild" : null,
+
+                    lateJoinReady:
+                        remoteWebcamActive
+
+                })
+
+        });
+
+    }
+
     #renderVoiceList(list) {
 
         this.#voiceParticipants =
@@ -2376,7 +2472,15 @@ export class VoiceMediaService {
 
         if (options.detachVideo) {
 
-            this.#context?.detachParticipantVideo?.(participantId);
+            this.#context?.detachParticipantVideo?.(
+                participantId,
+                true,
+                reason,
+                {
+                    preserveAvailability:
+                        Boolean(options.preserveRemoteWebcamAvailability)
+                }
+            );
 
         }
 
@@ -2485,17 +2589,48 @@ export class VoiceMediaService {
 
             this.#recoveryTimers.delete(participantId);
 
+            const recoveryPlan =
+                this.#failedPeerRecoveryPlan(participantId);
+
             if (
                 this.#lifecycle.isDestroyed() ||
                 this.#peers.has(participantId) ||
-                !this.mediaActive()
+                !recoveryPlan.required
             ) {
 
                 return;
 
             }
 
-            this.connectMediaPeer(participantId).catch(error =>
+            this.#recordNegotiationDiagnostic({
+
+                event:
+                    "peer-recovery-dispatched",
+
+                remoteParticipantId:
+                    participantId,
+
+                receiveOnly:
+                    recoveryPlan.receiveOnly,
+
+                remoteWebcamActive:
+                    recoveryPlan.remoteWebcamActive,
+
+                clientEpoch:
+                    this.#clientEpoch,
+
+                authoritativeOffererParticipantId:
+                    Math.min(this.#localParticipantId(), participantId),
+
+                role:
+                    this.#ownsOffer(participantId) ? "offerer" : "answerer"
+
+            });
+
+            this.connectMediaPeer(
+                participantId,
+                recoveryPlan.connectOptions
+            ).catch(error =>
                 this.#recordCriticalFailure(null, error, {
 
                     operation:
@@ -2614,6 +2749,9 @@ export class VoiceMediaService {
         const participantId =
             Number(pc.__voiceRemoteParticipantId);
 
+        const recoveryPlan =
+            this.#failedPeerRecoveryPlan(participantId);
+
         if (this.#isActivePeer(pc)) {
 
             pc.__voiceLifecycleState =
@@ -2621,10 +2759,12 @@ export class VoiceMediaService {
 
             this.#releasePeer(pc, "peer-replacement", {
                 replacing: true,
-                detachVideo: true
+                detachVideo: true,
+                preserveRemoteWebcamAvailability:
+                    recoveryPlan.remoteWebcamActive
             });
 
-            if (this.mediaActive() && this.#ownsOffer(participantId)) {
+            if (recoveryPlan.required) {
 
                 this.#schedulePeerRecovery(participantId, pc);
 
@@ -4087,6 +4227,18 @@ export class VoiceMediaService {
                     pc,
                     "connectionstatechange"
                 );
+
+                if (pc.connectionState === "failed") {
+
+                    this.#recoverFailedPeer(
+                        pc,
+                        "connection-state-failed",
+                        new Error("The media peer connection failed and will be rebuilt.")
+                    );
+
+                    return;
+
+                }
 
                 this.#scheduleTransportRtpProbe(
                     pc,

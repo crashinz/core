@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/api_exception_handler.php';
 api_install_exception_handler('media-signal', 'MEDIA_SIGNAL_FAILED', 'Media signaling is temporarily unavailable.');
+define('CHATSPACE_SQLITE_POLL_REQUEST', ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET');
 require_once __DIR__ . '/../includes/base.php';
 require_once __DIR__ . '/../includes/media_signal_contract.php';
 
 $pdo = db();
+if ($_SERVER['REQUEST_METHOD'] === 'GET') session_write_close();
 
 function media_auth(PDO $pdo, int $sessionId, int $participantId, ?string $token): array {
     $participant = auth_participant($pdo, $sessionId, $token ?: '');
@@ -220,7 +222,7 @@ function media_signal_poll_payload(PDO $pdo, array $query): array {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $payload = db_with_sqlite_lock_retry(
+    $payload = db_with_sqlite_poll_retry(
         $pdo,
         static fn(): array => media_signal_poll_payload($pdo, $_GET),
         'media-signal-poll'

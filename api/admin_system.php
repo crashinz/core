@@ -201,6 +201,7 @@ if ($action === 'update_settings_registry') {
             'expected_database_compatibility_revision' => $body['expected_database_compatibility_revision'] ?? null,
             'moderation_trust_impact_confirmed' => !empty($body['moderation_trust_impact_confirmed']),
             'network_manual_bans_disable_confirmed' => !empty($body['network_manual_bans_disable_confirmed']),
+            'authentication_protection_disable_confirmed' => !empty($body['authentication_protection_disable_confirmed']),
             'expected_moderation_trust_revision' => $body['expected_moderation_trust_revision'] ?? null,
             'expected_operational_capacity_revision' => $body['expected_operational_capacity_revision'] ?? null,
             'expected_runtime_diagnostic_revision' => $body['expected_runtime_diagnostic_revision'] ?? null,

@@ -9,7 +9,7 @@ declare(strict_types=1);
 const MESSAGE_PROTECTION_PROTOCOL = 'corechat-message-protection-v1';
 const MESSAGE_PROTECTION_VERSION = 1;
 const MESSAGE_PROTECTION_MODES = ['standard', 'server-encrypted', 'e2ee-private'];
-const MESSAGE_PROTECTION_PRIVATE_CHANNELS = ['dm', 'link'];
+const MESSAGE_PROTECTION_PRIVATE_CHANNELS = ['dm', 'link', 'game'];
 const MESSAGE_PROTECTION_E2EE_TYPES = ['text'];
 const MESSAGE_PROTECTION_RECOVERY_ITERATIONS = 600000;
 
@@ -979,6 +979,15 @@ function message_protection_conversation_devices(
         );
         $statement->execute([$key]);
         $participantUserIds = array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
+    } elseif ($kind === 'game') {
+        $statement = $pdo->prepare(
+            "SELECT DISTINCT m.user_id
+               FROM multiplayer_game_sessions s
+               JOIN multiplayer_game_members m ON m.game_session_id=s.id
+              WHERE s.public_id=? AND m.membership_status='active'"
+        );
+        $statement->execute([$key]);
+        $participantUserIds = array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
     }
     $participantUserIds = array_values(array_filter(
         array_unique($participantUserIds),
@@ -1019,7 +1028,17 @@ function message_protection_authorize_conversation(PDO $pdo, int $userId, string
         $statement->execute([$key, $userId]);
         if ($statement->fetchColumn()) return;
     }
-    if (in_array($kind, ['room', 'community', 'game'], true) && moderation_identity_is_owner($pdo, $userId)) return;
+    if ($kind === 'game') {
+        $statement = $pdo->prepare(
+            "SELECT 1 FROM multiplayer_game_sessions s
+             JOIN multiplayer_game_members m ON m.game_session_id=s.id
+             WHERE s.public_id=? AND m.user_id=? AND m.membership_status='active'
+               AND s.status IN ('lobby','active','paused','completed','forfeited') LIMIT 1"
+        );
+        $statement->execute([$key, $userId]);
+        if ($statement->fetchColumn()) return;
+    }
+    if (in_array($kind, ['room', 'community'], true) && moderation_identity_is_owner($pdo, $userId)) return;
     throw new MessageProtectionException('Conversation protection access is denied.', 'MESSAGE_PROTECTION_CONVERSATION_DENIED', 403);
 }
 
@@ -1051,11 +1070,9 @@ function message_protection_request_transition(PDO $pdo, int $userId, array $inp
     if ((int)($input['expectedRevision'] ?? 0) !== $policy['revision']) {
         throw new MessageProtectionException('The message-protection policy changed elsewhere.', 'MESSAGE_PROTECTION_POLICY_STALE', 409);
     }
-    $table = $kind === 'room' ? 'messages' : 'community_messages';
-    $where = $kind === 'room' ? 'session_id=?' : ($kind === 'community' ? "scope='community'" : 'scope=? AND link_key=?');
-    $params = $kind === 'room' ? [(int)$key] : ($kind === 'community' ? [] : [$kind, $key]);
-    $count = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE {$where}");
-    $count->execute($params);
+    $route = message_protection_transition_route(['conversation_kind' => $kind, 'conversation_key' => $key]);
+    $count = $pdo->prepare("SELECT COUNT(*) FROM {$route['table']} WHERE {$route['where']}");
+    $count->execute($route['params']);
     $oldTotal = (int)$count->fetchColumn();
     $status = $toMode === 'e2ee-private' || $toMode === $policy['mode'] ? 'complete' : 'preparing';
     $remaining = $status === 'complete' ? 0 : $oldTotal;
@@ -1157,6 +1174,13 @@ function message_protection_emit_change_notice(
         if ($sessionId > 0) {
             emit_community_event($pdo, 'link', $sessionId, $key, 'message_protection_change', $payload);
         }
+        return;
+    }
+    if ($kind === 'game') {
+        $statement = $pdo->prepare('SELECT source_room_session_id FROM multiplayer_game_sessions WHERE public_id=? LIMIT 1');
+        $statement->execute([$key]);
+        $roomSessionId = (int)($statement->fetchColumn() ?: 0);
+        if ($roomSessionId > 0) emit_community_event($pdo, 'game', $roomSessionId, $key, 'message_protection_change', $payload);
     }
 }
 
@@ -1169,6 +1193,9 @@ function message_protection_transition_route(array $transition): array
     }
     if ($kind === 'community') {
         return ['table' => 'community_messages', 'where' => "scope='community'", 'params' => []];
+    }
+    if ($kind === 'game') {
+        return ['table' => 'game_chat_messages', 'where' => 'lobby_code=?', 'params' => [$key]];
     }
     if (in_array($kind, MESSAGE_PROTECTION_PRIVATE_CHANNELS, true)) {
         return [

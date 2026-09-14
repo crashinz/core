@@ -69,6 +69,20 @@ if ($expectedVersion <= 0) {
     ));
 }
 
+if (in_array($action, ['request_join', 'invite'], true)) {
+    try {
+        flood_protection_consume($pdo, 'relationship-request', (int)$participant['user_id']);
+    } catch (FloodProtectionException $error) {
+        auth_rate_retry_after_header($error->retryAfter);
+        json_out([
+            'error' => $error->getMessage(),
+            'code' => $error->errorCode,
+            'retry_after' => $error->retryAfter,
+            'control' => $error->control,
+        ], $error->httpStatus);
+    }
+}
+
 if ($action === 'request_join') {
     avatar_relationship_api_out(avatar_relationship_create_request(
         $pdo,

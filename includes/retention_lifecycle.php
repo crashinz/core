@@ -697,11 +697,22 @@ function retention_lifecycle_set_hold(
 
 function retention_lifecycle_ensure_user(PDO $pdo, int $userId): array
 {
+    $statement = $pdo->prepare('SELECT * FROM account_lifecycle_foundations WHERE user_id=?');
+    $statement->execute([$userId]);
+    $existing = $statement->fetch();
+    $statement->closeCursor();
+    if (is_array($existing)) return $existing;
+
     $insert = db_uses_mysql_syntax($pdo)
         ? 'INSERT IGNORE INTO account_lifecycle_foundations (user_id,opaque_identity) VALUES (?,?)'
         : 'INSERT OR IGNORE INTO account_lifecycle_foundations (user_id,opaque_identity) VALUES (?,?)';
-    $pdo->prepare($insert)->execute([$userId, retention_lifecycle_opaque_identity($userId)]);
-    $statement = $pdo->prepare('SELECT * FROM account_lifecycle_foundations WHERE user_id=?');
+    db_with_sqlite_lock_retry(
+        $pdo,
+        static function () use ($pdo, $insert, $userId): void {
+            $pdo->prepare($insert)->execute([$userId, retention_lifecycle_opaque_identity($userId)]);
+        },
+        'account lifecycle foundation initialization'
+    );
     $statement->execute([$userId]);
     return $statement->fetch() ?: [];
 }
@@ -741,6 +752,9 @@ function retention_lifecycle_revoke_sessions(
     )->execute([$targetUserId]);
     if (function_exists('p2p_transfer_terminate_user')) {
         p2p_transfer_terminate_user($pdo, $targetUserId, 'Account sessions revoked');
+    }
+    if (function_exists('multiplayer_game_terminate_user')) {
+        multiplayer_game_terminate_user($pdo, $targetUserId);
     }
     $row = retention_lifecycle_ensure_user($pdo, $targetUserId);
     $result = [

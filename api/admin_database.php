@@ -1,10 +1,22 @@
 <?php
 require_once __DIR__ . '/../includes/database_backups.php';
-$adminRestoreActivation = backup_sqlite_prebootstrap_activate(
-    isset($_COOKIE['corechat_restore_activation'])
-        ? (string)$_COOKIE['corechat_restore_activation']
-        : null
-);
+try {
+    $adminRestoreActivation = backup_sqlite_prebootstrap_activate(
+        isset($_COOKIE['corechat_restore_activation'])
+            ? (string)$_COOKIE['corechat_restore_activation']
+            : null
+    );
+} catch (Throwable) {
+    http_response_code(400);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: private, no-store, max-age=0');
+    header('Pragma: no-cache');
+    header('X-Content-Type-Options: nosniff');
+    header('X-Robots-Tag: noindex, nofollow, noarchive');
+    @error_log('CoreChat DATABASE_RESTORE_ACTIVATION_FAILED');
+    echo json_encode(['error' => 'Database restore activation failed.', 'code' => 'DATABASE_RESTORE_ACTIVATION_FAILED']);
+    exit;
+}
 if (is_array($adminRestoreActivation) && ($_GET['action'] ?? '') === 'complete_restore') {
     setcookie('corechat_restore_activation', '', [
         'expires' => time() - 3600,
@@ -198,12 +210,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'downloa
     if (db_driver() !== 'sqlite') json_out(['error' => 'Database download is available for SQLite installs. Use your MySQL/MariaDB backup tool for server databases.'], 400);
     $dbPath = sqlite_path();
     if (!is_file($dbPath)) json_out(['error' => 'Database not found'], 404);
-    log_tool(db(), (int)$me['id'], 'admin_database_download', null, null, 'Downloaded database backup');
-    security_protect_private_response();
-    header('Content-Type: application/vnd.sqlite3');
-    header('Content-Disposition: attachment; filename="chatspace-' . gmdate('Ymd-His') . '.sqlite"');
-    header('Content-Length: ' . filesize($dbPath));
-    readfile($dbPath);
+    $snapshotDirectory = null;
+    $snapshotPath = null;
+    $snapshotCheck = null;
+    $snapshotStream = null;
+    $backupFailed = false;
+    $responseStarted = false;
+    $cleanupSnapshot = static function () use (&$snapshotDirectory, &$snapshotPath, &$snapshotCheck, &$snapshotStream): void {
+        $snapshotCheck = null;
+        if (is_resource($snapshotStream)) @fclose($snapshotStream);
+        $snapshotStream = null;
+        if (is_string($snapshotPath) && (@file_exists($snapshotPath) || @is_link($snapshotPath)) && !@unlink($snapshotPath)) {
+            @error_log('CoreChat DATABASE_BACKUP_CLEANUP_FAILED');
+        }
+        if (is_string($snapshotDirectory) && @is_dir($snapshotDirectory) && !@rmdir($snapshotDirectory)) {
+            @error_log('CoreChat DATABASE_BACKUP_CLEANUP_FAILED');
+        }
+    };
+    register_shutdown_function($cleanupSnapshot);
+    $previousIgnoreAbort = ignore_user_abort(true);
+    set_error_handler(static function (int $severity): bool {
+        if (!(error_reporting() & $severity)) return false;
+        throw new ErrorException('Database backup operation failed.', 0, $severity);
+    });
+    try {
+        $directory = realpath(security_private_storage_directory('database-downloads'));
+        $publicRoot = realpath(dirname(__DIR__));
+        if ($directory === false || $publicRoot === false) throw new RuntimeException('Private backup storage unavailable.');
+        $directoryCompare = strtolower(str_replace('\\', '/', $directory));
+        $publicCompare = strtolower(str_replace('\\', '/', $publicRoot));
+        if ($directoryCompare === $publicCompare || str_starts_with($directoryCompare . '/', $publicCompare . '/')) {
+            throw new RuntimeException('Private backup storage unavailable.');
+        }
+        $ownedDirectory = $directory . DIRECTORY_SEPARATOR . 'download-' . bin2hex(random_bytes(16));
+        if (!mkdir($ownedDirectory, 0700)) throw new RuntimeException('Private backup storage unavailable.');
+        $snapshotDirectory = $ownedDirectory;
+        $snapshotPath = $snapshotDirectory . DIRECTORY_SEPARATOR . 'database.sqlite';
+        $pdo = db();
+        $pdo->exec('VACUUM INTO ' . $pdo->quote($snapshotPath));
+        clearstatcache(true, $snapshotPath);
+        $snapshotSize = is_file($snapshotPath) && !is_link($snapshotPath) ? filesize($snapshotPath) : false;
+        if ($snapshotSize === false || $snapshotSize < 1) throw new RuntimeException('Database snapshot unavailable.');
+        @chmod($snapshotPath, 0600);
+        $snapshotCheck = new PDO('sqlite:' . $snapshotPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $snapshotCheck->exec('PRAGMA query_only = ON');
+        if ($snapshotCheck->query('PRAGMA integrity_check')->fetchColumn() !== 'ok') throw new RuntimeException('Database snapshot failed verification.');
+        $snapshotCheck = null;
+        $snapshotStream = fopen($snapshotPath, 'rb');
+        if ($snapshotStream === false) throw new RuntimeException('Database snapshot unavailable.');
+        log_tool($pdo, (int)$me['id'], 'admin_database_download', null, null, 'Downloaded database backup');
+        security_protect_private_response();
+        header('Content-Type: application/vnd.sqlite3');
+        header('Content-Disposition: attachment; filename="chatspace-' . gmdate('Ymd-His') . '.sqlite"');
+        header('Content-Length: ' . $snapshotSize);
+        $responseStarted = true;
+        if (fpassthru($snapshotStream) === false) throw new RuntimeException('Database backup transfer failed.');
+    } catch (Throwable) {
+        $backupFailed = true;
+        @error_log($responseStarted ? 'CoreChat DATABASE_BACKUP_TRANSFER_FAILED' : 'CoreChat DATABASE_BACKUP_FAILED');
+    } finally {
+        $cleanupSnapshot();
+        restore_error_handler();
+        ignore_user_abort((bool)$previousIgnoreAbort);
+    }
+    if ($backupFailed && !$responseStarted) {
+        header_remove('Content-Disposition');
+        header_remove('Content-Length');
+        security_protect_private_response();
+        json_out(['error' => 'Database backup could not be created.', 'code' => 'DATABASE_BACKUP_FAILED'], 500);
+    }
     exit;
 }
 
@@ -233,6 +308,16 @@ if (is_array($decoded) && ($decoded['format'] ?? '') === 'chatspace-ce-portable-
     try {
         json_out(backup_import_core_bundle(db(), $decoded, (int)$me['id']));
     } catch (Throwable $e) {
+        // Portable import wraps validation failures; preserve the typed cause.
+        $profileError = $e;
+        while ($profileError !== null) {
+            if ($profileError instanceof MemberProfileException
+                && $profileError->errorCode === 'MEMBER_PROFILE_FIELD_TOO_LONG'
+                && $profileError->httpStatus === 400) {
+                json_out(['error' => $e->getMessage(), 'code' => $profileError->errorCode], 400);
+            }
+            $profileError = $profileError->getPrevious();
+        }
         json_out(['error' => $e->getMessage()], 500);
     }
 }
@@ -254,3 +339,5 @@ try {
 } catch (Throwable $e) {
     json_out(['error' => $e->getMessage()], 400);
 }
+
+

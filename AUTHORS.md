@@ -20,6 +20,14 @@ Catie Clark is an AI workforce transformation specialist and author of *DYAD: Th
 
 Their collaboration shapes the product language, community management approach, moderation flow, room behavior, interface details, and the human-AI design philosophy behind ChatSpace Community Edition.
 
+## Preserved Original-Author Game Implementations
+
+The current Tetris Versus and Space Invasion implementations are preserved
+unchanged under the project's original-author compatibility direction. The
+files do not contain a narrower file-level author or license notice, so this
+record does not invent or reassign one. The project credits above and the
+licensors named in `LICENSE.md` remain the public authority for this release.
+
 ## Open Standards Attribution
 
 AstroPlaces Chat proposed the `.agst` Gesture format adopted by ChatSpace Community Edition as an open standard for portable animated gestures with text and optional audio, following the Astro Places Package Format with `toc.json` manifests.

@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 const CHATSPACE_MEDIA_CLIENT_LEASE_SECONDS = 30;
 const CHATSPACE_MEDIA_CLIENT_REFRESH_SECONDS = 20;
+const CHATSPACE_MEDIA_SIGNAL_WRITE_RETRY_BUDGET_MS = 10000;
+const CHATSPACE_MEDIA_SIGNAL_WRITE_BUSY_TIMEOUT_MS = 1000;
 
 function media_client_epoch(mixed $value): string
 {
@@ -34,6 +36,7 @@ function media_signal_register_client(PDO $pdo, int $sessionId, int $participant
     );
     $select->execute([$participantId, $sessionId]);
     $current = $select->fetch() ?: null;
+    $select->closeCursor();
     if ($current
         && hash_equals((string)$current['client_epoch'], $clientEpoch)
         && (string)$current['updated_at'] > $refreshBefore) {
@@ -76,6 +79,7 @@ function media_signal_register_client(PDO $pdo, int $sessionId, int $participant
 
             $select->execute([$participantId, $sessionId]);
             $resolved = $select->fetch() ?: null;
+            $select->closeCursor();
             if (!$resolved) throw new RuntimeException('Media client lease could not be established.');
             return [
                 'epoch' => (string)$resolved['client_epoch'],
@@ -85,17 +89,16 @@ function media_signal_register_client(PDO $pdo, int $sessionId, int $participant
         }, 'media-client-lease');
     } catch (Throwable $error) {
         $leaseCutoff = gmdate('Y-m-d H:i:s', time() - CHATSPACE_MEDIA_CLIENT_LEASE_SECONDS);
-        if (!db_is_transient_lock_error($error)
-            || !$current
-            || !hash_equals((string)$current['client_epoch'], $clientEpoch)
-            || (string)$current['updated_at'] < $leaseCutoff) {
+        $sameEpoch = $current && hash_equals((string)$current['client_epoch'], $clientEpoch);
+        if (!db_is_transient_lock_error($error) || ($current && !$sameEpoch)) {
             throw $error;
         }
         return [
             'epoch' => $clientEpoch,
-            'started_at' => (string)$current['started_at'],
+            'started_at' => $sameEpoch ? (string)$current['started_at'] : $now,
             'refreshed' => false,
             'refresh_deferred' => true,
+            'lease_was_current' => $sameEpoch && (string)$current['updated_at'] >= $leaseCutoff,
         ];
     }
 }
@@ -125,18 +128,37 @@ function media_signal_insert(
     ?string $contextPublicId = null
 ): array
 {
-    $recipientEpoch = media_signal_recipient_epoch($pdo, $sessionId, $to);
-    $pdo->prepare(
-        'INSERT INTO media_signals
-            (session_id, media, from_participant_id, to_participant_id, sender_epoch, recipient_epoch,
-             context_type, context_public_id, type, data, expires_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)'
-    )->execute([
-        $sessionId, $media, $from, $to, $senderEpoch, $recipientEpoch,
-        $contextType, $contextPublicId, $type,
-        json_encode($data, JSON_UNESCAPED_SLASHES), media_signal_expiry(),
-    ]);
-    return ['signal_id' => (int)$pdo->lastInsertId(), 'recipient_epoch' => $recipientEpoch];
+    return db_with_sqlite_lock_retry(
+        $pdo,
+        static function () use (
+            $pdo,
+            $sessionId,
+            $media,
+            $from,
+            $to,
+            $type,
+            $data,
+            $senderEpoch,
+            $contextType,
+            $contextPublicId
+        ): array {
+            $recipientEpoch = media_signal_recipient_epoch($pdo, $sessionId, $to);
+            $pdo->prepare(
+                'INSERT INTO media_signals
+                    (session_id, media, from_participant_id, to_participant_id, sender_epoch, recipient_epoch,
+                     context_type, context_public_id, type, data, expires_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+            )->execute([
+                $sessionId, $media, $from, $to, $senderEpoch, $recipientEpoch,
+                $contextType, $contextPublicId, $type,
+                json_encode($data, JSON_UNESCAPED_SLASHES), media_signal_expiry(),
+            ]);
+            return ['signal_id' => (int)$pdo->lastInsertId(), 'recipient_epoch' => $recipientEpoch];
+        },
+        'media-signal-insert',
+        CHATSPACE_MEDIA_SIGNAL_WRITE_RETRY_BUDGET_MS,
+        CHATSPACE_MEDIA_SIGNAL_WRITE_BUSY_TIMEOUT_MS
+    );
 }
 
 function media_signal_cleanup_expired(PDO $pdo, ?int $sessionId = null): array

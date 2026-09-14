@@ -1,12 +1,17 @@
 <?php
-require_once __DIR__ . '/../../includes/base.php';
+require_once __DIR__ . '/_auth.php';
 
 $pdo = db();
 $body = input_json();
-$lobby = (string)($body['lobby_id'] ?? $body['lobby'] ?? '');
-$user = (int)($body['user_id'] ?? 0);
+try {
+$auth = game_compatibility_auth($pdo, $body);
+$body = $auth['source'];
+$lobby = (string)$auth['lobby'];
+$user = (int)$auth['participant']['id'];
 $clientRound = max(0, (int)($body['round_number'] ?? 0));
 if ($lobby === '' || $user <= 0) json_out(['error' => 'missing fields'], 400);
+if ((string)$auth['framework']['member_role'] !== 'master') json_out(['error' => 'Only the game Master can start another round'], 403);
+game_compatibility_record($pdo, $auth, 'legacy-restart', ['round' => $clientRound]);
 
 $pdo->beginTransaction();
 try {
@@ -63,4 +68,7 @@ try {
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     throw $e;
+}
+} catch (MultiplayerGameException $error) {
+    json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
 }

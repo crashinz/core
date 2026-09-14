@@ -35,6 +35,15 @@ function optional_core_voice_webcam_setting_defaults(): array
     ];
 }
 
+// Current installation defaults are separate from the checksum-covered historical snapshot.
+function optional_core_voice_webcam_runtime_setting_defaults(): array
+{
+    return array_replace(optional_core_voice_webcam_setting_defaults(), [
+        PRIVATE_VOICE_ENABLED_SETTING => '1',
+        VOICE_TRANSMISSION_MODES_ENABLED_SETTING => '1',
+        SELECTIVE_WEBCAM_AUDIENCE_ENABLED_SETTING => '1',
+    ]);
+}
 function optional_core_voice_webcam_schema_statements(PDO $pdo): array
 {
     $auto = db_uses_mysql_syntax($pdo) ? 'BIGINT PRIMARY KEY AUTO_INCREMENT' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
@@ -164,28 +173,27 @@ function optional_core_voice_webcam_schema_valid(PDO $pdo): bool
 
 function optional_core_voice_webcam_policy(PDO $pdo): array
 {
-    $selectedLimit = (int)app_setting(
-        $pdo,
-        PRIVATE_VOICE_PARTICIPANT_LIMIT_SETTING,
-        (string)PRIVATE_VOICE_RECOMMENDED_PARTICIPANTS
-    );
-    $selectedLimit = max(2, min(PRIVATE_VOICE_SUPPORTED_CEILING, $selectedLimit));
+    $configuredLimit = corechat_limit_value($pdo, PRIVATE_VOICE_PARTICIPANT_LIMIT_SETTING, PRIVATE_VOICE_RECOMMENDED_PARTICIPANTS);
+    $selectedLimit = $configuredLimit === null
+        ? PRIVATE_VOICE_SUPPORTED_CEILING
+        : max(2, min(PRIVATE_VOICE_SUPPORTED_CEILING, (int)$configuredLimit));
     return [
         'privateVoice' => [
-            'enabled' => app_setting($pdo, PRIVATE_VOICE_ENABLED_SETTING, '0') === '1',
+            'enabled' => app_setting($pdo, PRIVATE_VOICE_ENABLED_SETTING, optional_core_voice_webcam_runtime_setting_defaults()[PRIVATE_VOICE_ENABLED_SETTING]) === '1',
             'participantLimit' => $selectedLimit,
+            'limitEnforced' => $configuredLimit !== null,
             'recommendedParticipants' => PRIVATE_VOICE_RECOMMENDED_PARTICIPANTS,
             'supportedCeiling' => PRIVATE_VOICE_SUPPORTED_CEILING,
             'expirySeconds' => PRIVATE_VOICE_INVITATION_EXPIRY_SECONDS,
         ],
         'transmissionModes' => [
-            'enabled' => app_setting($pdo, VOICE_TRANSMISSION_MODES_ENABLED_SETTING, '0') === '1',
+            'enabled' => app_setting($pdo, VOICE_TRANSMISSION_MODES_ENABLED_SETTING, optional_core_voice_webcam_runtime_setting_defaults()[VOICE_TRANSMISSION_MODES_ENABLED_SETTING]) === '1',
             'availableModes' => VOICE_TRANSMISSION_MODES,
             'defaultMode' => 'voice-activation',
             'bindingDefault' => 'unassigned',
         ],
         'selectiveWebcamAudience' => [
-            'enabled' => app_setting($pdo, SELECTIVE_WEBCAM_AUDIENCE_ENABLED_SETTING, '0') === '1',
+            'enabled' => app_setting($pdo, SELECTIVE_WEBCAM_AUDIENCE_ENABLED_SETTING, optional_core_voice_webcam_runtime_setting_defaults()[SELECTIVE_WEBCAM_AUDIENCE_ENABLED_SETTING]) === '1',
             'availableModes' => WEBCAM_AUDIENCE_MODES,
             'defaultMode' => 'everyone',
         ],
@@ -406,7 +414,9 @@ function private_voice_end_user_memberships(PDO $pdo, int $sessionId, int $userI
 function private_voice_add_member(PDO $pdo, array $chat, int $userId): void
 {
     $members = private_voice_members($pdo, (int)$chat['id']);
-    if (count($members) >= (int)$chat['participant_limit']) {
+    $participantLimit = (int)optional_core_voice_webcam_policy($pdo)['privateVoice']['participantLimit'];
+    if (count($members) >= $participantLimit) {
+        limit_event_record_reached($pdo, PRIVATE_VOICE_PARTICIPANT_LIMIT_SETTING, 'private-voice', 'chat:' . (int)$chat['id'], 'rejected');
         throw new PrivateVoiceException('This private voice chat is full.', 'PRIVATE_VOICE_CHAT_FULL', 409);
     }
     foreach ($members as $member) {
@@ -447,7 +457,7 @@ function private_voice_chat_payload(PDO $pdo, array $chat, int $viewerUserId): a
         'id' => (string)$chat['public_id'],
         'version' => (int)$chat['version'],
         'status' => (string)$chat['status'],
-        'participantLimit' => (int)$chat['participant_limit'],
+        'participantLimit' => (int)optional_core_voice_webcam_policy($pdo)['privateVoice']['participantLimit'],
         'memberCount' => count($members),
         'members' => $members,
         'viewerIsMember' => $authorized,

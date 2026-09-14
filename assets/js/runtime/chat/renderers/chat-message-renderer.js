@@ -348,6 +348,21 @@ export class ChatMessageRenderer {
         const author =
             participant || message;
 
+        const roleClass =
+            context.participantRoleClass(author);
+
+        const roleLabel =
+            context.esc(context.participantRoleLabel(author));
+
+        const appearancePreferences =
+            context.getChatAppearancePreferences?.() || {};
+
+        const important =
+            (message.message_type || "text") === "important";
+
+        const staffRole =
+            ["role-owner", "role-admin", "role-moderator", "role-guide", "role-developer"].includes(roleClass);
+
         const row =
             context.document.createElement("div");
 
@@ -355,6 +370,10 @@ export class ChatMessageRenderer {
             "message" +
             (message.participant_id === cfg.myParticipantId ? " me" : "") +
             (message.is_deleted ? " deleted" : "") +
+            (message.muted_collapsed ? " muted-message" : "") +
+            ` ${roleClass}` +
+            (staffRole && (important || appearancePreferences.showRoleMessageColors !== false) ? " role-color-message" : "") +
+            (important ? " important-message" : "") +
             (this.#displayMode === "compact" ? " compact" : " detailed");
 
         row.dataset.messageId =
@@ -411,16 +430,20 @@ export class ChatMessageRenderer {
         const displayName =
             context.esc(rawDisplayName);
 
-        const roleClass =
-            context.participantRoleClass(author);
+        const roleBadge =
+            (important || appearancePreferences.showRoleMessageTitles === true)
+                ? (context.participantRoleBadgeHtml?.(participant || author) || "")
+                : "";
 
-        const roleLabel =
-            context.esc(context.participantRoleLabel(author));
+        const importantBadge =
+            important
+                ? `<span class="important-message-badge" title="Important ${roleLabel} message">IMPORTANT</span>`
+                : "";
 
         if (this.#displayMode === "compact") {
 
             const isText =
-                (message.message_type || "text") === "text";
+                ["text", "important"].includes(message.message_type || "text");
 
             const inlineBody = isText
                 ? this.linkifiedTextHtml(message.content)
@@ -445,7 +468,7 @@ export class ChatMessageRenderer {
                 `<div class="msg-meta-line">${this.renderReactions(message)}</div>`;
 
             row.innerHTML =
-                `<div class="bubble"><div class="msg-compact-line">${flagTime}<span class="msg-compact-name ${roleClass}" title="${roleLabel}">${displayName}</span><span class="msg-compact-separator" aria-hidden="true">:</span><span class="msg-compact-text">${compactText}</span>${optionsButton}</div><div class="msg-compact-continuation">${continuation}</div></div>`;
+                `<div class="bubble"><div class="msg-compact-line">${flagTime}<span class="msg-compact-name ${roleClass}" title="${roleLabel}">${displayName}${roleBadge}</span><span class="msg-compact-separator" aria-hidden="true">:</span><span class="msg-compact-text">${importantBadge}${compactText}</span>${optionsButton}</div><div class="msg-compact-continuation">${continuation}</div></div>`;
 
         } else {
 
@@ -461,7 +484,7 @@ export class ChatMessageRenderer {
                 );
 
             row.innerHTML =
-                `<div class="bubble"><div class="msg-head"><div class="msg-name ${roleClass}" title="${roleLabel}">${avatarMarkup}<span class="msg-name-copy"><span class="msg-name-text">${displayName}</span>${flagTime}</span></div>${optionsButton}</div>${this.replyPreviewHtml(message)}<div class="msg-content">${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${this.renderReactions(message)}</div></div>`;
+                `<div class="bubble"><div class="msg-head"><div class="msg-name ${roleClass}" title="${roleLabel}">${avatarMarkup}<span class="msg-name-copy"><span class="msg-name-primary"><span class="msg-name-text">${displayName}</span>${roleBadge}</span>${flagTime}</span></div>${optionsButton}</div>${this.replyPreviewHtml(message)}<div class="msg-content">${importantBadge}${body}</div>${deletedMeta}${original}<div class="msg-meta-line">${this.renderReactions(message)}</div></div>`;
 
         }
 
@@ -747,7 +770,12 @@ export class ChatMessageRenderer {
         return parts.map(part => {
 
             if (!/^https?:\/\//i.test(part)) {
-                return context.esc(part).replace(/\n/g, "<br>");
+                return context.esc(part).replace(/\n/g, "<br>")
+                    .replace(/\[emoji:([a-f0-9]{32})(?::([a-z0-9_-]{1,32}))?\]/g, (token, id, name) => {
+                        const source = context.esc(context.mediaUrl(`/api/custom_emojis.php?action=image&id=${id}`));
+                        const label = context.esc(`:${name || 'custom-emoji'}:`);
+                        return `<img class="chat-custom-emoji" src="${source}" alt="${label}" title="${label}" width="32" height="32" loading="lazy" decoding="async">`;
+                    });
             }
 
             const clean =

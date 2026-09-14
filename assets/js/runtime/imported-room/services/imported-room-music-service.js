@@ -351,10 +351,11 @@ export class ImportedRoomMusicService {
      *
      * @returns {string}
      */
-    inlinePlayerHtml(track) {
+    inlinePlayerHtml(track, capability = {}) {
 
         return this.#websiteCompatibility?.inlinePlayerHtml(
-            track
+            track,
+            capability
         ) || "";
 
     }

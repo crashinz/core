@@ -2,9 +2,96 @@
 require_once __DIR__ . '/../includes/base.php';
 require_once __DIR__ . '/../includes/message_centre.php';
 
+final class CorechatUploadedMediaReplyException extends RuntimeException
+{
+    public function __construct(public readonly int $httpStatus)
+    {
+        parent::__construct('Reply target unavailable');
+    }
+}
+
+
+final class CorechatUploadedMediaGameException extends RuntimeException
+{
+    public function __construct(string $message, public readonly int $httpStatus)
+    {
+        parent::__construct($message);
+    }
+}
+
+/**
+ * Resolve media admission, not historical download authorization.
+ * A framework identity must never fall back to its legacy compatibility seats.
+ */
+function uploaded_media_game_access(PDO $pdo, int $sessionId, array $participant, string $lobby, int $userId, bool $lock = false): array
+{
+    if ($userId <= 0 || (int)($participant['user_id'] ?? 0) !== $userId) {
+        throw new CorechatUploadedMediaGameException('Unauthorized', 403);
+    }
+    if ($lobby === '') throw new CorechatUploadedMediaGameException('Game required', 400);
+    if (database_migration_table_exists($pdo, 'multiplayer_game_sessions')) {
+        $sql = 'SELECT id,source_room_session_id,status FROM multiplayer_game_sessions WHERE public_id=? LIMIT 1';
+        if ($lock && db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+        $statement = $pdo->prepare($sql);
+        $statement->execute([$lobby]);
+        $framework = $statement->fetch();
+        $statement->closeCursor();
+        if (is_array($framework)) {
+            if ((int)$framework['source_room_session_id'] !== $sessionId
+                || !in_array((string)$framework['status'], ['lobby','active','paused','completed','forfeited'], true)) {
+                throw new CorechatUploadedMediaGameException('Game not found', 404);
+            }
+            try {
+                multiplayer_game_require_member($pdo, $lobby, $userId);
+            } catch (MultiplayerGameException $error) {
+                if ($error->httpStatus !== 403) throw $error;
+                throw new CorechatUploadedMediaGameException('Join or spectate the game to use game chat', 403);
+            }
+            $sql = "SELECT user_id,role,membership_status FROM multiplayer_game_members WHERE game_session_id=? ORDER BY id";
+            if ($lock && db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+            $members = $pdo->prepare($sql);
+            $members->execute([(int)$framework['id']]);
+            $rows = $members->fetchAll();
+            $members->closeCursor();
+            $audience = [];
+            foreach ($rows as $member) {
+                if ((string)$member['membership_status'] === 'active'
+                    && in_array((string)$member['role'], ['master','player','spectator'], true)
+                    && (int)$member['user_id'] > 0) {
+                    $audience[] = (int)$member['user_id'];
+                }
+            }
+            $audience = array_values(array_unique($audience));
+            if (!in_array($userId, $audience, true)) {
+                throw new CorechatUploadedMediaGameException('Join or spectate the game to use game chat', 403);
+            }
+            return ['framework' => true, 'audience' => $audience];
+        }
+    }
+    $sql = 'SELECT gl.* FROM game_lobbies gl JOIN game_sessions gs ON gs.lobby_code=gl.lobby_code
+            WHERE gs.room_session_id=? AND gl.lobby_code=? AND gs.ended_at IS NULL AND gl.status <> "ended" LIMIT 1';
+    if ($lock && db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
+    $statement = $pdo->prepare($sql);
+    $statement->execute([$sessionId, $lobby]);
+    $legacy = $statement->fetch();
+    $statement->closeCursor();
+    if (!is_array($legacy)) throw new CorechatUploadedMediaGameException('Game not found', 404);
+    $playerIds = array_values(array_filter([(int)($legacy['user1_id'] ?? 0), (int)($legacy['user2_id'] ?? 0)]));
+    if (!in_array((int)$participant['id'], $playerIds, true)) {
+        throw new CorechatUploadedMediaGameException('Join the game to use game chat', 403);
+    }
+    $placeholders = implode(',', array_fill(0, count($playerIds), '?'));
+    $players = $pdo->prepare("SELECT user_id FROM participants WHERE id IN ({$placeholders})");
+    $players->execute($playerIds);
+    $audience = array_map('intval', $players->fetchAll(PDO::FETCH_COLUMN));
+    $players->closeCursor();
+    return ['framework' => false, 'audience' => $audience];
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'POST required'], 405);
 
 $pdo = db();
+corechat_chat_post_rate_install_api_handler($pdo);
 $sessionId = resolve_session_id($pdo, $_POST['session_id'] ?? '');
 $participant = auth_participant($pdo, $sessionId, $_POST['join_token'] ?? '');
 $authorContext = author_context_for_participant($pdo, $sessionId, $participant);
@@ -63,22 +150,15 @@ if ($channel === 'dm') {
     if ($validatedBlock->fetch()) json_out(['error' => 'You cannot DM this user.'], 403);
 }
 
+$validatedGameAccess = null;
+$validatedGameUserId = 0;
 if ($channel === 'game') {
-    $validatedLobby = (string)($_POST['lobby_code'] ?? '');
-    if ($validatedLobby === '') json_out(['error' => 'Game required'], 400);
-    $validatedGame = $pdo->prepare(
-        'SELECT gl.*
-           FROM game_lobbies gl
-           JOIN game_sessions gs ON gs.lobby_code = gl.lobby_code
-          WHERE gs.room_session_id = ? AND gl.lobby_code = ? AND gs.ended_at IS NULL AND gl.status <> "ended"
-          LIMIT 1'
-    );
-    $validatedGame->execute([$sessionId, $validatedLobby]);
-    $validatedGameRow = $validatedGame->fetch();
-    if (!$validatedGameRow) json_out(['error' => 'Game not found'], 404);
-    $validatedPlayerIds = array_filter([(int)($validatedGameRow['user1_id'] ?? 0), (int)($validatedGameRow['user2_id'] ?? 0)]);
-    if (!in_array((int)$participant['id'], $validatedPlayerIds, true)) {
-        json_out(['error' => 'Join the game to use game chat'], 403);
+    $gameUser = require_user();
+    $validatedGameUserId = (int)$gameUser['id'];
+    try {
+        $validatedGameAccess = uploaded_media_game_access($pdo, $sessionId, $participant, (string)($_POST['lobby_code'] ?? ''), $validatedGameUserId);
+    } catch (CorechatUploadedMediaGameException $error) {
+        json_out(['error' => $error->getMessage()], $error->httpStatus);
     }
 }
 
@@ -91,11 +171,8 @@ if ($channel === 'dm') {
     $targetStatement->execute([$sessionId, $targetParticipantId]);
     $candidateTargetUserId = (int)$targetStatement->fetchColumn();
     if ($candidateTargetUserId > 0) $audience[] = $candidateTargetUserId;
-} elseif ($channel === 'game' && !empty($validatedPlayerIds)) {
-    $playerPlaceholders = implode(',', array_fill(0, count($validatedPlayerIds), '?'));
-    $playerUsers = $pdo->prepare("SELECT user_id FROM participants WHERE id IN ({$playerPlaceholders})");
-    $playerUsers->execute(array_values($validatedPlayerIds));
-    $audience = array_map('intval', $playerUsers->fetchAll(PDO::FETCH_COLUMN));
+} elseif ($channel === 'game') {
+    $audience = $validatedGameAccess['audience'];
 }
 try {
     $serverAsset = server_media_upload($pdo, $file, $participant, $sessionId, $channel, $isVoiceNote, $audience);
@@ -144,7 +221,7 @@ function file_reply_snapshot(PDO $pdo, string $channel, int $sessionId, array $p
     $replyChannel = (string)($_POST['reply_to_channel'] ?? $channel);
     if (str_starts_with($replyChannel, 'link:')) $replyChannel = 'link';
     if (str_starts_with($replyChannel, 'dm:')) $replyChannel = 'dm';
-    if ($replyChannel !== $channel) json_out(['error' => 'Reply target unavailable'], 400);
+    if ($replyChannel !== $channel) throw new CorechatUploadedMediaReplyException(400);
     if ($channel === 'room') {
         $stmt = $pdo->prepare('SELECT * FROM messages WHERE id = ? AND session_id = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1');
         $stmt->execute([$replyId, $sessionId]);
@@ -155,7 +232,7 @@ function file_reply_snapshot(PDO $pdo, string $channel, int $sessionId, array $p
         $message = $stmt->fetch();
         if ($message && !file_reply_accessible($pdo, $message, $channel, $sessionId, $participant)) $message = false;
     }
-    if (!$message) json_out(['error' => 'Reply target unavailable'], 404);
+    if (!$message) throw new CorechatUploadedMediaReplyException(404);
     return [
         'id' => (int)$message['id'],
         'channel' => $channel,
@@ -168,17 +245,35 @@ function file_reply_snapshot(PDO $pdo, string $channel, int $sessionId, array $p
     ];
 }
 
-$replyTo = $channel === 'link' ? null : file_reply_snapshot($pdo, $channel, $sessionId, $participant);
-$replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
+try {
+    $replyTo = $channel === 'link' ? null : file_reply_snapshot($pdo, $channel, $sessionId, $participant);
+    $replyToJson = $replyTo ? json_encode($replyTo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null;
+} catch (CorechatUploadedMediaReplyException $error) {
+    server_media_discard_unreferenced($pdo, (string)$serverAsset['id']);
+    json_out(['error' => $error->getMessage()], $error->httpStatus);
+}
 
 function uploaded_media_message(PDO $pdo, string $channel, string $messageType, array $participant, array $authorContext, string $content, array $file, string $mimeType, string $originalName, ?array $replyTo, ?string $replyToJson, string $assetPublicId, array $route = []): array {
     $ownsTransaction = !$pdo->inTransaction();
+    $transaction = [];
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+        $transaction = database_transaction_begin($pdo, true);
+        $ownsTransaction = !empty($transaction['owned']);
+        if ($channel === 'game') {
+            $access = uploaded_media_game_access(
+                $pdo,
+                (int)($route['game_room_session_id'] ?? 0),
+                $participant,
+                (string)($route['lobby_code'] ?? ''),
+                (int)($route['game_actor_user_id'] ?? 0),
+                true
+            );
+            // Finalize this new asset's recipient snapshot only after revalidation.
+            // Existing stored-audience historical download policy is unchanged.
+            $pdo->prepare("UPDATE server_media_assets SET audience_json=? WHERE public_id=? AND uploader_user_id=? AND status='active'")
+                ->execute([json_encode($access['audience'], JSON_UNESCAPED_SLASHES), $assetPublicId, (int)$participant['user_id']]);
         }
-        $message = create_message($pdo, $channel, $messageType, [
+        $message = corechat_create_rate_limited_message($pdo, $channel, $messageType, [
             'session_id' => $route['session_id'] ?? null,
             'participant' => $participant,
             'author_context' => $authorContext,
@@ -204,10 +299,10 @@ function uploaded_media_message(PDO $pdo, string $channel, string $messageType, 
             $channel,
             (string)($route['link_key'] ?? $route['dm_key'] ?? $route['lobby_code'] ?? '')
         );
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         return $message + ['server_media_id' => $assetPublicId, 'delivery' => 'server'];
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         if ($ownsTransaction) server_media_discard_unreferenced($pdo, $assetPublicId);
         throw $error;
     }
@@ -269,6 +364,9 @@ if ($channel === 'link') {
         });
     } catch (Throwable $error) {
         server_media_discard_unreferenced($pdo, (string)$serverAsset['id']);
+        if ($error instanceof CorechatUploadedMediaReplyException) {
+            json_out(['error' => $error->getMessage()], $error->httpStatus);
+        }
         throw $error;
     }
     if (!empty($result['error'])) {
@@ -302,23 +400,20 @@ if ($channel === 'dm') {
 }
 
 if ($channel === 'game') {
-    $lobby = (string)($_POST['lobby_code'] ?? '');
-    if ($lobby === '') json_out(['error' => 'Game required'], 400);
-    $stmt = $pdo->prepare(
-        'SELECT gl.*
-           FROM game_lobbies gl
-           JOIN game_sessions gs ON gs.lobby_code = gl.lobby_code
-          WHERE gs.room_session_id = ? AND gl.lobby_code = ? AND gs.ended_at IS NULL AND gl.status <> "ended"
-          LIMIT 1'
-    );
-    $stmt->execute([$sessionId, $lobby]);
-    $game = $stmt->fetch();
-    if (!$game) json_out(['error' => 'Game not found'], 404);
-    $playerIds = array_filter([(int)($game['user1_id'] ?? 0), (int)($game['user2_id'] ?? 0)]);
-    if (!in_array((int)$participant['id'], $playerIds, true)) json_out(['error' => 'Join the game to use game chat'], 403);
-    json_out(uploaded_media_message($pdo, 'game', $isVoiceNote ? 'voice_note' : 'file', $participant, $authorContext, $publicPath, $file, $mimeType, $isVoiceNote ? 'Voice Note' : $originalName, $replyTo, $replyToJson, (string)$serverAsset['id'], ['lobby_code' => $lobby]));
+    try {
+        $message = uploaded_media_message($pdo, 'game', $isVoiceNote ? 'voice_note' : 'file', $participant, $authorContext, $publicPath, $file, $mimeType, $isVoiceNote ? 'Voice Note' : $originalName, $replyTo, $replyToJson, (string)$serverAsset['id'], [
+            'lobby_code' => (string)($_POST['lobby_code'] ?? ''),
+            'game_room_session_id' => $sessionId,
+            'game_actor_user_id' => $validatedGameUserId,
+        ]);
+    } catch (CorechatUploadedMediaGameException $error) {
+        json_out(['error' => $error->getMessage()], $error->httpStatus);
+    }
+    json_out($message);
 }
 
 json_out(uploaded_media_message($pdo, 'room', $isVoiceNote ? 'voice_note' : 'file', $participant, $authorContext, $publicPath, $file, $mimeType, $isVoiceNote ? 'Voice Note' : $originalName, $replyTo, $replyToJson, (string)$serverAsset['id'], [
     'session_id' => $sessionId,
 ]));
+
+

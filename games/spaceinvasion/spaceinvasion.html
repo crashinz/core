@@ -41,6 +41,8 @@ body{
 }
 .card-header{border-bottom:1px solid rgba(255,255,255,0.12); gap:12px;}
 .card-footer{border-top:1px solid rgba(255,255,255,0.12);}
+body[data-external-game-controls="true"] #btnRestart,
+body[data-external-game-controls="true"] #btnResign{display:none}
 .card-body{padding:18px 22px 22px; display:flex; flex-direction:column; gap:14px;}
 .info-label{font-size:14px; opacity:.95}
 .muted{color:var(--muted)}
@@ -80,6 +82,37 @@ body{
   position:absolute; font-size:13px; text-shadow:0 2px 8px rgba(0,0,0,.65);
   transform:translate(-50%, 0); white-space:nowrap; pointer-events:none; font-weight:800;
 }
+.control-guide{
+  margin-top:10px;
+  padding:8px 12px;
+  border:1px solid rgba(57,208,255,.34);
+  border-radius:8px;
+  color:#dff8ff;
+  background:rgba(6,18,31,.9);
+  font-size:clamp(.72rem,2vw,.9rem);
+  font-weight:800;
+  line-height:1.25;
+  text-align:center;
+}
+.game-recovery{
+  position:absolute;
+  z-index:9;
+  inset:50% auto auto 50%;
+  width:min(440px,calc(100% - 28px));
+  padding:18px;
+  border:1px solid rgba(255,216,77,.72);
+  border-radius:12px;
+  color:#fff;
+  background:rgba(17,17,25,.97);
+  box-shadow:0 18px 48px rgba(0,0,0,.62);
+  text-align:center;
+  transform:translate(-50%,-50%);
+}
+.game-recovery[hidden]{display:none}
+.game-recovery h2{margin:0 0 8px;font-size:clamp(1.05rem,3vw,1.4rem)}
+.game-recovery p{margin:0;color:var(--muted);font-size:clamp(.78rem,2.2vw,.95rem);line-height:1.35}
+.game-recovery-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:9px;margin-top:14px;pointer-events:auto}
+body.is-recovering .hud{visibility:hidden}
 
 /* Actions */
 .actions{display:flex; gap:10px; align-items:center;}
@@ -129,7 +162,7 @@ body.embedded .card-body{
   align-items:center;
 }
 body.embedded .canvas-wrap{
-  width:min(100%, calc((100vh - 20px) * 1.5));
+  width:min(100%, calc((100vh - 62px) * 1.5));
   min-height:0;
   padding:10px;
   box-sizing:border-box;
@@ -137,7 +170,7 @@ body.embedded .canvas-wrap{
 body.embedded .canvas-back{
   aspect-ratio:3 / 2;
   width:100%;
-  height:min(calc(100vh - 30px), calc((100vw - 40px) * .6667));
+  height:min(calc(100vh - 72px), calc((100vw - 40px) * .6667));
 }
 body.embedded #game{
   width:100%;
@@ -147,6 +180,30 @@ body.embedded .waiting-cover{
   display:none !important;
   border-radius:0;
 }
+body.session-unavailable{
+  display:grid;
+  place-items:center;
+  padding:24px;
+  overflow:auto;
+  background:radial-gradient(900px 500px at 50% 0%, #1b1730 0%, #0f0f12 68%);
+}
+.session-unavailable-notice{
+  width:min(620px, 100%);
+  margin:0;
+  padding:24px 28px;
+  border:1px solid rgba(255,255,255,.28);
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(38,34,58,.98), rgba(17,17,23,.98));
+  color:#fff;
+  font-size:clamp(1rem, 2.5vw, 1.3rem);
+  font-weight:700;
+  line-height:1.45;
+  text-align:center;
+  box-shadow:0 18px 50px rgba(0,0,0,.48);
+}
+.session-unavailable-notice h1{margin:0 0 10px;font-size:clamp(1.25rem,4vw,1.8rem)}
+.session-unavailable-notice p{margin:0;color:var(--muted);font-size:clamp(.9rem,2.4vw,1.05rem);font-weight:600}
+.session-unavailable-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:18px}
 </style>
 </head>
 <body>
@@ -170,16 +227,25 @@ body.embedded .waiting-cover{
             <div class="ship-label" id="labelP1">Player 1 (You)</div>
             <div class="ship-label" id="labelP2">Player 2</div>
           </div>
+          <section class="game-recovery" id="gameRecovery" role="alert" hidden>
+            <h2>Game status needs attention</h2>
+            <p id="gameRecoveryMessage">The current game status could not be restored.</p>
+            <div class="game-recovery-actions">
+              <button id="gameRecoveryRetry" type="button">Retry status</button>
+              <button id="gameRecoveryReturn" type="button">Return to room</button>
+            </div>
+          </section>
         </div>
+        <p class="control-guide" id="controlGuide">Move with A/D or Left/Right. Fire with Space, W, Up, or Enter.</p>
       </div>
     </div>
 
     <div class="card-footer">
       <div class="actions">
-        <button id="btnRestart">Restart</button>
+        <button id="btnRestart" data-external-game-row="terminal">Restart</button>
         <button id="btnResign">Resign</button>
       </div>
-      <div id="status" class="info-label">Waiting for Opponent…</div>
+      <div id="status" class="info-label">Starting solo game...</div>
     </div>
 
     <!-- Waiting overlay -->
@@ -187,7 +253,7 @@ body.embedded .waiting-cover{
       <div class="waiting-panel">
         <div>
           <span class="spinner" id="waitingSpinner"></span>
-          <span class="info-label" id="waitingMsg">Waiting for Opponent…</span>
+          <span class="info-label" id="waitingMsg">Starting solo game...</span>
         </div>
         <div class="invite-row" id="inviteRow" aria-live="polite">
           <div class="invite-title">Share this Lobby Code</div>
@@ -213,6 +279,10 @@ const player = Math.max(1, Math.min(2, parseInt(params.get('player')||'1',10)));
 const user   = parseInt(params.get('user')||'1001',10);
 const gameId = parseInt(params.get('game')||'6',10);
 const csrf   = params.get('csrf') || '';
+const frameworkRoomSessionId = params.get('session_id') || '';
+const frameworkParticipantId = params.get('participant_id') || '';
+const frameworkJoinToken = params.get('join_token') || '';
+const frameworkGameSessionId = params.get('game_session_id') || code;
 const embedded = params.get('embedded') === '1';
 if (embedded) document.body.classList.add('embedded');
 
@@ -228,12 +298,14 @@ function gameApiPath(path){
 }
 
 function leaveToParent(){
+  stopArcadeSession();
+
   try { window.parent.postMessage({ type:'game_close', lobby: code }, window.location.origin); } catch {}
   location.href = LIST_URL;
 }
 
 window.addEventListener('message', e=>{
-  if (e.origin !== window.location.origin || e.data?.type !== 'game_control') return;
+  if (e.source !== window.parent || e.origin !== window.location.origin || e.data?.type !== 'game_control') return;
   if (e.data.action === 'rematch') el('btnRestart')?.click();
   if (e.data.action === 'resign') el('btnResign')?.click();
 });
@@ -248,6 +320,23 @@ const waitingMsg   = el('waitingMsg');
 const inviteRow    = el('inviteRow');
 const copyCodeBtn  = el('copyCodeBtn');
 const statusEl     = el('status');
+const recoveryPanel = el('gameRecovery');
+const recoveryMessage = el('gameRecoveryMessage');
+
+function showSpaceRecovery(message){
+  document.body.classList.add('is-recovering');
+  recoveryMessage.textContent=String(message||'The current game status could not be restored.');
+  recoveryPanel.hidden=false;
+  statusEl.textContent='Game status could not be restored.';
+  statusEl.setAttribute('role','alert');
+}
+function hideSpaceRecovery(){
+  document.body.classList.remove('is-recovering');
+  recoveryPanel.hidden=true;
+  statusEl.setAttribute('role','status');
+}
+el('gameRecoveryRetry').addEventListener('click',()=>location.reload());
+el('gameRecoveryReturn').addEventListener('click',leaveToParent);
 
 /* Copy button feedback */
 let copyResetTimer=null; copyCodeBtn?.addEventListener('click', async ()=>{
@@ -256,7 +345,7 @@ let copyResetTimer=null; copyCodeBtn?.addEventListener('click', async ()=>{
     copyCodeBtn.classList.add('success');
     copyCodeBtn.innerHTML='<span class="ico">✅</span> Copied!';
     if(copyResetTimer) clearTimeout(copyResetTimer);
-    copyResetTimer=setTimeout(()=>{
+    copyResetTimer=scheduleArcadeTimeout(()=>{
       copyCodeBtn.classList.remove('success');
       copyCodeBtn.innerHTML='<span class="ico">📋</span> Copy';
     },1200);
@@ -264,28 +353,279 @@ let copyResetTimer=null; copyCodeBtn?.addEventListener('click', async ()=>{
 });
 
 /* ================= API helpers ================= */
-async function apiGet(p){
-  try{
-    p = gameApiPath(p);
-    const u=(p.startsWith('/'))?`${base}${p}`:`${p}`;
-    const r=await fetch(u);
-    if(!r.ok){ const t=await r.text().catch(()=> ''); console.warn('GET failed', r.status, t); return {}; }
-    return r.json();
-  }catch(e){ console.warn('GET error', e); return {}; }
+
+// Transport lifecycle only: no arcade rules, controls, or scoring are changed.
+let arcadeSessionStopped = false;
+let arcadeTerminalError = null;
+const arcadePollTimers = new Set();
+const arcadeTimeouts = new Set();
+const arcadeFrames = new Set();
+function stopArcadeSession(error) {
+  if (arcadeSessionStopped) return;
+  arcadeSessionStopped = true;
+  arcadeTerminalError = error || Object.assign(new Error('This game session has closed.'), {code:'GAME_SESSION_CLOSED', httpStatus:410, retryable:false});
+  for (const id of arcadePollTimers) clearInterval(id);
+  for (const id of arcadeTimeouts) clearTimeout(id);
+  for (const id of arcadeFrames) cancelAnimationFrame(id);
+  arcadePollTimers.clear(); arcadeTimeouts.clear(); arcadeFrames.clear();
 }
-async function apiPost(p,d){
+window.addEventListener('pagehide', () => {
+  stopArcadeSession(Object.assign(new Error('This game page is closing.'), {
+    code:'GAME_SESSION_CLOSED',
+    httpStatus:410,
+    retryable:false
+  }));
+}, {once:true});
+function endUnavailableArcadeSession(error) {
+  if (arcadeSessionStopped) return;
+  if (restoreCompletedSpaceSession(error)) return;
+  stopArcadeSession(error);
+  const notice = document.createElement('main');
+  const title = document.createElement('h1');
+  const detail = document.createElement('p');
+  const actions = document.createElement('div');
+  const returnButton = document.createElement('button');
+  document.body.classList.add('session-unavailable');
+  notice.className = 'session-unavailable-notice';
+  notice.setAttribute('role', 'alert');
+  title.textContent = 'Space Invasion session unavailable';
+  detail.textContent = 'This session may have ended or expired. Return to the room to choose a current game.';
+  actions.className = 'session-unavailable-actions';
+  returnButton.type = 'button';
+  returnButton.textContent = 'Return to room';
+  returnButton.addEventListener('click', leaveToParent);
+  actions.append(returnButton);
+  notice.append(title, detail, actions);
+  document.body.replaceChildren(notice);
+  if (window.parent !== window) window.parent.postMessage({type:'corechat-game-session-unavailable', lobbyCode:String(code), actorUserId:Number(user), httpStatus:error.httpStatus, code:error.code}, location.origin);
+}
+function arcadeRequestIsBound(url, payload = {}) {
+  const target = new URL(url, location.href);
+  const lobby = payload.lobby_id ?? payload.lobby ?? target.searchParams.get('lobby_id') ?? target.searchParams.get('lobby');
+  const actor = payload.user_id ?? target.searchParams.get('user') ?? target.searchParams.get('user_id');
+  return target.origin === location.origin && /\/games\/api\/(?:lobby|moves|state)\.php$/.test(target.pathname)
+    && String(lobby || '') === String(code) && Number(actor) === Number(user) && Number(user) > 0;
+}
+async function readArcadeResponse(response, url, payload, allowTerminal) {
+  if (arcadeSessionStopped) throw arcadeTerminalError;
+  const expired = response.redirected && /\/(?:login|logout)\.php$/i.test(new URL(response.url, location.href).pathname);
+  let data;
+  try { data = await response.json(); } catch { data = null; }
+  if (arcadeSessionStopped) throw arcadeTerminalError;
+  if (!response.ok || expired || !data || typeof data !== 'object' || Array.isArray(data) || data.error) {
+    const status = expired ? 401 : Number(response.status || 0);
+    const error = Object.assign(new Error(String(data?.error || (expired ? 'Your CoreChat session expired.' : 'The game request could not be completed.'))), {httpStatus:status, code:String(data?.code || (expired ? 'AUTHENTICATION_REQUIRED' : 'GAME_REQUEST_FAILED')), retryable:status === 0 || status === 429 || status >= 500});
+    if (allowTerminal && [401,403,404,410].includes(status) && arcadeRequestIsBound(url, payload)) endUnavailableArcadeSession(error);
+    throw error;
+  }
+  return data;
+}
+function scheduleArcadeInterval(callback, delay) {
+  if (arcadeSessionStopped) return 0;
+  const id = setInterval(async () => {
+    if (arcadeSessionStopped) return;
+    try { await callback(); } catch (error) { if (!arcadeSessionStopped) console.warn('Game request failed', {httpStatus:error.httpStatus || 0, code:error.code || 'NETWORK_ERROR'}); }
+  }, delay);
+  arcadePollTimers.add(id); return id;
+}
+function scheduleArcadeTimeout(callback, delay) {
+  if (arcadeSessionStopped) return 0;
+  const id = setTimeout(() => { arcadeTimeouts.delete(id); if (!arcadeSessionStopped) callback(); }, delay);
+  arcadeTimeouts.add(id); return id;
+}
+function scheduleArcadeFrame(callback) {
+  if (arcadeSessionStopped) return 0;
+  const id = requestAnimationFrame(time => { arcadeFrames.delete(id); if (!arcadeSessionStopped) callback(time); });
+  arcadeFrames.add(id); return id;
+}
+function bindFrameworkRequest(target) {
+  if (!frameworkRoomSessionId || !frameworkParticipantId || !frameworkJoinToken) {
+    return target;
+  }
+  if (target instanceof URL) {
+    target.searchParams.set("session_id", frameworkRoomSessionId);
+    target.searchParams.set("participant_id", frameworkParticipantId);
+    target.searchParams.set("join_token", frameworkJoinToken);
+    return target;
+  }
+  target.session_id = frameworkRoomSessionId;
+  target.participant_id = frameworkParticipantId;
+  target.join_token = frameworkJoinToken;
+  return target;
+}
+async function apiGet(p) {
+  if (arcadeSessionStopped) throw arcadeTerminalError;
   p = gameApiPath(p);
-  const u=(p.startsWith('/'))?`${base}${p}`:`${p}`;
-  const payload = Object.assign({}, d || {}, { _csrf: csrf });
-  try{
-    const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(payload)});
-    if(!r.ok){ const t=await r.text().catch(()=> ''); throw new Error(`POST ${u} failed ${r.status}: ${t}`); }
-    return r.json();
-  }catch(e){ console.warn('POST error', e); throw e; }
+  const target = new URL(p.startsWith('/') ? base + p : p, location.href);
+  if (!target.searchParams.has('user') && !target.searchParams.has('user_id')) target.searchParams.set('user', String(user));
+  bindFrameworkRequest(target);
+  const url = target.toString();
+  const response = await fetch(url, {credentials:'same-origin', cache:'no-store'});
+  return readArcadeResponse(response, url, {}, true);
+}
+async function apiPost(p, d) {
+  if (arcadeSessionStopped) throw arcadeTerminalError;
+  p = gameApiPath(p);
+  const url = new URL(p.startsWith('/') ? base + p : p, location.href).toString();
+  const payload = Object.assign({}, d || {}, {_csrf:csrf});
+  bindFrameworkRequest(payload);
+  const response = await fetch(url, {method:'POST', credentials:'same-origin', cache:'no-store', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify(payload)});
+  return readArcadeResponse(response, url, payload, ['join','reconnect'].includes(String(payload.action || '')));
+}
+
+let arcadeCompletionPromise = null;
+let arcadeCompletionFinished = false;
+const arcadeTerminalHistoryKey = 'corechatSpaceTerminalV1';
+let arcadeTerminalSnapshotOwnedByDocument=false;
+function arcadeTerminalSnapshotKey(){
+  return `corechat-space-terminal-v1:${String(code)}:${Number(user)}`;
+}
+function rememberArcadeTerminalSnapshot(reason){
+  arcadeTerminalSnapshotOwnedByDocument=true;
+  const snapshot={version:1,lobby:String(code),user:Number(user),reason:String(reason||'Game over').slice(0,80),savedAt:Date.now()};
+  try{sessionStorage.setItem(arcadeTerminalSnapshotKey(),JSON.stringify(snapshot));}catch{}
+}
+function completedArcadeTerminalSnapshot(){
+  let snapshot=history.state?.[arcadeTerminalHistoryKey]||null;
+  if(!snapshot){
+    try{snapshot=JSON.parse(sessionStorage.getItem(arcadeTerminalSnapshotKey())||'null');}catch{snapshot=null;}
+  }
+  if(!arcadeTerminalSnapshotOwnedByDocument){
+    try{sessionStorage.removeItem(arcadeTerminalSnapshotKey());}catch{}
+  }
+  const age=Date.now()-Number(snapshot?.savedAt||0);
+  if(!snapshot||snapshot.version!==1||String(snapshot.lobby)!==String(code)||Number(snapshot.user)!==Number(user)||age<0||age>300000)return null;
+  const nextState=history.state&&typeof history.state==='object'?{...history.state}:{};
+  nextState[arcadeTerminalHistoryKey]=snapshot;
+  try{history.replaceState(nextState,'');}catch{}
+  return snapshot;
+}
+function restoreCompletedSpaceSession(error){
+  const snapshot=completedArcadeTerminalSnapshot();
+  if(!snapshot)return false;
+  stopArcadeSession(error);
+  state.started=true;
+  state.over=true;
+  state.reason=String(snapshot.reason||'Game over');
+  arcadeCompletionFinished=true;
+  waitingCover.style.display='none';
+  inviteRow.style.display='none';
+  draw(0,0);
+  presentSpaceTerminal(state.reason,0,true);
+  return true;
+}
+function arcadeFrameworkBindingIsValid(){
+  return String(frameworkGameSessionId)===String(code)
+    && String(frameworkRoomSessionId).trim()!==''
+    && /^[1-9][0-9]*$/.test(String(frameworkParticipantId))
+    && Number(frameworkParticipantId)===Number(user)
+    && String(frameworkJoinToken)!=='';
+}
+async function readArcadeFrameworkResponse(response){
+  let data;
+  try{data=await response.json();}catch{data=null;}
+  if(!response.ok||!data||typeof data!=='object'||Array.isArray(data)||data.error){
+    const status=Number(response.status||0);
+    throw Object.assign(new Error(String(data?.error||'The game result could not be recorded.')),{httpStatus:status,code:String(data?.code||'GAME_RESULT_FAILED'),retryable:data?.retryable===true||status===0||status===429||status>=500,retryAfterMs:Number(data?.retryAfterMs||0)});
+  }
+  return data;
+}
+async function arcadeFrameworkRequest(url, options={}){
+  let response;
+  try{response=await fetch(url,{credentials:'same-origin',cache:'no-store',...options});}
+  catch{throw Object.assign(new Error('The game result request could not be completed.'),{httpStatus:0,code:'NETWORK_ERROR',retryable:true,retryAfterMs:250});}
+  return readArcadeFrameworkResponse(response);
+}
+async function arcadeFrameworkSession(){
+  const query=new URLSearchParams({action:'session',session_id:String(frameworkRoomSessionId),participant_id:String(frameworkParticipantId),join_token:String(frameworkJoinToken),game_session_id:String(frameworkGameSessionId)});
+  return arcadeFrameworkRequest(new URL(`${base}/api/game_framework.php?${query}`,location.href).toString());
+}
+async function arcadeFrameworkComplete(result){
+  const url=new URL(`${base}/api/game_framework.php`,location.href).toString();
+  const payload={action:'complete',session_id:String(frameworkRoomSessionId),participant_id:String(frameworkParticipantId),join_token:String(frameworkJoinToken),game_session_id:String(frameworkGameSessionId),result,_csrf:csrf};
+  return arcadeFrameworkRequest(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(payload)});
+}
+function arcadeCompletionDelay(delay){return new Promise(resolve=>setTimeout(resolve,delay));}
+async function completeArcadeSession(expectedGameKey, resultFactory){
+  if(arcadeCompletionFinished)return true;
+  if(!arcadeFrameworkBindingIsValid())return false;
+  if(arcadeCompletionPromise)return arcadeCompletionPromise;
+  stopArcadeSession(Object.assign(new Error('This game has ended.'),{code:'GAME_SESSION_COMPLETING',httpStatus:410,retryable:false}));
+  const pending=(async()=>{
+    let lastError=null;
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        const framework=await arcadeFrameworkSession();
+        if(String(framework.publicId||'')!==String(frameworkGameSessionId)||String(framework.gameKey||'')!==expectedGameKey){
+          throw Object.assign(new Error('The game result binding is invalid.'),{code:'GAME_RESULT_BINDING_INVALID',httpStatus:403,retryable:false});
+        }
+        if(String(framework.status||'')==='completed'){arcadeCompletionFinished=true;return true;}
+        if(!['active','paused','forfeited'].includes(String(framework.status||''))){
+          throw Object.assign(new Error('The game cannot be completed from its current state.'),{code:'GAME_RESULT_STATE_INVALID',httpStatus:409,retryable:false});
+        }
+        if(String(framework.viewerRole||'')!=='master')return false;
+        const result=resultFactory(framework);
+        if(!result||typeof result!=='object'||Array.isArray(result)){
+          throw Object.assign(new Error('The game result is invalid.'),{code:'GAME_RESULT_INVALID',httpStatus:422,retryable:false});
+        }
+        const receipt=await arcadeFrameworkComplete(result);
+        const validReceipt=String(framework.mode||'')==='practice'
+          ? receipt.practice===true&&receipt.recorded===false
+          : typeof receipt.resultPublicId==='string'&&receipt.resultPublicId!==''&&receipt.immutable===true;
+        if(!validReceipt)throw Object.assign(new Error('The game result receipt is invalid.'),{code:'GAME_RESULT_RECEIPT_INVALID',httpStatus:502,retryable:false});
+        arcadeCompletionFinished=true;
+        return true;
+      }catch(error){
+        lastError=error;
+        if(error?.retryable!==true||attempt===2)break;
+        await arcadeCompletionDelay(Math.max(100,Math.min(1000,Number(error.retryAfterMs)||250)));
+      }
+    }
+    console.warn('Game completion failed',{code:lastError?.code||'GAME_RESULT_FAILED',httpStatus:lastError?.httpStatus||0});
+    return false;
+  })();
+  arcadeCompletionPromise=pending;
+  try{return await pending;}finally{if(arcadeCompletionPromise===pending)arcadeCompletionPromise=null;}
+}
+function completeSpaceSession(){
+  return completeArcadeSession('spaceinvasion',framework=>{
+    if(String(framework.mode||'')!=='practice')throw Object.assign(new Error('The Space Invasion result mode is invalid.'),{code:'GAME_RESULT_INVALID',httpStatus:422,retryable:false});
+    return {};
+  });
 }
 
 /* ================= Networking - moves only (no state.php poll) ================= */
 let lastSeq = 0; // sequence from game_moves
+let arcadeStartupGeneration = 0;
+let arcadeStartupBlocked = false;
+
+function validateArcadeControlCheckpoint(value, throughSequence) {
+  const record = item => item !== null && typeof item === 'object' && !Array.isArray(item);
+  const exactKeys = (item, keys) => record(item) && Object.keys(item).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(item, key));
+  const validSequence = sequence => Number.isSafeInteger(sequence) && sequence > 0;
+  if (!validSequence(throughSequence)
+    || !exactKeys(value, ['version','lobbyCode','throughSequence','control'])
+    || value.version !== 1 || value.lobbyCode !== String(code) || value.throughSequence !== throughSequence
+    || (value.control !== null && (!exactKeys(value.control, ['sequence','type'])
+      || !validSequence(value.control.sequence) || value.control.sequence > throughSequence
+      || !['game_over','restart'].includes(value.control.type)))) {
+    throw Object.assign(new Error('The game checkpoint is invalid.'), {code:'GAME_STATE_INVALID', retryable:false});
+  }
+  return value;
+}
+
+function startArcadePolling(){
+  if(arcadeSessionStopped) return;
+  // start periodic polls
+  if(!pollTimer) pollTimer = scheduleArcadeInterval(fetchEvents, 500);
+  if(!statusTimer) statusTimer = scheduleArcadeInterval(async ()=>{
+    const s = await getLobbyStatus();
+    const isOngoing = s && ['ongoing', 'active'].includes(String(s.status || '').toLowerCase());
+    setSecondPlayerPresent(Boolean(s?.user2_id) || player === 2 || sawOtherJoin);
+    inviteRow.style.display = 'none';
+    if(!arcadeStartupBlocked) statusEl.textContent = state.over ? spaceTerminalMessage(state.reason) : 'Game on';
+  }, 800);
+}
 
 async function fetchEvents(){
   // moves.php GET returns [{sequence,user_id,payload,created_at}]
@@ -297,11 +637,12 @@ async function fetchEvents(){
         lastSeq = Math.max(lastSeq, m.sequence||0);
         if(Number(m.user_id || 0) === Number(user)) continue;
         const p = m.payload || {};
+        if(arcadeStartupBlocked && p.type !== 'restart') continue;
         applyMove(m.user_id||0, p);
       }
     }
   }catch(e){
-    console.warn('moves poll failed', e);
+    if(!arcadeSessionStopped) console.warn('moves poll failed', e);
   }
 }
 
@@ -326,17 +667,21 @@ async function getLobbyStatus(){
 
 /* Restart and results */
 async function restartGame(){
+  if(arcadeSessionStopped)return;
   const startAt = Date.now()+650;
   softRestart(startAt);
   const response = await postMove('restart', { startAt });
   if(response?.sequence) lastSeq = Math.max(lastSeq, response.sequence);
+  if(Number.isSafeInteger(response?.sequence) && response.sequence > 0) startArcadePolling();
 }
 async function sendResult(result, reason=''){
+  rememberArcadeTerminalSnapshot(reason);
   try{
     await apiPost(`/api/result.php`, { lobby: code, user_id: user, result, reason, score: myScore() });
   }catch(e){ console.warn('result error', e); }
   // also push an explicit control move so peer sees it even if result.php broadcast changes later
   await postMove('game_over', { reason });
+  await completeSpaceSession();
 }
 
 /* ================= Game constants ================= */
@@ -493,27 +838,64 @@ let pollTimer=null, statusTimer=null, sawOtherJoin=false;
 
 /* Join lobby - server will broadcast {type:'join'} and may broadcast {type:'start'} if status becomes ongoing */
 async function joinAndBegin(){
-  await joinLobby();
-  const response = await postMove('join', { player });
-  if(response?.sequence) lastSeq = Math.max(lastSeq, response.sequence);
-  // start periodic polls
-  pollTimer   = setInterval(fetchEvents, 500);
-  statusTimer = setInterval(async ()=>{
-    const s = await getLobbyStatus();
-    const isOngoing = s && ['ongoing', 'active'].includes(String(s.status || '').toLowerCase());
-    setSecondPlayerPresent(Boolean(s?.user2_id) || player === 2 || sawOtherJoin);
-    inviteRow.style.display = 'none';
-    statusEl.textContent = isOngoing || sawOtherJoin ? 'Game on' : 'Solo mode - waiting for opponent';
-  }, 800);
+  const generation = ++arcadeStartupGeneration;
+  arcadeStartupBlocked = true;
+  let throughSequence = 0;
+  let restored = false;
+  try {
+    await joinLobby();
+    const response = await postMove('join', { player });
+    if(arcadeSessionStopped) return false;
+    if(!Number.isSafeInteger(response?.sequence) || response.sequence <= 0) {
+      throw Object.assign(new Error('The game join checkpoint is unavailable.'), {code:'GAME_STATE_INVALID', retryable:false});
+    }
+    throughSequence = response.sequence;
+    lastSeq = Math.max(lastSeq, throughSequence);
+    const checkpoint = validateArcadeControlCheckpoint(await apiGet('/api/moves.php?action=control-checkpoint&lobby_id=' + encodeURIComponent(code) + '&throughSequence=' + throughSequence), throughSequence);
+    if(arcadeSessionStopped) return false;
+    if(generation === arcadeStartupGeneration) {
+      if(checkpoint.control?.type === 'game_over') applyMove(user, {type:'game_over'});
+      arcadeStartupBlocked = false;
+      hideSpaceRecovery();
+      restored = true;
+    }
+  } catch(error) {
+    if(arcadeSessionStopped) return false;
+    if(generation === arcadeStartupGeneration) {
+      arcadeStartupBlocked = true;
+      showSpaceRecovery('Unable to restore the current game status. Retry the status check or return to the room.');
+      console.warn('Game checkpoint failed', {code:error.code || 'NETWORK_ERROR', httpStatus:error.httpStatus || 0});
+    }
+  }
+  if(throughSequence > 0) startArcadePolling();
+  return restored && generation === arcadeStartupGeneration;
 }
 
 /* ================= Game loop ================= */
 function clamp(x,a,b){ return Math.min(b, Math.max(a,x)); }
 function nowMs(){ return Date.now(); }
+function spaceTerminalMessage(reason,actorUserId=0,restored=false){
+  if(restored)return 'Game complete: the previous result was restored.';
+  const normalized=String(reason||'').trim().toLowerCase();
+  if(normalized==='invaded')return 'Game over: the invasion reached your defenses.';
+  if(normalized==='resigned')return Number(actorUserId)===Number(user)
+    ? 'Game ended: you resigned.'
+    : 'Game ended: the other player resigned.';
+  return normalized ? `Game complete: ${String(reason).trim()}.` : 'Game complete.';
+}
+function presentSpaceTerminal(reason,actorUserId=0,restored=false){
+  hideSpaceRecovery();
+  document.body.classList.add('has-terminal-result');
+  const message=spaceTerminalMessage(reason,actorUserId,restored);
+  statusEl.textContent=message;
+  statusEl.setAttribute('role','status');
+  el('tip').textContent=`${message} Return to the room to play again.`;
+  el('btnRestart').disabled=true;
+}
 
 function tick(ts){
   const dt = ts - state.lastFrame; state.lastFrame = ts;
-  if(!state.startAt){ requestAnimationFrame(tick); return; }
+  if(!state.startAt){ scheduleArcadeFrame(tick); return; }
   const elapsed = Math.max(0, nowMs() - (state.levelStartAt || state.startAt));
 
   const me = player===1 ? state.p1 : state.p2;
@@ -544,7 +926,8 @@ function tick(ts){
       const ax=pos.x, ay=pos.y, aw=ALIEN_W, ah=ALIEN_H;
       if(ay+ah >= SHIP_Y-8 && !state.over){
         state.over = true; state.reason = 'Invaded';
-        postMove('game_over', { reason:'Invaded' });
+        presentSpaceTerminal(state.reason,user);
+        void sendResult('loss', 'Invaded');
       }
       for(const b of state.orbs){
         if(b.y < ay+ah && b.y > ay && b.x > ax && b.x < ax+aw){
@@ -574,7 +957,7 @@ function tick(ts){
   }
 
   draw(elapsed, dt);
-  if(!state.over){ requestAnimationFrame(tick); }
+  if(!state.over){ scheduleArcadeFrame(tick); }
 }
 
 let _lastMoveSend = 0;
@@ -590,6 +973,7 @@ function throttleMoveBroadcast(x){
 function applyMove(sender, p){
   switch(p.type){
     case 'join':
+      if(state.over) break;
       if(sender !== user){
         sawOtherJoin = true;
         setSecondPlayerPresent(true);
@@ -597,6 +981,7 @@ function applyMove(sender, p){
       }
       break;
     case 'start': {
+      if(state.over) break;
       // accept either p.startAt (ms) or p.at (seconds)
       const startMs = (typeof p.startAt === 'number' && p.startAt > 10_000) ? p.startAt
                      : (typeof p.at === 'number' ? p.at*1000 : Date.now()+600);
@@ -608,7 +993,7 @@ function applyMove(sender, p){
         statusEl.textContent = 'Game on';
         initStars(); bindKeys();
         state.lastFrame = performance.now();
-        requestAnimationFrame(tick);
+        scheduleArcadeFrame(tick);
       } else {
         sawOtherJoin = true;
         statusEl.textContent = 'Game on';
@@ -633,7 +1018,9 @@ function applyMove(sender, p){
       break;
     case 'game_over':
       state.over = true; state.reason = p.reason||'';
-      statusEl.textContent = 'Game over';
+      rememberArcadeTerminalSnapshot(state.reason);
+      presentSpaceTerminal(state.reason,sender);
+      void completeSpaceSession();
       break;
     case 'restart':
       softRestart(typeof p.startAt === 'number' ? p.startAt : undefined);
@@ -692,7 +1079,9 @@ function draw(elapsed, dt){
   el('scoreL').textContent = `P1: ${state.p1.score}`;
   el('scoreR').textContent = `P2: ${state.p2.score}`;
 
-  el('tip').textContent = `Level ${state.level} · ${hasSecondPlayer ? 'Co-op fire active' : 'Solo mode - waiting for opponent'}`;
+  el('tip').textContent = state.over
+    ? `${spaceTerminalMessage(state.reason)} Return to the room to play again.`
+    : `Level ${state.level} · ${hasSecondPlayer ? 'Co-op fire active' : 'Solo play'}`;
   el('tip').style.opacity = Math.max(.72, 1 - Math.min(.28, elapsed/6000));
 }
 
@@ -701,8 +1090,10 @@ function positionShipLabel(id, x, y, text){
   if(id === 'labelP2' && !hasSecondPlayer) return;
   const rect = cvs.getBoundingClientRect();
   const scaleX = rect.width / W, scaleY = rect.height / H;
-  d.style.left = (rect.left + window.scrollX + x*scaleX) + 'px';
-  d.style.top  = (rect.top  + window.scrollY + y*scaleY) + 'px';
+  const labelWidth=d.offsetWidth||100;
+  const labelHeight=d.offsetHeight||16;
+  d.style.left = clamp(x*scaleX,labelWidth/2+4,rect.width-labelWidth/2-4) + 'px';
+  d.style.top  = clamp(y*scaleY,4,rect.height-labelHeight-4) + 'px';
 }
 
 function setSecondPlayerPresent(present){
@@ -714,6 +1105,7 @@ function setSecondPlayerPresent(present){
 /* ================= Controls ================= */
 el('btnRestart').addEventListener('click', ()=> restartGame());
 el('btnResign').addEventListener('click', async ()=>{
+  applyMove(user, { type:'game_over', reason:'Resigned' });
   await sendResult('loss','Resigned');
 });
 el('leave').addEventListener('click', leaveToParent);
@@ -721,6 +1113,11 @@ el('leave2').addEventListener('click', leaveToParent);
 
 /* Restart soft reset */
 function softRestart(startAt = Date.now()+650){
+  arcadeStartupGeneration++;
+  arcadeStartupBlocked = false;
+  hideSpaceRecovery();
+  document.body.classList.remove('has-terminal-result');
+  el('btnRestart').disabled=false;
   state.over=false; state.reason='';
   state.level = 1;
   state.p1.x = W*0.28; state.p2.x = W*0.72;
@@ -728,9 +1125,11 @@ function softRestart(startAt = Date.now()+650){
   state.startAt = startAt;
   state.levelStartAt = startAt;
   state.started = true;
-  statusEl.textContent = hasSecondPlayer ? 'Game on' : 'Solo mode - waiting for opponent';
+  statusEl.textContent = 'Game on';
+  el('tip').removeAttribute('role');
+  el('tip').textContent = 'Starting game...';
   state.lastFrame = performance.now();
-  requestAnimationFrame(tick);
+  scheduleArcadeFrame(tick);
 }
 
 function startLevel(level, startAt = Date.now()+850, announce = true){
@@ -750,22 +1149,23 @@ function advanceLevel(){
 async function kickoff(){
   waitingCover.style.display = 'none';
   inviteRow.style.display = 'none';
-  statusEl.textContent = 'Solo mode - waiting for opponent';
-
-  // 1) Register
-  await joinAndBegin();
-
-  // 2) Start immediately in solo mode; networking upgrades it when a partner joins.
+  statusEl.textContent = 'Starting solo game...';
+  el('tip').textContent = 'Restoring game status...';
+  el('tip').removeAttribute('role');
+  // Bind the existing controls even if checkpoint loading fails and Restart is needed.
+  initStars();
+  bindKeys();
+  const ready = await joinAndBegin();
+  if(!ready || arcadeSessionStopped) return;
+  // A terminal checkpoint restores presentation only, not historical gameplay or scores.
   if(!state.startAt){
     state.startAt = Date.now()+300;
     state.levelStartAt = state.startAt;
     state.started = true;
-    initStars();
-    bindKeys();
   }
-
   state.lastFrame = performance.now();
-  requestAnimationFrame(tick);
+  if(state.over){ draw(0,0); return; }
+  scheduleArcadeFrame(tick);
 }
 kickoff();
 

@@ -1,0 +1,3909 @@
+:root {
+  color-scheme: dark;
+  --bg: #15182a;
+  --panel: #202640;
+  --panel-strong: #293154;
+  --text: #f7f8ff;
+  --muted: #bdc6e2;
+  --accent: #9fb1ff;
+  --accent-strong: #728cff;
+  --line: rgba(205, 214, 255, .2);
+  --success: #83e0b1;
+  --classic-ink: #3c2440;
+  --classic-paper: #f2c4b6;
+  --classic-panel: rgba(91, 38, 55, .82);
+}
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; min-height: 0; margin: 0; overflow: hidden; }
+body {
+  background: radial-gradient(circle at 50% -20%, #303a67, var(--bg) 58%);
+  color: var(--text);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: clamp(7px, 1vw, 12px);
+}
+button, select, input { font: inherit; }
+.game {
+  width: min(100%, 1540px);
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.game-header, .score-heading-row, .roll-actions, .header-actions, .records-heading-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+}
+.header-actions { flex-wrap: wrap; justify-content: flex-end; }
+.eyebrow { color: var(--accent); font-size: .78rem; font-weight: 800; letter-spacing: .12em; margin: 0 0 2px; text-transform: uppercase; }
+h1, h2, h3, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-size: clamp(1.35rem, 3vw, 2rem); line-height: 1.05; }
+h2 { margin-bottom: 3px; font-size: 1.15rem; }
+h3 { margin: 0; font-size: 1rem; }
+.appearance, .status, .table, .scoreboard { border: 1px solid var(--line); border-radius: 14px; }
+.appearance { background: var(--panel); margin: 0; padding: 8px 12px; font-weight: 700; }
+.appearance { color: var(--success); }
+.status { background: rgba(114, 140, 255, .12); margin: 0; padding: 7px 11px; }
+.player-status-strip {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  align-self: center;
+  display: grid;
+  grid-template-columns: repeat(var(--player-status-columns, 4), max-content);
+  gap: 7px;
+}
+.player-status-strip[hidden] { display: none; }
+.player-status-block {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto auto;
+  justify-content: start;
+  align-items: center;
+  gap: 5px 9px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(11,18,35,.58);
+}
+.player-status-block.is-current { border-color: var(--accent); background: rgba(114,140,255,.15); }
+.player-status-block.is-on-hold {
+  border-color: rgba(238, 190, 104, .78);
+  background:
+    repeating-linear-gradient(135deg, rgba(238,190,104,.08) 0 7px, transparent 7px 14px),
+    rgba(28, 24, 23, .82);
+}
+.player-status-name { min-width: 0; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-status-timer { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.player-status-turn { padding: 2px 6px; border-radius: 999px; color: #071224; background: var(--accent); font-size: .72rem; font-weight: 850; white-space: nowrap; }
+.player-status-hold,
+.score-player-state {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid rgba(238,190,104,.64);
+  border-radius: 999px;
+  color: #ffe3a5;
+  background: #3a2b1c;
+  font-size: .66rem;
+  font-weight: 900;
+  letter-spacing: .055em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.score-player-state { margin: 4px auto 0; color: #6c4318; background: #f5d79b; }
+th.is-on-hold,
+td.is-on-hold {
+  background: repeating-linear-gradient(135deg, rgba(133,92,42,.12) 0 6px, rgba(255,255,255,.08) 6px 12px);
+}
+td.is-on-hold { color: rgba(74, 55, 34, .58); }
+.game-options { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; padding: 8px 11px; background: rgba(22, 35, 58, .9); }
+.game-options[hidden] { display: none; }
+.game-options h2 { margin: 0; font-size: 1rem; }
+.game-option { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+.game-option.viewer-effect-option { padding: 5px 7px; border: 1px solid var(--line); border-radius: 8px; background: rgba(11,18,35,.34); }
+.settings-acceptance { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-acceptance span { padding: 4px 8px; border-radius: 999px; background: rgba(255,208,128,.12); font-size: .82rem; }
+.settings-acceptance .is-accepted { background: rgba(114,223,177,.14); }
+.shared-game-settings {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.shared-game-settings[hidden] { display: none; }
+.shared-settings-heading { grid-column: 1 / -1; }
+.shared-game-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, auto);
+  align-items: center;
+  gap: 5px 9px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(11,18,35,.34);
+}
+.shared-game-setting-label { font-weight: 750; }
+.shared-game-setting select,
+.shared-game-setting input {
+  min-height: 40px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(205,214,255,.42);
+  border-radius: 8px;
+  color: var(--text);
+  background: #252d4e;
+}
+.shared-game-setting-help { grid-column: 1 / -1; }
+.presentation-grid {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(360px, .92fr);
+  gap: 12px;
+  align-items: stretch;
+}
+.play-surface-slot {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: center;
+  gap: 8px;
+  container-type: size;
+}
+.table, .scoreboard { background: rgba(32, 38, 64, .9); padding: clamp(8px, 1vw, 12px); }
+.play-surface { min-width: 0; display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.5fr); gap: 16px; align-items: center; overflow: hidden; }
+.scoreboard {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.classic-seat-labels, .classic-avatars, .classic-score, .classic-score-actions, .classic-media-controls, .classic-drum-motion, .classic-microphone-motion, .built-in-score-sheet { display: none; }
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+.turn-copy { align-self: start; }
+.minor { color: var(--muted); font-size: .9rem; margin: 0; }
+.dice { min-width: 0; container-type: inline-size; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
+.die, #roll, .info, .secondary {
+  border: 1px solid rgba(205, 214, 255, .42); color: var(--text); cursor: pointer;
+  background: linear-gradient(#34406d, #252d4e); border-radius: 12px;
+  min-height: 44px; box-shadow: 0 7px 18px rgba(0, 0, 0, .22);
+}
+.die { position: relative; min-width: 0; aspect-ratio: 1; font-size: clamp(1.3rem, 10cqi, 2.25rem); font-weight: 900; }
+.die.is-rolling {
+  animation: five-dice-roll-feedback 120ms steps(2, end) 3;
+}
+@keyframes five-dice-roll-feedback {
+  0% { transform: translate(-2px, 1px) rotate(-2deg); filter: brightness(.9); }
+  50% { transform: translate(2px, -2px) rotate(2deg); filter: brightness(1.22); }
+  100% { transform: translate(0, 0) rotate(0); filter: brightness(1); }
+}
+.die.has-private-media { background: transparent; color: transparent; }
+.classic-die-image { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; pointer-events: none; }
+body[data-appearance="classic"] .classic-die-image {
+  position: absolute;
+  inset: 0;
+}
+.die[aria-pressed="true"] { outline: 3px solid var(--success); outline-offset: 2px; transform: translateY(-3px); background: linear-gradient(#286b60, #194b46); box-shadow: 0 0 0 2px rgba(114, 223, 177, .24), 0 8px 19px rgba(0, 0, 0, .32); }
+.die[aria-pressed="true"]::after { content: "Kept"; position: absolute; right: 3px; bottom: 3px; padding: 1px 5px; border-radius: 999px; color: #10221e; background: #baf3df; font: 800 clamp(.58rem, 3cqi, .72rem)/1.35 system-ui, sans-serif; letter-spacing: .02em; }
+.die:focus-visible, #roll:focus-visible, .info:focus-visible, .category:focus-visible,
+.secondary:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.classic-hotspot:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+button:disabled { cursor: not-allowed; opacity: .48; }
+#roll { padding: 10px 18px; font-weight: 800; background: linear-gradient(var(--accent-strong), #526bd7); }
+.secondary { padding: 8px 12px; box-shadow: none; }
+.roll-actions { width: min(100%, 840px); grid-column: 1 / -1; justify-content: center; flex-wrap: wrap; }
+.five-dice-lifecycle {
+  order: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.five-dice-lifecycle[hidden] { display: none; }
+.five-dice-lifecycle > button { order: 1; }
+.five-dice-lifecycle > .lifecycle-status { order: 2; flex: 0 0 100%; justify-content: center; text-align: center; }
+.lifecycle-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(11,18,35,.44);
+  color: var(--muted);
+  font-size: .84rem;
+  font-weight: 700;
+}
+.lifecycle-confirm { border-color: rgba(255,208,128,.74); }
+.info { width: 44px; min-width: 44px; border-radius: 50%; font-weight: 900; }
+.rules, .accessibility-panel { max-height: min(58vh, 560px); overflow: auto; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 14px; background: rgba(159, 177, 255, .1); padding: 11px 13px; margin: 10px 0; }
+.rules[hidden], .accessibility-panel[hidden] { display: none; }
+.rules dl, .accessibility-panel dl { margin: 10px 0 0; }
+.rules dt, .accessibility-panel dt { font-weight: 800; }
+.rules dd, .accessibility-panel dd { margin: 2px 0 9px; color: var(--muted); }
+.classic-board-scale-controls { display: inline-flex; align-items: center; gap: 7px; }
+.classic-board-scale-controls output { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
+.display-settings {
+  flex: 0 0 auto;
+  margin: 6px 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.separate-controls-preference {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  white-space: nowrap;
+  font-size: .86rem;
+  font-weight: 750;
+}
+.compact-state-button,
+.inline-info {
+  min-height: 40px;
+  border: 1px solid rgba(205, 214, 255, .48);
+  border-radius: 7px;
+  color: #fff;
+  background: #34406d;
+  font-weight: 850;
+}
+.compact-state-button { min-width: 50px; padding: 5px 10px; }
+.inline-info { width: 40px; padding: 4px; }
+.compact-state-button:focus-visible,
+.inline-info:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.compact-info-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  right: 0;
+  width: min(320px, calc(100vw - 34px));
+  padding: 9px 11px;
+  border: 1px solid rgba(205, 214, 255, .55);
+  border-radius: 8px;
+  color: #fff;
+  background: #171d35;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .34);
+  white-space: normal;
+  font-size: .82rem;
+  font-weight: 500;
+}
+.compact-info-popover[hidden] { display: none; }
+.separate-media-controls {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.separate-media-controls[hidden] { display: none; }
+.separate-media-controls .secondary { min-height: 40px; padding: 6px 10px; }
+.separate-media-controls .music-fallback { grid-column: 1 / -1; justify-self: center; }
+.table-scroll {
+  min-height: 0;
+  overflow: auto;
+  max-width: 100%;
+  border-radius: 10px;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #aebcff #202640;
+}
+.table-scroll::-webkit-scrollbar { width: 14px; height: 14px; }
+.table-scroll::-webkit-scrollbar-track { background: #202640; border-radius: 9px; }
+.table-scroll::-webkit-scrollbar-thumb { background: #aebcff; border: 3px solid #202640; border-radius: 9px; }
+.table-scroll:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.table-scroll[data-clipped="true"] { box-shadow: 0 0 0 2px #aebcff, inset -8px -8px 0 rgba(174, 188, 255, .13); }
+.score-scroll-cue {
+  flex: 0 0 auto;
+  margin: 5px 0;
+  color: #fff;
+  font-size: .86rem;
+  font-weight: 800;
+}
+.score-scroll-controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(205, 214, 255, .42);
+  border-radius: 9px;
+  background: #171d35;
+  box-shadow: inset 0 -3px 0 rgba(159, 177, 255, .22);
+}
+.score-scroll-controls[hidden] { display: none; }
+.score-scroll-control-label { margin-right: auto; color: #fff; font-size: .8rem; font-weight: 800; }
+.score-scroll-button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px 10px;
+  border: 1px solid rgba(205, 214, 255, .48);
+  border-radius: 8px;
+  color: #fff;
+  background: #34406d;
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+.score-scroll-button:disabled { opacity: .42; }
+.scoreboard > .table-scroll { flex: 1 1 auto; }
+table { width: 100%; min-width: 620px; border-collapse: collapse; background: rgba(13, 17, 34, .28); }
+th, td { border: 1px solid var(--line); padding: 9px 10px; text-align: center; }
+th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: #252d4b; z-index: 1; }
+thead th { background: var(--panel-strong); }
+.category { width: 100%; min-height: 40px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: inherit; text-align: inherit; }
+.category:not(:disabled):hover { border-color: var(--accent); background: rgba(159, 177, 255, .1); cursor: pointer; }
+tfoot { font-weight: 800; }
+.records { flex: 0 0 auto; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.records-heading-row { justify-content: flex-start; flex-wrap: wrap; }
+.records-heading-row label { margin-left: auto; color: var(--muted); font-size: .9rem; }
+.records select { min-height: 44px; max-width: 230px; border: 1px solid var(--line); border-radius: 8px; background: #252d4b; color: var(--text); padding: 7px 10px; }
+.record-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.record-totals div { background: rgba(13, 17, 34, .38); border-radius: 9px; padding: 10px; }
+.record-totals dt { color: var(--muted); font-size: .82rem; }
+.record-totals dd { margin: 2px 0 0; font-weight: 750; }
+.scoreboard[hidden] { display: none; }
+.presentation-grid:has(.scoreboard[hidden]) { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 941px) and (min-height: 521px) {
+  body[data-appearance="classic"] .play-surface {
+    width: min(100cqw, 131.25cqh);
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+  }
+}
+.scoreboard table { min-width: 500px; table-layout: fixed; font-size: .78rem; }
+.scoreboard th, .scoreboard td { padding: 5px 6px; }
+.scoreboard th:first-child, .scoreboard td:first-child { width: 142px; }
+
+body[data-appearance="classic"] {
+  background: radial-gradient(circle at 35% -10%, #875166, #163d40 64%, #112b2e);
+}
+body[data-appearance="classic"] .appearance { color: #ffe0ec; background: #62354b; border-color: #d49aaa; }
+body[data-appearance="classic"] .play-surface {
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  min-width: 0;
+  min-height: 0;
+  width: min(100%, var(--viewer-board-max-width, 840px));
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  justify-self: center;
+  align-self: center;
+  aspect-ratio: 840 / 640;
+  display: block;
+  color: var(--classic-ink);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: var(--classic-paper);
+  background-image: var(--five-dice-board, linear-gradient(145deg, #f5c8bd, #d79aad 48%, #537f76));
+  background-position: center;
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+  overflow: hidden;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .28);
+}
+
+/* Built-in table restoration. The Classic/OCX scorecard remains unchanged. */
+body[data-appearance="classic"] .turn-copy,
+body[data-appearance="classic"] .built-in-table-mark { display: none; }
+body[data-appearance="built-in"] .play-surface {
+  position: relative;
+  width: min(100%, 980px);
+  min-height: 520px;
+  grid-template-columns: minmax(380px, 1.1fr) minmax(250px, .9fr);
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas:
+    "score-sheet turn"
+    "score-sheet roll"
+    "score-sheet dice";
+  gap: 12px 14px;
+  padding: clamp(16px, 2.2vw, 30px);
+  border: 12px solid #382318;
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255,255,255,.08), transparent 34%),
+    repeating-linear-gradient(105deg, rgba(255,255,255,.018) 0 2px, rgba(0,0,0,.018) 2px 5px),
+    linear-gradient(145deg, #1b5a4b, #0c352f 70%, #082823);
+  box-shadow: inset 0 0 0 3px #a66c42, inset 0 0 35px rgba(0,0,0,.58), 0 16px 32px rgba(0,0,0,.38);
+  overflow: hidden;
+}
+body[data-appearance="built-in"] .turn-copy {
+  grid-area: turn;
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  padding: 18px;
+  border: 1px solid rgba(255,235,190,.24);
+  border-radius: 16px;
+  color: #f9edcf;
+  background: rgba(4,30,25,.6);
+  box-shadow: inset 0 0 18px rgba(0,0,0,.28);
+}
+body[data-appearance="built-in"] .turn-copy h2 { margin: 0 0 8px; font-size: 1.05rem; text-transform: uppercase; letter-spacing: .08em; }
+body[data-appearance="built-in"] .turn-copy p { margin: 4px 0; }
+body[data-appearance="built-in"] .built-in-roll {
+  grid-area: roll;
+  position: relative;
+  z-index: 4;
+  display: inline-grid;
+  min-height: 38px;
+  width: min(72%, 230px);
+  place-items: center;
+  justify-self: center;
+  padding: 7px 18px;
+  color: #fff4d2;
+  border: 2px solid #bd9360;
+  border-radius: 999px;
+  background: linear-gradient(#286f5e, #164b40);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .08), 0 6px 12px rgba(0, 0, 0, .3);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: .86rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+body[data-appearance="built-in"] .built-in-roll:is(:hover, :focus-visible) {
+  color: #17362f;
+  background: linear-gradient(#f9e8ac, #d4b96f);
+  outline: 3px solid #f9e8ac;
+  outline-offset: 2px;
+}
+body[data-appearance="built-in"] .built-in-roll:disabled {
+  color: rgba(255, 244, 210, .58);
+  border-color: rgba(189, 147, 96, .48);
+  background: linear-gradient(#3f5e56, #2c4540);
+  box-shadow: none;
+  cursor: default;
+}
+body[data-appearance="built-in"] .built-in-roll[hidden],
+body[data-appearance="built-in"] .roll-actions > #roll { display: none; }
+body[data-appearance="built-in"] .built-in-table-mark {
+  position: absolute;
+  left: 73%;
+  top: 25px;
+  color: rgba(238,215,161,.36);
+  text-align: center;
+  transform: translateX(-50%);
+  letter-spacing: .25em;
+  line-height: .82;
+  pointer-events: none;
+}
+body[data-appearance="built-in"] .built-in-table-mark span,
+body[data-appearance="built-in"] .built-in-table-mark strong { display: block; }
+body[data-appearance="built-in"] .built-in-table-mark strong { font-size: 2rem; }
+body[data-appearance="built-in"] .dice {
+  grid-area: dice;
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  padding: 24px;
+  border: 2px solid rgba(249,222,168,.4);
+  border-radius: 22px;
+  background: rgba(3,24,21,.55);
+  box-shadow: inset 0 0 22px rgba(0,0,0,.42), 0 8px 20px rgba(0,0,0,.28);
+}
+body[data-appearance="built-in"] .die {
+  color: #18222a;
+  border: 3px solid #d6c9aa;
+  border-radius: 15px;
+  background: linear-gradient(145deg, #fffdf0, #d8cfb7);
+  text-shadow: 0 1px 0 #fff;
+  box-shadow: inset -5px -5px 8px rgba(74,55,31,.2), 0 5px 8px rgba(0,0,0,.42);
+}
+body[data-appearance="built-in"] .die[aria-pressed="true"] {
+  color: #10221e;
+  border-color: #93e8cb;
+  background: linear-gradient(145deg, #d8fff1, #89ccb5);
+}
+body[data-appearance="built-in"] .die {
+  --five-dice-face: linear-gradient(145deg, #fffaf0, #e5d7bb 82%);
+  overflow: hidden;
+  color: transparent;
+  background-color: #eee2ca;
+  background-image: var(--five-dice-pips, none), var(--five-dice-face);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  font-size: 0;
+  text-shadow: none;
+  box-shadow: inset 0 -5px 0 rgba(85, 61, 34, .18), inset 0 0 0 2px rgba(255, 255, 255, .58), 0 7px 14px rgba(0, 0, 0, .34);
+}
+body[data-appearance="built-in"] .die[aria-pressed="true"] {
+  --five-dice-face: linear-gradient(145deg, #d9fff1, #8bcdb7 84%);
+  background-image: var(--five-dice-pips, none), var(--five-dice-face);
+}
+body[data-appearance="built-in"] .die::after {
+  content: none;
+  display: none;
+}
+body[data-appearance="built-in"] .die[aria-label*=': 1,'] {
+  --five-dice-pips: radial-gradient(circle at 50% 50%, #17332d 0 7%, transparent 8%);
+}
+body[data-appearance="built-in"] .die[aria-label*=': 2,'] {
+  --five-dice-pips:
+    radial-gradient(circle at 29% 29%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 71% 71%, #17332d 0 7%, transparent 8%);
+}
+body[data-appearance="built-in"] .die[aria-label*=': 3,'] {
+  --five-dice-pips:
+    radial-gradient(circle at 28% 28%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 50% 50%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 72% 72%, #17332d 0 7%, transparent 8%);
+}
+body[data-appearance="built-in"] .die[aria-label*=': 4,'] {
+  --five-dice-pips:
+    radial-gradient(circle at 29% 29%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 71% 29%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 29% 71%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 71% 71%, #17332d 0 7%, transparent 8%);
+}
+body[data-appearance="built-in"] .die[aria-label*=': 5,'] {
+  --five-dice-pips:
+    radial-gradient(circle at 28% 28%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 72% 28%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 50% 50%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 28% 72%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 72% 72%, #17332d 0 7%, transparent 8%);
+}
+body[data-appearance="built-in"] .die[aria-label*=': 6,'] {
+  --five-dice-pips:
+    radial-gradient(circle at 29% 25%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 71% 25%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 29% 50%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 71% 50%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 29% 75%, #17332d 0 7%, transparent 8%),
+    radial-gradient(circle at 71% 75%, #17332d 0 7%, transparent 8%);
+}
+body[data-appearance="built-in"] .built-in-score-sheet {
+  --score-pad-ink: #2c251c;
+  --score-pad-rule: rgba(87, 67, 43, .34);
+  grid-area: score-sheet;
+  position: relative;
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  align-self: stretch;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 15px 15px;
+  color: var(--score-pad-ink);
+  border: 2px solid #815532;
+  border-radius: 9px 16px 11px 14px;
+  background:
+    linear-gradient(96deg, transparent 0 13px, rgba(150, 65, 54, .34) 13px 15px, transparent 15px),
+    repeating-linear-gradient(0deg, rgba(88, 67, 39, .035) 0 1px, transparent 1px 4px),
+    linear-gradient(145deg, #f2e5bd, #dbc794 72%, #cbb37f);
+  box-shadow: 5px 7px 0 rgba(20, 13, 8, .22), inset 0 0 24px rgba(104, 72, 31, .14);
+  transform: rotate(-.25deg);
+}
+body[data-appearance="built-in"] .built-in-score-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 1px solid rgba(77, 53, 28, .22);
+  border-radius: 6px 12px 8px 10px;
+  pointer-events: none;
+}
+.built-in-score-heading {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 3px 8px 9px;
+  border-bottom: 2px solid rgba(71, 49, 27, .52);
+}
+.built-in-score-kicker {
+  display: block;
+  color: #8e3f2c;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+}
+.built-in-score-heading h2 {
+  margin: 2px 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.1rem, 2vw, 1.5rem);
+  line-height: 1;
+  letter-spacing: .02em;
+}
+.built-in-score-heading p {
+  max-width: 15rem;
+  margin: 0;
+  color: #514333;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: .75rem;
+  font-style: italic;
+  line-height: 1.25;
+  text-align: right;
+}
+.built-in-score-actions {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding-left: 9px;
+}
+.built-in-score-columns,
+.built-in-score-choice {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(92px, 1.2fr) repeat(var(--built-in-player-count), minmax(50px, .8fr));
+  align-items: center;
+  gap: 3px;
+}
+.built-in-score-columns {
+  min-height: 42px;
+  padding: 2px 5px 4px;
+  color: #5c4a36;
+  border-bottom: 2px solid rgba(71, 49, 27, .52);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+}
+.built-in-score-column-category { padding-left: 2px; text-transform: uppercase; }
+.built-in-score-player-name {
+  overflow: hidden;
+  padding: 3px 2px;
+  border-radius: 4px;
+  line-height: 1.05;
+  text-align: center;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.built-in-score-player-name[data-viewer="true"] {
+  color: #17483d;
+  background: rgba(80, 142, 119, .18);
+}
+.built-in-score-choice {
+  position: relative;
+  min-height: 26px;
+  padding: 4px 5px 3px;
+  color: var(--score-pad-ink);
+  border: 0;
+  border-bottom: 1px solid var(--score-pad-rule);
+  border-radius: 4px 4px 2px 2px;
+  background: transparent;
+  font-family: Georgia, "Times New Roman", serif;
+  text-align: left;
+}
+.built-in-score-choice::after {
+  content: attr(data-score-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 5px);
+  z-index: 30;
+  width: max-content;
+  max-width: min(310px, 92vw);
+  padding: 7px 9px;
+  color: #fff7df;
+  border: 1px solid #d3b06c;
+  border-radius: 7px;
+  background: #243d36;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, .34);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.built-in-score-choice:is(:hover, :focus-visible)::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.built-in-score-choice:disabled { opacity: 1; cursor: default; }
+.built-in-score-choice[data-state="available"] {
+  color: #143e35;
+  border: 1px solid #397362;
+  border-bottom-width: 2px;
+  background: linear-gradient(100deg, rgba(255, 248, 198, .96), rgba(221, 235, 183, .82));
+  box-shadow: 1px 2px 0 rgba(48, 63, 42, .23);
+  cursor: pointer;
+}
+.built-in-score-choice[data-state="available"]:is(:hover, :focus-visible) {
+  color: #092b24;
+  background: #fff6b8;
+  outline: 3px solid #f8e37d;
+  outline-offset: 1px;
+  transform: translateX(2px);
+}
+.built-in-score-choice[data-state="scored"] {
+  color: #766653;
+  background: rgba(112, 87, 55, .07);
+}
+.built-in-score-category {
+  overflow: hidden;
+  font-size: clamp(.72rem, 1.15vw, .88rem);
+  font-weight: 700;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.built-in-score-player-value {
+  min-width: 0;
+  padding: 2px 3px;
+  color: #665644;
+  border-left: 1px solid rgba(87, 67, 43, .2);
+  font-family: "Courier New", monospace;
+  font-size: .76rem;
+  font-weight: 900;
+  text-align: center;
+}
+.built-in-score-player-value[data-viewer="true"] { background: rgba(80, 142, 119, .08); }
+.built-in-score-player-value[data-preview="true"] {
+  color: #145747;
+  background: rgba(255, 246, 184, .68);
+}
+body[data-appearance="built-in"] + .scoreboard table,
+body[data-appearance="built-in"] .scoreboard table { background: rgba(10,22,38,.62); }
+@media (max-width: 620px) {
+  body[data-appearance="built-in"] .play-surface {
+    min-height: 850px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto 1fr;
+    grid-template-areas: "turn" "roll" "dice" "score-sheet";
+    padding: 26px 18px;
+  }
+  body[data-appearance="built-in"] .built-in-table-mark { left: 50%; top: 25%; opacity: .5; }
+  body[data-appearance="built-in"] .built-in-score-sheet { align-self: auto; transform: none; }
+}
+
+/* POST-BUILD-000063-MODERN-FIVE-DICE-BUILT-IN-2026-08-30
+   Work4's approved jazz-lounge presentation. Classic remains source-mapped. */
+body[data-appearance="built-in"] {
+  --modern-five-dice-ink: #061417;
+  --modern-five-dice-panel: #0a2227;
+  --modern-five-dice-felt: #0b3437;
+  --modern-five-dice-brass: #d8a94f;
+  --modern-five-dice-brass-light: #f5d783;
+  --modern-five-dice-cyan: #5de1dd;
+  --modern-five-dice-coral: #ef7b62;
+  --modern-five-dice-ivory: #f6edda;
+  --modern-five-dice-muted: #9bb0b1;
+}
+
+body[data-appearance="classic"] .built-in-jazz-decor,
+body[data-appearance="classic"] .built-in-opening-curtain,
+body[data-appearance="classic"] .built-in-five-dice-stage-effects,
+body[data-appearance="classic"] .built-in-five-dice-result {
+  display: none !important;
+}
+
+body[data-appearance="built-in"] .player-status-strip.has-built-in-board-avatars {
+  width: min(100%, 1280px);
+  grid-template-columns: repeat(var(--player-status-columns, 4), minmax(0, 1fr));
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "avatar name turn"
+    "avatar score timer"
+    "avatar hold hold";
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 64px;
+  padding: 7px 10px;
+  color: #f7f1e5;
+  border: 1px solid rgba(216,169,79,.35);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.035), transparent 42%),
+    rgba(4,18,21,.92);
+  box-shadow: inset 0 1px rgba(255,255,255,.04), 0 8px 18px rgba(0,0,0,.22);
+}
+
+body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar.is-current {
+  border-color: var(--modern-five-dice-cyan);
+  background: linear-gradient(145deg, rgba(93,225,221,.13), transparent 58%), rgba(4,18,21,.96);
+  box-shadow: inset 0 0 0 2px rgba(93,225,221,.13), 0 0 22px rgba(93,225,221,.11);
+}
+
+body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+  grid-area: avatar;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--modern-five-dice-brass);
+  border-radius: 8px;
+  object-fit: cover;
+  background: #12292d;
+}
+
+body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .player-status-name {
+  grid-area: name;
+  overflow: hidden;
+  max-width: none;
+  color: #f7f1e5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-appearance="built-in"] .player-status-score {
+  grid-area: score;
+  color: var(--modern-five-dice-muted);
+  font-size: .76rem;
+}
+
+body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .player-status-timer {
+  grid-area: timer;
+  justify-self: end;
+  color: var(--modern-five-dice-muted);
+  font-size: .72rem;
+}
+
+body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .player-status-turn {
+  grid-area: turn;
+  justify-self: end;
+  color: #052326;
+  background: var(--modern-five-dice-cyan);
+  font-size: .56rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .player-status-hold {
+  grid-area: hold;
+  color: var(--modern-five-dice-brass-light);
+}
+
+body[data-appearance="built-in"] .play-surface {
+  position: relative;
+  isolation: isolate;
+  width: min(100%, 1280px);
+  min-height: 680px;
+  grid-template-columns: minmax(300px, .82fr) minmax(420px, 1.45fr) minmax(155px, .43fr);
+  grid-template-rows: auto minmax(390px, 1fr) auto;
+  grid-template-areas:
+    "score-sheet turn decor"
+    "score-sheet dice decor"
+    "score-sheet roll decor";
+  gap: 0;
+  padding: 14px;
+  border: 1px solid rgba(216,169,79,.44);
+  border-radius: 22px;
+  color: #f7f1e5;
+  background:
+    linear-gradient(rgba(6,20,23,.62), rgba(6,20,23,.88)),
+    url("../../assets/images/five-dice-modern/materials-and-effects.png") 0 0 / 400% 200%,
+    #061619;
+  box-shadow: 0 22px 65px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.05);
+  image-rendering: auto;
+  overflow: hidden;
+}
+
+body[data-appearance="built-in"] .play-surface::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 14px;
+  border: 1px solid rgba(245,215,131,.28);
+  border-radius: 17px;
+  pointer-events: none;
+}
+
+body[data-appearance="built-in"] .turn-copy {
+  grid-area: turn;
+  z-index: 4;
+  align-self: stretch;
+  margin: 0;
+  padding: 12px 18px;
+  color: #f7f1e5;
+  border: 0;
+  border-bottom: 1px solid rgba(216,169,79,.22);
+  border-radius: 0;
+  background: rgba(4,18,21,.82);
+  box-shadow: none;
+}
+
+body[data-appearance="built-in"] .turn-copy h2 {
+  margin: 0 0 5px;
+  color: var(--modern-five-dice-brass-light);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .2em;
+}
+
+body[data-appearance="built-in"] .turn-copy #turn-name {
+  color: #fff8e8;
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+body[data-appearance="built-in"] .turn-copy #roll-count {
+  color: var(--modern-five-dice-muted);
+}
+
+body[data-appearance="built-in"] .built-in-score-sheet {
+  --score-pad-ink: #e7efed;
+  --score-pad-rule: rgba(216,169,79,.2);
+  grid-area: score-sheet;
+  z-index: 3;
+  min-height: 0;
+  gap: 8px;
+  padding: 14px;
+  color: var(--score-pad-ink);
+  border: 0;
+  border-right: 1px solid rgba(216,169,79,.3);
+  border-radius: 0;
+  background:
+    linear-gradient(rgba(4,18,21,.92), rgba(4,18,21,.92)),
+    url("../../assets/images/five-dice-modern/materials-and-effects.png") 25% 0 / 400% 200%;
+  box-shadow: none;
+  transform: none;
+  overflow: auto;
+  scrollbar-color: var(--modern-five-dice-brass) #071a1d;
+}
+
+body[data-appearance="built-in"] .built-in-score-sheet::after { content: none; }
+
+body[data-appearance="built-in"] .built-in-score-heading {
+  align-items: end;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid rgba(216,169,79,.38);
+}
+
+body[data-appearance="built-in"] .built-in-score-kicker {
+  color: var(--modern-five-dice-brass-light);
+  font-family: inherit;
+}
+
+body[data-appearance="built-in"] .built-in-score-heading h2 {
+  color: #f7f1e5;
+  font-size: 1.24rem;
+}
+
+body[data-appearance="built-in"] .built-in-score-heading p {
+  max-width: 13rem;
+  color: var(--modern-five-dice-muted);
+  font-family: inherit;
+  font-style: normal;
+  font-size: .7rem;
+}
+
+body[data-appearance="built-in"] .built-in-score-actions {
+  gap: 3px;
+  padding: 0;
+}
+
+body[data-appearance="built-in"] .built-in-score-columns,
+body[data-appearance="built-in"] .built-in-score-choice {
+  grid-template-columns: minmax(100px, 1.35fr) repeat(var(--built-in-player-count), minmax(38px, .55fr));
+  gap: 2px;
+}
+
+body[data-appearance="built-in"] .built-in-score-columns {
+  min-height: 31px;
+  padding: 2px 3px 4px;
+  color: var(--modern-five-dice-brass-light);
+  border-bottom: 1px solid rgba(216,169,79,.34);
+  font-family: inherit;
+  font-size: .62rem;
+}
+
+body[data-appearance="built-in"] .built-in-score-player-name[data-viewer="true"] {
+  color: #061417;
+  background: var(--modern-five-dice-cyan);
+}
+
+body[data-appearance="built-in"] .built-in-score-choice {
+  min-height: 29px;
+  padding: 2px;
+  color: #cad8d6;
+  border: 1px solid rgba(216,169,79,.18);
+  border-radius: 4px;
+  background-color: rgba(9,39,43,.68);
+  background-image:
+    linear-gradient(90deg, rgba(216,169,79,.11), transparent 18% 82%, rgba(216,169,79,.08)),
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 46%, rgba(0,0,0,.18));
+  background-repeat: no-repeat;
+  box-shadow: none;
+  font-family: inherit;
+}
+
+body[data-appearance="built-in"] .built-in-score-choice[data-state="available"] {
+  color: #f4fbf9;
+  border-color: var(--modern-five-dice-cyan);
+  background-color: rgba(8,69,75,.9);
+  box-shadow: inset 0 0 0 1px rgba(93,225,221,.28), 0 0 12px rgba(93,225,221,.12);
+}
+
+body[data-appearance="built-in"] .built-in-score-choice[data-state="available"]:is(:hover, :focus-visible) {
+  color: #fff;
+  background-color: #0d5960;
+  outline: 3px solid var(--modern-five-dice-cyan);
+  outline-offset: 1px;
+  transform: translateX(2px);
+}
+
+body[data-appearance="built-in"] .built-in-score-choice[data-state="scored"] {
+  color: #d6dfdc;
+  background-color: rgba(12,30,33,.88);
+}
+
+body[data-appearance="built-in"] .built-in-score-choice[data-state="bonus"] {
+  border-color: rgba(245,215,131,.55);
+  background-image:
+    linear-gradient(90deg, rgba(245,215,131,.18), transparent 22% 78%, rgba(245,215,131,.12)),
+    linear-gradient(180deg, rgba(255,255,255,.05), transparent 46%, rgba(0,0,0,.18));
+}
+
+body[data-appearance="built-in"] .built-in-score-choice[data-state="total"] {
+  border-color: rgba(93,225,221,.52);
+  background-image:
+    linear-gradient(90deg, rgba(93,225,221,.17), transparent 22% 78%, rgba(93,225,221,.12)),
+    linear-gradient(180deg, rgba(255,255,255,.045), transparent 46%, rgba(0,0,0,.18));
+  font-weight: 900;
+}
+
+body[data-appearance="built-in"] .built-in-score-category {
+  padding-left: 5px;
+  color: inherit;
+  font-size: clamp(.65rem, .8vw, .78rem);
+  letter-spacing: .02em;
+}
+
+body[data-appearance="built-in"] .built-in-score-player-value {
+  color: inherit;
+  border-left-color: rgba(216,169,79,.18);
+  font-size: .7rem;
+}
+
+body[data-appearance="built-in"] .built-in-score-player-value[data-viewer="true"] {
+  background: rgba(93,225,221,.08);
+}
+
+body[data-appearance="built-in"] .built-in-score-player-value[data-preview="true"] {
+  color: var(--modern-five-dice-cyan);
+  background: rgba(8,69,75,.46);
+}
+
+body[data-appearance="built-in"] .built-in-score-choice.is-score-committing {
+  animation: modern-five-dice-score-commit 1.45s ease-out both;
+}
+
+body[data-appearance="built-in"] .built-in-score-choice.is-bonus-earned {
+  animation: modern-five-dice-bonus 1.7s ease-out both;
+}
+
+body[data-appearance="built-in"] .dice {
+  grid-area: dice;
+  z-index: 3;
+  align-self: stretch;
+  min-height: 390px;
+  place-items: center;
+  gap: clamp(6px, 1.2vw, 18px);
+  padding: 55px 18px 24px;
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(36,116,117,.27), transparent 58%),
+    repeating-linear-gradient(108deg, rgba(255,255,255,.012) 0 2px, transparent 2px 7px),
+    var(--modern-five-dice-felt);
+  box-shadow: inset 0 0 55px rgba(0,0,0,.7);
+}
+
+body[data-appearance="built-in"] .die {
+  --modern-die-size: clamp(58px, 6.1vw, 104px);
+  position: relative;
+  isolation: isolate;
+  width: min(100%, var(--modern-die-size));
+  max-width: var(--modern-die-size);
+  aspect-ratio: 1;
+  padding: 0;
+  color: transparent;
+  border: 0;
+  border-radius: 24%;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  filter: drop-shadow(0 10px 10px rgba(0,0,0,.52));
+  transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
+}
+
+body[data-appearance="built-in"] .die::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -3%;
+  border-radius: 22%;
+  background-image: url("../../assets/images/five-dice-modern/sculpted-dice-faces.png");
+  background-repeat: no-repeat;
+  background-size: 600% auto;
+  background-position-y: center;
+  pointer-events: none;
+}
+
+body[data-appearance="built-in"] .die[data-face="0"]::before {
+  opacity: .2;
+  filter: grayscale(1);
+}
+
+body[data-appearance="built-in"] .die[data-face="1"]::before { background-position-x: 0%; }
+body[data-appearance="built-in"] .die[data-face="2"]::before { background-position-x: 20%; }
+body[data-appearance="built-in"] .die[data-face="3"]::before { background-position-x: 40%; }
+body[data-appearance="built-in"] .die[data-face="4"]::before { background-position-x: 60%; }
+body[data-appearance="built-in"] .die[data-face="5"]::before { background-position-x: 80%; }
+body[data-appearance="built-in"] .die[data-face="6"]::before { background-position-x: 100%; }
+
+body[data-appearance="built-in"] .die:not(:disabled):is(:hover, :focus-visible) {
+  z-index: 2;
+  outline: 3px solid var(--modern-five-dice-cyan);
+  outline-offset: 4px;
+  transform: translateY(-8px) scale(1.03);
+}
+
+body[data-appearance="built-in"] .die[aria-pressed="true"] {
+  box-shadow: 0 0 0 4px rgba(93,225,221,.42), 0 0 28px rgba(93,225,221,.36);
+  filter: drop-shadow(0 9px 9px rgba(0,0,0,.48));
+  transform: translateY(-5px);
+}
+
+body[data-appearance="built-in"] .die[aria-pressed="true"]::after {
+  content: "HELD";
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: -25px;
+  display: block;
+  padding: 3px 7px;
+  color: #061417;
+  border-radius: 999px;
+  background: var(--modern-five-dice-cyan);
+  font-size: .56rem;
+  font-weight: 900;
+  letter-spacing: .1em;
+  line-height: 1;
+  transform: translateX(-50%);
+}
+
+body[data-appearance="built-in"] .die.is-rolling {
+  animation: modern-five-dice-roll 630ms cubic-bezier(.2,.72,.28,1) infinite alternate;
+}
+
+body[data-appearance="built-in"] .built-in-roll {
+  grid-area: roll;
+  z-index: 5;
+  display: grid;
+  width: clamp(150px, 16vw, 190px);
+  min-height: 0;
+  aspect-ratio: 1.25;
+  place-items: center;
+  align-self: end;
+  justify-self: center;
+  margin: -30px 0 24px;
+  padding: 0 20px;
+  color: #fff7e7;
+  border: 0;
+  border-radius: 50%;
+  background-color: transparent;
+  background-image: url("../../assets/images/five-dice-modern/roll-drum-states.png");
+  background-repeat: no-repeat;
+  background-position: 0 50%;
+  background-size: 500% 100%;
+  filter: drop-shadow(0 12px 14px rgba(0,0,0,.5));
+  box-shadow: none;
+  font-family: inherit;
+  font-size: .92rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-shadow: 0 2px 5px #000;
+  cursor: pointer;
+}
+
+body[data-appearance="built-in"] .built-in-roll:is(:hover, :focus-visible) {
+  color: #fff7e7;
+  background-position: 25% 50%;
+  outline: 3px solid var(--modern-five-dice-cyan);
+  outline-offset: 3px;
+}
+
+body[data-appearance="built-in"] .built-in-roll:active { background-position: 50% 50%; }
+body[data-appearance="built-in"] .built-in-roll:disabled {
+  color: rgba(255,247,231,.62);
+  background-position: 75% 50%;
+  filter: grayscale(.35) drop-shadow(0 8px 10px rgba(0,0,0,.4));
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-rolling .built-in-roll {
+  background-position: 100% 50%;
+  animation: modern-five-dice-drum-active .7s linear infinite;
+}
+
+body[data-appearance="built-in"] .built-in-jazz-decor {
+  grid-area: decor;
+  z-index: 2;
+  position: relative;
+  align-self: stretch;
+  overflow: hidden;
+  border-left: 1px solid rgba(216,169,79,.28);
+  background: linear-gradient(90deg, #061619, #030a0c);
+}
+
+body[data-appearance="built-in"] .built-in-jazz-decor img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+
+body[data-appearance="built-in"] .built-in-table-mark { display: none; }
+
+body[data-appearance="built-in"] .built-in-five-dice-stage-effects {
+  position: absolute;
+  z-index: 8;
+  inset: 14px;
+  overflow: hidden;
+  border-radius: 17px;
+  pointer-events: none;
+}
+
+body[data-appearance="built-in"] .built-in-score-transfer {
+  position: absolute;
+  left: 42%;
+  top: 43%;
+  width: 0;
+  height: 5px;
+  border-radius: 99px;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, var(--modern-five-dice-cyan), #fff);
+  box-shadow: 0 0 18px var(--modern-five-dice-cyan);
+  transform: rotate(168deg);
+  transform-origin: left center;
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-scoring .built-in-score-transfer {
+  animation: modern-five-dice-score-transfer 1.35s ease-in-out both;
+}
+
+body[data-appearance="built-in"] .built-in-opening-curtain {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  display: none;
+  place-items: center;
+  opacity: 0;
+  background: radial-gradient(circle, rgba(18,69,72,.97), rgba(3,12,14,.995) 64%);
+  pointer-events: none;
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .built-in-opening-curtain {
+  display: grid;
+  animation: modern-five-dice-curtain-open 3.6s ease-in-out both;
+}
+
+.built-in-opening-mark {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 7vw, 5rem);
+  letter-spacing: .13em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.built-in-opening-mark span {
+  display: block;
+  margin-top: 8px;
+  color: var(--modern-five-dice-brass-light);
+  font-family: "Bahnschrift", "Aptos Display", sans-serif;
+  font-size: .7rem;
+  font-weight: 900;
+  letter-spacing: .28em;
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .built-in-score-sheet {
+  animation: modern-five-dice-scorecard-enter 3.2s .7s both;
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .dice {
+  animation: modern-five-dice-stage-light 3.1s .9s both;
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .die {
+  animation: modern-five-dice-dice-arrive 1.05s cubic-bezier(.18,.78,.22,1) both;
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .die:nth-child(1) { animation-delay: 1.15s; }
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .die:nth-child(2) { animation-delay: 1.28s; }
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .die:nth-child(3) { animation-delay: 1.41s; }
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .die:nth-child(4) { animation-delay: 1.54s; }
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .die:nth-child(5) { animation-delay: 1.67s; }
+
+body[data-appearance="built-in"] .play-surface.is-built-in-opening .built-in-jazz-decor {
+  animation: modern-five-dice-decor-enter 3.2s .8s both;
+}
+
+body[data-appearance="built-in"] .built-in-five-dice-result {
+  position: absolute;
+  z-index: 24;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  min-width: min(410px, calc(100% - 32px));
+  place-items: center;
+  gap: 7px;
+  padding: 28px 30px;
+  color: #f7f1e5;
+  border: 2px solid var(--modern-five-dice-brass-light);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 0, rgba(93,225,221,.2), transparent 45%),
+    linear-gradient(145deg, #0b3034, #061619 68%);
+  box-shadow: 0 24px 70px rgba(0,0,0,.68), inset 0 0 0 3px rgba(216,169,79,.12);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+body[data-appearance="built-in"] .built-in-five-dice-result[hidden] { display: none; }
+
+.built-in-result-kicker {
+  color: var(--modern-five-dice-brass-light);
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+}
+
+#built-in-result-name {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.8rem, 5vw, 3.4rem);
+  font-weight: 500;
+  line-height: 1;
+}
+
+#built-in-result-score { color: var(--modern-five-dice-cyan); font-weight: 850; }
+#built-in-result-game-name { color: var(--modern-five-dice-muted); }
+
+body[data-appearance="built-in"] .play-surface.is-built-in-winning .built-in-five-dice-result {
+  animation: modern-five-dice-result-arrive 4.5s ease both;
+}
+
+body[data-appearance="built-in"] .play-surface.is-built-in-winning::after {
+  content: "";
+  position: absolute;
+  z-index: 22;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 8%, #f5d783 0 3px, transparent 4px),
+    radial-gradient(circle at 22% 32%, #5de1dd 0 4px, transparent 5px),
+    radial-gradient(circle at 81% 14%, #ef7b62 0 4px, transparent 5px),
+    radial-gradient(circle at 72% 38%, #f6edda 0 3px, transparent 4px),
+    radial-gradient(circle at 44% 6%, #5de1dd 0 3px, transparent 4px);
+  background-size: 115px 140px, 137px 151px, 128px 162px, 149px 146px, 121px 158px;
+  animation: modern-five-dice-confetti 3.9s ease-out both;
+}
+
+@keyframes modern-five-dice-roll {
+  0% { transform: translate(-5px, -10px) rotate(-12deg) scale(.92); filter: brightness(.84); }
+  55% { transform: translate(7px, 3px) rotate(18deg) scale(1.04); filter: brightness(1.18); }
+  100% { transform: translate(-2px, 8px) rotate(40deg) scale(.96); filter: brightness(.94); }
+}
+
+@keyframes modern-five-dice-drum-active { 50% { filter: drop-shadow(0 0 22px rgba(93,225,221,.65)); } }
+@keyframes modern-five-dice-score-transfer { 0% { width: 0; opacity: 0; } 25% { width: 22%; opacity: 1; } 72% { width: 38%; opacity: 1; } 100% { width: 43%; opacity: 0; } }
+@keyframes modern-five-dice-score-commit { 0% { filter: brightness(1); } 34% { filter: brightness(1.75); box-shadow: 0 0 22px rgba(93,225,221,.55); } 100% { filter: none; } }
+@keyframes modern-five-dice-bonus { 0% { filter: brightness(1); } 24% { color: #fff4cf; background-color: #6d4817; box-shadow: 0 0 26px rgba(245,215,131,.56); } 100% { filter: none; } }
+@keyframes modern-five-dice-curtain-open { 0%, 20% { opacity: 1; clip-path: inset(0); } 70% { opacity: 1; clip-path: inset(0 49%); } 100% { opacity: 0; clip-path: inset(0 50%); } }
+@keyframes modern-five-dice-scorecard-enter { 0%, 10% { opacity: 0; clip-path: inset(0 100% 0 0); } 50%, 100% { opacity: 1; clip-path: inset(0); } }
+@keyframes modern-five-dice-stage-light { 0%, 15% { filter: brightness(.18); } 55%, 100% { filter: brightness(1); } }
+@keyframes modern-five-dice-dice-arrive { 0% { opacity: 0; translate: 80px -120px; rotate: 160deg; scale: .65; } 75% { opacity: 1; translate: -5px 8px; rotate: 350deg; scale: 1.06; } 100% { opacity: 1; translate: 0; rotate: 360deg; scale: 1; } }
+@keyframes modern-five-dice-decor-enter { 0%, 15% { opacity: 0; transform: translateX(60px); } 55%, 100% { opacity: 1; transform: none; } }
+@keyframes modern-five-dice-result-arrive { 0%, 42% { opacity: 0; transform: translate(-50%, -44%) scale(.78); } 62% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); } 75%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes modern-five-dice-confetti { 0% { opacity: 0; transform: translateY(-12%); } 18% { opacity: 1; } 100% { opacity: 0; transform: translateY(76%); } }
+
+@media (max-width: 1100px) {
+  body[data-appearance="built-in"] .play-surface {
+    grid-template-columns: minmax(250px, .78fr) minmax(340px, 1.22fr) minmax(112px, .32fr);
+  }
+}
+
+@media (max-width: 860px) {
+  body[data-appearance="built-in"] .play-surface {
+    grid-template-columns: minmax(250px, .8fr) minmax(340px, 1.45fr);
+    grid-template-areas:
+      "score-sheet turn"
+      "score-sheet dice"
+      "score-sheet roll"
+      "score-sheet decor";
+  }
+  body[data-appearance="built-in"] .built-in-jazz-decor {
+    display: block;
+    min-height: 190px;
+    border-top: 1px solid rgba(216,169,79,.28);
+    border-left: 0;
+  }
+  body[data-appearance="built-in"] .built-in-jazz-decor img {
+    object-fit: contain;
+    object-position: center;
+  }
+}
+
+@media (max-width: 760px) {
+  body[data-appearance="built-in"] .player-status-strip.has-built-in-board-avatars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  body[data-appearance="built-in"] .play-surface {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(270px, auto) auto minmax(180px, auto) auto;
+    grid-template-areas:
+      "turn"
+      "dice"
+      "roll"
+      "decor"
+      "score-sheet";
+    padding: 8px;
+  }
+  body[data-appearance="built-in"] .dice {
+    min-height: 270px;
+    padding: 38px 10px 12px;
+  }
+  body[data-appearance="built-in"] .built-in-roll {
+    margin: -20px 0 8px;
+  }
+  body[data-appearance="built-in"] .built-in-score-sheet {
+    max-height: none;
+    border-top: 1px solid rgba(216,169,79,.3);
+    border-right: 0;
+  }
+  body[data-appearance="built-in"] .built-in-jazz-decor {
+    min-height: clamp(180px, 44vw, 250px);
+  }
+  body[data-appearance="built-in"] .built-in-score-transfer { display: none; }
+}
+
+@media (max-width: 500px) {
+  body[data-appearance="built-in"] .player-status-strip.has-built-in-board-avatars { grid-template-columns: minmax(0, 1fr); }
+  body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar { grid-template-columns: 42px minmax(0, 1fr) auto; }
+  body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar { width: 42px; height: 42px; }
+  body[data-appearance="built-in"] .play-surface { padding: 5px; border-radius: 14px; }
+  body[data-appearance="built-in"] .dice { min-height: 220px; gap: 4px; padding-inline: 6px; }
+  body[data-appearance="built-in"] .die { --modern-die-size: clamp(44px, 17vw, 72px); }
+  body[data-appearance="built-in"] .built-in-roll { width: 142px; }
+  body[data-appearance="built-in"] .built-in-score-sheet { padding: 9px 6px; }
+  body[data-appearance="built-in"] .built-in-score-heading { align-items: start; flex-direction: column; }
+  body[data-appearance="built-in"] .built-in-score-heading p { max-width: none; text-align: left; }
+  body[data-appearance="built-in"] .built-in-score-columns,
+  body[data-appearance="built-in"] .built-in-score-choice {
+    grid-template-columns: minmax(88px, 1.2fr) repeat(var(--built-in-player-count), minmax(30px, .5fr));
+  }
+  body[data-appearance="built-in"] .built-in-score-category { font-size: .59rem; }
+  body[data-appearance="built-in"] .built-in-score-player-value { font-size: .62rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-appearance="built-in"] .play-surface *,
+  body[data-appearance="built-in"] .play-surface *::before,
+  body[data-appearance="built-in"] .play-surface *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The approved board is taller than the shared short desktop iframe. Let the
+   built-in presentation scroll instead of shrinking its title/player rail to
+   zero and painting the board over it. Classic retains its fixed OCX fit. */
+html:has(> body[data-appearance="built-in"]),
+body[data-appearance="built-in"] {
+  height: auto;
+  min-height: 100%;
+  overflow: auto;
+}
+
+body[data-appearance="built-in"] .game {
+  height: auto;
+  min-height: 100%;
+}
+
+body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars,
+body[data-appearance="built-in"] .presentation-grid {
+  flex: 0 0 auto;
+}
+
+/* Approved-composition details that have no counterpart in the older modern
+   block. Keep them after every historical selector for deterministic output. */
+html body[data-appearance="built-in"] .built-in-five-dice-brand {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: .34em;
+  padding: 3px 12px;
+  color: var(--modern-five-dice-ivory);
+  border-right: 1px solid rgba(216,169,79,.24);
+  font-family: "Bahnschrift Condensed", "Aptos Display", sans-serif;
+  font-size: clamp(1.7rem, 3.1vw, 3.4rem);
+  font-weight: 300;
+  letter-spacing: .12em;
+  line-height: .92;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand::before,
+html body[data-appearance="built-in"] .built-in-five-dice-brand::after {
+  content: "";
+  width: clamp(10px, 1.7vw, 26px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--modern-five-dice-brass));
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand::after {
+  background: linear-gradient(90deg, var(--modern-five-dice-brass), transparent);
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand strong {
+  color: var(--modern-five-dice-ivory);
+  font: inherit;
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand span { color: #9ddce2; }
+
+html body[data-appearance="built-in"] .turn-copy,
+html body[data-appearance="built-in"] .built-in-score-heading {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+html body[data-appearance="built-in"] .built-in-score-column-category {
+  color: transparent;
+  user-select: none;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice,
+html body[data-appearance="built-in"] .built-in-score-choice[data-state] {
+  min-height: 29px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category,
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-player-value {
+  display: grid;
+  min-height: 29px;
+  place-items: center;
+  padding: 2px 4px;
+  color: #cad8d6;
+  border: 1px solid rgba(216,169,79,.21);
+  background: rgba(9,39,43,.66);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category {
+  justify-content: start;
+  padding-left: 8px;
+  color: #f0e5d1;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="available"] > span {
+  border-color: var(--modern-five-dice-cyan);
+  background: rgba(8,69,75,.86);
+  box-shadow: inset 0 0 0 1px rgba(93,225,221,.18);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="scored"] > span {
+  color: #d6dfdc;
+  background: rgba(12,30,33,.88);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="bonus"] > span {
+  border-color: rgba(245,215,131,.48);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="total"] > span {
+  border-color: rgba(93,225,221,.45);
+  font-weight: 900;
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-value[data-viewer="true"] {
+  background: rgba(8,69,75,.38);
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-value[data-preview="true"] {
+  color: var(--modern-five-dice-cyan);
+  background: rgba(8,69,75,.82);
+}
+
+html body[data-appearance="built-in"] .die:nth-child(1) { --approved-die-y: -82px; }
+html body[data-appearance="built-in"] .die:nth-child(2) { --approved-die-y: -42px; }
+html body[data-appearance="built-in"] .die:nth-child(3) { --approved-die-y: 0px; }
+html body[data-appearance="built-in"] .die:nth-child(4) { --approved-die-y: 42px; }
+html body[data-appearance="built-in"] .die:nth-child(5) { --approved-die-y: 82px; }
+html body[data-appearance="built-in"] .die { translate: 0 var(--approved-die-y, 0); }
+
+html body[data-appearance="built-in"] .built-in-roll::after {
+  content: attr(data-rolls-left-label);
+  position: absolute;
+  left: 50%;
+  bottom: 5%;
+  width: 72%;
+  color: #f6edda;
+  font-size: .58rem;
+  font-weight: 900;
+  letter-spacing: .09em;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 1050px) and (min-width: 761px) {
+  html body[data-appearance="built-in"] .built-in-five-dice-brand {
+    font-size: clamp(1.35rem, 3.2vw, 2.25rem);
+  }
+  html body[data-appearance="built-in"] .built-in-score-category { font-size: .61rem; }
+}
+
+@media (max-width: 760px) {
+  html body[data-appearance="built-in"] .built-in-five-dice-brand {
+    grid-column: 1 / -1;
+    min-height: 62px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(216,169,79,.24);
+  }
+  html body[data-appearance="built-in"] .die:nth-child(n) { --approved-die-y: 0px; }
+}
+
+@media (max-width: 500px) {
+  html body[data-appearance="built-in"] .built-in-five-dice-brand { grid-column: 1; }
+}
+body[data-appearance="classic"] .turn-copy {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+body[data-appearance="classic"] .classic-seat-labels,
+body[data-appearance="classic"] .classic-avatars,
+body[data-appearance="classic"] .classic-score,
+body[data-appearance="classic"] .classic-score-actions {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.classic-avatar-seat {
+  position: absolute;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+}
+.classic-avatar-seat.is-occupied {
+  background: #646464;
+  box-shadow: none;
+}
+.classic-avatar-seat img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center;
+  background: transparent;
+}
+.classic-score-cell {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #d92a40;
+  font-family: "Arial Narrow", Arial, Helvetica, sans-serif;
+  font-size: clamp(8px, 2.35cqw, 20px);
+  line-height: 1;
+  font-weight: 700;
+  text-shadow: 1px 1px 0 #f4b5b0, -1px 0 0 rgba(84, 0, 20, .35);
+  pointer-events: none;
+}
+.classic-total-cell { font-weight: 900; }
+.classic-score-row-art {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  background-image: var(--five-dice-score-row-art, none);
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: 100% 200%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.classic-player-lane {
+  position: absolute;
+  z-index: 3;
+  background-image: var(--five-dice-player-lane, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.classic-score-choice {
+  position: absolute;
+  z-index: 9;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  overflow: hidden;
+}
+.classic-score-choice-art {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  height: 100%;
+  background-image: var(--five-dice-score-row-art, none);
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: 100% 200%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.classic-score-choice:is(:hover, :focus-visible, .is-previewing) .classic-score-choice-art {
+  background-position: center bottom;
+}
+.classic-score-choice:focus-visible { outline: 0; }
+.classic-score-preview {
+  opacity: .56;
+  font-style: italic;
+}
+.classic-score-preview[hidden] { display: none; }
+.score-preview {
+  color: color-mix(in srgb, currentColor 56%, transparent);
+  font-style: italic;
+}
+body[data-appearance="classic"] .dice {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+body[data-appearance="classic"] .die {
+  position: absolute;
+  width: 6.6667%;
+  min-height: 0;
+  height: 8.75%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: transparent;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  pointer-events: auto;
+}
+body[data-appearance="classic"] .die.is-rolling { animation: none; }
+body[data-appearance="classic"] .classic-roll-strip {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background-image: var(--five-dice-roll-strip, none);
+  background-position: center 0;
+  background-repeat: no-repeat;
+  background-size: 100% 1200%;
+  image-rendering: pixelated;
+  pointer-events: none;
+  animation: five-dice-source-roll 1167ms steps(11, end) both;
+}
+@keyframes five-dice-source-roll {
+  from { background-position-y: 0%; }
+  to { background-position-y: 100%; }
+}
+body[data-appearance="classic"] .die[aria-pressed="true"] { outline: 0; transform: none; box-shadow: none; background: transparent; }
+body[data-appearance="classic"] .die[aria-pressed="true"]::after { display: none; }
+body[data-appearance="classic"] .classic-media-controls {
+  display: contents;
+}
+body[data-appearance="classic"] .classic-drum-motion:not([hidden]) {
+  position: absolute;
+  z-index: 8;
+  display: block;
+  background-image: var(--five-dice-drum-motion, none);
+  background-position: center var(--five-dice-drum-offset, 50%);
+  background-repeat: no-repeat;
+  background-size: 100% 500%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+body[data-appearance="classic"] .classic-microphone-motion:not([hidden]) {
+  position: absolute;
+  z-index: 8;
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+}
+.classic-microphone-strip {
+  display: block;
+  width: 100%;
+  height: 2300%;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;
+  transform: translateY(0);
+  will-change: transform;
+}
+.classic-microphone-strip.is-running {
+  animation: five-dice-source-microphone 750ms steps(23, end) infinite;
+}
+@keyframes five-dice-source-microphone {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
+}
+body[data-appearance="classic"] .classic-hotspot {
+  position: absolute;
+  z-index: 11;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: transparent;
+  background-color: transparent;
+  background-image: var(--five-dice-control-rest, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-shadow: none;
+  font-size: 0;
+  cursor: pointer;
+}
+body[data-appearance="classic"] .classic-hotspot:hover,
+body[data-appearance="classic"] .classic-hotspot:focus-visible {
+  outline: 0;
+  background-image: var(--five-dice-control-hover, var(--five-dice-control-rest, none));
+}
+body[data-appearance="classic"] .classic-hotspot:active {
+  background-image: var(--five-dice-control-pressed, var(--five-dice-control-hover, none));
+}
+body[data-appearance="classic"] .classic-hotspot:disabled { opacity: 1; }
+/* Runtime positions come only from the immutable 840x640 source map. */
+
+@media (max-width: 940px) {
+  html, body { height: auto; min-height: 100%; overflow: auto; }
+  .game { height: auto; min-height: 100%; grid-template-rows: auto; }
+  .presentation-grid { flex: 0 0 auto; height: auto; grid-template-columns: 1fr; }
+  .play-surface-slot { height: auto; grid-template-rows: auto auto; container-type: normal; }
+  body[data-appearance="classic"] .play-surface-slot { aspect-ratio: auto; }
+  .scoreboard { height: auto; max-height: none; }
+  .scoreboard > .table-scroll {
+    flex: 0 0 auto;
+    height: clamp(260px, 48vw, 520px);
+  }
+  body[data-appearance="classic"] .play-surface {
+    width: min(100%, 840px);
+    height: auto;
+    max-height: none;
+    justify-self: center;
+  }
+}
+@media (max-width: 1100px) and (min-width: 721px) {
+  .player-status-strip[data-player-count="3"],
+  .player-status-strip[data-player-count="4"] { grid-template-columns: repeat(2, max-content); }
+}
+@media (max-width: 720px) {
+  body { padding: 9px; }
+  .game-header { align-items: flex-start; }
+  .header-actions { justify-content: flex-start; }
+  .play-surface { grid-template-columns: 1fr; }
+  .dice { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .die { min-height: 48px; }
+  .record-totals { grid-template-columns: 1fr; }
+  .records-heading-row label { margin-left: 0; }
+  .roll-actions, .separate-media-controls { align-items: stretch; }
+  .separate-media-controls { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .separate-media-controls .music-fallback { width: min(100%, 180px); }
+  .player-status-strip { width: 100%; grid-template-columns: minmax(0, 1fr); }
+  .player-status-block { grid-template-columns: minmax(0, auto) auto; }
+  .player-status-turn { grid-column: 1 / -1; justify-self: start; }
+  body[data-appearance="classic"] .play-surface {
+    aspect-ratio: 840 / 640;
+  }
+}
+@media (max-width: 430px) {
+  .game-header { display: grid; }
+  .appearance { justify-self: start; }
+  .dice { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  body[data-appearance="classic"] .play-surface {
+    display: block;
+    width: calc(100% - 8px);
+    aspect-ratio: 840 / 640;
+  }
+}
+
+/* Built-in player identity cards. Existing Classic scorecard avatars are unchanged. */
+.player-status-strip.has-built-in-board-avatars .player-status-block.has-built-in-board-avatar {
+  min-height: 58px;
+  grid-template-columns: 44px minmax(0, auto) auto;
+  grid-template-areas:
+    "avatar name turn"
+    "avatar timer turn";
+  align-items: center;
+}
+.player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+  grid-area: avatar;
+  width: 44px;
+  height: 44px;
+  align-self: center;
+  border: 2px solid var(--line);
+  border-radius: 7px;
+  background: #111b24;
+  object-fit: cover;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .32);
+}
+.player-status-block.has-built-in-board-avatar.is-current .built-in-board-player-avatar {
+  border-color: var(--accent);
+}
+.player-status-block.has-built-in-board-avatar .player-status-name { grid-area: name; }
+.player-status-block.has-built-in-board-avatar .player-status-timer { grid-area: timer; }
+.player-status-block.has-built-in-board-avatar .player-status-turn {
+  grid-area: turn;
+  grid-column: auto;
+  justify-self: start;
+}
+@media (max-width: 720px) {
+  .player-status-strip.has-built-in-board-avatars .player-status-block.has-built-in-board-avatar {
+    min-height: 52px;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "avatar name turn"
+      "avatar timer turn";
+  }
+  .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+    width: 38px;
+    height: 38px;
+  }
+  .player-status-block.has-built-in-board-avatar .player-status-turn {
+    grid-column: auto;
+    justify-self: end;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .die.is-rolling { animation: none; }
+  body[data-appearance="classic"] .classic-roll-strip { animation: none; background-position-y: 100%; }
+}
+
+/*
+ * The shared game shell can preserve a readable chat pane on reduced laptop
+ * viewports by allocating a short landscape iframe. Fit both presentation
+ * surfaces to that exact allocation instead of letting the width-only stacked
+ * breakpoint crop the Classic board. This is presentation-only: authoritative
+ * game state and the 840:640 board geometry remain unchanged.
+ */
+@media (min-width: 640px) and (max-height: 520px) {
+  html, body {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+  body { padding: 6px; }
+  .game {
+    height: 100%;
+    min-height: 0;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    gap: 5px;
+  }
+  .game-header,
+  .header-actions { gap: 8px; }
+  .game-header { min-width: 0; }
+  h1 { font-size: clamp(1.15rem, 2.4vw, 1.55rem); }
+  .eyebrow { font-size: .68rem; }
+  .appearance,
+  .status { padding: 5px 8px; }
+  .presentation-grid {
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(240px, .82fr) minmax(330px, 1.18fr);
+    gap: 8px;
+    align-items: stretch;
+  }
+  .play-surface-slot {
+    width: 100%;
+    height: 100%;
+    container-type: size;
+  }
+  body[data-appearance="classic"] .play-surface {
+    width: min(100cqw, 131.25cqh);
+    max-width: 100%;
+    height: auto;
+    max-height: 100%;
+    aspect-ratio: 840 / 640;
+    align-self: center;
+    justify-self: center;
+  }
+  body[data-appearance="classic"] .play-surface-slot:has(.roll-actions button:not([hidden])) .play-surface {
+    width: min(100cqw, max(1px, calc(131.25cqh - 63px)));
+    max-height: none;
+  }
+  .scoreboard {
+    height: 100%;
+    min-height: 0;
+    padding: 6px;
+  }
+  .scoreboard h2 { font-size: 1rem; }
+  .scoreboard .minor { font-size: .78rem; }
+  .scoreboard table { font-size: .7rem; }
+  .scoreboard th,
+  .scoreboard td { padding: 3px 4px; }
+  .records { margin-top: 5px; padding-top: 5px; }
+  .record-totals { gap: 6px; margin: 6px 0; }
+  .record-totals div { padding: 6px; }
+}
+@media (min-width: 2200px) {
+  .game { width: min(94vw, 3000px); }
+}
+
+/* FRAMEWORK-COMPACT-OPTIONS-ROWS-2026-08-28 */
+.game-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 5px;
+  padding: 8px 11px;
+}
+.game-options h2 { margin-bottom: 1px; }
+.game-options > .game-option,
+.game-options > .separate-controls-preference {
+  box-sizing: border-box;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(190px, 34%) minmax(0, 1fr);
+  align-items: center;
+  min-height: 0;
+  gap: 4px 10px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(11,18,35,.34);
+}
+.game-options > .separate-controls-preference {
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+}
+.game-options > .game-option.viewer-effect-option { padding: 6px 9px; }
+.game-options > .game-option > :first-child,
+.game-options > .separate-controls-preference > :first-child {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+  line-height: 1.2;
+}
+.game-options > .game-option > :not(:first-child):not(.minor),
+.game-options > .separate-controls-preference > .compact-state-button {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: start;
+  max-width: 100%;
+}
+.game-options > .game-option > .minor {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 0;
+  font-size: .72rem;
+  line-height: 1.2;
+}
+.game-options .classic-board-scale-controls,
+.game-options .setting-choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.game-options select,
+.game-options .compact-state-button,
+.game-options .secondary {
+  min-height: 29px;
+  padding: 4px 9px;
+  line-height: 1.12;
+}
+.game-options .setting-label-with-info {
+  display: block;
+  width: auto;
+  min-width: 0;
+  line-height: 1.2;
+}
+.game-options .setting-label-with-info > .inline-info {
+  box-sizing: border-box;
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin-left: 5px;
+  padding: 0;
+  vertical-align: middle;
+  font-size: 12px;
+  line-height: 1;
+}
+.game-options > .shared-game-settings {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  padding-top: 5px;
+}
+.game-options .shared-game-setting {
+  position: relative;
+  grid-template-columns: minmax(190px, 34%) minmax(0, 1fr);
+  align-items: center;
+  min-height: 0;
+  padding: 6px 9px;
+  border-radius: 7px;
+}
+.game-options .shared-game-setting > .setting-label-with-info {
+  grid-column: 1;
+  grid-row: 1;
+  display: block;
+  min-width: 0;
+}
+.game-options .shared-game-setting > .setting-label-with-info > .inline-info {
+  box-sizing: border-box;
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin-left: 5px;
+  padding: 0;
+  border-radius: 50%;
+  vertical-align: middle;
+  font-size: 12px;
+  line-height: 1;
+}
+.game-options .shared-game-setting > select,
+.game-options .shared-game-setting > input {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: start;
+  max-width: 100%;
+}
+.game-options .shared-game-setting > select { width: min(100%, 230px); }
+.game-options .shared-game-setting > input { width: 110px; }
+.game-options .shared-game-setting > .shared-game-setting-help {
+  grid-column: auto;
+  grid-row: auto;
+  margin: 0;
+}
+.game-options > .settings-acceptance { margin-top: 2px; }
+.game-options > #save-game-options,
+.game-options > #accept-game-options { justify-self: start; }
+@media (max-width: 620px) {
+  .game-options > .game-option,
+  .game-options > .separate-controls-preference,
+  .game-options .shared-game-setting {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .game-options > .game-option > :first-child,
+  .game-options > .game-option > :not(:first-child),
+  .game-options > .separate-controls-preference > :first-child,
+  .game-options > .separate-controls-preference > .compact-state-button,
+  .game-options .shared-game-setting > * {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+/* Cascade guard for the approved composition. The modern presentation block
+   above intentionally shares older selectors, so these geometry rules remain
+   last and cannot be replaced by those historical declarations. */
+html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+  width: 100%;
+  max-width: 1540px;
+  grid-template-columns: minmax(210px, .72fr) repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 9px;
+  margin-bottom: -8px;
+  padding: 12px;
+  border: 1px solid rgba(216,169,79,.44);
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  background: linear-gradient(145deg, rgba(255,255,255,.025), transparent 42%), #061619;
+  box-shadow: inset 0 1px rgba(255,255,255,.05);
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-areas: "avatar name turn" "avatar score timer" "avatar hold hold";
+  min-height: 72px;
+  padding: 7px 10px;
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+  width: 56px;
+  height: 56px;
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .player-status-name,
+html body[data-appearance="built-in"] .player-status-score {
+  justify-self: start;
+  text-align: left;
+}
+
+html body[data-appearance="built-in"] .play-surface {
+  width: 100%;
+  max-width: 1540px;
+  min-height: 640px;
+  grid-template-columns: minmax(280px, .8fr) minmax(420px, 1.55fr) minmax(150px, .48fr);
+  grid-template-rows: minmax(640px, 1fr);
+  grid-template-areas: "score-sheet dice decor";
+  gap: 0;
+  padding: 14px;
+  border-radius: 0 0 22px 22px;
+}
+
+html body[data-appearance="built-in"] .built-in-score-sheet {
+  min-height: 640px;
+  gap: 0;
+  padding: 12px 10px;
+  border: 1px solid #7d5b29;
+  border-right: 1px solid rgba(216,169,79,.3);
+  border-radius: 14px 0 0 14px;
+  background: linear-gradient(rgba(4,18,21,.93), rgba(4,18,21,.93)), url("../../assets/images/five-dice-modern/materials-and-effects.png") 25% 0 / 400% 200%;
+  box-shadow: inset 0 0 0 4px #081316, inset 0 0 38px rgba(0,0,0,.42);
+  transform: none;
+  overflow: visible;
+}
+
+html body[data-appearance="built-in"] .built-in-score-actions {
+  height: 100%;
+  align-content: stretch;
+  gap: 3px;
+  padding: 0;
+}
+
+html body[data-appearance="built-in"] .built-in-score-columns,
+html body[data-appearance="built-in"] .built-in-score-choice {
+  grid-template-columns: minmax(112px, 1.35fr) repeat(var(--built-in-player-count), minmax(38px, .55fr));
+  gap: 2px;
+}
+
+html body[data-appearance="built-in"] .built-in-score-columns {
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+}
+
+html body[data-appearance="built-in"] .dice {
+  grid-area: dice;
+  min-height: 640px;
+  align-self: stretch;
+  padding: 72px 22px 170px;
+  border: 1px solid #7d5b29;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 5px #081316, inset 0 0 65px #000;
+}
+
+html body[data-appearance="built-in"] .built-in-roll {
+  grid-area: dice;
+  position: relative;
+  align-self: end;
+  justify-self: center;
+  width: clamp(170px, 16vw, 210px);
+  margin: 0 0 22px;
+}
+
+html body[data-appearance="built-in"] .built-in-jazz-decor {
+  grid-area: decor;
+  min-height: 640px;
+  border: 1px solid #7d5b29;
+  border-left: 0;
+  border-radius: 0 14px 14px 0;
+  box-shadow: inset 0 0 0 4px #081316;
+}
+
+html body[data-appearance="built-in"] .built-in-jazz-decor img {
+  object-fit: cover;
+  object-position: right center;
+}
+
+@media (max-width: 1050px) and (min-width: 761px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    grid-template-columns: minmax(170px, .68fr) repeat(4, minmax(0, 1fr));
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    min-height: 64px;
+    padding: 6px 8px;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+    width: 46px;
+    height: 46px;
+  }
+  html body[data-appearance="built-in"] .play-surface {
+    grid-template-columns: minmax(238px, .78fr) minmax(360px, 1.36fr) minmax(102px, .32fr);
+    grid-template-rows: minmax(620px, 1fr);
+    grid-template-areas: "score-sheet dice decor";
+  }
+  html body[data-appearance="built-in"] .built-in-score-sheet,
+  html body[data-appearance="built-in"] .dice,
+  html body[data-appearance="built-in"] .built-in-jazz-decor { min-height: 620px; }
+  html body[data-appearance="built-in"] .built-in-score-columns,
+  html body[data-appearance="built-in"] .built-in-score-choice {
+    grid-template-columns: minmax(96px, 1.2fr) repeat(var(--built-in-player-count), minmax(30px, .52fr));
+  }
+}
+
+@media (max-width: 760px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    min-height: 62px;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+    width: 46px;
+    height: 46px;
+  }
+  html body[data-appearance="built-in"] .play-surface {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(430px, auto) auto minmax(190px, auto);
+    grid-template-areas: "dice" "score-sheet" "decor";
+  }
+  html body[data-appearance="built-in"] .dice {
+    min-height: 430px;
+    padding: 52px 10px 150px;
+  }
+  html body[data-appearance="built-in"] .built-in-score-sheet {
+    min-height: 620px;
+    border: 1px solid #7d5b29;
+    border-radius: 14px;
+  }
+  html body[data-appearance="built-in"] .built-in-jazz-decor {
+    min-height: clamp(190px, 44vw, 270px);
+    border: 1px solid #7d5b29;
+    border-radius: 14px;
+  }
+}
+
+@media (max-width: 500px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px;
+  }
+  html body[data-appearance="built-in"] .play-surface { padding: 7px; }
+  html body[data-appearance="built-in"] .dice { min-height: 390px; padding-bottom: 135px; }
+  html body[data-appearance="built-in"] .built-in-roll { width: 154px; margin-bottom: 12px; }
+  html body[data-appearance="built-in"] .built-in-score-columns,
+  html body[data-appearance="built-in"] .built-in-score-choice {
+    grid-template-columns: minmax(88px, 1.2fr) repeat(var(--built-in-player-count), minmax(30px, .5fr));
+  }
+}
+
+html body[data-appearance="built-in"] .presentation-grid {
+  height: auto;
+  min-height: 0;
+  align-items: start;
+}
+
+html body[data-appearance="built-in"] .play-surface-slot {
+  height: auto;
+  min-height: 0;
+  grid-template-rows: auto auto;
+  container-type: normal;
+}
+
+/* Exact approved jazz-lounge composition. This intentionally sits last in the
+   cascade: earlier blocks retain Classic support and shared-shell fallbacks,
+   while these rules reproduce the approved Five Dice presentation. */
+html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  max-width: 1672px;
+  min-height: 126px;
+  grid-template-columns: minmax(235px, 24%) repeat(4, minmax(0, 19%));
+  align-items: stretch;
+  gap: 8px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  border: 2px solid rgba(188, 136, 61, .82);
+  border-bottom-width: 1px;
+  border-radius: 18px 18px 0 0;
+  background:
+    linear-gradient(100deg, rgba(255,255,255,.035), transparent 36%),
+    linear-gradient(180deg, #071c21, #041318);
+  box-shadow: inset 0 0 0 4px #030d10, inset 0 1px rgba(255,255,255,.08), 0 18px 48px rgba(0,0,0,.28);
+  overflow: hidden;
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand {
+  min-height: 100%;
+  justify-content: center;
+  gap: .22em;
+  padding: 8px 18px;
+  border-right: 1px solid rgba(216,169,79,.42);
+  font-family: "Bahnschrift Condensed", "Arial Narrow", sans-serif;
+  font-size: clamp(2.25rem, 4.15vw, 4.55rem);
+  font-weight: 250;
+  letter-spacing: .105em;
+  line-height: .9;
+  text-shadow: 0 2px 18px rgba(0,0,0,.8);
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand strong {
+  color: #f5e6cf;
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand span {
+  color: #a9dde4;
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 104px;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  grid-template-areas: "avatar name turn" "avatar score turn" "avatar timer timer";
+  gap: 3px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(216,169,79,.52);
+  border-radius: 10px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.04), transparent 44%),
+    linear-gradient(180deg, rgba(10,35,40,.98), rgba(4,19,23,.98));
+  box-shadow: inset 0 0 0 2px rgba(0,0,0,.5), inset 0 1px rgba(255,255,255,.06);
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar.is-current {
+  border-color: #73e9ef;
+  box-shadow: inset 0 0 0 2px rgba(93,225,221,.15), 0 0 18px rgba(93,225,221,.12);
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar.is-empty-seat {
+  opacity: .28;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.025), transparent 48%),
+    linear-gradient(180deg, rgba(10,35,40,.65), rgba(4,19,23,.65));
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+  box-sizing: border-box;
+  width: 72px;
+  height: 72px;
+  border: 3px solid #c49248;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 2px #17262a, 0 4px 12px rgba(0,0,0,.52);
+}
+
+html body[data-appearance="built-in"] .player-status-name {
+  align-self: end;
+  color: #7be3eb;
+  font-size: clamp(.85rem, 1.25vw, 1.25rem);
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .player-status-block:nth-child(3) .player-status-name { color: #f17d68; }
+html body[data-appearance="built-in"] .player-status-block:nth-child(4) .player-status-name { color: #e8b44f; }
+html body[data-appearance="built-in"] .player-status-block:nth-child(5) .player-status-name { color: #a9cd63; }
+
+html body[data-appearance="built-in"] .player-status-score {
+  align-self: start;
+  color: #f7f1e5;
+  font-size: .82rem;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .player-status-turn {
+  align-self: center;
+  padding: 6px 8px;
+  color: #dfffff;
+  border: 1px solid #5de1dd;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(17,95,104,.9), rgba(7,50,57,.94));
+  box-shadow: 0 0 12px rgba(93,225,221,.26);
+  font-size: .58rem;
+  line-height: 1.05;
+  letter-spacing: .08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .play-surface {
+  box-sizing: border-box;
+  position: relative;
+  display: grid;
+  width: 100%;
+  max-width: 1672px;
+  min-height: 720px;
+  grid-template-columns: minmax(390px, 40%) minmax(500px, 48%) minmax(130px, 12%);
+  grid-template-rows: minmax(720px, 1fr);
+  grid-template-areas: "score-sheet dice decor";
+  gap: 0;
+  margin: 0 auto;
+  padding: 0;
+  border: 2px solid rgba(188,136,61,.82);
+  border-top-width: 1px;
+  border-radius: 0 0 20px 20px;
+  background: #030d10;
+  box-shadow: inset 0 0 0 5px #02090b, 0 24px 65px rgba(0,0,0,.42);
+  overflow: hidden;
+}
+
+html body[data-appearance="built-in"] .play-surface::before {
+  inset: 8px;
+  z-index: 1;
+  border: 1px solid rgba(245,215,131,.32);
+  border-radius: 13px;
+}
+
+html body[data-appearance="built-in"] .built-in-score-sheet {
+  box-sizing: border-box;
+  grid-area: score-sheet;
+  z-index: 3;
+  min-width: 0;
+  min-height: 720px;
+  align-self: stretch;
+  gap: 0;
+  padding: 11px 10px 13px;
+  border: 0;
+  border-right: 1px solid rgba(216,169,79,.52);
+  border-radius: 14px 0 0 14px;
+  background:
+    linear-gradient(rgba(3,15,18,.88), rgba(3,15,18,.94)),
+    url("../../assets/images/five-dice-modern/materials-and-effects.png") 25% 0 / 400% 200%;
+  box-shadow: inset 0 0 0 4px rgba(0,0,0,.45), inset 0 0 45px rgba(0,0,0,.42);
+  overflow: hidden;
+}
+
+html body[data-appearance="built-in"] .built-in-score-actions {
+  display: grid;
+  height: 100%;
+  grid-template-rows: 34px repeat(17, minmax(31px, 1fr));
+  align-content: stretch;
+  gap: 2px;
+  padding: 0;
+}
+
+html body[data-appearance="built-in"] .built-in-score-columns,
+html body[data-appearance="built-in"] .built-in-score-choice {
+  min-height: 0;
+  grid-template-columns: minmax(132px, 1.55fr) repeat(4, minmax(44px, .82fr));
+  gap: 2px;
+}
+
+html body[data-appearance="built-in"] .built-in-score-columns {
+  padding: 0;
+  border: 0;
+  color: #d8a94f;
+  font-size: clamp(.62rem, .86vw, .9rem);
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .built-in-score-column-category {
+  color: transparent;
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-name {
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  color: #a9dde4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-name:nth-child(3) { color: #ef7b62; }
+html body[data-appearance="built-in"] .built-in-score-player-name:nth-child(4) { color: #e6b44e; }
+html body[data-appearance="built-in"] .built-in-score-player-name:nth-child(5) { color: #a7cd62; }
+html body[data-appearance="built-in"] .built-in-score-player-name.is-empty-seat { color: rgba(246,237,218,.5); }
+
+html body[data-appearance="built-in"] .built-in-score-choice,
+html body[data-appearance="built-in"] .built-in-score-choice[data-state] {
+  min-height: 0;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category,
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-player-value {
+  box-sizing: border-box;
+  min-height: 0;
+  height: 100%;
+  padding: 3px 6px;
+  border: 1px solid rgba(216,169,79,.4);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.08)),
+    rgba(8,27,31,.88);
+  font-size: clamp(.65rem, .86vw, .88rem);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category {
+  padding-left: 10px;
+  color: #f4e9d8;
+  font-weight: 600;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-value {
+  color: #e9e5db;
+  font-weight: 700;
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-value.is-empty-seat {
+  color: rgba(246,237,218,.55);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="available"] > span {
+  color: #eaffff;
+  border-color: #5de1dd;
+  background: linear-gradient(180deg, rgba(21,91,99,.96), rgba(7,53,59,.96));
+  box-shadow: inset 0 0 0 1px rgba(93,225,221,.22), 0 0 12px rgba(93,225,221,.12);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="bonus"] > span {
+  border-color: rgba(245,215,131,.72);
+  background: linear-gradient(180deg, rgba(77,54,21,.86), rgba(27,25,20,.92));
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="total"] > span {
+  color: #9be9ee;
+  border-color: rgba(93,225,221,.72);
+  background: linear-gradient(180deg, rgba(9,55,60,.9), rgba(6,28,32,.94));
+  font-weight: 900;
+}
+
+html body[data-appearance="built-in"] .dice {
+  box-sizing: border-box;
+  grid-area: dice;
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  min-height: 700px;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  gap: clamp(8px, 1.15vw, 18px);
+  margin: 10px 0 10px 10px;
+  padding: 96px 28px 238px;
+  border: 3px solid #b98236;
+  border-right-width: 2px;
+  border-radius: 40px 28px 28px 40px;
+  background:
+    radial-gradient(ellipse at 50% 38%, rgba(38,124,127,.26), transparent 58%),
+    repeating-linear-gradient(108deg, rgba(255,255,255,.012) 0 2px, transparent 2px 7px),
+    url("../../assets/images/five-dice-modern/materials-and-effects.png") 0 0 / 400% 200%,
+    #082f33;
+  box-shadow:
+    inset 0 0 0 5px #071316,
+    inset 0 0 0 8px rgba(226,180,92,.3),
+    inset 0 0 70px rgba(0,0,0,.82),
+    0 0 0 1px rgba(255,231,169,.52);
+  overflow: hidden;
+}
+
+html body[data-appearance="built-in"] .die {
+  --modern-die-size: clamp(72px, 6.9vw, 116px);
+  flex: 0 0 var(--modern-die-size);
+  width: var(--modern-die-size);
+  max-width: var(--modern-die-size);
+  filter: drop-shadow(0 14px 12px rgba(0,0,0,.62));
+}
+
+html body[data-appearance="built-in"] .die:nth-child(1) { --approved-die-y: -108px; transform: rotate(-4deg); }
+html body[data-appearance="built-in"] .die:nth-child(2) { --approved-die-y: -58px; transform: rotate(3deg); }
+html body[data-appearance="built-in"] .die:nth-child(3) { --approved-die-y: -5px; transform: rotate(-3deg); }
+html body[data-appearance="built-in"] .die:nth-child(4) { --approved-die-y: 50px; transform: rotate(4deg); }
+html body[data-appearance="built-in"] .die:nth-child(5) { --approved-die-y: 104px; transform: rotate(-2deg); }
+
+html body[data-appearance="built-in"] .die[aria-pressed="true"] {
+  box-shadow: 0 0 0 5px #d8a94f, 0 0 0 9px rgba(3,12,14,.9), 0 0 30px rgba(245,215,131,.42);
+}
+
+html body[data-appearance="built-in"] .die[aria-pressed="true"]::after {
+  bottom: -30px;
+  padding: 5px 10px;
+  color: #d8a94f;
+  border: 1px solid #9c6a29;
+  border-radius: 3px;
+  background: linear-gradient(#19120b, #070707);
+  box-shadow: 0 3px 10px rgba(0,0,0,.75);
+  font-size: .68rem;
+}
+
+html body[data-appearance="built-in"] .built-in-roll {
+  box-sizing: border-box;
+  position: absolute;
+  z-index: 12;
+  left: 64%;
+  bottom: 4px;
+  display: grid;
+  width: clamp(240px, 23.5vw, 382px);
+  min-height: 0;
+  aspect-ratio: 1.25;
+  place-items: center;
+  margin: 0;
+  padding: 0 13% 14%;
+  color: #fff8e8;
+  background-position: 0 50%;
+  filter: drop-shadow(0 16px 18px rgba(0,0,0,.72));
+  font-family: "Bahnschrift Condensed", "Arial Narrow", sans-serif;
+  font-size: clamp(1.35rem, 2.45vw, 2.65rem);
+  font-weight: 800;
+  letter-spacing: .045em;
+  line-height: .88;
+  text-align: center;
+  text-shadow: 0 3px 6px #000;
+  white-space: pre-line;
+  transform: translateX(-50%);
+}
+
+html body[data-appearance="built-in"] .built-in-roll::after {
+  bottom: 8.5%;
+  width: 62%;
+  padding: 4px 2px;
+  color: #f6edda;
+  border: 1px solid rgba(216,169,79,.5);
+  border-radius: 4px;
+  background: rgba(3,16,19,.92);
+  font-size: clamp(.55rem, .82vw, .82rem);
+}
+
+html body[data-appearance="built-in"] .built-in-jazz-decor {
+  box-sizing: border-box;
+  grid-area: decor;
+  z-index: 4;
+  min-width: 0;
+  min-height: 720px;
+  align-self: stretch;
+  border: 0;
+  border-left: 1px solid rgba(216,169,79,.42);
+  border-radius: 0 14px 14px 0;
+  background:
+    radial-gradient(circle at 50% 24%, rgba(122,78,18,.18), transparent 30%),
+    linear-gradient(90deg, #061619, #020708);
+  box-shadow: inset 0 0 0 4px rgba(0,0,0,.42);
+  overflow: hidden;
+}
+
+html body[data-appearance="built-in"] .built-in-jazz-decor img {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+
+html body[data-appearance="built-in"] .roll-actions {
+  width: 100%;
+  max-width: 1672px;
+  margin: 8px auto 0;
+}
+
+@media (max-width: 1180px) and (min-width: 761px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    min-height: 108px;
+    grid-template-columns: minmax(205px, 23%) repeat(4, minmax(0, 19.25%));
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+    min-height: 88px;
+    grid-template-columns: 58px minmax(0,1fr);
+    grid-template-areas: "avatar name" "avatar score" "avatar turn";
+    padding: 7px;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+    width: 58px;
+    height: 58px;
+  }
+  html body[data-appearance="built-in"] .player-status-turn { justify-self: start; padding: 3px 5px; }
+  html body[data-appearance="built-in"] .play-surface {
+    min-height: 650px;
+    grid-template-columns: minmax(350px, 39%) minmax(430px, 49%) minmax(105px, 12%);
+    grid-template-rows: minmax(650px, 1fr);
+  }
+  html body[data-appearance="built-in"] .built-in-score-sheet,
+  html body[data-appearance="built-in"] .built-in-jazz-decor { min-height: 650px; }
+  html body[data-appearance="built-in"] .dice { min-height: 630px; padding-inline: 18px; }
+  html body[data-appearance="built-in"] .built-in-score-columns,
+  html body[data-appearance="built-in"] .built-in-score-choice {
+    grid-template-columns: minmax(114px, 1.45fr) repeat(4, minmax(36px, .72fr));
+  }
+}
+
+@media (max-width: 760px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    min-height: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-radius: 16px;
+  }
+  html body[data-appearance="built-in"] .built-in-five-dice-brand {
+    grid-column: 1 / -1;
+    min-height: 82px;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+    min-height: 82px;
+    grid-template-columns: 52px minmax(0,1fr);
+    grid-template-areas: "avatar name" "avatar score" "avatar turn";
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+    width: 52px;
+    height: 52px;
+  }
+  html body[data-appearance="built-in"] .play-surface {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(470px, auto) auto minmax(230px, auto);
+    grid-template-areas: "dice" "score-sheet" "decor";
+    gap: 8px;
+    padding: 7px;
+    border-width: 2px;
+    border-radius: 16px;
+  }
+  html body[data-appearance="built-in"] .dice {
+    min-height: 470px;
+    margin: 0;
+    padding: 82px 12px 190px;
+    border-radius: 28px;
+  }
+  html body[data-appearance="built-in"] .die { --modern-die-size: clamp(50px, 16vw, 82px); }
+  html body[data-appearance="built-in"] .die:nth-child(n) { --approved-die-y: 0px; transform: none; }
+  html body[data-appearance="built-in"] .built-in-roll {
+    left: 50%;
+    top: 250px;
+    bottom: auto;
+    width: clamp(210px, 58vw, 280px);
+  }
+  html body[data-appearance="built-in"] .built-in-score-sheet {
+    min-height: 690px;
+    border: 1px solid rgba(216,169,79,.52);
+    border-radius: 14px;
+  }
+  html body[data-appearance="built-in"] .built-in-jazz-decor {
+    min-height: clamp(230px, 60vw, 340px);
+    border: 1px solid rgba(216,169,79,.42);
+    border-radius: 14px;
+  }
+}
+
+@media (max-width: 500px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    grid-template-columns: minmax(0,1fr);
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar.is-empty-seat { display: none; }
+  html body[data-appearance="built-in"] .dice { min-height: 430px; padding-top: 70px; }
+  html body[data-appearance="built-in"] .built-in-roll { top: 232px; }
+  html body[data-appearance="built-in"] .built-in-score-columns,
+  html body[data-appearance="built-in"] .built-in-score-choice {
+    grid-template-columns: minmax(102px, 1.45fr) repeat(4, minmax(32px, .66fr));
+  }
+}
+
+/* The shared room commonly gives the game a narrow landscape pane. Preserve
+   the approved desktop composition there at a reduced scale; reserve the
+   stacked layout above for true phone widths only. */
+@media (min-width: 421px) and (max-width: 760px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    min-height: 78px;
+    grid-template-columns: minmax(112px, 23%) repeat(4, minmax(0, 19.25%));
+    gap: 3px;
+    padding: 5px 6px;
+    border-radius: 11px 11px 0 0;
+  }
+  html body[data-appearance="built-in"] .built-in-five-dice-brand {
+    grid-column: 1;
+    min-height: 100%;
+    padding: 4px 5px;
+    border-right: 1px solid rgba(216,169,79,.42);
+    border-bottom: 0;
+    font-size: clamp(1.2rem, 5vw, 1.75rem);
+  }
+  html body[data-appearance="built-in"] .built-in-five-dice-brand::before,
+  html body[data-appearance="built-in"] .built-in-five-dice-brand::after { width: 6px; }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+    min-height: 66px;
+    grid-template-columns: 36px minmax(0,1fr);
+    grid-template-areas: "avatar name" "avatar score" "avatar turn";
+    gap: 1px 4px;
+    padding: 4px;
+    border-radius: 6px;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+    width: 36px;
+    height: 36px;
+    border-width: 2px;
+  }
+  html body[data-appearance="built-in"] .player-status-name { font-size: .58rem; }
+  html body[data-appearance="built-in"] .player-status-score { font-size: .5rem; }
+  html body[data-appearance="built-in"] .player-status-turn {
+    justify-self: start;
+    padding: 2px 3px;
+    font-size: .4rem;
+  }
+  html body[data-appearance="built-in"] .play-surface {
+    min-height: 390px;
+    grid-template-columns: minmax(176px, 39%) minmax(220px, 49%) minmax(52px, 12%);
+    grid-template-rows: minmax(390px, 1fr);
+    grid-template-areas: "score-sheet dice decor";
+    gap: 0;
+    padding: 0;
+    border-radius: 0 0 11px 11px;
+  }
+  html body[data-appearance="built-in"] .built-in-score-sheet {
+    min-height: 390px;
+    padding: 6px 4px 7px;
+    border: 0;
+    border-right: 1px solid rgba(216,169,79,.52);
+    border-radius: 8px 0 0 8px;
+  }
+  html body[data-appearance="built-in"] .built-in-score-actions {
+    grid-template-rows: 18px repeat(17, minmax(16px, 1fr));
+    gap: 1px;
+  }
+  html body[data-appearance="built-in"] .built-in-score-columns,
+  html body[data-appearance="built-in"] .built-in-score-choice {
+    grid-template-columns: minmax(66px, 1.45fr) repeat(4, minmax(21px, .68fr));
+    gap: 1px;
+  }
+  html body[data-appearance="built-in"] .built-in-score-columns { font-size: .43rem; }
+  html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category,
+  html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-player-value {
+    padding: 1px 2px;
+    font-size: .43rem;
+  }
+  html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category { padding-left: 4px; }
+  html body[data-appearance="built-in"] .dice {
+    min-height: 378px;
+    margin: 5px 0 5px 5px;
+    padding: 48px 6px 126px;
+    gap: 3px;
+    border-width: 2px;
+    border-radius: 20px 13px 13px 20px;
+  }
+  html body[data-appearance="built-in"] .die {
+    --modern-die-size: clamp(34px, 8vw, 48px);
+  }
+  html body[data-appearance="built-in"] .die:nth-child(1) { --approved-die-y: -45px; transform: rotate(-4deg); }
+  html body[data-appearance="built-in"] .die:nth-child(2) { --approved-die-y: -23px; transform: rotate(3deg); }
+  html body[data-appearance="built-in"] .die:nth-child(3) { --approved-die-y: 0px; transform: rotate(-3deg); }
+  html body[data-appearance="built-in"] .die:nth-child(4) { --approved-die-y: 23px; transform: rotate(4deg); }
+  html body[data-appearance="built-in"] .die:nth-child(5) { --approved-die-y: 45px; transform: rotate(-2deg); }
+  html body[data-appearance="built-in"] .die[aria-pressed="true"]::after {
+    bottom: -15px;
+    padding: 2px 3px;
+    font-size: .38rem;
+  }
+  html body[data-appearance="built-in"] .built-in-roll {
+    left: 63.5%;
+    top: auto;
+    bottom: 0;
+    width: clamp(120px, 29vw, 158px);
+    padding-bottom: 14%;
+    font-size: clamp(.85rem, 3vw, 1.15rem);
+  }
+  html body[data-appearance="built-in"] .built-in-roll::after {
+    padding: 1px;
+    font-size: .4rem;
+  }
+  html body[data-appearance="built-in"] .built-in-jazz-decor {
+    display: block;
+    min-height: 390px;
+    border: 0;
+    border-left: 1px solid rgba(216,169,79,.42);
+    border-radius: 0 8px 8px 0;
+  }
+  html body[data-appearance="built-in"] .built-in-jazz-decor img {
+    object-fit: cover;
+    object-position: right center;
+  }
+}
+
+/* Production artboard: the exact approved image is the visual source of truth.
+   All live DOM is a transparent, percentage-positioned interaction layer. */
+body[data-appearance="classic"] .five-dice-approved-artboard { display: contents; }
+
+html body[data-appearance="built-in"] .five-dice-approved-artboard {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1672px;
+  aspect-ratio: 1672 / 940;
+  margin: 0 auto;
+  background: #02090b url("../../assets/images/five-dice-modern/five-dice-approved-board-background-v1.png") center / 100% 100% no-repeat;
+  overflow: hidden;
+}
+
+html body[data-appearance="built-in"] .presentation-grid {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+html body[data-appearance="built-in"] .play-surface-slot {
+  display: grid;
+  width: 100%;
+  height: auto;
+  grid-template-rows: auto auto;
+}
+
+html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+  position: absolute;
+  z-index: 10;
+  top: 1.7%;
+  left: 23.45%;
+  display: grid;
+  width: 62.65%;
+  max-width: none;
+  min-height: 0;
+  height: 14.25%;
+  grid-template-columns: minmax(0, 29.6fr) repeat(3, minmax(0, 22.77fr));
+  gap: .7%;
+  margin: 0;
+  padding: 1.1% .8%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+html body[data-appearance="built-in"] .built-in-five-dice-brand { display: none; }
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+  position: relative;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+}
+
+html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars .player-status-block.has-built-in-board-avatar {
+  display: block;
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar.is-empty-seat {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+}
+
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+  position: absolute;
+  top: 9%;
+  left: 4.5%;
+  box-sizing: border-box;
+  width: 32%;
+  max-width: none;
+  height: auto;
+  aspect-ratio: 1;
+  border: 2px solid #c8954b;
+  border-radius: 7%;
+  background: #101b1e;
+  box-shadow: 0 3px 10px rgba(0,0,0,.58);
+}
+
+html body[data-appearance="built-in"] .player-status-name {
+  position: absolute;
+  top: 15%;
+  left: 39%;
+  max-width: 25%;
+  overflow: hidden;
+  color: #7edee5;
+  font-size: clamp(6px, 1.25vw, 21px);
+  line-height: 1;
+  letter-spacing: .02em;
+  text-shadow: 0 2px 4px #000;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html body[data-appearance="built-in"] .player-status-score {
+  position: absolute;
+  top: 46%;
+  left: 39%;
+  display: grid;
+  max-width: 25%;
+  gap: 4%;
+  color: #f4eee3;
+  line-height: 1;
+  text-shadow: 0 2px 4px #000;
+}
+
+html body[data-appearance="built-in"] .player-status-score-label {
+  color: #d7d2ca;
+  font-size: clamp(5px, .9vw, 15px);
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .player-status-score-value {
+  color: #f7f1e5;
+  font-size: clamp(9px, 1.95vw, 32px);
+  font-weight: 750;
+  line-height: .92;
+}
+
+/* Lifecycle text belongs in the right-hand status lane, not behind the avatar. */
+html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .player-status-timer {
+  position: absolute;
+  top: 52%;
+  right: 1%;
+  width: 28%;
+  min-width: 0;
+  max-width: 28%;
+  font-size: clamp(6px, .65vw, 11px);
+  line-height: 1.1;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+html body[data-appearance="built-in"] .player-status-turn {
+  position: absolute;
+  top: 16%;
+  right: 1%;
+  display: grid;
+  box-sizing: border-box;
+  width: 28%;
+  max-width: none;
+  place-items: center;
+  padding: 2% 1%;
+  color: #dfffff;
+  border: 1px solid #5de1dd;
+  border-radius: 5px;
+  background: linear-gradient(180deg, rgba(20,100,109,.96), rgba(4,47,54,.96));
+  box-shadow: 0 0 10px rgba(93,225,221,.3);
+  font-family: "Bahnschrift Condensed", "Arial Narrow", sans-serif;
+  font-size: clamp(3px, .32vw, 6px);
+  letter-spacing: -.025em;
+  line-height: .9;
+  text-align: center;
+  white-space: normal;
+}
+
+html body[data-appearance="built-in"] .play-surface {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: block;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+html body[data-appearance="built-in"] .play-surface::before { content: none; }
+
+html body[data-appearance="built-in"] .built-in-score-sheet {
+  position: absolute;
+  z-index: 7;
+  top: 19.25%;
+  left: 1.45%;
+  display: block;
+  width: 37.75%;
+  min-width: 0;
+  min-height: 0;
+  height: 71.9%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+html body[data-appearance="built-in"] .built-in-score-actions {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-summary-key="yahtzeeBonus"] {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+html body[data-appearance="built-in"] .built-in-score-columns,
+html body[data-appearance="built-in"] .built-in-score-choice {
+  position: absolute;
+  left: 0;
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  grid-template-columns: 29.25% repeat(4, 17.6875%);
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+html body[data-appearance="built-in"] .built-in-score-columns { top: 0; height: 5.78%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="ones"] { top: 5.78%; height: 5.63%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="twos"] { top: 11.41%; height: 5.63%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="threes"] { top: 17.04%; height: 5.77%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="fours"] { top: 22.81%; height: 5.78%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="fives"] { top: 28.59%; height: 5.63%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="sixes"] { top: 34.22%; height: 5.78%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-summary-key="upperBonus"] { top: 40%; height: 5.63%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-summary-key="upperSubtotal"] { top: 45.63%; height: 6.37%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="three-kind"] { top: 53.48%; height: 5.78%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="four-kind"] { top: 59.26%; height: 5.78%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="full-house"] { top: 65.04%; height: 5.77%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="small-straight"] { top: 70.81%; height: 5.63%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="large-straight"] { top: 76.44%; height: 5.78%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="yahtzee"] { top: 82.22%; height: 5.78%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-category="chance"] { top: 88%; height: 5.63%; }
+html body[data-appearance="built-in"] .built-in-score-choice[data-summary-key="total"] { top: 94.37%; height: 5.63%; }
+
+html body[data-appearance="built-in"] .built-in-score-column-category { color: transparent; }
+
+html body[data-appearance="built-in"] .built-in-score-player-name {
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  padding: 0 3%;
+  color: #82dce3;
+  background: transparent;
+  font-size: clamp(5px, .92vw, 17px);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category,
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-player-value {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  place-items: center;
+  padding: 0 4%;
+  color: #f1e8d9;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: clamp(5px, .82vw, 16px);
+  line-height: 1;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice > .built-in-score-category {
+  justify-content: start;
+  padding-left: 6%;
+  font-weight: 500;
+  letter-spacing: .015em;
+  text-transform: uppercase;
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-value {
+  color: #f1e8d9;
+  font-weight: 650;
+}
+
+html body[data-appearance="built-in"] .built-in-score-player-value.is-empty-seat,
+html body[data-appearance="built-in"] .built-in-score-player-name.is-empty-seat {
+  color: rgba(246,237,218,.72);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="available"] > span {
+  color: #eaffff;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="available"] > .built-in-score-category,
+html body[data-appearance="built-in"] .built-in-score-player-value[data-preview="true"] {
+  color: #8ee7ec;
+  background: transparent;
+  box-shadow: none;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="available"]:is(:hover, :focus-visible) > .built-in-score-category,
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="available"]:is(:hover, :focus-visible) > .built-in-score-player-value[data-preview="true"] {
+  color: #eaffff;
+  background: rgba(10, 92, 99, .52);
+  box-shadow: inset 0 0 0 1px rgba(93,225,221,.8), 0 0 8px rgba(93,225,221,.18);
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="scored"] > span,
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="bonus"] > span,
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="total"] > span {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html body[data-appearance="built-in"] .built-in-score-choice[data-state="total"] > span {
+  color: #94e2e8;
+  font-weight: 900;
+}
+
+html body[data-appearance="built-in"] .dice {
+  position: absolute;
+  z-index: 8;
+  top: 18.75%;
+  left: 41.0%;
+  display: block;
+  width: 47.35%;
+  min-width: 0;
+  min-height: 0;
+  height: 60.2%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+html body[data-appearance="built-in"] .die {
+  --modern-die-size: 14.2%;
+  position: absolute;
+  width: var(--modern-die-size);
+  max-width: none;
+  aspect-ratio: 1;
+  translate: none;
+  filter: drop-shadow(0 .75vw .65vw rgba(0,0,0,.62));
+}
+
+html body[data-appearance="built-in"] .die:nth-child(1) { left: 9.4%; top: 5.3%; transform: rotate(-4deg); }
+html body[data-appearance="built-in"] .die:nth-child(2) { left: 25.4%; top: 20.4%; transform: rotate(3deg); }
+html body[data-appearance="built-in"] .die:nth-child(3) { left: 43.2%; top: 33.9%; transform: rotate(-3deg); }
+html body[data-appearance="built-in"] .die:nth-child(4) { left: 59.5%; top: 47.6%; transform: rotate(4deg); }
+html body[data-appearance="built-in"] .die:nth-child(5) { left: 76.0%; top: 62.2%; transform: rotate(-2deg); }
+
+html body[data-appearance="built-in"] .die[aria-pressed="true"] {
+  --five-dice-face: linear-gradient(145deg, #fffaf0, #e5d7bb 82%);
+  border-color: #d6c9aa;
+  border-radius: 50%;
+  outline: clamp(2px,.28vw,5px) solid #d8a94f;
+  outline-offset: clamp(4px,.52vw,9px);
+  background-color: #eee2ca;
+  box-shadow: inset 0 -5px 0 rgba(85,61,34,.18), inset 0 0 0 2px rgba(255,255,255,.58), 0 0 2vw rgba(245,215,131,.42);
+  filter: drop-shadow(0 .75vw .65vw rgba(0,0,0,.62));
+  transition: outline-color .16s ease, box-shadow .16s ease;
+}
+
+html body[data-appearance="built-in"] .die:nth-child(1)[aria-pressed="true"] { transform: rotate(-4deg); }
+html body[data-appearance="built-in"] .die:nth-child(2)[aria-pressed="true"] { transform: rotate(3deg); }
+html body[data-appearance="built-in"] .die:nth-child(3)[aria-pressed="true"] { transform: rotate(-3deg); }
+html body[data-appearance="built-in"] .die:nth-child(4)[aria-pressed="true"] { transform: rotate(4deg); }
+html body[data-appearance="built-in"] .die:nth-child(5)[aria-pressed="true"] { transform: rotate(-2deg); }
+
+html body[data-appearance="built-in"] .die[aria-pressed="true"]::after {
+  bottom: -27%;
+  padding: 3% 8%;
+  font-size: clamp(4px, .62vw, 11px);
+}
+
+html body[data-appearance="built-in"] .built-in-roll {
+  position: absolute;
+  z-index: 11;
+  top: 66.7%;
+  left: 61.75%;
+  display: grid;
+  width: 21.8%;
+  min-height: 0;
+  aspect-ratio: 1.25;
+  place-items: center;
+  margin: 0;
+  padding: 0 4% 4.8%;
+  color: #fff8e8;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  filter: none;
+  font-size: clamp(8px, 2.7vw, 46px);
+  line-height: .88;
+  transform: translateX(-50%);
+}
+
+html body[data-appearance="built-in"] .built-in-roll:is(:hover, :focus-visible) {
+  color: #fff;
+  background: radial-gradient(circle at 50% 42%, rgba(93,225,221,.18), transparent 50%);
+  outline: clamp(1px,.18vw,3px) solid #5de1dd;
+  outline-offset: clamp(1px,.25vw,4px);
+}
+
+html body[data-appearance="built-in"] .built-in-roll:disabled {
+  color: rgba(255,248,232,.58);
+  background: transparent;
+  filter: none;
+}
+
+html body[data-appearance="built-in"] .play-surface.is-built-in-rolling .built-in-roll {
+  background: radial-gradient(circle at 50% 42%, rgba(93,225,221,.24), transparent 58%);
+  animation: modern-five-dice-drum-active .7s linear infinite;
+}
+
+html body[data-appearance="built-in"] .built-in-roll::after {
+  top: 70%;
+  bottom: auto;
+  width: 72%;
+  padding: 0;
+  color: #f0dfc5;
+  border: 0;
+  background: transparent;
+  font-size: clamp(9px, 1.55vw, 25px);
+  line-height: 1.05;
+  letter-spacing: .045em;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+html body[data-appearance="built-in"] .built-in-jazz-decor { display: none; }
+
+html body[data-appearance="built-in"] .built-in-five-dice-stage-effects {
+  inset: 0;
+  border-radius: 0;
+}
+
+html body[data-appearance="built-in"] .roll-actions {
+  position: static;
+  width: 100%;
+  max-width: 1672px;
+  margin: 8px auto 0;
+}
+
+@media (max-width: 760px) {
+  html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars {
+    top: 1.7%;
+    left: 23.45%;
+    width: 62.65%;
+    height: 14.25%;
+    grid-template-columns: minmax(0, 29.6fr) repeat(3, minmax(0, 22.77fr));
+    gap: .7%;
+    padding: 1.1% .8%;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar {
+    min-height: 0;
+    display: block;
+    padding: 4% 5%;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar .built-in-board-player-avatar {
+    width: 32%;
+    height: auto;
+  }
+  html body[data-appearance="built-in"] .player-status-block.has-built-in-board-avatar.is-empty-seat { display: grid; }
+  html body[data-appearance="built-in"] .play-surface {
+    position: absolute;
+    inset: 0;
+    display: block;
+    min-height: 0;
+    height: 100%;
+    padding: 0;
+  }
+  html body[data-appearance="built-in"] .built-in-score-sheet {
+    top: 19.25%;
+    left: 1.45%;
+    width: 37.75%;
+    min-height: 0;
+    height: 71.9%;
+    padding: 0;
+    border: 0;
+  }
+  html body[data-appearance="built-in"] .built-in-score-columns,
+  html body[data-appearance="built-in"] .built-in-score-choice {
+    grid-template-columns: 29.25% repeat(4, 17.6875%);
+  }
+  html body[data-appearance="built-in"] .dice {
+    top: 18.75%;
+    left: 41%;
+    width: 47.35%;
+    min-height: 0;
+    height: 60.2%;
+    margin: 0;
+    padding: 0;
+  }
+  html body[data-appearance="built-in"] .die { --modern-die-size: 14.2%; }
+  html body[data-appearance="built-in"] .built-in-roll {
+    top: 66.7%;
+    left: 61.75%;
+    bottom: auto;
+    width: 21.8%;
+  }
+  html body[data-appearance="built-in"] .built-in-jazz-decor { display: none; }
+}
+body[data-external-game-controls="true"] [data-external-game-control="pause"],
+body[data-external-game-controls="true"] [data-external-game-row],
+body[data-external-game-controls="true"] #separate-media-controls {
+  display: none !important;
+}
+
+@media (pointer: coarse) {
+  .game-options .setting-label-with-info > .inline-info,
+  .game-options .shared-game-setting > .setting-label-with-info > .inline-info {
+    width: 44px; min-width: 44px; height: 44px; min-height: 44px;
+  }
+}
+
+@media (pointer: coarse) {
+  #height-fit-toggle { min-width: 44px; min-height: 44px; }
+}
+
+/* Embedded Five Dice uses the room stage as its only vertical scroller. */
+html:has(#corechat-single-scroll-sizing) #score-records {
+  height: auto;
+  max-height: none;
+}
+html:has(#corechat-single-scroll-sizing) #score-table-scroll {
+  flex: 0 0 auto;
+  height: auto;
+  max-height: none;
+}
+
+/* Readable metadata stays in its authored lanes while it fits. Artwork and
+   avatar coordinates are unchanged; narrow overflow uses the same text nodes
+   below the artboard rather than microscopic type or a second scroller. */
+html body[data-appearance="built-in"] #five-dice-player-status-strip .player-status-name {
+  max-width: 25%;
+  font-size: max(clamp(6px, 1.25vw, 21px), calc(12px * var(--five-dice-status-font-scale, 1)));
+}
+html body[data-appearance="built-in"] #five-dice-player-status-strip .player-status-turn {
+  font-size: max(.66rem, calc(10px * var(--five-dice-status-font-scale, 1)));
+  line-height: 1.15;
+  letter-spacing: .02em;
+  max-height: 44%;
+  padding: 0 1px;
+  white-space: normal;
+}
+html body[data-appearance="built-in"] #five-dice-player-status-strip .player-status-hold {
+  position: absolute;
+  top: 12%;
+  right: 1%;
+  left: auto;
+  bottom: auto;
+  display: grid;
+  align-content: center;
+  box-sizing: border-box;
+  width: 28%;
+  max-width: 28%;
+  height: 84%;
+  max-height: 84%;
+  margin: 0;
+  padding: 0 1px;
+  border-radius: 5px;
+  font-size: max(.66rem, calc(10px * var(--five-dice-status-font-scale, 1)));
+  line-height: 1.15;
+  letter-spacing: .02em;
+  text-align: center;
+  white-space: normal;
+}
+html body[data-appearance="built-in"] #five-dice-player-status-strip .player-status-hold > span { display: block; }
+html body[data-appearance="built-in"] #five-dice-player-status-strip .player-status-timer,
+html body[data-appearance="built-in"] #five-dice-player-status-strip .player-status-score-label {
+  font-size: max(clamp(6px, .65vw, 11px), calc(10px * var(--five-dice-status-font-scale, 1)));
+}
+#five-dice-readable-player-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+  margin: 8px 0;
+  overflow: visible;
+  overflow-anchor: none;
+}
+#five-dice-readable-player-status[hidden] { display: none; }
+#five-dice-readable-player-status .five-dice-readable-player {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(216,169,79,.35);
+  border-radius: 6px;
+  color: #f7f1e5;
+  background: rgba(4,18,21,.82);
+}
+#five-dice-readable-player-status .player-status-name,
+#five-dice-readable-player-status .player-status-score,
+#five-dice-readable-player-status .player-status-timer,
+#five-dice-readable-player-status .player-status-turn,
+#five-dice-readable-player-status .player-status-hold {
+  position: static;
+  inset: auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: normal;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-transform: none;
+}
+#five-dice-readable-player-status .player-status-name { flex: 1 0 100%; font-size: 14px; }
+#five-dice-readable-player-status .player-status-score { display: inline-flex; gap: 4px; }
+#five-dice-readable-player-status .player-status-score-label,
+#five-dice-readable-player-status .player-status-score-value { font-size: 12px; line-height: 1.3; }
+#five-dice-readable-player-status .player-status-hold,
+#five-dice-readable-player-status .player-status-turn { padding: 3px 6px; }
+#five-dice-readable-player-status .player-status-hold > span + span::before { content: " / "; }
+#five-dice-readable-player-status [hidden] { display: none; }
+
+/* Below readable art-target size, reuse the existing scorecard without
+   shrinking text, moving painted rows, or introducing another scroller. */
+html body[data-readable-scoring="true"] .game {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+html body[data-readable-scoring="true"] #score-records {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+html body[data-readable-scoring="true"] #score-table-scroll {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+html body[data-readable-scoring="true"] #score-records table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 12px;
+}
+html body[data-readable-scoring="true"] #score-records th,
+html body[data-readable-scoring="true"] #score-records td {
+  min-width: 0;
+  padding: 5px 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html body[data-readable-scoring="true"] #score-records th:first-child,
+html body[data-readable-scoring="true"] #score-records td:first-child { width: 40%; }
+html body[data-readable-scoring="true"] #score-records .category {
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px;
+  font-size: 14px;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html body[data-readable-scoring="true"] #score-records .score-heading-row { flex-wrap: wrap; }
+html body[data-readable-scoring="true"] #score-records .records-heading-row > * { min-width: 0; max-width: 100%; }
+html body[data-readable-scoring="true"] #score-records .record-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+html body[data-readable-scoring="true"] #score-records .record-totals > div { min-width: 0; overflow-wrap: anywhere; }
+#score-readability-note { margin: 4px 0 8px; }
+#score-readability-note[hidden] { display: none; }
+html:not(:has(#corechat-single-scroll-sizing)):has(body[data-readable-scoring="true"]),
+html:not(:has(#corechat-single-scroll-sizing)) body[data-readable-scoring="true"] {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+
+/* R30 responsive repair: a constrained artboard keeps its artwork while the
+   existing full score table becomes the readable, single-scroll control. */
+html body[data-readable-scoring="true"] #score-readability-note {
+  display:block;
+  padding:8px 10px;
+  border:1px solid rgba(93,225,221,.42);
+  border-radius:8px;
+  color:#dffcf8;
+  background:#09272b;
+  font-size:14px;
+  line-height:1.35;
+}
+
+/* The painted board already supplies each seat frame. Keep the turn cue on
+   the avatar border instead of drawing a second glowing rectangle. */
+html body[data-appearance="built-in"] #five-dice-player-status-strip.has-built-in-board-avatars .player-status-block.has-built-in-board-avatar.is-current {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body.five-dice-session-unavailable{
+  box-sizing:border-box;
+  display:grid;
+  min-height:100vh;
+  margin:0;
+  padding:20px;
+  place-items:center;
+  color:#f7f1e5;
+  background:
+    radial-gradient(circle at 50% 20%,rgba(93,225,221,.16),transparent 38%),
+    linear-gradient(145deg,#0a282c,#041316 72%);
+}
+.five-dice-unavailable{
+  box-sizing:border-box;
+  width:min(520px,100%);
+  padding:clamp(22px,5vw,40px);
+  border:1px solid rgba(216,169,79,.62);
+  border-radius:18px;
+  background:rgba(4,18,21,.96);
+  box-shadow:0 22px 70px rgba(0,0,0,.52),inset 0 0 0 3px rgba(216,169,79,.08);
+  text-align:center;
+}
+.five-dice-unavailable h1{margin:0 0 12px;color:#f5d783;font:500 clamp(1.7rem,7vw,2.7rem)/1.05 Georgia,"Times New Roman",serif}
+.five-dice-unavailable .status{margin:0 0 20px;color:#d7e5e1;font-size:clamp(1rem,3.8vw,1.15rem);line-height:1.5}
+.five-dice-unavailable-return{
+  display:inline-flex;
+  min-height:44px;
+  align-items:center;
+  justify-content:center;
+  padding:0 20px;
+  border:1px solid #d8a94f;
+  border-radius:9px;
+  color:#071517;
+  background:#f1cf79;
+  font-weight:800;
+  text-decoration:none;
+}
+.five-dice-unavailable-return:hover,.five-dice-unavailable-return:focus-visible{outline:3px solid #5de1dd;outline-offset:3px;background:#ffe39a}
+
+@media(max-width:760px){
+  body[data-appearance="built-in"]:has(.built-in-five-dice-result:not([hidden])) #five-dice-player-status-strip{
+    visibility:hidden;
+    pointer-events:none;
+  }
+  body[data-appearance="built-in"] .built-in-five-dice-result{
+    z-index:40;
+    width:min(340px,calc(100% - 24px));
+    padding:24px 14px 18px;
+    background:linear-gradient(145deg,#0b3034,#061619 68%);
+  }
+}
+
+/* The room owns embedded scrolling and gives the game natural content height.
+   Classic cannot size itself from cqh in a size-contained zero-height slot. */
+html:has(#corechat-single-scroll-sizing) body[data-appearance="classic"] .presentation-grid {
+  flex: 0 0 auto;
+  height: auto;
+  align-items: start;
+}
+html:has(#corechat-single-scroll-sizing) body[data-appearance="classic"] .play-surface-slot {
+  height: auto;
+  container-type: normal;
+  grid-template-rows: auto auto;
+  align-items: start;
+}
+html:has(#corechat-single-scroll-sizing) body[data-appearance="classic"] .five-dice-approved-artboard {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  grid-template-rows: auto auto;
+  justify-items: center;
+  gap: 8px;
+}
+html:has(#corechat-single-scroll-sizing) body[data-appearance="classic"] #play-surface {
+  width: min(100%, var(--viewer-board-max-width, 840px));
+  height: auto;
+  max-height: none;
+  aspect-ratio: 840 / 640;
+}
+body[data-appearance="classic"] #built-in-roll { display: none !important; }
+
+
+/* The Classic canvas is an interaction surface, not selectable document text. */
+body[data-appearance="classic"] #play-surface,
+body[data-appearance="classic"] #play-surface * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+body[data-appearance="classic"] #play-surface img {
+  -webkit-user-drag: none;
+}
+
+
+/* Scoring hit targets belong only to the viewer's source-mapped score cell. */
+body[data-appearance="classic"] .classic-score-choice {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0;
+}
+body[data-appearance="classic"] .classic-score-choice:is(:hover, :focus-visible, .is-previewing) {
+  outline: none;
+  background: rgba(255, 244, 208, .12);
+  box-shadow: inset 0 0 0 2px #fff4d0;
+}

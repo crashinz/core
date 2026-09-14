@@ -142,10 +142,11 @@ export class ChatComposerService {
      *
      * @param {string} content
      * @param {string} activeChat
+     * @param {{important?: boolean}} options
      *
      * @returns {Promise<Object|null>}
      */
-    async sendTextMessage(content, activeChat) {
+    async sendTextMessage(content, activeChat, options = {}) {
 
         const text =
             String(content || "").trim();
@@ -177,7 +178,10 @@ export class ChatComposerService {
                         text,
 
                     channel:
-                        activeChat
+                        activeChat,
+
+                    important:
+                        Boolean(options.important)
 
                 }, activeChat);
 

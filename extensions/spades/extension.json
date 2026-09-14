@@ -1,0 +1,125 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "spades",
+  "name": "Spades",
+  "version": "1.4.19",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.private-media",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative",
+    "game.presentation.private-media"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_b60c0a05",
+    "name": "Spades",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_b60c0a05",
+    "gameId": 62,
+    "path": "spades-first-party",
+    "entry": "index.html",
+    "icon": "spades-first-party-icon.svg",
+    "profile": "versus",
+    "minPlayers": 1,
+    "practiceMinPlayers": 1,
+    "recordedMinPlayers": 4,
+    "maxPlayers": 4,
+    "seats": [
+      "Team 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 1",
+      "Team 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 1",
+      "Team 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 2",
+      "Team 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 2"
+    ],
+    "adaptationVersion": "1.3.38",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_b60c0a05",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      },
+      {
+        "id": "classic",
+        "label": "Classic"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": true,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.363636,
+      "minimumReadableWidth": 600,
+      "minimumReadableHeight": 440
+    },
+    "rulesHelp": {
+      "label": "Spades rules",
+      "description": "Four-seat team Spades with accepted Board, Ace-High or Joker-Joker-Ace deck, Nil exchanges, Ten for 200, Boston, selectable bag rules, optional Legacy OCX back-door ending, authoritative deal and play, and Practice bots. Recorded play remains four authenticated humans."
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "includes/spades_extension.php": "df6ab45d9ff07cc3d818f559bde9bddf51ab807f89437fa5356231b95684368f",
+      "includes/spades_bot_support.php": "ae9ac02cfca6d8a38fc24dd373472c4e067e538b341a874521032a80698d7f9b",
+      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "assets/images/spades-first-party-icon.svg": "d43407d564236de33c78261b829cde931c6e02504e49f4c975cd9104d825a828",
+      "assets/audio/built-in-games/ui-select.ogg": "aec0c31ea934a35936ae0d2ab8fac8123c93aa5647f935853a58dbaf90278b7a",
+      "assets/audio/built-in-games/game-success.ogg": "33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c",
+      "assets/audio/built-in-games/game-loss.ogg": "a97513d7fd2b12b1210c423be943b4c1ab0e899b11db95855e9b74836e646ae0",
+      "assets/audio/built-in-games/card-shuffle.ogg": "96c84883a30845ede723a4cf2e8369e9837e7dd4e0d4eb0212b0a7ed21b0f544",
+      "assets/audio/built-in-games/card-play.ogg": "d8f26c33a665dcbdcc6f632f6050bc9dd548feb0d4942d4547615926d3926810",
+      "assets/audio/built-in-games/spades-your-team-nil-failed.wav": "bc12635cc442d43c26b5ae1f3cabee0b65524bb68adf609b7d60eeff14cd1205",
+      "assets/audio/built-in-games/spades-other-team-nil-failed.wav": "e239e8c7511db982559081c8fc66a952287d16fa3d51a70634ca1dbd1d9cd68f",
+      "assets/audio/built-in-games/spades-nil-failed.wav": "6f5f33ccf20ce76b51572b6e63ddbcc778394a55e485440775eb9943a4beb436",
+      "games/spades-first-party/spades-modern.js": "5625a5fe9b898ddf9ea1b0d8a9fb06102f07e21486f51bc64f0a6a4b633e2291",
+      "games/spades-first-party/spades-modern.css": "efac83f5ce77d21752538a22a0cc3d231851c0d8860828b921ce044d021f8445",
+      "assets/images/spades-modern/table-room.png": "eead2fc92b1872a3f5fa8c5710c3d9417166b9292a17fdfc91700fde8dab7249",
+      "assets/images/spades-modern/spade-emblem.svg": "e6128a7159c1a3c1bc908b90b2ba97a17ce7b1da6a33d5213898b77220ded7b9",
+      "assets/images/spades-modern/bot-2.png": "fe7e90d9e1295185bf46dcbe1cb15e6c31966c7e880fac045c5f7952baefeb61",
+      "assets/images/spades-modern/bot-3.png": "9d4a7d05bd6e5e363a06039b04bb4941e7b82d7ce5c97fc26a20f664e66a70fd",
+      "assets/images/spades-modern/bot-4.png": "4dd2f6f0b26942f2bc34f49ecb263c3017abf22da15ff86eaf72ed26a3ab4fa5",
+      "assets/images/spades-modern/normal-bot-4.png": "b5b218f41584f1fd21fafe8b6321df4d484d30a11921514bbea0f4672fb4af3c",
+      "assets/images/spades-modern/card-back.svg": "3c8b646f04d982cb11d9ade7a8c5412f72324478ea9c2bccc6a077c9b42e4c44",
+      "assets/images/spades-modern/joker-little.svg": "440743d19c6084774094183bd6ed26d9fde77d941f51ede6cc5ced104e0e3f67",
+      "assets/images/spades-modern/joker-big.svg": "a42199b120d87380d66625cb7ae9298d1eed10f2e90a34bacfa2ac0a4b11645b",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/spades-first-party/index.html": "fd382c8e48120dd2c66b87785dd35cb0e40ade4a32e0635c38e9d47321e9de1a",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
+      "includes/spades_bot_endgame_support.php": "608657cf5d18490bd64b45646815a4ea82465aa0276db5b2214f4677bcfdc447"
+    }
+  }
+}

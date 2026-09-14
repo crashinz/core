@@ -8,34 +8,72 @@ $p = auth_participant($pdo, $sessionId, $body['join_token'] ?? '');
 $action = $body['action'] ?? 'position';
 $allowedLinkIcons = allowed_link_icon_names($pdo);
 
+/** Count exact movement owners, never participant-ID prefixes or room totals. */
+function users_movement_limit_reached(PDO $pdo, int $sessionId, array $participantIds, float $maximum, int $excludeEventId = 0): bool {
+    $participantIds = array_values(array_unique(array_filter(array_map('intval', $participantIds), static fn(int $id): bool => $id > 0)));
+    if (!$participantIds) return false;
+    $marks = implode(',', array_fill(0, count($participantIds), '?'));
+    $cast = db_uses_mysql_syntax($pdo) ? 'UNSIGNED' : 'INTEGER';
+    $owner = "CAST(CASE WHEN JSON_VALID(payload) THEN COALESCE(JSON_EXTRACT(payload, '$.participant_id'), JSON_EXTRACT(payload, '$.actor_participant_id')) ELSE NULL END AS $cast)";
+    $stmt = $pdo->prepare("SELECT COUNT(*) AS movement_count FROM events WHERE session_id = ? AND type IN ('position','relationship_position') AND created_at >= ? AND id <> ? AND $owner IN ($marks) GROUP BY $owner");
+    $stmt->execute(array_merge([$sessionId, gmdate('Y-m-d H:i:s', time() - 1), $excludeEventId], $participantIds));
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $count) if ((int)$count >= $maximum) return true;
+    return false;
+}
+
+function users_lock_movement_participants(PDO $pdo, int $sessionId, array $ids): void {
+    if (!db_uses_mysql_syntax($pdo)) return; // The canonical SQLite write transaction already reserves its writer.
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id FOR UPDATE');
+    $stmt->execute(array_merge([$sessionId], $ids));
+    $stmt->fetchAll();
+}
+
 if ($action === 'position' || $action === 'update_position') {
-    $maxMoves = app_setting_float($pdo, 'avatar_movements_per_second', 12);
-    $recent = $pdo->prepare("SELECT COUNT(*) FROM events WHERE session_id = ? AND type = 'position' AND payload LIKE ? AND created_at >= ?");
-    $recent->execute([$sessionId, '%"participant_id":' . (int)$p['id'] . '%', gmdate('Y-m-d H:i:s', time() - 1)]);
-    if ((int)$recent->fetchColumn() >= $maxMoves) json_out(['ok' => true, 'throttled' => true]);
-    $x = max(0, min(1, (float)($body['x'] ?? 0)));
-    $y = max(0, min(1, (float)($body['y'] ?? 0)));
-    $pdo->prepare('UPDATE participants SET position_x = ?, position_y = ? WHERE id = ?')->execute([$x, $y, (int)$p['id']]);
-    emit_event($pdo, $sessionId, 'position', ['participant_id' => (int)$p['id'], 'position_x' => $x, 'position_y' => $y]);
-    json_out(['ok' => true]);
+    $result = avatar_relationship_transaction($pdo, function() use ($pdo, $sessionId, $p, $body): array {
+        users_lock_movement_participants($pdo, $sessionId, [(int)$p['id']]);
+        $maxMoves = corechat_limit_value($pdo, 'avatar_movements_per_second', 12.0);
+        if ($maxMoves !== null && users_movement_limit_reached($pdo, $sessionId, [(int)$p['id']], (float)$maxMoves)) {
+            limit_event_record_reached($pdo, 'avatar_movements_per_second', 'member', 'user:' . (int)$p['user_id'], 'throttled');
+            return ['ok' => true, 'throttled' => true];
+        }
+        $x = max(0, min(1, (float)($body['x'] ?? 0)));
+        $y = max(0, min(1, (float)($body['y'] ?? 0)));
+        $pdo->prepare('UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?')->execute([$x, $y, (int)$p['id'], $sessionId]);
+        emit_event($pdo, $sessionId, 'position', ['participant_id' => (int)$p['id'], 'position_x' => $x, 'position_y' => $y]);
+        return ['ok' => true];
+    });
+    json_out($result);
 }
 
 if ($action === 'position_pair') {
     $positions = $body['positions'] ?? [];
     if (!is_array($positions)) json_out(['error' => 'positions required'], 400);
 
+    $result = avatar_relationship_transaction($pdo, function() use ($pdo, $sessionId, $p, $positions): array {
     $allowed = [(int)$p['id'] => true];
     if (!empty($p['linked_to_participant_id'])) $allowed[(int)$p['linked_to_participant_id']] = true;
     $stmt = $pdo->prepare('SELECT id FROM participants WHERE session_id = ? AND linked_to_participant_id = ?');
     $stmt->execute([$sessionId, (int)$p['id']]);
     foreach ($stmt->fetchAll() as $row) $allowed[(int)$row['id']] = true;
 
-    $update = $pdo->prepare('UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?');
-    $maxMoves = app_setting_float($pdo, 'avatar_movements_per_second', 12);
-    $recent = $pdo->prepare("SELECT COUNT(*) FROM events WHERE session_id = ? AND type = 'position' AND created_at >= ?");
-    $recent->execute([$sessionId, gmdate('Y-m-d H:i:s', time() - 1)]);
-    if ((int)$recent->fetchColumn() >= $maxMoves * 2) json_out(['ok' => true, 'throttled' => true]);
+    $accepted = [];
     foreach ($positions as $pos) {
+        if (!is_array($pos)) continue;
+        $id = (int)($pos['participant_id'] ?? 0);
+        if ($id && !empty($allowed[$id])) $accepted[$id] = $pos;
+    }
+    $movementIds = array_values(array_unique(array_merge([(int)$p['id']], array_keys($accepted))));
+    users_lock_movement_participants($pdo, $sessionId, $movementIds);
+    $update = $pdo->prepare('UPDATE participants SET position_x = ?, position_y = ? WHERE id = ? AND session_id = ?');
+    $maxMoves = corechat_limit_value($pdo, 'avatar_movements_per_second', 12.0);
+    if ($maxMoves !== null) {
+        if (users_movement_limit_reached($pdo, $sessionId, $movementIds, (float)$maxMoves)) {
+            limit_event_record_reached($pdo, 'avatar_movements_per_second', 'member', 'user:' . (int)$p['user_id'], 'throttled', ['pairedMovement' => true]);
+            return ['ok' => true, 'throttled' => true];
+        }
+    }
+    foreach ($accepted as $pos) {
         $id = (int)($pos['participant_id'] ?? 0);
         if (!$id || empty($allowed[$id])) continue;
         $x = max(0, min(1, (float)($pos['x'] ?? 0)));
@@ -43,10 +81,14 @@ if ($action === 'position_pair') {
         $update->execute([$x, $y, $id, $sessionId]);
         emit_event($pdo, $sessionId, 'position', ['participant_id' => $id, 'position_x' => $x, 'position_y' => $y]);
     }
-    json_out(['ok' => true]);
+    return ['ok' => true];
+    });
+    json_out($result);
 }
 
 if ($action === 'relationship_position') {
+    $transaction = database_transaction_begin($pdo, true);
+    try {
     $result = avatar_relationship_move_group(
         $pdo,
         $sessionId,
@@ -56,6 +98,21 @@ if ($action === 'relationship_position') {
         trim((string)($body['operation_id'] ?? '')),
         is_array($body['positions'] ?? null) ? $body['positions'] : []
     );
+    // Let the canonical owner validate authorization, membership, version and
+    // idempotency first. Rejected admissions roll back its uncommitted writes.
+    $maxMoves = corechat_limit_value($pdo, 'avatar_movements_per_second', 12.0);
+    if (!empty($result['ok']) && empty($result['idempotent']) && $maxMoves !== null
+        && users_movement_limit_reached($pdo, $sessionId, [(int)$p['id']], (float)$maxMoves, (int)($result['event_id'] ?? 0))) {
+        database_transaction_rollback($pdo, $transaction);
+        limit_event_record_reached($pdo, 'avatar_movements_per_second', 'member', 'user:' . (int)$p['user_id'], 'throttled', ['pairedMovement' => true]);
+        $result = ['ok' => true, 'throttled' => true];
+    } else {
+        database_transaction_commit($pdo, $transaction);
+    }
+    } catch (Throwable $error) {
+        database_transaction_rollback($pdo, $transaction);
+        throw $error;
+    }
     if (empty($result['ok'])) {
         json_out($result, (int)($result['http_status'] ?? 409));
     }

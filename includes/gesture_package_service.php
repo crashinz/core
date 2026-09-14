@@ -808,10 +808,12 @@ function gesture_package_create(PDO $pdo, array $actor, array $fields, array $fi
             gesture_catalog_lock_user($pdo, $actorId);
             $capability = gesture_catalog_require_user_mutation($pdo, true);
             gesture_capability_require_scope($capability, 'personal');
-            $limit = max(1, (int)app_setting($pdo, 'gesture_upload_limit', '50'));
-            $count = $pdo->prepare('SELECT COUNT(*) FROM gestures WHERE owner_user_id = ? AND deleted_at IS NULL');
-            $count->execute([$actorId]);
-            if ((int)$count->fetchColumn() >= $limit) throw new GestureCatalogException('Gesture limit reached. Remove some gestures to make room.', 409, 'GESTURE_LIMIT_REACHED');
+            $limit = corechat_limit_value($pdo, 'gesture_upload_limit', 50);
+            if ($limit !== null) {
+                $count = $pdo->prepare('SELECT COUNT(*) FROM gestures WHERE owner_user_id = ? AND deleted_at IS NULL');
+                $count->execute([$actorId]);
+                if ((int)$count->fetchColumn() >= $limit) throw new GestureCatalogException('Gesture limit reached. Remove some gestures to make room.', 409, 'GESTURE_LIMIT_REACHED');
+            }
             $publicId = uuid_v4();
             $generation = 1;
             $metadata = $prepared['metadata'];
@@ -848,6 +850,9 @@ function gesture_package_create(PDO $pdo, array $actor, array $fields, array $fi
         });
     } catch (Throwable $error) {
         gesture_package_cleanup_promoted($promoted);
+        if ($error instanceof GestureCatalogException && $error->errorCode === 'GESTURE_LIMIT_REACHED') {
+            limit_event_record_reached($pdo, 'gesture_upload_limit', 'member', 'user:' . $actorId, 'rejected');
+        }
         throw $error;
     }
 }
@@ -974,9 +979,39 @@ function gesture_package_editor_detail(PDO $pdo, array $actor, string $publicId,
     return ['gesture' => $payload, 'package' => gesture_package_public_summary($pdo, $row, $admin), 'preferences' => gesture_catalog_preferences_payload($pdo, $actorId)];
 }
 
-function gesture_package_media_url(array $row, string $role, string $purpose = 'catalog'): ?string
+function gesture_package_media_scope(?string $scope): ?string
+{
+    if ($scope === null || $scope === '') return null;
+    if (!in_array($scope, ['server', 'personal'], true)) {
+        throw new GestureCatalogException('Gesture media scope is invalid.', 400, 'INVALID_SCOPE');
+    }
+    return $scope;
+}
+
+function gesture_package_media_token(array $row, string $role, string $purpose, ?string $scope = null): string
+{
+    $secret = (string)($row['media_access_token'] ?? '');
+    if ($secret === '') return '';
+    $scope = gesture_package_media_scope($scope);
+    if ($scope === null) return $secret;
+    return hash_hmac(
+        'sha256',
+        implode('|', [
+            (string)($row['public_id'] ?? ''),
+            (string)max(1, (int)($row['package_generation'] ?? 1)),
+            $role,
+            $purpose,
+            $scope,
+        ]),
+        $secret
+    );
+}
+
+function gesture_package_media_url(array $row, string $role, string $purpose = 'catalog', ?string $scope = null): ?string
 {
     if (!in_array($role, ['animation', 'poster', 'audio'], true)) return null;
+    $scope = gesture_package_media_scope($scope);
+    $scopeQuery = $scope === null ? '' : '&scope=' . rawurlencode($scope);
     if ((string)($row['package_status'] ?? 'legacy-unverified') === 'legacy-unverified') {
         if ($role === 'poster') return null;
         $legacyPath = (string)($row[$role === 'animation' ? 'gif_path' : 'audio_path'] ?? '');
@@ -988,8 +1023,8 @@ function gesture_package_media_url(array $row, string $role, string $purpose = '
         ) {
             $publicId = rawurlencode((string)$row['public_id']);
             $generation = max(1, (int)$row['package_generation']);
-            $token = rawurlencode((string)$row['media_access_token']);
-            return app_url("/api/gesture_media.php?id={$publicId}&generation={$generation}&role={$role}&purpose=" . rawurlencode($purpose) . "&token={$token}");
+            $token = rawurlencode(gesture_package_media_token($row, $role, $purpose, $scope));
+            return app_url("/api/gesture_media.php?id={$publicId}&generation={$generation}&role={$role}&purpose=" . rawurlencode($purpose) . "{$scopeQuery}&token={$token}");
         }
         return media_url($legacyPath);
     }
@@ -997,8 +1032,8 @@ function gesture_package_media_url(array $row, string $role, string $purpose = '
     if ($role === 'poster' && empty($row['package_has_poster'])) return null;
     $publicId = rawurlencode((string)$row['public_id']);
     $generation = max(1, (int)($row['package_generation'] ?? 1));
-    $token = rawurlencode((string)($row['media_access_token'] ?? ''));
-    return app_url("/api/gesture_media.php?id={$publicId}&generation={$generation}&role={$role}&purpose=" . rawurlencode($purpose) . "&token={$token}");
+    $token = rawurlencode(gesture_package_media_token($row, $role, $purpose, $scope));
+    return app_url("/api/gesture_media.php?id={$publicId}&generation={$generation}&role={$role}&purpose=" . rawurlencode($purpose) . "{$scopeQuery}&token={$token}");
 }
 
 function gesture_package_media_record(PDO $pdo, string $publicId, int $generation): array
@@ -1015,13 +1050,15 @@ function gesture_package_media_record(PDO $pdo, string $publicId, int $generatio
     return $row;
 }
 
-function gesture_package_authorize_media(PDO $pdo, array $actor, array $record, string $token, string $role, string $purpose): void
+function gesture_package_authorize_media(PDO $pdo, array $actor, array $record, string $token, string $role, string $purpose, ?string $scope = null): void
 {
     $actorId = (int)($actor['id'] ?? 0);
     $staff = in_array((string)($actor['role'] ?? ''), ['admin', 'developer'], true);
     $owner = $actorId === (int)$record['owner_user_id'];
     $public = !empty($record['is_public']);
-    $capability = $token !== '' && hash_equals((string)$record['media_access_token'], $token);
+    $scope = gesture_package_media_scope($scope);
+    $expectedToken = gesture_package_media_token($record, $role, $purpose, $scope);
+    $capability = $token !== '' && $expectedToken !== '' && hash_equals($expectedToken, $token);
     if ($purpose === 'admin' && (string)($actor['role'] ?? '') !== 'admin') {
         throw new GestureCatalogException(
             'Administrator media maintenance is not authorized.',
@@ -1035,7 +1072,7 @@ function gesture_package_authorize_media(PDO $pdo, array $actor, array $record, 
         $policy = gesture_capability_policy($pdo);
         gesture_capability_require_scope(
             $policy,
-            gesture_capability_scope_for_gesture($record, $actorId)
+            $scope ?? gesture_capability_scope_for_gesture($record, $actorId)
         );
         $features = gesture_part4_feature_flags($pdo);
         if (in_array($role, ['animation', 'poster'], true) && empty($features['animation_media'])) {

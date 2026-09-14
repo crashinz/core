@@ -565,6 +565,9 @@ function moderation_safety_set_block(PDO $pdo, int $blockerUserId, int $blockedU
         if (function_exists('p2p_transfer_terminate_pair')) {
             p2p_transfer_terminate_pair($pdo, $blockerUserId, $blockedUserId, 'Participant block');
         }
+        if (function_exists('multiplayer_game_terminate_pair')) {
+            multiplayer_game_terminate_pair($pdo, $blockerUserId, $blockedUserId);
+        }
     } else {
         $pdo->prepare('DELETE FROM user_blocks WHERE blocker_user_id=? AND blocked_user_id=?')
             ->execute([$blockerUserId, $blockedUserId]);

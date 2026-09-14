@@ -759,6 +759,140 @@ function server_media_register_avatar(PDO $pdo, int $userId, string $publicPath,
     );
 }
 
+function server_media_register_nameplate(PDO $pdo, int $userId, string $publicPath, string $absolutePath, string $declaredMime): string
+{
+    if (!preg_match('#^/assets/uploads/(?:avatars|nameplates)/nameplate-[A-Za-z0-9._-]+$#', $publicPath)) {
+        throw new ServerMediaException('The nameplate inventory path is invalid.', 'SERVER_MEDIA_NAMEPLATE_SOURCE_INVALID', 500);
+    }
+    return server_media_register_owned_asset(
+        $pdo,
+        'avatar',
+        $publicPath,
+        'nameplate',
+        'avatar',
+        $absolutePath,
+        basename($publicPath),
+        $declaredMime,
+        $userId,
+        false
+    );
+}
+
+function server_media_select_library_asset(PDO $pdo, int $userId, string $kind, string $sourceId): array
+{
+    if ($userId < 1 || !in_array($kind, ['avatar', 'nameplate'], true)
+        || preg_match('/\Asm_[a-f0-9]{32}\z/', $sourceId) !== 1) {
+        throw new ServerMediaException('The selected image is unavailable.', 'LIBRARY_SELECTION_UNAVAILABLE', 404);
+    }
+    $delivery = moderation_safety_delivery_policy($pdo, 'avatar');
+    if (($delivery['effectiveMode'] ?? '') !== 'server-stored') {
+        throw new ServerMediaException('Server-stored images are disabled.', 'LIBRARY_SELECTION_DISABLED', 403);
+    }
+    $transaction = database_transaction_begin($pdo, true);
+    if (empty($transaction['owned'])) {
+        throw new LogicException('Library selection must own its transaction.');
+    }
+    $createdPath = null;
+    try {
+        // SQLite owns an immediate writer transaction; MySQL locks this user's row.
+        $lockSuffix = db_uses_mysql_syntax($pdo) ? ' FOR UPDATE' : '';
+        $user = $pdo->prepare('SELECT id FROM users WHERE id=?' . $lockSuffix);
+        $user->execute([$userId]);
+        if (!$user->fetchColumn()) throw new ServerMediaException('The room identity is unavailable.', 'LIBRARY_SELECTION_UNAVAILABLE', 404);
+        $removedKeySql = db_uses_mysql_syntax($pdo)
+            ? "CONCAT('{$kind}_library.deleted.',server_media_assets.public_id)"
+            : "'{$kind}_library.deleted.' || server_media_assets.public_id";
+        $find = $pdo->prepare("SELECT * FROM server_media_assets WHERE public_id=? AND source_owner='avatar' AND source_role=? AND category='avatar' AND status='active' AND (expires_at IS NULL OR expires_at>CURRENT_TIMESTAMP) AND NOT EXISTS (SELECT 1 FROM app_settings removed WHERE removed.setting_key=$removedKeySql AND removed.value='1') LIMIT 1" . $lockSuffix);
+        $mapKey = $kind . '_library.copy.' . $userId . '.' . $sourceId;
+        $ownedId = app_setting($pdo, $mapKey, '');
+        $find->execute([$ownedId !== '' ? $ownedId : $sourceId, $kind]);
+        $asset = $find->fetch();
+        if (!$asset || ($ownedId !== '' && (int)$asset['uploader_user_id'] !== $userId)) {
+            throw new ServerMediaException('The selected image is unavailable.', 'LIBRARY_SELECTION_UNAVAILABLE', 404);
+        }
+        $copyRequired = (int)$asset['uploader_user_id'] !== $userId;
+        if ($copyRequired) {
+            // Hold the sharing record through first-copy creation, alongside the source asset.
+            $sharing = $pdo->prepare('SELECT value FROM app_settings WHERE setting_key=?' . $lockSuffix);
+            $sharing->execute([$kind . '_library.shared.' . $sourceId]);
+            if ((string)$sharing->fetchColumn() !== '1') {
+                throw new ServerMediaException('The selected image is no longer shared.', 'LIBRARY_SELECTION_UNAVAILABLE', 404);
+            }
+        }
+        $public = (string)$asset['source_key'];
+        $pattern = $kind === 'nameplate'
+            ? '#\A/assets/uploads/(?:avatars|nameplates)/nameplate-[A-Za-z0-9._-]+\z#'
+            : '#\A/assets/uploads/avatars/[A-Za-z0-9._-]+\z#';
+        $sourcePath = realpath((string)$asset['storage_path']);
+        $publicFile = preg_match($pattern, $public) === 1 && !str_contains($public, '..')
+            ? realpath(dirname(__DIR__) . $public) : false;
+        $directory = str_starts_with($public, '/assets/uploads/nameplates/') ? 'nameplates' : 'avatars';
+        $root = realpath(dirname(__DIR__) . '/assets/uploads/' . $directory);
+        if (!$sourcePath || !$publicFile || $sourcePath !== $publicFile || !$root
+            || !str_starts_with($sourcePath, $root . DIRECTORY_SEPARATOR) || !is_file($sourcePath)) {
+            throw new ServerMediaException('The selected image is unavailable.', 'LIBRARY_SELECTION_UNAVAILABLE', 404);
+        }
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($sourcePath) ?: '';
+        $types = ['image/gif' => IMAGETYPE_GIF, 'image/webp' => IMAGETYPE_WEBP, 'image/png' => IMAGETYPE_PNG, 'image/jpeg' => IMAGETYPE_JPEG];
+        $extensions = ['image/gif' => 'gif', 'image/webp' => 'webp', 'image/png' => 'png', 'image/jpeg' => 'jpg'];
+        $dimensions = @getimagesize($sourcePath);
+        $sourceHash = hash_file('sha256', $sourcePath);
+        if (!$dimensions || !isset($types[$mime]) || (int)$dimensions[2] !== $types[$mime]
+            || !is_string($sourceHash) || !hash_equals(strtolower((string)$asset['source_sha256']), $sourceHash)) {
+            throw new ServerMediaException('The selected image is invalid.', 'LIBRARY_SELECTION_INVALID', 404);
+        }
+        if ($copyRequired) {
+            $public = ($kind === 'nameplate' ? '/assets/uploads/nameplates/nameplate-' : '/assets/uploads/avatars/')
+                . bin2hex(random_bytes(12)) . '.' . $extensions[$mime];
+            security_assert_storage_destination($kind === 'nameplate' ? 'nameplate_upload' : 'avatar_upload', $public);
+            $destination = dirname(__DIR__) . $public;
+            $directory = dirname($destination);
+            if (!is_dir($directory) && !@mkdir($directory, 0755, true) && !is_dir($directory)) {
+                throw new ServerMediaException('The selected image could not be stored.', 'LIBRARY_SELECTION_STORE_FAILED', 500);
+            }
+            // Exclusive creation never overwrites an existing upload, and no image encoder is involved.
+            $output = @fopen($destination, 'xb');
+            if ($output === false) throw new ServerMediaException('The selected image could not be stored.', 'LIBRARY_SELECTION_STORE_FAILED', 500);
+            $createdPath = $destination;
+            $input = @fopen($sourcePath, 'rb');
+            try {
+                if ($input === false || stream_copy_to_stream($input, $output) === false) {
+                    throw new ServerMediaException('The selected image could not be copied.', 'LIBRARY_SELECTION_STORE_FAILED', 500);
+                }
+            } finally {
+                if (is_resource($input)) fclose($input);
+                fclose($output);
+            }
+            $copyHash = hash_file('sha256', $destination);
+            if (!is_string($copyHash) || !hash_equals($sourceHash, $copyHash)) {
+                throw new ServerMediaException('The selected image copy is incomplete.', 'LIBRARY_SELECTION_STORE_FAILED', 500);
+            }
+            $ownedId = $kind === 'nameplate'
+                ? server_media_register_nameplate($pdo, $userId, $public, $destination, $mime)
+                : server_media_register_avatar($pdo, $userId, $public, $destination, $mime, false);
+            set_app_setting($pdo, $mapKey, $ownedId);
+            foreach (['name', 'section'] as $field) {
+                $fallback = $field === 'name' ? (string)$asset['original_name'] : '';
+                set_app_setting($pdo, $kind . '_library.' . $field . '.' . $ownedId,
+                    app_setting($pdo, $kind . '_library.' . $field . '.' . $sourceId, $fallback));
+            }
+            $asset['public_id'] = $ownedId;
+            $asset['uploader_user_id'] = $userId;
+            $asset['source_key'] = $public;
+            $sourcePath = $destination;
+        }
+        $asset['storage_path'] = $sourcePath;
+        $asset['selection_dimensions'] = $dimensions;
+        $asset['selection_mime'] = $mime;
+        database_transaction_commit($pdo, $transaction);
+        return $asset;
+    } catch (Throwable $error) {
+        database_transaction_rollback($pdo, $transaction);
+        if ($createdPath !== null) @unlink($createdPath);
+        throw $error;
+    }
+}
+
 function server_media_gesture_public_id_valid(string $publicId): bool
 {
     return preg_match('/\A[A-Za-z0-9._:-]{1,64}\z/', $publicId) === 1;
@@ -834,6 +968,11 @@ function server_media_policy(PDO $pdo): array
     $gestureMode = app_setting($pdo, SERVER_MEDIA_GESTURE_MODE, 'both');
     if (!in_array($fileMode, $modes, true)) $fileMode = 'p2p-only';
     if (!in_array($gestureMode, $modes, true)) $gestureMode = 'both';
+    $limit = static fn(string $id, int|float $default): int|float|null => corechat_limit_value($pdo, $id, $default);
+    $bytes = static function(string $id, float $default) use ($limit): ?int {
+        $megabytes = $limit($id, $default);
+        return $megabytes === null ? null : (int)round($megabytes * 1024 * 1024);
+    };
     return [
         'serverAttachmentsEnabled' => app_setting($pdo, SERVER_MEDIA_ATTACHMENTS_ENABLED, '0') === '1',
         'serverVoiceNotesEnabled' => app_setting($pdo, SERVER_MEDIA_VOICE_NOTES_ENABLED, '0') === '1',
@@ -843,17 +982,29 @@ function server_media_policy(PDO $pdo): array
         'p2pSendGestureEnabled' => in_array($gestureMode, ['p2p-only','both'], true),
         'defaultDelivery' => 'p2p',
         'noSilentFallback' => true,
-        'retentionHours' => max(1, min(8760, (int)app_setting($pdo, SERVER_MEDIA_RETENTION_HOURS, '24'))),
+        'retentionHours' => ($retention = $limit(SERVER_MEDIA_RETENTION_HOURS, 24)) === null ? null : max(1, min(8760, (int)$retention)),
         'limits' => [
-            'imageBytes' => app_setting_bytes($pdo, SERVER_MEDIA_IMAGE_MAX_MB, 10),
-            'documentBytes' => app_setting_bytes($pdo, SERVER_MEDIA_DOCUMENT_MAX_MB, 20),
-            'voiceNoteBytes' => app_setting_bytes($pdo, SERVER_MEDIA_VOICE_MAX_MB, 10),
-            'userRolling24HoursBytes' => app_setting_bytes($pdo, SERVER_MEDIA_USER_DAILY_MB, 100),
-            'installationStorageBytes' => app_setting_bytes($pdo, SERVER_MEDIA_INSTALLATION_STORAGE_MB, 2048),
-            'monthlyDeliveryBytes' => app_setting_bytes($pdo, SERVER_MEDIA_MONTHLY_DELIVERY_MB, 5120),
-            'warningLowPercent' => (int)app_setting($pdo, SERVER_MEDIA_WARNING_LOW_PERCENT, '75'),
-            'warningHighPercent' => (int)app_setting($pdo, SERVER_MEDIA_WARNING_HIGH_PERCENT, '90'),
-            'hardStopPercent' => (int)app_setting($pdo, SERVER_MEDIA_HARD_STOP_PERCENT, '100'),
+            'imageBytes' => $bytes(SERVER_MEDIA_IMAGE_MAX_MB, 10),
+            'documentBytes' => $bytes(SERVER_MEDIA_DOCUMENT_MAX_MB, 20),
+            'voiceNoteBytes' => $bytes(SERVER_MEDIA_VOICE_MAX_MB, 10),
+            'userRolling24HoursBytes' => $bytes(SERVER_MEDIA_USER_DAILY_MB, 100),
+            'installationStorageBytes' => $bytes(SERVER_MEDIA_INSTALLATION_STORAGE_MB, 2048),
+            'monthlyDeliveryBytes' => $bytes(SERVER_MEDIA_MONTHLY_DELIVERY_MB, 5120),
+            'warningLowPercent' => $limit(SERVER_MEDIA_WARNING_LOW_PERCENT, 75),
+            'warningHighPercent' => $limit(SERVER_MEDIA_WARNING_HIGH_PERCENT, 90),
+            'hardStopPercent' => $limit(SERVER_MEDIA_HARD_STOP_PERCENT, 100),
+        ],
+        'limitEnforcement' => [
+            SERVER_MEDIA_RETENTION_HOURS => corechat_limit_is_enforced($pdo, SERVER_MEDIA_RETENTION_HOURS),
+            SERVER_MEDIA_IMAGE_MAX_MB => corechat_limit_is_enforced($pdo, SERVER_MEDIA_IMAGE_MAX_MB),
+            SERVER_MEDIA_DOCUMENT_MAX_MB => corechat_limit_is_enforced($pdo, SERVER_MEDIA_DOCUMENT_MAX_MB),
+            SERVER_MEDIA_VOICE_MAX_MB => corechat_limit_is_enforced($pdo, SERVER_MEDIA_VOICE_MAX_MB),
+            SERVER_MEDIA_USER_DAILY_MB => corechat_limit_is_enforced($pdo, SERVER_MEDIA_USER_DAILY_MB),
+            SERVER_MEDIA_INSTALLATION_STORAGE_MB => corechat_limit_is_enforced($pdo, SERVER_MEDIA_INSTALLATION_STORAGE_MB),
+            SERVER_MEDIA_MONTHLY_DELIVERY_MB => corechat_limit_is_enforced($pdo, SERVER_MEDIA_MONTHLY_DELIVERY_MB),
+            SERVER_MEDIA_WARNING_LOW_PERCENT => corechat_limit_is_enforced($pdo, SERVER_MEDIA_WARNING_LOW_PERCENT),
+            SERVER_MEDIA_WARNING_HIGH_PERCENT => corechat_limit_is_enforced($pdo, SERVER_MEDIA_WARNING_HIGH_PERCENT),
+            SERVER_MEDIA_HARD_STOP_PERCENT => corechat_limit_is_enforced($pdo, SERVER_MEDIA_HARD_STOP_PERCENT),
         ],
         'uploadNotice' => 'Server upload notice: Files stored by this community may be accessed and reviewed by its administrators to investigate abuse, enforce community rules, and address safety or legal concerns. Use peer-to-peer transfer if you do not want the file stored on this server.',
     ];
@@ -885,18 +1036,33 @@ function server_media_usage_summary(PDO $pdo): array
     $policy = server_media_policy($pdo);
     $storage = server_media_storage_usage($pdo);
     $delivery = server_media_monthly_delivery_usage($pdo);
-    $classify = static function(int $used, int $limit) use ($policy): array {
+    $classify = static function(int $used, ?int $limit) use ($policy): array {
+        if ($limit === null) return ['usedBytes' => $used, 'limitBytes' => null, 'percent' => null, 'status' => 'unenforced'];
         $percent = $limit > 0 ? round(($used / $limit) * 100, 2) : 100.0;
-        $status = $percent >= $policy['limits']['hardStopPercent']
+        $status = $policy['limits']['hardStopPercent'] !== null && $percent >= $policy['limits']['hardStopPercent']
             ? 'hard-stop'
-            : ($percent >= $policy['limits']['warningHighPercent']
+            : ($policy['limits']['warningHighPercent'] !== null && $percent >= $policy['limits']['warningHighPercent']
                 ? 'urgent-warning'
-                : ($percent >= $policy['limits']['warningLowPercent'] ? 'warning' : 'ok'));
+                : ($policy['limits']['warningLowPercent'] !== null && $percent >= $policy['limits']['warningLowPercent'] ? 'warning' : 'ok'));
         return ['usedBytes' => $used, 'limitBytes' => $limit, 'percent' => $percent, 'status' => $status];
     };
+    $storageSummary = $classify($storage, $policy['limits']['installationStorageBytes']);
+    $deliverySummary = $classify($delivery, $policy['limits']['monthlyDeliveryBytes']);
+    foreach (['storage' => $storageSummary, 'monthly-delivery' => $deliverySummary] as $scope => $summary) {
+        $status = (string)$summary['status'];
+        if (in_array($status, ['warning', 'urgent-warning', 'hard-stop'], true)) {
+            limit_event_record_reached($pdo, SERVER_MEDIA_WARNING_LOW_PERCENT, 'installation', 'server-media:' . $scope, 'warned', ['percent' => $summary['percent']]);
+        }
+        if (in_array($status, ['urgent-warning', 'hard-stop'], true)) {
+            limit_event_record_reached($pdo, SERVER_MEDIA_WARNING_HIGH_PERCENT, 'installation', 'server-media:' . $scope, 'warned', ['percent' => $summary['percent']]);
+        }
+        if ($status === 'hard-stop') {
+            limit_event_record_reached($pdo, SERVER_MEDIA_HARD_STOP_PERCENT, 'installation', 'server-media:' . $scope, 'blocked', ['percent' => $summary['percent']]);
+        }
+    }
     return [
-        'storage' => $classify($storage, (int)$policy['limits']['installationStorageBytes']),
-        'monthlyDelivery' => $classify($delivery, (int)$policy['limits']['monthlyDeliveryBytes']),
+        'storage' => $storageSummary,
+        'monthlyDelivery' => $deliverySummary,
         'warningLowPercent' => $policy['limits']['warningLowPercent'],
         'warningHighPercent' => $policy['limits']['warningHighPercent'],
         'hardStopPercent' => $policy['limits']['hardStopPercent'],
@@ -943,16 +1109,27 @@ function server_media_upload(PDO $pdo, array $file, array $actor, int $sessionId
         : ($voiceNote
         ? $policy['limits']['voiceNoteBytes']
         : (str_starts_with($classification['detectedMime'], 'image/') ? $policy['limits']['imageBytes'] : $policy['limits']['documentBytes']));
-    if ($bytes <= 0 || $bytes > $maxBytes) {
+    if ($bytes <= 0 || ($maxBytes !== null && $bytes > $maxBytes)) {
+        if (!isset($options['maxBytes'])) {
+            $settingId = $voiceNote
+                ? SERVER_MEDIA_VOICE_MAX_MB
+                : (str_starts_with($classification['detectedMime'], 'image/') ? SERVER_MEDIA_IMAGE_MAX_MB : SERVER_MEDIA_DOCUMENT_MAX_MB);
+            limit_event_record_reached($pdo, $settingId, 'member', 'user:' . (int)($actor['user_id'] ?? $actor['id'] ?? 0), 'rejected', ['submittedBytes' => $bytes]);
+        }
         throw new ServerMediaException('The file exceeds the configured per-file limit.', 'SERVER_MEDIA_FILE_LIMIT', 413, ['maxBytes' => $maxBytes]);
     }
     $userId = (int)($actor['user_id'] ?? $actor['id'] ?? 0);
     if ($userId <= 0) throw new ServerMediaException('Authenticated uploader required.', 'SERVER_MEDIA_AUTH_REQUIRED', 403);
-    if (server_media_user_rolling_usage($pdo, $userId) + $bytes > $policy['limits']['userRolling24HoursBytes']) {
+    if ($policy['limits']['userRolling24HoursBytes'] !== null && server_media_user_rolling_usage($pdo, $userId) + $bytes > $policy['limits']['userRolling24HoursBytes']) {
+        limit_event_record_reached($pdo, SERVER_MEDIA_USER_DAILY_MB, 'member', 'user:' . $userId, 'rejected');
         throw new ServerMediaException('The rolling 24-hour server upload allowance has been reached.', 'SERVER_MEDIA_USER_ALLOWANCE', 429);
     }
-    $storageHardLimit = (int)floor($policy['limits']['installationStorageBytes'] * ($policy['limits']['hardStopPercent'] / 100));
-    if (server_media_storage_usage($pdo) + $bytes > $storageHardLimit) {
+    $storageHardLimit = $policy['limits']['installationStorageBytes'] === null || $policy['limits']['hardStopPercent'] === null
+        ? null
+        : (int)floor($policy['limits']['installationStorageBytes'] * ($policy['limits']['hardStopPercent'] / 100));
+    if ($storageHardLimit !== null && server_media_storage_usage($pdo) + $bytes > $storageHardLimit) {
+        limit_event_record_reached($pdo, SERVER_MEDIA_INSTALLATION_STORAGE_MB, 'installation', 'server-media-storage', 'rejected');
+        limit_event_record_reached($pdo, SERVER_MEDIA_HARD_STOP_PERCENT, 'installation', 'server-media-storage', 'rejected');
         throw new ServerMediaException('The installation server-file allowance has been reached.', 'SERVER_MEDIA_STORAGE_ALLOWANCE', 507);
     }
     $publicId = 'sm_' . bin2hex(random_bytes(16));
@@ -969,19 +1146,15 @@ function server_media_upload(PDO $pdo, array $file, array $actor, int $sessionId
     }
     $hash = strtoupper(hash_file('sha256', $target));
     $persistent = $evidence ? 1 : 0;
-    $expires = $persistent ? null : gmdate('Y-m-d H:i:s', time() + ($policy['retentionHours'] * 3600));
+    $expires = $persistent || $policy['retentionHours'] === null ? null : gmdate('Y-m-d H:i:s', time() + ($policy['retentionHours'] * 3600));
     $audienceJson = json_encode(array_values(array_unique(array_map('intval', $audience))), JSON_UNESCAPED_SLASHES);
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         server_media_lock_quota_owner($pdo);
-        if (server_media_user_rolling_usage($pdo, $userId) + $bytes > $policy['limits']['userRolling24HoursBytes']) {
+        if ($policy['limits']['userRolling24HoursBytes'] !== null && server_media_user_rolling_usage($pdo, $userId) + $bytes > $policy['limits']['userRolling24HoursBytes']) {
             throw new ServerMediaException('The rolling 24-hour server upload allowance has been reached.', 'SERVER_MEDIA_USER_ALLOWANCE', 429);
         }
-        if (server_media_storage_usage($pdo) + $bytes + (int)$preview['bytes'] > $storageHardLimit) {
+        if ($storageHardLimit !== null && server_media_storage_usage($pdo) + $bytes + (int)$preview['bytes'] > $storageHardLimit) {
             throw new ServerMediaException('The installation server-file allowance has been reached.', 'SERVER_MEDIA_STORAGE_ALLOWANCE', 507);
         }
         $stmt = $pdo->prepare(
@@ -998,11 +1171,17 @@ function server_media_upload(PDO $pdo, array $file, array $actor, int $sessionId
             $preview['path'], (int)$preview['bytes'],
         ]);
         $assetId = (int)$pdo->lastInsertId();
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         @unlink($target);
         if (is_string($preview['path'])) @unlink($preview['path']);
+        if ($error instanceof ServerMediaException && $error->errorCode === 'SERVER_MEDIA_USER_ALLOWANCE') {
+            limit_event_record_reached($pdo, SERVER_MEDIA_USER_DAILY_MB, 'member', 'user:' . $userId, 'rejected');
+        } elseif ($error instanceof ServerMediaException && $error->errorCode === 'SERVER_MEDIA_STORAGE_ALLOWANCE') {
+            limit_event_record_reached($pdo, SERVER_MEDIA_INSTALLATION_STORAGE_MB, 'installation', 'server-media-storage', 'rejected');
+            limit_event_record_reached($pdo, SERVER_MEDIA_HARD_STOP_PERCENT, 'installation', 'server-media-storage', 'rejected');
+        }
         throw $error;
     }
     server_media_refresh_sidecar($pdo, $assetId);
@@ -1029,12 +1208,8 @@ function server_media_asset_by_public_id(PDO $pdo, string $publicId): array
 
 function server_media_discard_unreferenced(PDO $pdo, string $publicId): void
 {
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         $assetSql = 'SELECT * FROM server_media_assets WHERE public_id=? LIMIT 1';
         if (db_uses_mysql_syntax($pdo)) $assetSql .= ' FOR UPDATE';
         $assetStatement = $pdo->prepare($assetSql);
@@ -1044,14 +1219,14 @@ function server_media_discard_unreferenced(PDO $pdo, string $publicId): void
         $references = $pdo->prepare('SELECT COUNT(*) FROM server_media_references WHERE asset_id=? AND active=1');
         $references->execute([(int)$asset['id']]);
         if ((int)$references->fetchColumn() > 0) {
-            if ($ownsTransaction) $pdo->commit();
+            database_transaction_commit($pdo, $transaction);
             return;
         }
         $pdo->prepare("UPDATE server_media_assets SET status='deleted',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='active'")
             ->execute([(int)$asset['id']]);
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
     if (is_file((string)$asset['storage_path'])) @unlink((string)$asset['storage_path']);
@@ -1168,12 +1343,8 @@ function server_media_add_reference(PDO $pdo, string $publicId, string $messageT
     if (!in_array($messageTable, ['messages','community_messages','game_chat_messages'], true) || $messageId <= 0) {
         throw new ServerMediaException('The file message reference is invalid.', 'SERVER_MEDIA_REFERENCE_INVALID', 500);
     }
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         $assetSql = 'SELECT * FROM server_media_assets WHERE public_id=? LIMIT 1';
         if (db_uses_mysql_syntax($pdo)) $assetSql .= ' FOR UPDATE';
         $assetStatement = $pdo->prepare($assetSql);
@@ -1187,9 +1358,9 @@ function server_media_add_reference(PDO $pdo, string $publicId, string $messageT
             ? 'INSERT IGNORE INTO server_media_references (asset_id,message_table,message_id,channel_scope,relationship_key,active) VALUES (?,?,?,?,?,1)'
             : 'INSERT OR IGNORE INTO server_media_references (asset_id,message_table,message_id,channel_scope,relationship_key,active) VALUES (?,?,?,?,?,1)';
         $pdo->prepare($sql)->execute([(int)$asset['id'],$messageTable,$messageId,$channel,$relationshipKey]);
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 }
@@ -1442,12 +1613,8 @@ function server_media_bulk_mutate(PDO $pdo, array $actor, array $publicIds, stri
             throw $error;
         }
     }
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         foreach ($assets as $asset) {
             server_media_log_review_action($pdo, $actor, $asset, $review, $action);
             if ($action === 'pin' || $action === 'unpin') {
@@ -1477,9 +1644,9 @@ function server_media_bulk_mutate(PDO $pdo, array $actor, array $publicIds, stri
                 $deletePaths[] = [(string)$asset['storage_path'], is_string($asset['preview_path']) ? $asset['preview_path'] : ''];
             }
         }
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         foreach ($quarantineMoves as $move) server_media_restore_owned_quarantine($move);
         throw $error;
     }
@@ -1575,7 +1742,7 @@ function server_media_remove_own(PDO $pdo, array $actor, string $publicId): arra
         throw new ServerMediaException('Only the sender can remove their server copy.', 'SERVER_MEDIA_REMOVE_OWN_DENIED', 403);
     }
     if ((string)$asset['status'] !== 'active') return ['id' => $publicId, 'status' => (string)$asset['status'], 'idempotent' => true];
-    $pdo->beginTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
         $references = $pdo->prepare('SELECT message_table,message_id FROM server_media_references WHERE asset_id=? AND active=1');
         $references->execute([(int)$asset['id']]);
@@ -1587,9 +1754,9 @@ function server_media_remove_own(PDO $pdo, array $actor, string $publicId): arra
         }
         $pdo->prepare('UPDATE server_media_references SET active=0 WHERE asset_id=?')->execute([(int)$asset['id']]);
         $pdo->prepare("UPDATE server_media_assets SET status='deleted',updated_at=CURRENT_TIMESTAMP WHERE id=?")->execute([(int)$asset['id']]);
-        $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
     @unlink((string)$asset['storage_path']);
@@ -1627,14 +1794,11 @@ function server_media_revoke_user_uploads(PDO $pdo, int $userId, string $reason)
 
 function server_media_expire(PDO $pdo): int
 {
+    if (!corechat_limit_is_enforced($pdo, SERVER_MEDIA_RETENTION_HOURS)) return 0;
     $assets = $pdo->query("SELECT * FROM server_media_assets WHERE status='active' AND persistent=0 AND grandfathered=0 AND pinned=0 AND expires_at IS NOT NULL AND expires_at<CURRENT_TIMESTAMP ORDER BY id LIMIT 250")->fetchAll();
     if (!$assets) return 0;
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         foreach ($assets as $asset) {
             $references = $pdo->prepare('SELECT message_table,message_id FROM server_media_references WHERE asset_id=? AND active=1');
             $references->execute([(int)$asset['id']]);
@@ -1648,9 +1812,9 @@ function server_media_expire(PDO $pdo): int
             $pdo->prepare("UPDATE server_media_assets SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='active'")
                 ->execute([(int)$asset['id']]);
         }
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
     foreach ($assets as $asset) {
@@ -1658,28 +1822,31 @@ function server_media_expire(PDO $pdo): int
         if (!empty($asset['preview_path'])) @unlink((string)$asset['preview_path']);
         server_media_refresh_sidecar($pdo, (int)$asset['id']);
     }
+    limit_event_record_reached($pdo, SERVER_MEDIA_RETENTION_HOURS, 'installation', 'server-media-retention', 'cleaned', ['deletedCount' => count($assets)]);
     return count($assets);
 }
 
 function server_media_record_delivery(PDO $pdo, array $asset, int $userId): void
 {
     $policy = server_media_policy($pdo);
-    $deliveryHardLimit = (int)floor($policy['limits']['monthlyDeliveryBytes'] * ($policy['limits']['hardStopPercent'] / 100));
-    $ownsTransaction = !$pdo->inTransaction();
+    $deliveryHardLimit = $policy['limits']['monthlyDeliveryBytes'] === null || $policy['limits']['hardStopPercent'] === null
+        ? null
+        : (int)floor($policy['limits']['monthlyDeliveryBytes'] * ($policy['limits']['hardStopPercent'] / 100));
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         server_media_lock_quota_owner($pdo);
-        if (server_media_monthly_delivery_usage($pdo) + (int)$asset['byte_size'] > $deliveryHardLimit) {
+        if ($deliveryHardLimit !== null && server_media_monthly_delivery_usage($pdo) + (int)$asset['byte_size'] > $deliveryHardLimit) {
             throw new ServerMediaException('The monthly server-delivery allowance has been reached.', 'SERVER_MEDIA_DELIVERY_ALLOWANCE', 429);
         }
         $pdo->prepare('INSERT INTO server_media_delivery_usage (asset_id,user_id,byte_count) VALUES (?,?,?)')
             ->execute([(int)$asset['id'],$userId,(int)$asset['byte_size']]);
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
+        if ($error instanceof ServerMediaException && $error->errorCode === 'SERVER_MEDIA_DELIVERY_ALLOWANCE') {
+            limit_event_record_reached($pdo, SERVER_MEDIA_MONTHLY_DELIVERY_MB, 'installation', 'server-media-delivery', 'rejected');
+            limit_event_record_reached($pdo, SERVER_MEDIA_HARD_STOP_PERCENT, 'installation', 'server-media-delivery', 'rejected');
+        }
         throw $error;
     }
 }

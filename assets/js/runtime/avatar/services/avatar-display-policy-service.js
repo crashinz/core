@@ -210,6 +210,19 @@ export class AvatarDisplayPolicyService {
             });
         }
 
+        const exactWidth = Number(participant.avatar_display_width_px);
+        const exactHeight = Number(participant.avatar_display_height_px);
+        if (Number.isInteger(exactWidth) && Number.isInteger(exactHeight)
+            && exactWidth >= MIN_DISPLAY_SIZE && exactHeight >= MIN_DISPLAY_SIZE) {
+            const cap = this.#policy.avatarDisplayMaxPx;
+            const scale = Math.min(1, cap / exactWidth, cap / exactHeight,
+                lapInitiator ? lapMaxEdge / Math.max(exactWidth, exactHeight) : 1);
+            return Object.freeze({
+                kind: "avatar-exact",
+                width: Math.max(1, Math.round(exactWidth * scale)),
+                height: Math.max(1, Math.round(exactHeight * scale))
+            });
+        }
         return Object.freeze({
             kind: "avatar",
             maxEdge: lapInitiator

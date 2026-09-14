@@ -5,8 +5,10 @@ $pdo = db();
 $branding = private_site_branding_projection($pdo, 'registration');
 $registrationPolicy = moderation_identity_registration_policy($pdo);
 $policyBundle = moderation_identity_current_policy_bundle();
-$ageGateEnabled = app_setting($pdo, 'age_gate_enabled', '0') === '1';
-$ageGateMinAge = max(1, min(120, (int)app_setting($pdo, 'age_gate_min_age', '13')));
+$ageGateMinimum = corechat_limit_value($pdo, 'age_gate_min_age', 13);
+$ageGateEnabled = app_setting($pdo, 'age_gate_enabled', '0') === '1' && $ageGateMinimum !== null;
+$ageGateMinAge = $ageGateMinimum === null ? null : max(1, min(120, (int)$ageGateMinimum));
+$registrationAvatarPolicy = avatar_size_policy($pdo);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($_FILES['avatar']['tmp_name'])) {
         security_authorize_outside_content_or_json($pdo, null, 'registration_avatar', ['source' => 'registration']);
@@ -21,18 +23,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mime = $finfo->file($_FILES['avatar']['tmp_name']) ?: '';
         $allowed = ['image/gif' => 'gif', 'image/webp' => 'webp'];
         $dims = @getimagesize($_FILES['avatar']['tmp_name']);
-        $validDims = security_valid_image_file((string)$_FILES['avatar']['tmp_name'], $mime)
-            && $dims[0] >= 42 && $dims[1] >= 42 && $dims[0] <= 250 && $dims[1] <= 250;
-        if (isset($allowed[$mime]) && (int)$_FILES['avatar']['size'] <= 5 * 1024 * 1024 && $validDims) {
+        $validImage = security_valid_image_file((string)$_FILES['avatar']['tmp_name'], $mime);
+        $validDims = $validImage
+            && $dims[0] >= AVATAR_UPLOAD_MIN_DIMENSION_PX && $dims[1] >= AVATAR_UPLOAD_MIN_DIMENSION_PX
+            && $dims[0] <= (int)$registrationAvatarPolicy['avatarUploadMaxWidthPx']
+            && $dims[1] <= (int)$registrationAvatarPolicy['avatarUploadMaxHeightPx'];
+        $validBytes = $registrationAvatarPolicy['avatarMaxBytes'] === null
+            || (int)$_FILES['avatar']['size'] <= (int)$registrationAvatarPolicy['avatarMaxBytes'];
+        if (isset($allowed[$mime]) && $validBytes && $validDims) {
             $file = bin2hex(random_bytes(12)) . '.' . $allowed[$mime];
             $dest = __DIR__ . '/assets/uploads/avatars/' . $file;
             move_uploaded_file($_FILES['avatar']['tmp_name'], $dest);
             $avatarPath = '/assets/uploads/avatars/' . $file;
             security_assert_storage_destination('registration_avatar', $avatarPath);
+        } elseif (isset($allowed[$mime]) && $validImage) {
+            // The safe default remains selected. Record only the configured
+            // limit that rejected this valid image, never the file or identity.
+            if (!$validBytes) {
+                limit_event_record_reached($pdo, 'avatar_max_size_mb', 'registration', 'anonymous-registration-avatar', 'rejected', ['submittedBytes' => (int)$_FILES['avatar']['size']]);
+            } else {
+                if ((int)$dims[0] > (int)$registrationAvatarPolicy['avatarUploadMaxWidthPx']) {
+                    limit_event_record_reached($pdo, 'avatar_upload_max_width_px', 'registration', 'anonymous-registration-avatar', 'rejected', ['submittedWidthPx' => (int)$dims[0]]);
+                }
+                if ((int)$dims[1] > (int)$registrationAvatarPolicy['avatarUploadMaxHeightPx']) {
+                    limit_event_record_reached($pdo, 'avatar_upload_max_height_px', 'registration', 'anonymous-registration-avatar', 'rejected', ['submittedHeightPx' => (int)$dims[1]]);
+                }
+            }
         }
     }
     $ageVerified = !$ageGateEnabled || !empty($_POST['age_gate_confirm']);
     if ($ageGateEnabled && !$ageVerified) {
+        limit_event_record_reached($pdo, 'age_gate_min_age', 'registration', 'anonymous-registration', 'rejected');
         $error = 'You must verify that you are at least ' . $ageGateMinAge . ' to create an account.';
     } elseif ($username === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8) {
         $error = 'Use a valid Username, email, and password of at least 8 characters.';

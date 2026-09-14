@@ -11,7 +11,7 @@ $documents = [
         'path' => 'MODIFICATIONS.md',
         'title' => "exe's Changelog",
         'kicker' => 'Public modification history',
-        'description' => 'Rendered directly from the canonical MODIFICATIONS.md source.',
+        'description' => 'A public history of changes to this CoreChat installation.',
     ],
     'third-party-notices' => [
         'path' => 'THIRD_PARTY_NOTICES.md',
@@ -66,7 +66,7 @@ if (isset($markdown) && $markdown !== false) {
       <?= $content ?>
     <?php else: ?>
       <h2>Document unavailable</h2>
-      <p>The selected canonical public document is missing, unreadable, or exceeds the bounded document limit.</p>
+      <p>The selected public document is missing, unreadable, or exceeds the document size limit.</p>
     <?php endif; ?>
   </article>
   <footer class="public-document-footer">

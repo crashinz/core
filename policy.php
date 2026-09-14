@@ -5,9 +5,76 @@ define('CHATSPACE_POLICY_ACCEPTANCE_ROUTE', true);
 require_once __DIR__ . '/includes/base.php';
 
 $pdo = db();
+if (!moderation_identity_policy_acceptance_storage_ready($pdo)) {
+    redirect_to('/database-update.php');
+}
 $user = current_user();
 $bundle = moderation_identity_current_policy_bundle();
 $error = '';
+
+function policy_inline_markdown(string $text): string
+{
+    $escaped = e($text);
+    $escaped = preg_replace('/`([^`]+)`/', '<code>$1</code>', $escaped) ?? $escaped;
+    $escaped = preg_replace('/\*\*([^*]+)\*\*/', '<strong>$1</strong>', $escaped) ?? $escaped;
+    return preg_replace('/\*([^*]+)\*/', '<em>$1</em>', $escaped) ?? $escaped;
+}
+
+function policy_render_markdown(string $markdown): string
+{
+    $html = [];
+    $paragraph = [];
+    $listType = null;
+    $listItems = [];
+    $flushParagraph = static function () use (&$paragraph, &$html): void {
+        if (!$paragraph) return;
+        $html[] = '<p>' . policy_inline_markdown(implode(' ', $paragraph)) . '</p>';
+        $paragraph = [];
+    };
+    $flushList = static function () use (&$listType, &$listItems, &$html): void {
+        if ($listType === null || !$listItems) return;
+        $items = array_map(static fn(string $item): string => '<li>' . policy_inline_markdown($item) . '</li>', $listItems);
+        $html[] = '<' . $listType . '>' . implode('', $items) . '</' . $listType . '>';
+        $listType = null;
+        $listItems = [];
+    };
+
+    foreach (preg_split('/\R/', $markdown) ?: [] as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '') {
+            $flushParagraph();
+            $flushList();
+            continue;
+        }
+        if (preg_match('/^(#{1,4})\s+(.+)$/', $trimmed, $match) === 1) {
+            $flushParagraph();
+            $flushList();
+            $level = min(6, strlen($match[1]) + 2);
+            $html[] = '<h' . $level . '>' . policy_inline_markdown($match[2]) . '</h' . $level . '>';
+            continue;
+        }
+        if (preg_match('/^[-*]\s+(.+)$/', $trimmed, $match) === 1) {
+            $flushParagraph();
+            if ($listType !== null && $listType !== 'ul') $flushList();
+            $listType = 'ul';
+            $listItems[] = $match[1];
+            continue;
+        }
+        if (preg_match('/^\d+[.)]\s+(.+)$/', $trimmed, $match) === 1) {
+            $flushParagraph();
+            if ($listType !== null && $listType !== 'ol') $flushList();
+            $listType = 'ol';
+            $listItems[] = $match[1];
+            continue;
+        }
+        $flushList();
+        $paragraph[] = $trimmed;
+    }
+    $flushParagraph();
+    $flushList();
+    return implode("\n", $html);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$user) redirect_to('/login.php');
     if (empty($_POST['accept_terms']) || empty($_POST['accept_rules'])) {
@@ -35,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php foreach ([$bundle['terms'], $bundle['communityRules']] as $document): ?>
       <article class="policy-document" aria-labelledby="policy-<?= e($document['id']) ?>">
         <h2 id="policy-<?= e($document['id']) ?>"><?= e($document['title']) ?> <span class="minor">v<?= e($document['version']) ?></span></h2>
-        <pre class="policy-document-content"><?= e($document['content']) ?></pre>
+        <div class="policy-document-content"><?= policy_render_markdown((string)$document['content']) ?></div>
       </article>
     <?php endforeach; ?>
     <?php if ($user): ?>

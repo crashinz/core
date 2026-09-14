@@ -95,6 +95,14 @@ export class ChatGameChatService {
      */
     #pollTimer = null;
 
+    // Invalidates responses and timers owned by a previous chat session.
+    #pollGeneration = 0;
+    #pollInFlight = null;
+    #pollFailures = 0;
+
+    // Retain one confirmed closed lobby without changing game/session ownership.
+    #closedChat = null;
+
     /**
      * Whether the current participant is actively typing in game chat.
      *
@@ -175,8 +183,14 @@ export class ChatGameChatService {
      */
     configure(context = {}) {
 
+        if (this.#context !== context) this.#closedChat = null;
         this.#context = context;
 
+    }
+
+    isChatClosed(lobbyCode = this.#context?.getActiveGame?.()?.lobby_code) {
+        return Boolean(this.#closedChat && this.#closedChat.context === this.#context
+            && this.#closedChat.lobby === lobbyCode);
     }
 
     //--------------------------------------------------
@@ -263,6 +277,11 @@ export class ChatGameChatService {
             context.getActiveGame();
 
         if (!activeGame) return null;
+        if (this.isChatClosed(activeGame.lobby_code)) {
+            const error = new Error("This game chat has ended. Your message was not sent.");
+            error.code = "GAME_CHAT_CLOSED";
+            throw error;
+        }
 
         const config =
             context.getConfig();
@@ -301,6 +320,9 @@ export class ChatGameChatService {
      */
     reset() {
 
+        this.#pollGeneration += 1;
+        this.#pollInFlight = null;
+        this.#pollFailures = 0;
         this.#clearPollTimer();
 
         this.#clearTypingStopTimer();
@@ -384,11 +406,26 @@ export class ChatGameChatService {
         const lobby =
             activeGame.lobby_code;
 
+        if (this.isChatClosed(lobby)) return;
+
+        const generation = this.#pollGeneration;
+        if (this.#pollInFlight?.generation === generation
+            && this.#pollInFlight?.context === context
+            && this.#pollInFlight?.lobby === lobby) return;
+        const isCurrentPoll = () => this.#context === context
+            && this.#pollGeneration === generation
+            && context.getActiveGame()?.lobby_code === lobby;
+
         const config =
             context.getConfig();
 
         const last =
             this.#lastIds.get(lobby) || 0;
+
+        this.#clearPollTimer();
+        const pollOwner = { context, generation, lobby };
+        this.#pollInFlight = pollOwner;
+        let terminalFailure = false;
 
         try {
 
@@ -411,14 +448,66 @@ export class ChatGameChatService {
 
             const data =
                 await context.fetchGameChat(
-                    query
+                    query,
+                    {
+                        shouldReportFailure: error => isCurrentPoll() || !(
+                            error?.code === "HTTP_ERROR"
+                            && Number(error?.details?.status || 0) === 404
+                            && error?.responsePayload?.error === "Game not found"
+                        ),
+                    }
                 );
+
+            if (!isCurrentPoll()) return;
+
+            if (Object.hasOwn(data, "chatLifecycle")) {
+                const lifecycle = data.chatLifecycle;
+                if (!lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)
+                    || Object.keys(lifecycle).length !== 3 || lifecycle.version !== 1
+                    || lifecycle.status !== "closed" || lifecycle.lobbyCode !== lobby
+                    || Object.hasOwn(data, "error")
+                    || !Array.isArray(data.messages) || data.messages.length !== 0
+                    || !Array.isArray(data.typing) || data.typing.length !== 0) {
+                    throw this.#lifecycleFailure("GAME_CHAT_LIFECYCLE_INVALID",
+                        "The game chat lifecycle response is invalid.", 200);
+                }
+                this.reset();
+                this.#closedChat = { context, lobby };
+                const closedGeneration = this.#pollGeneration;
+                const isCurrentClosedChat = () => this.#context === context
+                    && this.#pollGeneration === closedGeneration
+                    && context.getActiveGame()?.lobby_code === lobby && this.isChatClosed(lobby);
+                try {
+                    await context.onGameChatClosed?.(lobby, isCurrentClosedChat);
+                } catch (error) {
+                    if (isCurrentClosedChat()) {
+                        if (error?.name !== "RuntimeRequestError") {
+                            this.#lifecycleFailure("GAME_CHAT_RECONCILIATION_FAILED",
+                                "The closed game chat could not refresh the game list.", 0);
+                        }
+                        context.warnError?.(error);
+                    }
+                }
+                return;
+            }
 
             if (data.error) {
                 throw new Error(data.error);
             }
 
-            (data.messages || []).forEach(
+            if (!Array.isArray(data.messages)
+                || !data.messages.every(message => message && typeof message === "object" && !Array.isArray(message)
+                    && Number.isSafeInteger(Number(message.id)) && Number(message.id) > 0)
+                || !Array.isArray(data.typing)
+                || !data.typing.every(participantId => Number.isSafeInteger(Number(participantId)) && Number(participantId) > 0)) {
+                throw this.#lifecycleFailure(
+                    "GAME_CHAT_RESPONSE_INVALID",
+                    "The game chat response is invalid.",
+                    200
+                );
+            }
+
+            data.messages.forEach(
                 message => {
 
                     this.#lastIds.set(
@@ -437,9 +526,10 @@ export class ChatGameChatService {
                 }
             );
 
-            if ((data.typing || []).length) {
+            this.#pollFailures = 0;
+            if (data.typing.length) {
 
-                (data.typing || []).forEach(
+                data.typing.forEach(
                     participantId => this.setTyping(participantId, true)
                 );
 
@@ -447,18 +537,33 @@ export class ChatGameChatService {
 
         } catch (error) {
 
+            if (!isCurrentPoll()) return;
+
+            terminalFailure = Number(error?.details?.status || 0) === 404
+                || /game not found/i.test(String(error?.message || ''));
+
+            if (terminalFailure) {
+                this.reset();
+                return;
+            }
+
+            this.#pollFailures = Math.min(this.#pollFailures + 1, 6);
             context.warnError?.(
                 error
             );
 
         } finally {
 
-            if (context.getActiveGame()?.lobby_code === lobby) {
+            const ownsPoll = this.#pollInFlight === pollOwner;
+            if (ownsPoll) this.#pollInFlight = null;
+            if (ownsPoll && !terminalFailure && isCurrentPoll()) {
+
+                const interval = /^(localhost|127(?:\.\d+){3})$/i.test(globalThis.location?.hostname || "") ? 3500 : 900;
 
                 this.#pollTimer =
                     setTimeout(
                         () => this.poll(),
-                        900
+                        Math.min(30000, interval * (2 ** this.#pollFailures))
                     );
 
             }
@@ -478,7 +583,7 @@ export class ChatGameChatService {
         const activeGame =
             context.getActiveGame();
 
-        if (!activeGame) return;
+        if (!activeGame || this.isChatClosed(activeGame.lobby_code)) return;
 
         this.reset();
 
@@ -509,7 +614,7 @@ export class ChatGameChatService {
         const activeGame =
             context.getActiveGame();
 
-        if (!activeGame) {
+        if (!activeGame || this.isChatClosed(activeGame.lobby_code)) {
             return Promise.resolve();
         }
 
@@ -566,7 +671,7 @@ export class ChatGameChatService {
         const context =
             this.#requireContext();
 
-        if (!context.getActiveGame()) return;
+        if (!context.getActiveGame() || this.isChatClosed()) return;
 
         if (!this.#typingActive) {
 
@@ -633,6 +738,17 @@ export class ChatGameChatService {
     /**
      * Clears the active game chat poll timer.
      */
+    #lifecycleFailure(code, message, status) {
+        const error = new Error(message);
+        error.code = code;
+        error.details = Object.freeze({
+            operation: "poll-game-chat", endpointCategory: "game-chat", method: "GET",
+            status, recoverable: true,
+        });
+        this.#context?.reportGameChatFailure?.(error);
+        return error;
+    }
+
     #clearPollTimer() {
 
         if (this.#pollTimer) {

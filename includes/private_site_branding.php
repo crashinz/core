@@ -287,9 +287,38 @@ function private_site_branding_setting_definitions(): array {
             'previewPath' => '/about.html',
         ]),
         $override('branding_other_name_override', 'extension.private-site-branding.other_name_override', 'other-detected-branding', 'Other Detected Branding', 'Other public page brand name override', 'Account and ejection pages', 'Document title and public header identity', '/account.php', 10),
+        ...private_site_branding_additional_setting_definitions($shared),
     ];
 }
 
+
+function private_site_branding_additional_setting_definitions(array $shared): array {
+    $definitions = [];
+    foreach ([
+        ['branding_lobby_subtitle','lobby_subtitle','lobby-page','Lobby Page','Lobby subtitle','Community powered by ChatSpace CE','string',180],
+        ['branding_room_version_label','room_version_label','chat-room','Chat Room','Room version display text','','string',180],
+        ['branding_powered_logo_path','powered_logo_path','shared-branding','Shared Branding','Powered-by image path','/assets/images/logos/chatspace-ce-full-logo.png','string',240],
+        ['branding_show_powered_logo','show_powered_logo','shared-branding','Shared Branding','Show powered-by image',true,'boolean',null],
+    ] as [$id,$key,$subsection,$sectionLabel,$label,$default,$type,$maximum]) {
+        $definitions[] = array_replace($shared, [
+            'id' => $id, 'settingKey' => 'extension.private-site-branding.' . $key,
+            'subsectionId' => $subsection, 'subsectionLabel' => $sectionLabel,
+            'subsectionOrder' => private_site_branding_subsection_order($subsection),
+            'label' => $label, 'type' => $type, 'defaultValue' => $default,
+            'maximum' => $maximum, 'order' => 45 + count($definitions), 'optional' => true,
+            'standardFallback' => is_string($default) ? $default : '',
+            'description' => $id === 'branding_room_version_label'
+                ? 'Optional room footer display text. Blank uses the real application version. Version detection and About/legal information remain unchanged.'
+                : ($id === 'branding_powered_logo_path'
+                    ? 'Installation-relative image path under /assets/. Turn Show powered-by image off for no image. Used on login and lobby where the powered-by area is shown.'
+                    : 'Customize this public branding presentation without changing license notices or required About information.'),
+            'helpText' => $id === 'branding_lobby_subtitle' ? 'Blank hides the subtitle. The standard ChatSpace community keeps its Community Edition default unless customized.' : '',
+            'previewPath' => $subsection === 'lobby-page' ? '/lobby.php' : '/login.php',
+            'safeToReset' => true, 'bulkOperations' => ['setting','subsection','category'],
+        ]);
+    }
+    return $definitions;
+}
 function private_site_branding_page_setting_key(string $pageKey): string {
     return match ($pageKey) {
         'login' => 'extension.private-site-branding.login_name_override',
@@ -311,6 +340,9 @@ function private_site_branding_projection(PDO $pdo, string $pageKey = 'shared'):
         'compact_logo_path' => '/assets/images/chatspace-ce-logo.png',
         'powered_logo_path' => '/assets/images/logos/chatspace-ce-full-logo.png',
         'has_custom_logo' => false,
+        'show_powered_logo' => true,
+        'lobby_subtitle' => 'Community Edition',
+        'room_version_label' => '',
         'license_reminder' => PRIVATE_SITE_BRANDING_REMINDER_DEFAULT,
         'room_version_attribution' => PRIVATE_SITE_BRANDING_ROOM_ATTRIBUTION_DEFAULT,
         'show_changelog_login' => true,
@@ -334,6 +366,12 @@ function private_site_branding_projection(PDO $pdo, string $pageKey = 'shared'):
             'extension.private-site-branding.room_version_attribution',
             PRIVATE_SITE_BRANDING_ROOM_ATTRIBUTION_DEFAULT
         ));
+        $subtitle = app_setting($pdo, 'extension.private-site-branding.lobby_subtitle', "\0");
+        $poweredLogo = trim(app_setting($pdo, 'extension.private-site-branding.powered_logo_path', $defaults['powered_logo_path']));
+        if (!preg_match('#^/assets/[A-Za-z0-9_./-]+\.(?:png|jpe?g|gif|webp)$#iD', $poweredLogo) || str_contains($poweredLogo, '..')) {
+            $poweredLogo = $defaults['powered_logo_path'];
+        }
+        $showPoweredLogo = app_setting($pdo, 'extension.private-site-branding.show_powered_logo', '1') === '1';
         return [
             'extension_id' => PRIVATE_SITE_BRANDING_ID,
             'enabled' => true,
@@ -341,7 +379,10 @@ function private_site_branding_projection(PDO $pdo, string $pageKey = 'shared'):
             'effective_name' => $override !== '' ? $override : ($sharedName !== '' ? $sharedName : 'ChatSpace Community Edition'),
             'logo_path' => $logo !== '' ? $logo : $defaults['logo_path'],
             'compact_logo_path' => $logo !== '' ? $logo : $defaults['compact_logo_path'],
-            'powered_logo_path' => $defaults['powered_logo_path'],
+            'powered_logo_path' => $poweredLogo,
+            'show_powered_logo' => $showPoweredLogo,
+            'lobby_subtitle' => $subtitle !== "\0" ? $subtitle : (($override !== '' || $sharedName !== '') ? 'Community powered by ChatSpace CE' : 'Community Edition'),
+            'room_version_label' => trim(app_setting($pdo, 'extension.private-site-branding.room_version_label', '')),
             'has_custom_logo' => $logo !== '',
             'license_reminder' => $reminder !== '' ? $reminder : PRIVATE_SITE_BRANDING_REMINDER_DEFAULT,
             'room_version_attribution' => $attribution !== '' ? $attribution : PRIVATE_SITE_BRANDING_ROOM_ATTRIBUTION_DEFAULT,

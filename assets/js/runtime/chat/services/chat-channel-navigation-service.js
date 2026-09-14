@@ -78,6 +78,7 @@ export class ChatChannelNavigationService {
      * @type {string}
      */
     #activeChat = DEFAULT_CHAT_KEY;
+    #composerDrafts = new Map();
 
     //--------------------------------------------------
     // Constructor
@@ -111,6 +112,7 @@ export class ChatChannelNavigationService {
      */
     destroy() {
 
+        this.#composerDrafts.clear();
         this.#context = null;
         this.#activeChat = DEFAULT_CHAT_KEY;
 
@@ -194,11 +196,15 @@ export class ChatChannelNavigationService {
         }
 
         this.#stopTyping();
+        const draft = this.#context?.readComposerDraft?.();
+        if (draft?.text) this.#composerDrafts.set(this.#activeChat, draft);
+        else this.#composerDrafts.delete(this.#activeChat);
         this.#clearReplyDraft();
 
         this.#activeChat = target;
 
         this.#syncActiveChat();
+        this.#context?.restoreComposerDraft?.(this.#composerDrafts.get(target) || null);
 
         return this.#activeChat;
 

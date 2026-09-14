@@ -1,5 +1,6 @@
 import {IncrementalSha256, crc32Start, crc32Update, crc32Finish, safeRelativeZipPaths, storedZipSize, buildStoredZip} from './p2p-transfer-primitives.js';
-import {P2PLocalTransferStorage} from './p2p-local-transfer-storage.js';
+import {P2PLocalTransferStorage} from './p2p-local-transfer-storage.js?v=20260913-server-clock';
+import {serverEpochNow, serverDeadlineExpired} from '../../../core/animation-server-clock.js?v=20260913-r2';
 
 /******************************************************************************
  * Authenticated direct file and explicit gesture transfer service.
@@ -27,8 +28,11 @@ export class P2PTransferService {
   #peers = new Map();
   #announced = new Set();
   #processedSignals = new Set();
+  #pendingSignalAcks = new Set();
   #previewAttempts = new Set();
   #destroyed = false;
+  #pollFailures = 0;
+  #nextPollAt = 0;
   #localStorage = new P2PLocalTransferStorage();
 
   configure(context = {}) {
@@ -39,13 +43,27 @@ export class P2PTransferService {
     if (this.#destroyed || this.#timer) return;
     const config = this.#context?.getConfig?.() || {};
     const accountId = Number(config.myUserId || config.userId || 0);
+    const pollInterval = /^(localhost|127(?:\.\d+){3})$/i.test(globalThis.location?.hostname || '') ? 5000 : 1500;
     this.#localStorage.initialize(accountId)
       .then(() => this.#restoreDurableStates())
       .catch(error => this.#status(null, 'storage-unavailable', error.message));
-    this.poll().catch(error => this.#handlePollFailure(error));
+    this.#pollWithBackoff();
     this.#timer = this.#context?.setInterval?.(() => {
-      this.poll().catch(error => this.#handlePollFailure(error));
-    }, 1500) || setInterval(() => this.poll().catch(error => this.#handlePollFailure(error)), 1500);
+      this.#pollWithBackoff();
+    }, pollInterval) || setInterval(() => this.#pollWithBackoff(), pollInterval);
+  }
+
+  async #pollWithBackoff() {
+    if (this.#destroyed || this.#polling || Date.now() < this.#nextPollAt) return;
+    try {
+      await this.poll();
+      this.#pollFailures = 0;
+      this.#nextPollAt = 0;
+    } catch (error) {
+      this.#pollFailures = Math.min(this.#pollFailures + 1, 6);
+      this.#nextPollAt = Date.now() + Math.min(30000, 1500 * (2 ** (this.#pollFailures - 1)));
+      await this.#handlePollFailure(error);
+    }
   }
 
   destroy(reason = 'navigation') {
@@ -55,6 +73,7 @@ export class P2PTransferService {
     for (const peer of this.#peers.values()) this.#closePeer(peer, reason);
     this.#peers.clear();
     this.#offers.clear();
+    this.#pendingSignalAcks.clear();
     this.#localStorage.destroy().catch(() => {});
   }
 
@@ -290,7 +309,7 @@ export class P2PTransferService {
   async resumeTransfer(offerId) {
     const offer = this.#offers.get(offerId);
     const state = this.#resumeStates.get(offerId) || await this.#restoreOneState(offerId);
-    if (!offer || !state || TERMINAL.has(offer.status) || serverTime(offer.expiresAt) <= Date.now()) {
+    if (!offer || !state || TERMINAL.has(offer.status) || serverDeadlineExpired(serverTime(offer.expiresAt))) {
       throw new Error('The retained transfer is no longer available. Create a new offer.');
     }
     if (state.role === 'sender') {
@@ -432,13 +451,22 @@ export class P2PTransferService {
         this.#offers.delete(offerId);
         this.#status(previous, 'failed', 'The transfer is no longer authorized.');
       }
+      // Application and acknowledgement have different ownership. A lost ACK
+      // must be retried without applying the signal twice, even if this poll
+      // does not redeliver it. The server's recipient-bound ACK is idempotent.
+      for (const signalId of this.#pendingSignalAcks) {
+        await this.#context.apiPost('/api/p2p_transfer.php', {action: 'signal-ack', signal_id: signalId});
+        this.#pendingSignalAcks.delete(signalId);
+      }
       for (const signal of data.signals || []) {
         if (this.#processedSignals.has(Number(signal.id))) continue;
         const handled = await this.handleSignal(signal);
         if (!handled) continue;
         this.#processedSignals.add(Number(signal.id));
+        this.#pendingSignalAcks.add(Number(signal.id));
         if (this.#processedSignals.size > 500) this.#processedSignals.delete(this.#processedSignals.values().next().value);
         await this.#context.apiPost('/api/p2p_transfer.php', {action: 'signal-ack', signal_id: Number(signal.id)});
+        this.#pendingSignalAcks.delete(Number(signal.id));
       }
       await this.#localStorage.cleanupInvalid(validDurableIds).catch(() => {});
     } finally {
@@ -503,7 +531,7 @@ export class P2PTransferService {
   async #restoreDurableStates() {
     const states = await this.#localStorage.listStates();
     for (const record of states) {
-      if (serverTime(record.expiresAt) <= Date.now()) {
+      if (serverDeadlineExpired(serverTime(record.expiresAt))) {
         await this.#localStorage.cleanupAttempt(record.id);
         continue;
       }
@@ -1524,7 +1552,8 @@ export class P2PTransferService {
     const durableValid = state
       && Number(state.attempts || 0) < MAX_RESUME_ATTEMPTS
       && Number.isFinite(expiry)
-      && expiry > Date.now()
+      && serverEpochNow({conservative: true}) !== null
+      && !serverDeadlineExpired(expiry)
       && (peer.sender
         ? this.#sources.get(peer.offer.id)?.files?.every(entry => entry.file instanceof File)
         : (directLive || !String(state.storageMode || '').startsWith('direct')) && /^[A-F0-9]{64}$/.test(String(state.contentSha256 || ''))

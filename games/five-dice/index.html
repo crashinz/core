@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Five Dice</title>
+  <link rel="stylesheet" href="five-dice.css?v=f9a5c9f0a135">
+</head>
+<body data-appearance="built-in">
+  <main class="game" aria-labelledby="game-title">
+    <header class="game-header">
+      <div>
+        <h1 id="game-title">Five Dice</h1>
+      </div>
+      <div class="header-actions">
+        <button id="game-options-toggle" type="button" class="secondary" aria-expanded="false" aria-controls="game-options">Show Game Options</button>
+        <button id="rules" type="button" class="secondary" aria-expanded="false" aria-controls="rules-panel">Rules</button>
+        <button id="accessibility" type="button" class="secondary" aria-expanded="false" aria-controls="accessibility-panel">Accessibility</button>
+        <button id="score-records-toggle" type="button" class="secondary" aria-expanded="false" aria-controls="score-records">Show Score &amp; Records</button>
+      </div>
+    </header>
+
+    <p id="game-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">Loading the gameâ€¦</p>
+
+    <section id="game-options" class="game-options" tabindex="-1" aria-labelledby="game-options-heading" hidden>
+      <h2 id="game-options-heading">Game Options</h2>
+      <label class="game-option" for="appearance-select">
+        <span>Appearance</span>
+        <select id="appearance-select" aria-label="Appearance"></select>
+      </label>
+      <div id="height-fit-option" class="game-option viewer-effect-option" hidden>
+        <span id="height-fit-label">Fit available height</span>
+        <button id="height-fit-toggle" type="button" class="compact-state-button" aria-pressed="false" aria-labelledby="height-fit-label height-fit-toggle">Off</button>
+        <span class="minor">Personal to this game and browser. Fit the whole board to available height when readable; otherwise use the page scrollbar. Off preserves normal sizing.</span>
+      </div>
+      <div id="board-size-option" class="game-option viewer-effect-option" hidden>
+        <span>Board size</span>
+        <span class="classic-board-scale-controls" role="group" aria-label="Five Dice board size controls">
+          <button id="board-size-smaller" type="button" class="compact-state-button" aria-label="Make Five Dice board smaller">−</button>
+          <output id="board-size-value" aria-label="Five Dice board size">100%</output>
+          <button id="board-size-larger" type="button" class="compact-state-button" aria-label="Make Five Dice board larger">+</button>
+        </span>
+        <span class="minor">Viewer-local. 100% is the original 840 × 640 OCX canvas; responsive shrinking prevents overflow.</span>
+      </div>
+      <label id="mode-option" class="game-option" for="mode-select">
+        <span>Play mode</span>
+        <select id="mode-select" aria-label="Play mode">
+          <option value="practice">Practice Mode</option>
+          <option value="recorded">Ranked or Recorded Play</option>
+        </select>
+      </label>
+      <p id="mode-summary" class="game-option" hidden><span>Play mode</span><strong></strong></p>
+      <div class="game-option viewer-effect-option">
+        <span id="game-options-sound-fx-label">Sound FX</span>
+        <button id="game-options-sound-fx-toggle" type="button" class="compact-state-button" aria-pressed="true" aria-labelledby="game-options-sound-fx-label game-options-sound-fx-toggle">On</button>
+      </div>
+      <div class="game-option viewer-effect-option">
+        <span id="game-options-visual-fx-label">Visual FX</span>
+        <button id="game-options-visual-fx-toggle" type="button" class="compact-state-button" aria-pressed="true" aria-labelledby="game-options-visual-fx-label game-options-visual-fx-toggle">On</button>
+      </div>
+      <div class="separate-controls-preference">
+        <span id="separate-controls-label" class="setting-label-with-info">Show separate sound and visual controls
+          <button id="separate-controls-info" type="button" class="inline-info" aria-expanded="false" aria-controls="separate-controls-help" aria-label="About separate sound and visual controls">i</button>
+        </span>
+        <button id="separate-controls-toggle" type="button" class="compact-state-button" aria-pressed="false" aria-labelledby="separate-controls-label separate-controls-toggle">Off</button>
+        <div id="separate-controls-help" class="compact-info-popover" role="note" hidden>
+          When Off in Classic appearance, the board artwork controls remain available without reserving space for separate buttons.
+        </div>
+      </div>
+      <div id="shared-game-settings" class="shared-game-settings" aria-label="Shared game timing options"></div>
+      <div id="settings-acceptance" class="settings-acceptance" aria-label="Player acceptance"></div>
+      <button id="save-game-options" type="button" class="secondary">Save Game Options</button>
+      <button id="accept-game-options" type="button" class="secondary">Accept current Game Options</button>
+    </section>
+
+    <section id="rules-panel" class="rules" tabindex="-1" aria-labelledby="rules-panel-heading" hidden></section>
+    <section id="accessibility-panel" class="accessibility-panel" tabindex="-1" aria-labelledby="accessibility-panel-heading" hidden></section>
+
+    <div class="presentation-grid">
+      <div class="play-surface-slot">
+      <div id="five-dice-approved-artboard" class="five-dice-approved-artboard">
+      <div id="five-dice-player-status-strip" class="player-status-strip" aria-label="Player timer status" hidden></div>
+      <section id="play-surface" class="table play-surface" aria-labelledby="turn-heading">
+        <div class="turn-copy">
+          <h2 id="turn-heading">Current turn</h2>
+          <p id="turn-name">Waiting for players</p>
+          <p id="roll-count" class="minor">Rolls used: 0 of 3</p>
+        </div>
+        <button id="built-in-roll" class="built-in-roll" type="button" hidden>Roll dice</button>
+        <section id="built-in-score-sheet" class="built-in-score-sheet" aria-labelledby="built-in-score-heading">
+          <header class="built-in-score-heading">
+            <div>
+              <span class="built-in-score-kicker">Table score pad</span>
+              <h2 id="built-in-score-heading">Score this roll</h2>
+            </div>
+            <p id="built-in-score-hint">Roll the dice, then choose one unused row.</p>
+          </header>
+          <div id="built-in-score-actions" class="built-in-score-actions" role="group" aria-label="Five Dice player scorecard and scoring categories"></div>
+        </section>
+        <div class="built-in-five-dice-stage-effects" aria-hidden="true">
+          <span class="built-in-score-transfer"></span>
+        </div>
+        <div class="built-in-jazz-decor" aria-hidden="true">
+          <img src="../../assets/images/five-dice-modern/jazz-lounge-decor.png" alt="" decoding="async">
+        </div>
+        <div class="built-in-opening-curtain" aria-hidden="true">
+          <div class="built-in-opening-mark"><strong id="built-in-opening-name">Five Dice</strong><span>Tonight's game is ready</span></div>
+        </div>
+        <section id="built-in-five-dice-result" class="built-in-five-dice-result" role="status" aria-live="polite" hidden>
+          <span class="built-in-result-kicker">Game complete</span>
+          <strong id="built-in-result-name">Winner</strong>
+          <span id="built-in-result-score">Final score 0</span>
+          <span id="built-in-result-game-name">Five Dice champion</span>
+          <button id="built-in-result-dismiss" type="button" class="secondary">Close result</button>
+        </section>
+        <div class="built-in-table-mark" aria-hidden="true"><span>FIVE</span><strong>DICE</strong></div>
+        <div id="classic-seat-labels" class="classic-seat-labels" aria-label="Classic scorecard player columns"></div>
+        <div id="classic-avatars" class="classic-avatars" aria-label="Occupied Classic player seats"></div>
+        <div id="classic-score" class="classic-score" aria-label="Four-player Classic scorecard"></div>
+        <div id="classic-score-actions" class="classic-score-actions" aria-label="Classic score choices"></div>
+        <div id="dice" class="dice" role="group" aria-label="Current dice"></div>
+        <div id="classic-microphone-motion" class="classic-microphone-motion" aria-hidden="true" hidden>
+          <img id="classic-microphone-strip" class="classic-microphone-strip" alt="" width="24" height="598">
+        </div>
+        <div id="classic-drum-motion" class="classic-drum-motion" aria-hidden="true"></div>
+        <div class="classic-media-controls" role="group" aria-label="Classic artwork controls">
+          <button id="start-new-game-hotspot" type="button" class="classic-hotspot classic-action-hotspot" aria-label="Request a new game"><span class="sr-only">Start New Game</span></button>
+          <button id="sound-hotspot" type="button" class="classic-hotspot" aria-pressed="true" aria-label="Turn SFX off"><span class="sr-only">SFX</span></button>
+          <button id="nroll-hotspot" type="button" class="classic-hotspot classic-action-hotspot" aria-label="Roll dice"><span class="sr-only">Roll dice</span></button>
+          <button id="music-hotspot" type="button" class="classic-hotspot" aria-pressed="false" aria-label="Turn music on"><span class="sr-only">Music</span></button>
+          <button id="gfx-hotspot" type="button" class="classic-hotspot" aria-pressed="true" aria-label="Turn GFX off"><span class="sr-only">GFX</span></button>
+        </div>
+      </section>
+      </div>
+      <div class="roll-actions" aria-label="Below-board Dice actions">
+        <div id="five-dice-lifecycle" class="five-dice-lifecycle" aria-label="Game pause and reconnect controls"></div>
+        <button id="roll" type="button" hidden>Roll dice</button>
+        <div id="separate-media-controls" class="separate-media-controls" role="group" aria-label="Five Dice presentation controls" hidden>
+          <button id="sound-toggle" type="button" class="secondary" data-separate-control="soundFx" aria-pressed="true">SFX On</button>
+          <button id="gfx-toggle" type="button" class="secondary" data-separate-control="visualFx" aria-pressed="true">GFX On</button>
+          <button id="music-toggle" type="button" class="secondary music-fallback" data-separate-control="music" aria-pressed="false">Music Off</button>
+        </div>
+      </div>
+      </div>
+
+      <aside id="score-records" class="scoreboard" tabindex="-1" aria-labelledby="score-heading" hidden>
+        <div class="score-heading-row">
+          <div>
+            <h2 id="score-heading">Score &amp; Records</h2>
+            <p class="minor">Live scorecards and Recorded-play history.</p>
+            <p id="score-readability-note" class="minor" hidden>Use these readable scoring controls while the board is small. All categories and player scores remain available below.</p>
+          </div>
+        </div>
+        <p id="score-scroll-cue" class="score-scroll-cue" hidden>Scroll for remaining scores</p>
+        <div id="score-scroll-controls" class="score-scroll-controls" hidden aria-label="Scorecard scrolling controls">
+          <span class="score-scroll-control-label">Move through scores</span>
+          <button id="score-scroll-left" type="button" class="score-scroll-button" aria-label="Scroll scorecards left" aria-controls="score-table-scroll">&larr;</button>
+          <button id="score-scroll-right" type="button" class="score-scroll-button" aria-label="Scroll scorecards right" aria-controls="score-table-scroll">&rarr;</button>
+          <button id="score-scroll-up" type="button" class="score-scroll-button" aria-label="Scroll scorecards up" aria-controls="score-table-scroll">&uarr;</button>
+          <button id="score-scroll-down" type="button" class="score-scroll-button" aria-label="Scroll scorecards down" aria-controls="score-table-scroll">&darr;</button>
+        </div>
+        <div id="score-table-scroll" class="table-scroll" tabindex="0" aria-label="Game scorecards" aria-describedby="score-scroll-cue">
+          <table>
+            <thead id="score-head"></thead>
+            <tbody id="score-body"></tbody>
+            <tfoot id="score-foot"></tfoot>
+          </table>
+        </div>
+        <section class="records" aria-labelledby="records-heading">
+          <div class="records-heading-row">
+            <h3 id="records-heading">Recorded results</h3>
+            <label for="record-opponent">Opponent</label>
+            <select id="record-opponent"></select>
+          </div>
+          <dl class="record-totals">
+            <div><dt>Selected opponent</dt><dd id="opponent-record">0 wins Â· 0 losses Â· 0 draws</dd></div>
+            <div><dt>All opponents</dt><dd id="lifetime-record">0 wins Â· 0 losses Â· 0 draws</dd></div>
+          </dl>
+          <p class="minor">Practice Mode never changes Recorded results.</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <script type="module" src="five-dice.js?v=23113946f657"></script>
+</body>
+</html>
+

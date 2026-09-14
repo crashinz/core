@@ -1,0 +1,131 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "chess",
+  "name": "Chess",
+  "version": "1.0.16",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.private-media",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative",
+    "game.presentation.private-media"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_b60c0a02",
+    "name": "Chess",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_b60c0a02",
+    "gameId": 2,
+    "path": "chess-first-party",
+    "entry": "index.html",
+    "icon": "chess-first-party-icon.svg",
+    "profile": "versus",
+    "minPlayers": 2,
+    "practiceMinPlayers": 2,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 2,
+    "seats": [
+      "White",
+      "Black"
+    ],
+    "adaptationVersion": "1.0.5",
+    "presentationSelectionOwner": "viewer",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      },
+      {
+        "id": "classic",
+        "label": "Original OCX"
+      },
+      {
+        "id": "corechat",
+        "label": "CoreChat artwork"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": true,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.4375,
+      "minimumReadableWidth": 560,
+      "minimumReadableHeight": 390
+    },
+    "rulesHelp": {
+      "label": "Chess rules",
+      "description": "Server-authoritative Chess with complete move validation, accepted clocks, and standard terminal and draw rules."
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "includes/chess_extension.php": "c1398241fbd39456e16458b493826dfb7ed240b634f348eef8a6b27a82f7637b",
+      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "games/checkers-chess-modern.css": "e3755ea19150c3928dbb36bb7ce6c2152aa9274850a14e76951dd58ba50f9e99",
+      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "assets/images/chess-first-party-icon.svg": "551b241ef682f1fbc134f80c8c5cd3b2b1a8dceb8aff07f1d1e7bbeb4fcf7b0d",
+      "assets/images/chess-ocx-horseshoe-cue.png": "3dd3a3197f28f663431f58fd2dec6802e59e8d4de606b9510deed8d0ea991594",
+      "assets/images/chess-sculpted/ivory-bishop.png": "bfe00fd7e26a714ba267bd82bcf422ea9a38246f97c98487ea2959b6b04fc65b",
+      "assets/images/chess-sculpted/ivory-king.png": "b248fd3b1b789f81e3bef6ae664f7e9ab2c1eef47c29d81b7a2a548a67e02342",
+      "assets/images/chess-sculpted/ivory-knight.png": "79903a780ad9286fbf5768f9243d4f9f5f32167943d04bd00963b96f45b49fdf",
+      "assets/images/chess-sculpted/ivory-pawn.png": "6a166cca67f5a7e573070d112882696e1563207b659b66c5f1896e95880a1847",
+      "assets/images/chess-sculpted/ivory-queen.png": "0aa2cb7fe314b61c8ebf41b78a56f6e8203fe145e6bd3c43ae6589e1affdb3fb",
+      "assets/images/chess-sculpted/ivory-rook.png": "1a118031e44d96ac2a90c1df084d53174e056d9ddeec6715d333cf23c191c6a9",
+      "assets/images/chess-sculpted/navy-bishop.png": "08afe419e80fb49b8f7de5fa2f0f54369376703ff96a9c0a95b450fd58e5e08a",
+      "assets/images/chess-sculpted/navy-king.png": "03505c382cb7572dd878e1849491351ba0d4c12c7c9a053cca1edbd5a0b9fbd3",
+      "assets/images/chess-sculpted/navy-knight.png": "65615c6d9e7a6c768fb2cfcef4a38f39de531603db95bd968ccc1f144b9666f0",
+      "assets/images/chess-sculpted/navy-pawn.png": "ba3bca2dc2d9da8b64d103009761d9dc408156b8d6b833a065860285c41e95f9",
+      "assets/images/chess-sculpted/navy-queen.png": "0717aeab853f8795d604ec827308fc84a1ee40c8d7040a9a7d5ba405abcf14ff",
+      "assets/images/chess-sculpted/navy-rook.png": "5363779a6b6d2cbc4462459baa3a60d57bec3bd527ad87fc8fd9c4b18de94dc3",
+      "assets/audio/built-in-games/ui-select.ogg": "aec0c31ea934a35936ae0d2ab8fac8123c93aa5647f935853a58dbaf90278b7a",
+      "assets/audio/built-in-games/game-success.ogg": "33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c",
+      "assets/audio/built-in-games/game-loss.ogg": "a97513d7fd2b12b1210c423be943b4c1ab0e899b11db95855e9b74836e646ae0",
+      "assets/audio/built-in-games/piece-move.ogg": "4b2111252ccb64eed67f171e061053849cfbb29873536c03948646f244a3905c",
+      "assets/audio/built-in-games/piece-capture.ogg": "f41b3d106360fc68ebc061a211d4265b4cb5fa1fbe86e4d57d3673510e2c3784",
+      "assets/audio/built-in-games/chess-portal-descent.wav": "79628e5df4deb753828ca59a7399a03631f638301886d978a21a0c8db3db3826",
+      "assets/audio/built-in-games/ship-sink.ogg": "6d65b463c0555dd5be16b8db6d2cbe23a94e07a4637779b8ad17d0db3e500a87",
+      "assets/audio/built-in-games/checker-explosion-rumble.ogg": "3cb48d86dab63140cfb9aaeea4d4a6846abaca5831d157d8adbec0490da26343",
+      "assets/audio/built-in-games/chess-check.wav": "1577552ed2cadd24d2e6f3e888d26f8fadc4bbefda564de4895ffd1f9d6a085d",
+      "assets/audio/built-in-games/chess-checkmate.wav": "a1318a8ec3890be7aa912f5a1baba95ce47ae5374d3af6a6d32eab82372984d4",
+      "assets/audio/built-in-games/chess-piece-slide.mp3": "25d1c87adbcf749afebb83a21e4c4b7c50ff1b7c65398e94e348024eb78fdbf1",
+      "assets/audio/built-in-games/chess-piece-capture.mp3": "c447674370e3e511270948e6e831eb9107ed64ed76645d581cf2a978b221871a",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/chess-first-party/index.html": "7817431a00da0948621de5b70940043e1e8a6d20b51b0f9a31253f8d9b80e130",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+    }
+  }
+}

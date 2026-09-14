@@ -403,7 +403,7 @@ function runtime_diagnostic_retention_projection(PDO $pdo): array
 
 function runtime_diagnostic_retention_preview(PDO $pdo): array
 {
-    $batch = operational_capacity_projection($pdo)['values']['capacity_diagnostic_cleanup_batch_size'];
+    $batch = operational_capacity_projection($pdo)['runtimeValues']['capacity_diagnostic_cleanup_batch_size'];
     $stmt = $pdo->prepare(
         "SELECT COUNT(*) FROM runtime_diagnostic_retention r
          JOIN runtime_issues i ON i.id = r.issue_id
@@ -536,7 +536,7 @@ function runtime_diagnostic_retention_run_cleanup(PDO $pdo, int $actorUserId, bo
     if (!runtime_diagnostic_cleanup_acquire($pdo, $ownerToken)) {
         throw new RuntimeDiagnosticPolicyException('Diagnostic cleanup is already leased by another worker.', 'DIAGNOSTIC_CLEANUP_LEASED', 409);
     }
-    $batch = (int)operational_capacity_projection($pdo)['values']['capacity_diagnostic_cleanup_batch_size'];
+    $batch = (int)operational_capacity_projection($pdo)['runtimeValues']['capacity_diagnostic_cleanup_batch_size'];
     $scan = $pdo->prepare(
         "SELECT r.issue_id, r.fingerprint_until
            FROM runtime_diagnostic_retention r
@@ -566,6 +566,7 @@ function runtime_diagnostic_retention_run_cleanup(PDO $pdo, int $actorUserId, bo
              WHERE job_key = 'runtime-diagnostic-retention' AND owner_token = ?"
         )->execute([$scanned ? $issueId : 0, $scanned, $deleted, $ownerToken]);
         log_tool($pdo, $actorUserId, 'admin_runtime_diagnostic_cleanup', null, null, 'Bounded diagnostic cleanup scanned ' . $scanned . '; cleaned ' . $deleted . '; batch maximum ' . $batch . '; holds and active investigations preserved.');
+        if ($scanned >= $batch) limit_event_record_reached($pdo, 'capacity_diagnostic_cleanup_batch_size', 'installation', 'diagnostic-cleanup', 'truncated', ['scannedCount' => $scanned]);
         return ['ok' => true, 'scanned' => $scanned, 'deleted' => $deleted, 'batchMaximum' => $batch, 'retention' => runtime_diagnostic_retention_projection($pdo)];
     } catch (Throwable $error) {
         $pdo->prepare(

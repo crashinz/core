@@ -226,6 +226,10 @@ export class RoomEventRouter {
                 this.#context?.onParticipantAvatar?.(payload, event);
                 return true;
 
+            case "nameplate":
+                this.#context?.onParticipantNameplate?.(payload, event);
+                return true;
+
             case "avatar_size_policy":
                 this.#context?.onAvatarSizePolicy?.(payload, event);
                 return true;

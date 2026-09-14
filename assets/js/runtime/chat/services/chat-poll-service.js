@@ -10,7 +10,7 @@ import {
 
     ChatTransportCoordinator
 
-} from "./chat-transport-coordinator.js";
+} from "./chat-transport-coordinator.js?v=20260913-background-chime";
 
 export class ChatPollService {
 

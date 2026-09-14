@@ -13,11 +13,28 @@ $lobbyError = null;
 $canonicalAdminLaunch = (string)($_GET['admin'] ?? '') === '1';
 $staffRoles = ['admin', 'moderator', 'developer'];
 $isInstallationOwner = moderation_identity_is_owner($pdo, (int)$user['id']);
+$lobbyMaintenanceWarnings = [];
 if ($canonicalAdminLaunch && !in_array($user['role'] ?? 'user', $staffRoles, true)) {
     http_response_code(403);
     exit('Authorized staff access is required.');
 }
-if (!$canonicalAdminLaunch) cleanup_stale_participants($pdo);
+if (!$canonicalAdminLaunch) {
+    foreach ([
+        'live-website-rooms' => static fn() => live_website_rooms_cleanup($pdo),
+        'stale-participants' => static fn() => cleanup_stale_participants($pdo),
+    ] as $maintenanceOwner => $maintenance) {
+        try {
+            $maintenance();
+        } catch (Throwable $error) {
+            $reference = strtoupper(substr(hash('sha256', $maintenanceOwner . '|' . get_class($error) . '|' . $error->getMessage()), 0, 16));
+            error_log(sprintf('lobby maintenance failure [%s] %s: %s', $reference, get_class($error), $error->getMessage()));
+            $lobbyMaintenanceWarnings[] = $reference;
+        }
+    }
+}
+$liveWebsiteRoomsEnabled = live_website_rooms_enabled($pdo);
+$canvasExtension = first_party_extension_status($pdo, 'canvas');
+$canvasAvailable = ($canvasExtension['state'] ?? '') === 'enabled';
 $roleColors = role_color_settings($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -47,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $onlineCutoff = stale_cutoff($pdo);
 $roomsStmt = $pdo->prepare(
-    'SELECT r.*, u.display_name AS owner_name,
+    'SELECT r.*, u.display_name AS owner_name, l.target_host AS live_website_target_host,
         (
           SELECT COUNT(DISTINCT p.user_id)
             FROM participants p
@@ -56,6 +73,7 @@ $roomsStmt = $pdo->prepare(
              AND p.last_seen_at >= ?
         ) AS online_count
      FROM rooms r JOIN users u ON u.id = r.owner_id
+     LEFT JOIN live_website_rooms l ON l.room_id = r.id
      WHERE NOT EXISTS (
         SELECT 1 FROM room_ejections re
          WHERE re.room_id = r.id
@@ -73,7 +91,10 @@ $rooms = $roomsStmt->fetchAll();
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e(branded_page_title('Lobby', $pdo, 'lobby')) ?></title>
-  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css?v=20260913-permission-toggles')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/live-website-rooms.css')) ?>">
+  <?php if ($canvasAvailable): ?><link rel="stylesheet" href="<?= e(app_url('/extensions/canvas/assets/canvas.css?v=20260828-checklist-r2')) ?>"><?php endif; ?>
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=20260914-shared-controls')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-user-id="<?= (int)$user['id'] ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="picker-shell">
@@ -84,16 +105,18 @@ $rooms = $roomsStmt->fetchAll();
           <img class="<?= $branding['has_custom_logo'] ? 'custom-brand-logo' : '' ?>" src="<?= e(app_url($branding['compact_logo_path'])) ?>" alt="<?= e($branding['effective_name']) ?>">
           <div>
             <div class="app-name"><?= e($branding['effective_name'] === 'ChatSpace Community Edition' ? 'ChatSpace' : $branding['effective_name']) ?></div>
-            <div class="app-edition"><?= $branding['effective_name'] !== 'ChatSpace Community Edition' ? 'Community powered by ChatSpace CE' : 'Community Edition' ?></div>
+            <div class="app-edition"><?= e($branding['lobby_subtitle'] ?? ($branding['effective_name'] !== 'ChatSpace Community Edition' ? 'Community powered by ChatSpace CE' : 'Community Edition')) ?></div>
           </div>
         </div>
         <h1 class="picker-title">Lobby</h1>
       </div>
       <div class="top-actions lobby-account">
+        <?php if ($canvasAvailable): ?><button class="btn canvas-community-launcher" type="button" data-canvas-launcher data-canvas-scope="community">Canvas</button><?php endif; ?>
         <div class="minor lobby-signed-in">Signed in as <strong><?= e($user['display_name']) ?></strong></div>
         <button class="gear-btn lobby-gear" id="lobby-menu-btn" type="button" aria-label="Lobby menu">⚙</button>
       </div>
-        <div id="lobby-menu">
+<div id="lobby-menu">
+<button type="button" data-confirm-identity>Confirm Identity</button>
           <?php if (in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
         <button id="admin-open" type="button"><img src="<?= e(app_url('/assets/images/lobby.png')) ?>" alt="">Admin</button>
         <?php endif; ?>
@@ -105,6 +128,9 @@ $rooms = $roomsStmt->fetchAll();
       </div>
     </div>
     <div class="room-grid" id="room-grid">
+      <?php if ($isInstallationOwner && $lobbyMaintenanceWarnings): ?>
+      <div class="form-error">Background maintenance could not complete. Error reference: <?= e(implode(', ', $lobbyMaintenanceWarnings)) ?></div>
+      <?php endif; ?>
       <form class="room-card create-room-tile" id="create-room-form" method="post" enctype="multipart/form-data">
         <?= csrf_input() ?>
         <div class="create-room-tile-inner">
@@ -113,6 +139,7 @@ $rooms = $roomsStmt->fetchAll();
           <div class="room-create-tabs" role="tablist" aria-label="Room creation options">
             <button class="room-create-tab active" type="button" data-create-tab="manual">Create</button>
             <button class="room-create-tab" type="button" data-create-tab="import">Import URL</button>
+            <?php if ($liveWebsiteRoomsEnabled): ?><button class="room-create-tab" type="button" data-create-tab="live">Live Website</button><?php endif; ?>
           </div>
           <div class="room-create-panel active" id="room-create-manual">
             <label>Room name<input name="name" required placeholder="Moonlit Study, Neon Lounge, Table 7..."></label>
@@ -133,32 +160,47 @@ $rooms = $roomsStmt->fetchAll();
             <label>VP-style room URL<input id="room-import-url" type="url" placeholder="https://example.com/user/room.html"></label>
             <button class="btn btn-primary" id="room-import-preview" type="button">Preview Import</button>
             <div class="room-import-status" id="room-import-status" aria-live="polite"></div>
+            <p class="minor">Imports require Import Website Room permission, separate from Trusted status. <a href="<?= e(app_url('/account.php?return=lobby&tab=requests')) ?>">Request access in Account</a>.</p>
             <div class="room-import-preview" id="room-import-preview-card" hidden></div>
           </div>
+          <?php if ($liveWebsiteRoomsEnabled): ?>
+          <div class="room-create-panel" id="room-create-live">
+            <p class="minor live-website-create-note">Open an approved HTTPS website inside a temporary room. The website stays direct and personal; ChatSpace does not proxy it.</p>
+            <label>HTTPS website URL<input id="room-live-website-url" type="url" inputmode="url" autocomplete="url" placeholder="https://example.com" required></label>
+            <label>Room name <span class="minor">(optional)</span><input id="room-live-website-name" maxlength="90" placeholder="Uses the website title when blank"></label>
+            <button class="btn btn-primary" id="room-live-website-create" type="button">Create Live Website Room</button>
+            <div class="room-import-status" id="room-live-website-status" role="status" aria-live="polite"></div>
+          </div>
+          <?php endif; ?>
         </div>
       </form>
       <?php foreach ($rooms as $room): ?>
       <article class="room-card" data-room-id="<?= e($room['public_id']) ?>">
         <?php
-          $tileBg = $room['background_path'];
-          if ($room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')) {
-              $tileBg = $room['background_thumb_path'] ?: null;
-          }
+          $tileBg = room_import_tile_image_from_layout($room['import_layout_json'] ?? null);
+          if (!$tileBg && !empty($room['live_website_target_host'])) $tileBg = $room['background_thumb_path'];
           if (!$tileBg) {
-              $tileBg = room_import_tile_image_from_layout($room['import_layout_json'] ?? null);
+              $tileBg = str_starts_with((string)$room['background_mime'], 'video/')
+                  ? ($room['background_thumb_path'] ?: null)
+                  : $room['background_path'];
           }
         ?>
         <div class="room-card-media" <?php if ($tileBg): ?>style="background-image:url('<?= e(media_url($tileBg)) ?>')"<?php endif; ?>>
-          <?php if ($room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/') && !$room['background_thumb_path']): ?>
+          <?php if (!$tileBg && $room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
           <div class="room-video-placeholder">Video Room</div>
           <?php endif; ?>
         </div>
         <div class="room-card-body">
           <h2 class="room-card-name"><?= e($room['name']) ?></h2>
+          <?php if (!empty($room['live_website_target_host'])): ?><div class="live-website-room-domain"><span>Live Website</span><?= e($room['live_website_target_host']) ?></div><?php endif; ?>
           <div class="minor room-card-meta"><span class="room-card-count"><?= (int)$room['online_count'] ?></span> online · made by <span class="room-card-owner"><?= e($room['owner_name']) ?></span></div>
           <p class="room-card-actions">
             <a class="btn btn-primary" href="<?= e(app_url('/chatroom.php?id=' . rawurlencode((string)$room['public_id']))) ?>">Enter</a>
-            <?php if ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true)): ?>
+            <?php if (!empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || live_website_rooms_is_admin($user))): ?>
+            <button class="btn room-preview-refresh" type="button" data-room-id="<?= e($room['public_id']) ?>">Refresh Preview</button>
+            <span class="minor room-preview-status" role="status"></span>
+            <?php endif; ?>
+            <?php if (empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true))): ?>
             <button class="btn btn-primary room-edit-open" type="button" data-room-id="<?= e($room['public_id']) ?>" data-room-name="<?= e($room['name']) ?>" data-room-bg="<?= e($room['background_path'] ? media_url($room['background_path']) : '') ?>" data-room-thumb="<?= e($room['background_thumb_path'] ? media_url($room['background_thumb_path']) : '') ?>" data-room-mime="<?= e($room['background_mime'] ?? '') ?>">Edit</button>
             <?php endif; ?>
           </p>
@@ -166,7 +208,7 @@ $rooms = $roomsStmt->fetchAll();
       </article>
       <?php endforeach; ?>
     </div>
-    <?php if ($branding['has_custom_logo']): ?>
+    <?php if ($branding['has_custom_logo'] && ($branding['show_powered_logo'] ?? true)): ?>
       <div class="powered-by lobby-powered-by">
         <span>Powered by</span>
         <img src="<?= e(app_url($branding['powered_logo_path'])) ?>" alt="ChatSpace Community Edition">
@@ -356,34 +398,65 @@ $rooms = $roomsStmt->fetchAll();
         <div class="admin-form-status" id="admin-canonical-status" role="status" aria-live="polite"></div>
         <section class="admin-section active" id="admin-section-overview">
           <div class="admin-section-title">Operator Overview</div>
-          <div class="admin-section-sub">Quick status for accounts, enforcement, platform limits, and backup controls.</div>
-          <div class="admin-summary-grid">
-            <button class="admin-summary-card" type="button" data-admin-jump="users">
-              <span>Users</span>
+          <div class="admin-section-sub">Search this directory to open an important administration area and see what it controls.</div>
+          <label class="admin-directory-search">Search the admin directory
+            <input id="admin-overview-search" type="search" autocomplete="off" placeholder="Try install game, branding, limits, database...">
+          </label>
+          <div class="admin-summary-grid" id="admin-overview-directory">
+            <button class="admin-summary-card" type="button" data-admin-jump="users" data-admin-search="accounts roles permissions access users">
+              <span>Users &amp; Permissions</span>
               <strong id="admin-summary-users">0</strong>
-              <small>Manage accounts and roles</small>
+              <small>Create accounts, assign roles and permissions, and manage member access.</small>
             </button>
-            <button class="admin-summary-card" type="button" data-admin-jump="moderation">
-              <span>Moderation</span>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="moderation-privacy-security" data-admin-search="moderation privacy security authentication flood protection safety">
+              <span>Moderation, Privacy &amp; Security</span>
               <strong id="admin-summary-moderation">0</strong>
-              <small>Blocks and active ejections</small>
+              <small>Configure safety, privacy, authentication, and moderation protections.</small>
             </button>
-            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="limits">
-              <span>Limits</span>
-              <strong id="admin-summary-limits">Manage</strong>
-              <small>Rates, history, uploads, file sizes, and usage limits</small>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="rooms-games" data-admin-search="rooms games install game ocx classic enable rename packages">
+              <span>Rooms &amp; Games</span>
+              <small>Control room policies and enable, rename, and install Classic or OCX game packages.</small>
             </button>
-            <button class="admin-summary-card" type="button" data-admin-jump="database">
-              <span>Database</span>
-              <strong>DB</strong>
-              <small>Download or restore backups</small>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="private-site-branding" data-admin-search="branding appearance logo name colors theme visual">
+              <span>Branding &amp; Appearance</span>
+              <small>Customize the site identity, branding assets, colors, and visual presentation.</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="avatars-presence" data-admin-search="avatars presence online status profile display">
+              <span>Avatars &amp; Presence</span>
+              <small>Manage avatar display, presence, status, and member presentation policies.</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="chat-messaging" data-admin-search="chat messaging history composer messages">
+              <span>Chat &amp; Messaging</span>
+              <small>Configure message behavior, history, composer, and chat capabilities.</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="voice-media-players" data-admin-search="voice media players webcam audio music video">
+              <span>Voice, Media &amp; Players</span>
+              <small>Control voice, webcam, media playback, uploads, and player capabilities.</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="limits" data-admin-search="limits rates history uploads file sizes capacity usage">
+              <span>Limit Settings</span>
+              <small>Review rates, history, upload sizes, capacity, and usage limits.</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="errors" data-admin-search="system health errors diagnostics warnings runtime issues logs">
+              <span>System Health &amp; Errors</span>
+              <small>Review health signals, runtime errors, diagnostics, and resolution history.</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="database" data-admin-search="storage database backup restore migration schema hosting upload">
+              <span>Storage &amp; Database</span>
+              <small>Review database state, migrations, backups, restores, and storage readiness.</small>
+            </button>
+            <button class="admin-summary-card" type="button" data-admin-jump="settings" data-settings-view="advanced-compatibility" data-admin-search="advanced compatibility legacy database release technical">
+              <span>Advanced &amp; Compatibility</span>
+              <small>Manage advanced runtime, compatibility, and release-safety settings.</small>
             </button>
           </div>
+          <p class="admin-directory-empty" id="admin-overview-directory-empty" role="status" hidden>No admin sections match that search.</p>
         </section>
 
         <section class="admin-section" id="admin-section-users">
           <div class="admin-section-title">Manage Users</div>
           <div class="admin-section-sub">Create accounts, reset passwords, and set account roles.</div>
+          <p class="minor">Trusted status and content permissions are separate. Administrators can use an account's Access &amp; Permissions button to grant or revoke access directly, without a member request.</p>
           <?php if ($isInstallationOwner): ?>
           <div class="admin-panel admin-owner-policy-sections" id="admin-owner-panel" aria-label="Installation Owner controls">
             <h3>Installation Owner</h3>
@@ -553,6 +626,7 @@ $rooms = $roomsStmt->fetchAll();
           </div>
           <div class="admin-panel" id="admin-roles-requests-panel">
             <h3>Trusted Review, Capability Requests, and Appeals</h3>
+            <p class="minor" id="admin-capability-access-help" tabindex="-1">Member requests are reviewed here. To grant access without a request, open Accounts and use the member's Access &amp; Permissions button. For an existing request, select the permission, choose Approve selected, provide a reason, then Record Decision.</p>
             <p class="minor">Selecting a requested capability marks only that item for review; it never grants access by itself. Public reasons are shown to the member. Internal notes remain private.</p>
             <div class="admin-users admin-scroll-list" id="admin-moderation-cases"></div>
           </div>
@@ -642,7 +716,7 @@ $rooms = $roomsStmt->fetchAll();
           <div class="settings-registry-sticky-actions">
             <span id="lobby-admin-settings-dirty-summary">No unsaved changes</span>
             <button class="btn btn-primary" id="lobby-admin-settings-save" type="submit" form="lobby-admin-settings-registry-form" disabled>Save Changes</button>
-            <div class="admin-form-status" aria-live="polite"></div>
+            <div class="admin-form-status" id="lobby-admin-settings-status" role="status" aria-live="polite" aria-atomic="true"></div>
           </div>
         </section>
 
@@ -899,11 +973,17 @@ $rooms = $roomsStmt->fetchAll();
 
         <section class="admin-section" id="admin-section-errors">
           <div class="admin-section-title">Errors & Diagnostics</div>
-          <div class="admin-section-sub">Review bounded runtime issues, resolution history, and locally censored diagnostic evidence.</div>
-          <div class="admin-panel issue-workspace">
+          <div class="admin-section-sub">Review bounded runtime issues and correlate complete checks inside exportable audit runs.</div>
+          <div class="diagnostic-view-switch" role="group" aria-label="Diagnostics view"><button class="btn btn-primary" id="diagnostic-view-issues" type="button" aria-pressed="true">Runtime Issues</button><button class="btn" id="diagnostic-view-audits" type="button" aria-pressed="false">Audit Runs</button></div>
+          <div class="admin-panel issue-workspace" id="diagnostic-issues-pane">
             <aside>
-              <label>Status <select id="issue-status-filter"><option value="">All</option><option value="new">New</option><option value="confirmed">Confirmed</option><option value="investigating">Investigating</option><option value="fixed-pending-verification">Fixed pending verification</option><option value="resolved">Resolved</option><option value="expected">Expected</option><option value="ignored">Ignored</option><option value="regressed">Regressed</option></select></label>
-              <label>Severity <select id="issue-severity-filter"><option value="">All</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option></select></label>
+               <label>Status <select id="issue-status-filter"><option value="unresolved" selected>Unresolved</option><option value="">All</option><option value="new">New</option><option value="confirmed">Confirmed</option><option value="investigating">Investigating</option><option value="fixed-pending-verification">Fixed pending verification</option><option value="resolved">Resolved</option><option value="expected">Expected</option><option value="ignored">Ignored</option><option value="regressed">Regressed</option></select></label>
+               <label>Severity <select id="issue-severity-filter"><option value="">All</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option></select></label>
+               <label>Activity <select id="issue-activity-filter"><option value="all">All activity</option><option value="since-audit">New or recurring since audit</option></select></label>
+               <div class="shared-form-actions"><button class="btn" id="issue-audit-baseline-set" type="button">Set audit baseline</button></div>
+               <div class="minor" id="issue-audit-baseline-status">Loading audit baseline...</div>
+               <div class="shared-form-actions"><button class="btn" id="issue-collection-preview" type="button">Review export</button><button class="btn btn-primary" id="issue-collection-export" type="button" disabled>Download export</button></div>
+              <pre id="issue-collection-export-preview" hidden></pre>
               <div id="issue-grouped-totals" class="issue-grouped-totals" aria-live="polite"></div>
               <div id="issue-list" class="issue-list"></div>
               <div class="gesture-pager" id="issue-pager" aria-label="Runtime issue pages"></div>
@@ -911,13 +991,27 @@ $rooms = $roomsStmt->fetchAll();
             </aside>
             <article id="issue-detail" class="issue-detail"><p class="minor">Select an issue.</p></article>
           </div>
+          <div class="admin-panel issue-workspace" id="diagnostic-audits-pane" hidden>
+            <aside>
+              <label>Environment <select id="audit-run-environment"><option value="local">Local</option><option value="staging">Staging</option><option value="production">Production</option></select></label>
+              <div class="shared-form-actions"><button class="btn btn-primary" id="audit-run-start" type="button">Start audit run</button></div>
+              <p class="minor">After starting, reload each game test tab once so browser checks attach without background polling.</p>
+              <div id="audit-run-list" class="issue-list"></div>
+              <div class="minor" id="audit-run-list-status" role="status" aria-live="polite"></div>
+            </aside>
+            <article id="audit-run-detail" class="issue-detail"><p class="minor">Select an audit run.</p></article>
+          </div>
         </section>
       </div>
     </div>
   </div>
 </div>
 <?php endif; ?>
-<script src="<?= e(app_url('/assets/js/settings-registry.js')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/lobby.js')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/game-recordings.js?v=20260914')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260914-game-recordings')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260913-clear-warning-box')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260914-webcam-shared-controls')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/lobby.js?v=20260913-compact-admin')) ?>"></script>
+<?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>
 </body>
 </html>

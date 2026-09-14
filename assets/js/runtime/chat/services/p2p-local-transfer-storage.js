@@ -1,4 +1,5 @@
 /* Durable, account-scoped recipient-local storage for authenticated P2P transfers. */
+import {serverEpochNow, parseServerTimestamp} from '../../../core/animation-server-clock.js?v=20260913-r2';
 
 const ROOT_NAME = 'corechat-p2p-transfers-v2';
 const DATABASE_NAME = 'corechat-p2p-transfers-v2';
@@ -202,11 +203,11 @@ export class P2PLocalTransferStorage {
     }
   }
 
-  async cleanupInvalid(validOfferIds = [], now = Date.now()) {
+  async cleanupInvalid(validOfferIds = [], now = serverEpochNow({conservative: true})) {
     const valid = new Set(validOfferIds.map(safePart));
     const states = await this.listStates();
     for (const state of states) {
-      const expired = Date.parse(String(state.expiresAt || '')) <= now;
+      const expired = now !== null && parseServerTimestamp(state.expiresAt) <= now;
       if (expired || !valid.has(safePart(state.id)) || Number(state.accountId) !== this.#accountId) {
         await this.cleanupAttempt(state.id);
       }

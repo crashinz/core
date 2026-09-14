@@ -87,7 +87,7 @@ import {
 
     ChatMessageRenderer
 
-} from "./renderers/chat-message-renderer.js";
+} from "./renderers/chat-message-renderer.js?v=20260914-custom-emojis";
 
 import {
 
@@ -106,6 +106,8 @@ import {
     ChatUnreadService
 
 } from "./services/chat-unread-service.js";
+
+import { ChatMessageChimeService } from "./services/chat-message-chime-service.js?v=20260913-room-chime";
 
 import {
 
@@ -135,25 +137,25 @@ import {
 
     ChatPrivateChatService
 
-} from "./services/chat-private-chat-service.js";
+} from "./services/chat-private-chat-service.js?v=20260913-recipient-label";
 
 import {
 
     ChatGameChatService
 
-} from "./services/chat-game-chat-service.js";
+} from "./services/chat-game-chat-service.js?v=20260913-diagnostics-recovery";
 
 import {
 
     ChatPollService
 
-} from "./services/chat-poll-service.js";
+} from "./services/chat-poll-service.js?v=20260913-background-chime";
 
 import {
 
     ChatChannelNavigationService
 
-} from "./services/chat-channel-navigation-service.js";
+} from "./services/chat-channel-navigation-service.js?v=20260913-channel-drafts";
 
 //--------------------------------------------------
 // Chat Runtime
@@ -184,6 +186,8 @@ export class ChatRuntime extends CoreModule {
      * Unread orchestration runtime component.
      */
     #unread = null;
+
+    #notifications = null;
 
     /**
      * Reply draft runtime component.
@@ -307,6 +311,10 @@ export class ChatRuntime extends CoreModule {
      * @returns {ChatReplyService}
      *         Reply draft runtime component.
      */
+    get notifications() {
+        return this.#notifications;
+    }
+
     get reply() {
 
         return this.#reply;
@@ -453,6 +461,8 @@ export class ChatRuntime extends CoreModule {
             unread:
                 this.#unread?.getDiagnostics() ?? null,
 
+            notifications: this.#notifications?.getDiagnostics() ?? null,
+
             reply:
                 this.#reply?.getDiagnostics() ?? null,
 
@@ -502,6 +512,9 @@ export class ChatRuntime extends CoreModule {
 
         this.#createUnread();
 
+        this.#notifications = new ChatMessageChimeService();
+        this.#notifications.initialize();
+
         this.#createReply();
 
         this.#createTyping();
@@ -549,6 +562,7 @@ export class ChatRuntime extends CoreModule {
 
         this.#reply?.destroy();
 
+        this.#notifications?.destroy();
         this.#unread?.destroy();
 
         this.#privateChats?.destroy();

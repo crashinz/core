@@ -1,0 +1,19 @@
+.recent-authentication-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 24px;
+  border: 1px solid #69778f;
+  border-radius: 12px;
+  color: #f1f3fa;
+  background: #151823;
+  box-shadow: 0 16px 64px #0009;
+}
+.recent-authentication-dialog::backdrop { background: #0009; }
+.recent-authentication-dialog h2 { margin: 0 0 12px; }
+.recent-authentication-dialog p { line-height: 1.5; }
+.recent-authentication-dialog label { display: block; margin-bottom: 8px; }
+.recent-authentication-dialog input { box-sizing: border-box; width: 100%; }
+.recent-authentication-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.recent-authentication-dialog [hidden] { display: none !important; }

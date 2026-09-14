@@ -61,6 +61,20 @@ function account_deletion_disposition_registry(): array
         'message_protection_transitions' => 'retain-opaque-history',
         'message_reactions' => 'retain-opaque-history',
         'messages' => 'anonymize-tombstone',
+        'multiplayer_game_acceptances' => 'delete-active-edge',
+        'multiplayer_game_accounting' => 'retain-opaque-history',
+        'multiplayer_game_actions' => 'retain-opaque-history',
+        'multiplayer_game_members' => 'terminate-active-state',
+        'multiplayer_game_options' => 'delete-active-edge',
+        'multiplayer_game_presentation_preferences' => 'delete-active-edge',
+        'multiplayer_game_randomness' => 'retain-opaque-history',
+        'multiplayer_game_result_members' => 'delete-active-edge',
+        'multiplayer_game_result_pairs' => 'delete-active-edge',
+        'multiplayer_game_results' => 'retain-opaque-history',
+        'multiplayer_game_saves' => 'delete-active-edge',
+        'multiplayer_game_seat_requests' => 'delete-active-edge',
+        'multiplayer_game_sessions' => 'terminate-active-state',
+        'multiplayer_game_votes' => 'delete-active-edge',
         'moderation_actions' => 'retain-opaque-history',
         'moderation_case_actions' => 'retain-opaque-history',
         'moderation_case_assignments' => 'delete-active-edge',
@@ -671,6 +685,31 @@ function account_deletion_execute(
         );
         if (function_exists('server_media_revoke_user_uploads')) {
             $counts['activeEdgesRemoved'] += server_media_revoke_user_uploads($pdo, $userId, 'Account deleted');
+        }
+        if (function_exists('multiplayer_game_terminate_user')) {
+            $counts['activeEdgesRemoved'] += multiplayer_game_terminate_user($pdo, $userId);
+        }
+        if (account_deletion_table_exists($pdo, 'multiplayer_game_saves')) {
+            $deleteSaves = $pdo->prepare(
+                'DELETE FROM multiplayer_game_saves WHERE game_session_public_id IN (
+                    SELECT s.public_id FROM multiplayer_game_sessions s
+                    JOIN multiplayer_game_members m ON m.game_session_id=s.id WHERE m.user_id=?
+                )'
+            );
+            $deleteSaves->execute([$userId]);
+            $counts['activeEdgesRemoved'] += $deleteSaves->rowCount();
+        }
+        foreach ([
+            ['multiplayer_game_acceptances', 'user_id=?'],
+            ['multiplayer_game_options', 'user_id=?'],
+            ['multiplayer_game_presentation_preferences', 'user_id=?'],
+            ['multiplayer_game_result_members', 'user_id=?'],
+            ['multiplayer_game_result_pairs', 'user_id=? OR opponent_user_id=?'],
+            ['multiplayer_game_seat_requests', 'user_id=?'],
+            ['multiplayer_game_votes', 'user_id=?'],
+        ] as [$table, $where]) {
+            $params = str_contains($where, ' OR ') ? [$userId, $userId] : [$userId];
+            $counts['activeEdgesRemoved'] += account_deletion_delete($pdo, $table, $where, $params);
         }
 
         if (account_deletion_table_exists($pdo, 'participants')) {

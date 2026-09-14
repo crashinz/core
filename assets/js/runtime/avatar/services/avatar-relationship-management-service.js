@@ -1,3 +1,4 @@
+import { AvatarRelationshipRequestNotice } from "./avatar-relationship-request-notice.js?v=20260913-requests";
 /******************************************************************************
  * Chat Runtime Framework for ChatSpace
  * ---------------------------------------------------------------------------
@@ -19,6 +20,7 @@ export class AvatarRelationshipManagementService {
     #runtime;
     #context = null;
     #requests = Object.freeze([]);
+    #requestNotice = null;
     #relationshipId = "";
     #projection = null;
     #previousFocus = null;
@@ -40,12 +42,15 @@ export class AvatarRelationshipManagementService {
         this.#unsubscribeRelationship =
             this.#runtime.relationships.observeRelationshipEvents(() => {
                 this.#syncLauncher();
+                this.#syncRequestNotice();
                 if (this.isOpen()) this.#render();
             });
     }
 
     destroy() {
         this.close({ restoreFocus: false });
+        this.#requestNotice?.destroy();
+        this.#requestNotice = null;
         this.#bindings?.abort();
         this.#bindings = null;
         this.#unsubscribeRelationship?.();
@@ -65,6 +70,11 @@ export class AvatarRelationshipManagementService {
         this.#bindings?.abort();
         this.#bindings = new AbortController();
         this.#context = context;
+        this.#requestNotice?.destroy();
+        this.#requestNotice = new AvatarRelationshipRequestNotice(context.document, {
+            onAction: button => this.#handleAction(button),
+            onReview: relationshipId => this.openForRelationship(relationshipId, "request-notice")
+        });
         const signal = this.#bindings.signal;
         const modal = this.#element("relationship-management-modal");
         const close = this.#element("relationship-management-close");
@@ -169,6 +179,7 @@ export class AvatarRelationshipManagementService {
 
     seed({ requests = [] } = {}) {
         this.#requests = Object.freeze(Array.from(requests || []).map(request => Object.freeze({ ...request })));
+        this.#syncRequestNotice();
         this.#syncLauncher();
         if (this.isOpen()) this.#render();
     }
@@ -254,8 +265,9 @@ export class AvatarRelationshipManagementService {
     handleRemoteRelationship(payload = {}) {
         const action = String(payload.action || "");
         const relationshipId = String(payload.relationship_id || "");
-        if (this.#relationshipId && relationshipId && relationshipId !== this.#relationshipId) return;
-        if (["relationship-dissolved", "member-left", "member-removed"].includes(action)) {
+        // Requests are actor-wide, even when a different relationship was last inspected.
+        const pertainsToOpenRelationship = !this.#relationshipId || !relationshipId || relationshipId === this.#relationshipId;
+        if (pertainsToOpenRelationship && ["relationship-dissolved", "member-left", "member-removed"].includes(action)) {
             const viewerId = Number(this.#context?.getConfig?.()?.myParticipantId || 0);
             const targetId = Number(payload.target_participant_id || 0);
             if (action === "relationship-dissolved" || targetId === viewerId) this.close();
@@ -265,6 +277,30 @@ export class AvatarRelationshipManagementService {
             this.#refreshTimer = null;
             this.refresh().catch(error => this.#context?.showError?.(error));
         }, 0);
+    }
+
+    #syncRequestNotice() {
+        if (!this.#requestNotice) return;
+        const viewerId = Number(this.#context?.getConfig?.()?.myParticipantId || 0);
+        const relationshipIds = new Set(this.#requests.filter(request => request.status === "pending")
+            .map(request => String(request.relationshipId || request.relationship_id || "")));
+        const items = [];
+        for (const relationshipId of relationshipIds) {
+            const relationship = this.#runtime.relationships.relationshipById(relationshipId);
+            const projection = this.#runtime.relationships.relationshipManagementProjection(relationship, {
+                viewerParticipantId: viewerId,
+                participants: this.#runtime.state,
+                requests: this.#requests.filter(request => String(request.relationshipId || request.relationship_id || "") === relationshipId)
+            });
+            for (const request of projection?.requests || []) {
+                if (!request.actions.accept && !request.actions.reject) continue;
+                const row = this.#requestRow(request, projection);
+                row.querySelectorAll("button").forEach(button => { button.disabled = this.#isPending(); });
+                items.push({ id: request.id, relationshipId, row,
+                    signature: JSON.stringify([request, projection.lapSeats, this.#isPending()]) });
+            }
+        }
+        this.#requestNotice.update(items);
     }
 
     projection() {
@@ -368,6 +404,13 @@ export class AvatarRelationshipManagementService {
         if (seatSection) seatSection.hidden = projection.lapSeats.length === 0;
         if (settings) settings.hidden = !projection.viewer.active;
         if (footer) footer.hidden = !projection.viewer.active;
+        const permissionHelp = this.#element("relationship-management-permission-help");
+        if (permissionHelp) {
+            permissionHelp.hidden = !projection.viewer.active || projection.actions.configurePosition;
+            const creator = projection.members.find(member => member.permissionRole === "creator");
+            permissionHelp.textContent = permissionHelp.hidden ? ""
+                : `You are a Member of this relationship. Only its Creator and Managers can change group settings. ${creator?.displayName || "The Creator"} can promote you to Manager. Site or room ownership does not automatically make you a relationship Manager. You can still leave this relationship.`;
+        }
         if (joinPolicy) {
             joinPolicy.value = projection.joinPolicy;
             joinPolicy.disabled = this.#isPending() || !projection.actions.setJoinPolicy;
@@ -872,6 +915,7 @@ export class AvatarRelationshipManagementService {
             this.#runtime.dances?.suspend(relationshipId, `local-${action}`);
         }
         this.#pendingMutation = action;
+        this.#syncRequestNotice();
         this.#render();
         try {
             const response = await this.#context?.mutateRelationship?.({
@@ -894,6 +938,7 @@ export class AvatarRelationshipManagementService {
             }
             await this.refresh({ render: false });
             this.#pendingMutation = null;
+            this.#syncRequestNotice();
             const refreshed = this.#buildProjection();
             if (!refreshed || (!refreshed.viewer.active && !refreshed.requests.length && !refreshed.actions.requestJoin)) {
                 this.close();
@@ -938,7 +983,12 @@ export class AvatarRelationshipManagementService {
                 this.#setStatus("Relationship changes could not be saved.");
             }
             if (this.isOpen()) this.#render();
-            if (!authoritativeRejection) this.#context?.showError?.(error);
+            this.#syncRequestNotice();
+            if (!authoritativeRejection) {
+                if (!this.isOpen() && this.#requestNotice?.isVisible()) {
+                    this.#requestNotice.showStatus(error?.message || "The request could not be updated. Please try again.");
+                } else this.#context?.showError?.(error);
+            }
             this.#context?.recordDiagnostic?.({
                 event: "relationship-management-mutation-failed",
                 action,
@@ -977,6 +1027,7 @@ export class AvatarRelationshipManagementService {
     #setStatus(message) {
         const status = this.#element("relationship-management-status");
         if (status) status.textContent = String(message || "");
+        this.#requestNotice?.showStatus(message);
     }
 
     #syncLauncher(projection = null) {

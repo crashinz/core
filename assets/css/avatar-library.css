@@ -1,0 +1,16 @@
+.avatar-library-dialog { position: fixed; z-index: 10000; margin: 0; width: min(1000px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box; padding: 20px; background: var(--panel, #151922); color: var(--text, #eee); border: 1px solid var(--accent, #8072dd); border-radius: 12px; }
+.avatar-library-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.avatar-library-actions :is(input,select) { width: auto; max-width: 100%; }
+.avatar-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 12px; }
+.avatar-library-grid article { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 9px; border: 1px solid var(--border, #444); border-radius: 8px; }
+.avatar-library-grid img { width: 100%; height: 145px; object-fit: contain; background: #0003; }
+.avatar-library-grid strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.avatar-library-grid :is(input,button) { box-sizing: border-box; width: 100%; min-width: 0; font-size: 12px; }
+.avatar-library-grid summary { cursor: pointer; font-size: 12px; }
+.avatar-library-grid details input { margin-block: 4px; }
+.avatar-library-dialog [hidden] { display: none; }
+
+.avatar-library-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 1; background: var(--panel, #151922); cursor: grab; touch-action: none; user-select: none; }
+.avatar-library-titlebar.is-dragging { cursor: grabbing; }
+.avatar-library-titlebar h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.avatar-library-titlebar button { flex: 0 0 auto; cursor: pointer; }

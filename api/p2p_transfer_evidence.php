@@ -33,7 +33,7 @@ try {
         throw new P2PTransferException('Choose the received file to submit with this report.', 'P2P_TRANSFER_EVIDENCE_FILE_REQUIRED', 400);
     }
     $fileCount = (int)($offer['file_count'] ?? 1);
-    $maximumEvidenceBytes = (int)p2p_transfer_policy($pdo)['maxFileBytes'] * min(max(1, $fileCount), 10) + 4 * 1024 * 1024;
+    $maximumEvidenceBytes = max(1, (int)$offer['byte_size']) + 4 * 1024 * 1024;
     if ($fileCount === 1 && (int)($file['size'] ?? 0) !== (int)$offer['byte_size']) {
         throw new P2PTransferException('The submitted file size does not match the received transfer.', 'P2P_TRANSFER_EVIDENCE_MISMATCH', 409);
     }
@@ -85,8 +85,7 @@ try {
         }
     }
 
-    if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-    else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+    $transaction = database_transaction_begin($pdo, true);
     $report = moderation_safety_submit_report($pdo, (int)$participant['user_id'], [
         'origin_type' => 'file',
         'origin_reference' => $offerId,
@@ -106,12 +105,12 @@ try {
         ],
     ]);
     p2p_transfer_event($pdo, $offer, (int)$participant['user_id'], 'evidence-submitted', 'Recipient voluntarily submitted the received file as protected moderation evidence.');
-    $pdo->commit();
+    database_transaction_commit($pdo, $transaction);
     log_tool($pdo, (int)$participant['user_id'], 'p2p_transfer_evidence_submitted', (int)$offer['sender_user_id'], null, 'Transfer ' . $offerId . '; protected file ' . $storedId . '; report ' . $report['reference'] . '.');
     header('Cache-Control: no-store');
     json_out(['ok' => true, 'reportReference' => $report['reference'], 'payloadSubmitted' => true]);
 } catch (P2PTransferException|ModerationSafetyException|ServerMediaException $error) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
+    if (isset($transaction)) database_transaction_rollback($pdo, $transaction);
     if ($storedId !== '') {
         try { server_media_discard_unreferenced($pdo, $storedId); } catch (Throwable) {}
     }
@@ -119,7 +118,7 @@ try {
     $status = property_exists($error, 'httpStatus') ? $error->httpStatus : 409;
     json_out(['error' => $error->getMessage(), 'code' => $code], $status);
 } catch (Throwable $error) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
+    if (isset($transaction)) database_transaction_rollback($pdo, $transaction);
     if ($storedId !== '') {
         try { server_media_discard_unreferenced($pdo, $storedId); } catch (Throwable) {}
     }

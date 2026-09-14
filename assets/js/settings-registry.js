@@ -117,7 +117,59 @@
       for (const eventName of ['pointerdown', 'keydown', 'input']) {
         this.activityRoot?.addEventListener?.(eventName, () => this.noteActivity(), { passive: true });
       }
-      window.addEventListener('pagehide', () => this.relock('', ''));
+      this.activityRoot?.addEventListener?.('pointerdown', event => {
+        if (!this.authorized || !this.locked || this.unlockDialog?.open) return;
+        if (this.mount?.contains(event.target)) return;
+        const selector = 'button:disabled, input:disabled, select:disabled, textarea:disabled, [aria-disabled="true"]';
+        let control = event.target?.closest?.(selector);
+        // Some disabled controls do not receive pointer events themselves.
+        if (!control) control = [...this.activityRoot.querySelectorAll(selector)].find(node => {
+          if (!node.getClientRects().length) return false;
+          const box = node.getBoundingClientRect();
+          return event.clientX >= box.left && event.clientX <= box.right
+            && event.clientY >= box.top && event.clientY <= box.bottom;
+        });
+        if (!control || !this.activityRoot.contains(control)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        requestAnimationFrame(() => this.showUnlockPrompt(control));
+      }, true);
+      window.addEventListener('pagehide', () => {
+        this.closeUnlockPrompt();
+        this.relock('', '');
+      });
+    }
+
+    showUnlockPrompt(returnTarget = document.activeElement) {
+      if (!this.authorized || !this.locked || !this.mount?.isConnected) return;
+      if (this.unlockDialog?.open) { this.unlockButton.focus(); return; }
+      const dialog = document.createElement('dialog');
+      dialog.className = 'settings-unlock-dialog';
+      dialog.setAttribute('aria-label', 'Unlock settings changes');
+      const message = element('p', '', 'Settings are locked. Unlock here, then retry your action. Unlocking does not save or perform that action.');
+      const close = element('button', 'btn', 'Cancel');
+      close.type = 'button';
+      const home = document.createComment('Settings unlock panel returns here');
+      this.mount.before(home);
+      dialog.append(message, this.mount, close);
+      document.body.appendChild(dialog);
+      this.unlockDialog = dialog;
+      // Move the actual panel, including its one existing unlock button.
+      // Keep its handlers and the same authorization/inactivity controller.
+      const restore = () => {
+        home.replaceWith(this.mount);
+        dialog.remove();
+        if (this.unlockDialog === dialog) this.unlockDialog = null;
+        if (returnTarget?.isConnected && !returnTarget.disabled) returnTarget.focus?.({ preventScroll: true });
+      };
+      dialog.addEventListener('close', restore, { once: true });
+      close.addEventListener('click', () => dialog.close());
+      try { dialog.showModal(); this.unlockButton.focus(); }
+      catch (error) { restore(); this.unlockButton.focus(); }
+    }
+
+    closeUnlockPrompt() {
+      if (this.unlockDialog?.open) this.unlockDialog.close();
     }
 
     updatePresentation() {
@@ -149,6 +201,7 @@
       this.updatePresentation();
       this.announce(`Settings changes unlocked by ${source === 'keyboard' ? 'keyboard' : 'button'}.`, 'ok');
       this.onLockChange(false, source);
+      this.closeUnlockPrompt();
       this.noteActivity();
       return true;
     }
@@ -188,7 +241,7 @@
       }
       if (this.locked) {
         this.announce('Unlock settings changes before making an edit.', 'error');
-        this.unlockButton?.focus();
+        this.showUnlockPrompt();
         return false;
       }
       this.noteActivity();
@@ -211,6 +264,7 @@
       this.onEntryChange = options.onEntryChange || (() => {});
       this.onOperation = options.onOperation || null;
       this.onAssetChange = options.onAssetChange || null;
+      this.onMediaPackAction = options.onMediaPackAction || null;
       this.onViewChange = options.onViewChange || (() => {});
       this.categoryNavigation = Boolean(options.categoryNavigation);
       this.navigationLabel = options.navigationLabel || 'Settings section';
@@ -431,14 +485,15 @@
 
     createColorControl(entry) {
       const id = `settings-registry-${safeId(entry.id)}`;
-      const roleMatch = String(entry.id || '').match(/^role_color_(admin|developer|guide|owner|user)_(bg|text)$/);
+      const roleMatch = String(entry.id || '').match(/^role_color_(admin|developer|guide|moderator|owner|user)_(bg|text)$/);
       const role = roleMatch?.[1] || '';
       const part = roleMatch?.[2] || '';
       const roleLabel = {
         admin: 'Administrator',
         developer: 'Developer',
         guide: 'Guide',
-        owner: 'Room Owner',
+        moderator: 'Moderator',
+        owner: 'CoreChat Owner',
         user: 'Standard User',
       }[role] || 'Role';
       const wrapper = element('div', 'settings-color-control');
@@ -537,7 +592,7 @@
       for (const entry of this.entries.filter(item => item.type === 'color')) {
         if (!normalizeHex(this.draft.get(entry.id))) issues.set(entry.id, 'Enter a color in #RRGGBB format, such as #000000.');
       }
-      for (const role of ['admin', 'developer', 'guide', 'owner', 'user']) {
+      for (const role of ['admin', 'developer', 'guide', 'moderator', 'owner', 'user']) {
         const backgroundId = `role_color_${role}_bg`;
         const textId = `role_color_${role}_text`;
         if (!this.entryMap.has(backgroundId) || !this.entryMap.has(textId)) continue;
@@ -712,7 +767,7 @@
         return value;
       }
       if (entry.type === 'fixed') {
-        const fixed = element('div', 'settings-fixed-value', 'Always enforced');
+        const fixed = element('div', 'settings-fixed-value', entry.fixedDisplayValue || 'Always enforced');
         fixed.setAttribute('role', 'status');
         return fixed;
       }
@@ -864,6 +919,7 @@
       card?.classList.toggle('is-dirty', this.isDirty(entry));
       this.updateSummaries();
       this.applyDependencyStates();
+      this.syncLimitEnforcementControls();
       this.syncInheritedActions();
       this.refreshRoleColorPresentation();
       this.refreshValidationPresentation();
@@ -967,6 +1023,12 @@
 
     summaryFor(entries) {
       const changed = entries.filter(entry => this.draftChangedFromDefault(entry)).length;
+      const floodEntries = entries.filter(entry => entry.bulkGroup === 'flood-protection');
+      if (floodEntries.length && entries.every(entry => entry.subsectionId === 'flood-protection')) {
+        const enabled = floodEntries.filter(entry => this.draftEnabled(entry) === true).length;
+        const state = enabled === floodEntries.length ? 'All enabled' : (enabled === 0 ? 'All disabled' : 'Custom');
+        return `${state} · ${changed} changed`;
+      }
       const optional = entries.filter(entry => entry.optional);
       const enabled = optional.filter(entry => this.draftEnabled(entry) === true).length;
       const parts = [`${changed} changed`];
@@ -1168,6 +1230,388 @@
       this.updateConnectionCapabilityStatuses();
     }
 
+    async mediaPackFilesAreIdentical(first, second) {
+      if (!(first instanceof Blob) || !(second instanceof Blob) || first.size !== second.size) return false;
+      const [firstBytes, secondBytes] = await Promise.all([first.arrayBuffer(), second.arrayBuffer()]);
+      const left = new Uint8Array(firstBytes);
+      const right = new Uint8Array(secondBytes);
+      for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return false;
+      }
+      return true;
+    }
+
+    async collectFiveDiceDroppedFiles(dataTransfer) {
+      const collected = [];
+      const walkHandle = async handle => {
+        if (!handle) return;
+        if (handle.kind === 'file') {
+          collected.push(await handle.getFile());
+          return;
+        }
+        if (handle.kind === 'directory') {
+          for await (const child of handle.values()) await walkHandle(child);
+        }
+      };
+      const walkEntry = entry => new Promise((resolve, reject) => {
+        if (entry.isFile) {
+          entry.file(file => { collected.push(file); resolve(); }, reject);
+          return;
+        }
+        if (!entry.isDirectory) { resolve(); return; }
+        const reader = entry.createReader();
+        const read = () => reader.readEntries(async entries => {
+          if (!entries.length) { resolve(); return; }
+          try {
+            for (const child of entries) await walkEntry(child);
+            read();
+          } catch (error) { reject(error); }
+        }, reject);
+        read();
+      });
+      const items = [...(dataTransfer?.items || [])];
+      for (const item of items) {
+        if (typeof item.getAsFileSystemHandle === 'function') {
+          const handle = await item.getAsFileSystemHandle();
+          await walkHandle(handle);
+        } else if (typeof item.webkitGetAsEntry === 'function') {
+          await walkEntry(item.webkitGetAsEntry());
+        } else {
+          const file = item.getAsFile?.();
+          if (file) collected.push(file);
+        }
+      }
+      if (!collected.length) collected.push(...(dataTransfer?.files || []));
+      return collected;
+    }
+
+    renderFiveDiceMediaPack(target) {
+      const status = this.registry?.fiveDiceMediaPack;
+      if (!status || String(status.gameKey || '') !== 'g_4f8c2d71') return;
+      const section = element('section', 'settings-installed-features settings-five-dice-media-pack');
+      section.dataset.fiveDiceMediaPack = 'true';
+      const heading = element('div', 'settings-installed-features-heading');
+      const title = element('h3', '', `Install Classic Artwork & Sound — ${String(status.displayName || 'Five Dice')}`);
+      const titleId = `${this.container.id || 'settings-registry'}-five-dice-media-pack-title`;
+      title.id = titleId;
+      section.setAttribute('aria-labelledby', titleId);
+      heading.append(
+        title,
+        element('p', 'minor', `Add the optional installation-private Classic appearance for ${String(status.displayName || 'Five Dice')}. The complete Built-in appearance and silent audio fallback remain usable without it.`)
+      );
+      section.appendChild(heading);
+      const summary = element('dl', 'settings-entry-destination settings-five-dice-media-summary');
+      const add = (label, value) => summary.append(element('dt', '', label), element('dd', '', String(value)));
+      add('Installed slots', Number(status.installedCount || 0));
+      add('Required Classic slots', Number(status.requiredCount || 0));
+      add('Missing slots using built-in fallback', Number(status.missingCount || 0));
+      add('Invalid slots using built-in fallback', Number(status.invalidCount || 0));
+      add('Classic appearance', status.classicAvailable ? 'Available' : 'Unavailable');
+      add('Selected appearance', status.presentation?.requestedPack === 'built-in' ? 'Built-in' : 'Classic');
+      add('Effective appearance', status.presentation?.effectivePack === 'classic' ? 'Classic' : 'Built-in');
+      add('Music source', 'MP3 when installed; MIDI is not required');
+      section.appendChild(summary);
+      if (Array.isArray(status.invalid) && status.invalid.length) {
+        const warning = element('div', 'settings-entry-error', 'Some optional media files are invalid. Replace only the listed slots; games and records are unaffected.');
+        warning.setAttribute('role', 'status');
+        const list = element('ul', 'settings-five-dice-media-invalid');
+        for (const item of status.invalid) {
+          list.appendChild(element('li', '', String(item.label || 'Invalid media slot')));
+        }
+        warning.appendChild(list);
+        section.appendChild(warning);
+      }
+      section.appendChild(element('p', 'minor', String(status.guidance || '')));
+      if (status.surface === 'setup') {
+        const note = element('div', 'settings-entry-destination settings-five-dice-media-owner-note');
+        note.append(
+          element('strong', '', 'Available after Setup'),
+          element('p', 'minor', 'Classic artwork and sound installation becomes available after the first Installation Owner account is created and Setup is finalized. Setup never exposes an unauthenticated upload path.')
+        );
+        section.appendChild(note);
+        target.appendChild(section);
+        return;
+      }
+      if (!status.canManage) {
+        section.appendChild(element('p', 'minor', 'Only the Installation Owner can verify, install, replace, or remove this private media pack.'));
+        target.appendChild(section);
+        return;
+      }
+
+      const manager = element('div', 'settings-five-dice-media-manager');
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.multiple = true;
+      fileInput.accept = '.ocx,.png,.wav,.mp3,application/octet-stream,image/png,audio/wav,audio/mpeg';
+      fileInput.hidden = true;
+      fileInput.dataset.fiveDicePackInput = 'files';
+      const folderInput = fileInput.cloneNode();
+      folderInput.dataset.fiveDicePackInput = 'folder';
+      folderInput.setAttribute('webkitdirectory', '');
+      folderInput.setAttribute('directory', '');
+      const chooseFiles = element('button', 'btn', 'Select OCX or original/prepared files');
+      chooseFiles.type = 'button';
+      const chooseFolder = element('button', 'btn', 'Choose original source folder');
+      chooseFolder.type = 'button';
+      const drop = element('div', 'settings-five-dice-media-drop', 'Drop a legacy OCX for static-only media extraction, the MyChange source folder, original files, or a prepared pack here. The OCX is never executed, registered, or retained.');
+      drop.tabIndex = 0;
+      drop.setAttribute('role', 'button');
+      drop.setAttribute('aria-label', 'Choose Classic artwork and sound files');
+      const progress = document.createElement('progress');
+      progress.max = Number(status.requiredCount || 30);
+      progress.value = 0;
+      progress.setAttribute('aria-label', 'Recognized Classic media slots');
+      const selectionStatus = element('p', 'minor settings-five-dice-media-selection', 'No files selected.');
+      selectionStatus.setAttribute('role', 'status');
+      selectionStatus.setAttribute('aria-live', 'polite');
+      const actionStatus = element('p', 'settings-five-dice-media-action-status', '');
+      actionStatus.setAttribute('role', 'status');
+      actionStatus.setAttribute('aria-live', 'polite');
+      const install = element('button', 'btn btn-primary', status.installedCount ? 'Replace Pack' : 'Install Classic Artwork & Sound');
+      install.type = 'button';
+      install.disabled = true;
+      const verify = element('button', 'btn', 'Verify Pack');
+      verify.type = 'button';
+      const remove = element('button', 'btn btn-danger', 'Remove Pack');
+      remove.type = 'button';
+      remove.disabled = !status.installedCount;
+      const actions = element('div', 'settings-five-dice-media-actions');
+      actions.append(install, verify, remove);
+      const confirmation = element('div', 'settings-entry-error settings-five-dice-media-confirmation');
+      confirmation.hidden = true;
+      confirmation.appendChild(element('p', '', 'Remove the active Classic artwork and sound pack? The game immediately uses Built-in presentation; games, scores, records, saves, and the saved appearance preference remain unchanged.'));
+      const confirmRemove = element('button', 'btn btn-danger', 'Remove Classic Pack');
+      confirmRemove.type = 'button';
+      const cancelRemove = element('button', 'btn', 'Cancel');
+      cancelRemove.type = 'button';
+      confirmation.append(confirmRemove, cancelRemove);
+
+      let selectedFiles = [];
+      let selectionCanInstall = false;
+      const accepted = new Map(Object.entries(status.acceptedFilenameSlots || {}).map(([name, slot]) => [String(name).toLocaleLowerCase(), String(slot)]));
+      const updateSelection = async files => {
+        actionStatus.textContent = '';
+        const bySlot = new Map();
+        let ignored = 0;
+        let identicalDuplicates = 0;
+        let conflictingDuplicates = 0;
+        const ocxFiles = [];
+        for (const file of files) {
+          if (String(file.name || '').toLocaleLowerCase().endsWith('.ocx')) { ocxFiles.push(file); continue; }
+          const slot = accepted.get(String(file.name || '').toLocaleLowerCase());
+          if (!slot) { ignored += 1; continue; }
+          if (bySlot.has(slot)) {
+            if (await this.mediaPackFilesAreIdentical(bySlot.get(slot), file)) identicalDuplicates += 1;
+            else conflictingDuplicates += 1;
+            continue;
+          }
+          bySlot.set(slot, file);
+        }
+        selectedFiles = [...bySlot.values(), ...ocxFiles];
+        progress.value = bySlot.size;
+        const required = Number(status.requiredCount || 30);
+        const missing = Math.max(0, required - bySlot.size);
+        const duplicateCopy = `${identicalDuplicates} identical duplicate file${identicalDuplicates === 1 ? '' : 's'} collapsed safely; ${conflictingDuplicates} conflicting duplicate${conflictingDuplicates === 1 ? '' : 's'}.`;
+        if (ocxFiles.length === 1) {
+          const nextAction = this.locked
+            ? `Unlock settings changes, then click ${install.textContent}.`
+            : `Click ${install.textContent} to statically extract and validate all ${required} required media slots.`;
+          const supplemental = bySlot.size
+            ? `${bySlot.size}/${required} supplemental files directly recognized.`
+            : 'No supplemental files are selected or required for raw-OCX import.';
+          selectionStatus.textContent = `1 OCX recognized. ${nextAction} ${supplemental} ${duplicateCopy} ${ignored} unrelated file${ignored === 1 ? '' : 's'} ignored safely.`;
+        } else if (ocxFiles.length > 1) {
+          selectionStatus.textContent = `${ocxFiles.length} OCX files selected; choose exactly one OCX. ${bySlot.size}/${required} supplemental files directly recognized; ${duplicateCopy} ${ignored} unrelated file${ignored === 1 ? '' : 's'} ignored safely.`;
+        } else {
+          selectionStatus.textContent = `${bySlot.size}/${required} directly recognized; ${missing} not directly supplied; ${duplicateCopy} ${ignored} unrelated file${ignored === 1 ? '' : 's'} ignored safely.`;
+        }
+        selectionStatus.classList.toggle('error', (missing > 0 && ocxFiles.length === 0) || conflictingDuplicates > 0 || ocxFiles.length > 1);
+        selectionCanInstall = conflictingDuplicates === 0 && ocxFiles.length <= 1 && (missing === 0 || ocxFiles.length === 1);
+        install.disabled = this.readOnly || this.locked || !selectionCanInstall;
+      };
+      const choose = async files => {
+        try { await updateSelection([...(files || [])]); }
+        catch (error) { actionStatus.textContent = error.message || 'The selected files could not be read.'; }
+      };
+      fileInput.addEventListener('change', () => choose(fileInput.files));
+      folderInput.addEventListener('change', () => choose(folderInput.files));
+      chooseFiles.addEventListener('click', () => fileInput.click());
+      chooseFolder.addEventListener('click', () => folderInput.click());
+      drop.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        fileInput.click();
+      });
+      for (const type of ['dragenter', 'dragover']) drop.addEventListener(type, event => {
+        event.preventDefault();
+        drop.classList.add('is-dragging');
+      });
+      for (const type of ['dragleave', 'drop']) drop.addEventListener(type, event => {
+        event.preventDefault();
+        drop.classList.remove('is-dragging');
+      });
+      drop.addEventListener('drop', async event => {
+        actionStatus.textContent = 'Reading selected files…';
+        try {
+          await updateSelection(await this.collectFiveDiceDroppedFiles(event.dataTransfer));
+          actionStatus.textContent = '';
+        } catch (error) {
+          actionStatus.textContent = error.message || 'The dropped folder could not be read safely.';
+        }
+      });
+      const run = async (action, details = {}) => {
+        if (!this.onMediaPackAction || this.readOnly || this.locked) return;
+        actionStatus.textContent = action === 'verify' ? 'Verifying the active pack…' : `${action === 'remove' ? 'Removing' : 'Validating'} the private pack…`;
+        for (const control of [install, verify, remove, confirmRemove, cancelRemove, chooseFiles, chooseFolder]) control.disabled = true;
+        try {
+          await this.onMediaPackAction(action, details, this);
+          actionStatus.textContent = action === 'remove' ? 'Pack removed; Built-in is active.' : (action === 'verify' ? 'Pack verification complete.' : 'Complete pack activated atomically.');
+        } catch (error) {
+          actionStatus.textContent = error.message || 'The Classic artwork and sound action failed safely.';
+          for (const control of [verify, confirmRemove, cancelRemove, chooseFiles, chooseFolder]) control.disabled = this.readOnly || this.locked;
+          install.disabled = this.readOnly || this.locked || !selectionCanInstall;
+          remove.disabled = this.readOnly || this.locked || !status.installedCount;
+          throw error;
+        }
+      };
+      install.addEventListener('click', () => run(status.installedCount ? 'replace' : 'install', { files: selectedFiles }).catch(() => {}));
+      verify.addEventListener('click', () => run('verify').catch(() => {}));
+      remove.addEventListener('click', () => {
+        confirmation.hidden = false;
+        confirmRemove.focus();
+      });
+      cancelRemove.addEventListener('click', () => {
+        confirmation.hidden = true;
+        remove.focus();
+      });
+      confirmRemove.addEventListener('click', () => run('remove', { confirmed: true }).catch(() => {}));
+      manager.append(fileInput, folderInput, drop, chooseFolder, chooseFiles, progress, selectionStatus, actions, confirmation, actionStatus);
+      section.appendChild(manager);
+      target.appendChild(section);
+    }
+
+    renderGameMediaPacks(target) {
+      const packs = Array.isArray(this.registry?.gameMediaPacks) ? this.registry.gameMediaPacks : [];
+      for (const status of packs) {
+        const extensionId = String(status.extensionId || '');
+        if (!extensionId) continue;
+        const section = element('section', 'settings-installed-features settings-five-dice-media-pack settings-game-media-pack');
+        section.dataset.gameMediaPack = extensionId;
+        const title = element('h3', '', `Install Classic Artwork & Sound — ${String(status.displayName || 'Installed game')}`);
+        const titleId = `${this.container.id || 'settings-registry'}-${extensionId}-media-pack-title`;
+        title.id = titleId;
+        section.setAttribute('aria-labelledby', titleId);
+        section.append(
+          title,
+          element('p', 'minor', 'Add the optional installation-private Classic appearance. The complete Built-in presentation and silent audio fallback remain usable without it.')
+        );
+        const summary = element('dl', 'settings-entry-destination settings-five-dice-media-summary');
+        const add = (label, value) => summary.append(element('dt', '', label), element('dd', '', String(value)));
+        add('Installed slots', Number(status.installedCount || 0));
+        add('Required Classic slots', Number(status.requiredCount || 0));
+        add('Missing slots using Built-in fallback', Array.isArray(status.missing) ? status.missing.length : 0);
+        add('Invalid slots using Built-in fallback', Array.isArray(status.invalid) ? status.invalid.length : 0);
+        add('Classic appearance', status.classicComplete ? 'Available' : 'Unavailable');
+        add('Effective appearance', status.presentation?.effectivePack === 'classic' ? 'Classic' : (status.presentation?.effectivePack === 'corechat' ? 'CoreChat artwork' : 'Built-in'));
+        section.appendChild(summary);
+        if (Array.isArray(status.invalid) && status.invalid.length) {
+          const warning = element('div', 'settings-entry-error', 'Some private media files are invalid. Replace the listed slots; active games, saves, scores, and records remain unchanged.');
+          warning.setAttribute('role', 'status');
+          const list = element('ul', 'settings-five-dice-media-invalid');
+          for (const item of status.invalid) list.appendChild(element('li', '', String(item.label || 'Invalid media slot')));
+          warning.appendChild(list);
+          section.appendChild(warning);
+        }
+        if (status.surface === 'setup') {
+          const note = element('div', 'settings-entry-destination settings-five-dice-media-owner-note');
+          note.append(element('strong', '', 'Available after Setup'), element('p', 'minor', String(status.setupGuidance || 'Classic media installation becomes available after the Installation Owner account is finalized. Setup never exposes an unauthenticated upload path.')));
+          section.appendChild(note);
+          target.appendChild(section);
+          continue;
+        }
+        if (!status.canManage) {
+          section.appendChild(element('p', 'minor', 'Only the Installation Owner can verify, install, replace, or remove this private media pack.'));
+          target.appendChild(section);
+          continue;
+        }
+        const manager = element('div', 'settings-five-dice-media-manager');
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file'; fileInput.multiple = true; fileInput.accept = '.ocx,.png,.gif,.wav,application/octet-stream,image/png,image/gif,audio/wav'; fileInput.hidden = true;
+        const folderInput = fileInput.cloneNode(); folderInput.setAttribute('webkitdirectory', ''); folderInput.setAttribute('directory', '');
+        const chooseFiles = element('button', 'btn', 'Select OCX or original/prepared files'); chooseFiles.type = 'button';
+        const chooseFolder = element('button', 'btn', 'Choose original source folder'); chooseFolder.type = 'button';
+        const drop = element('div', 'settings-five-dice-media-drop', 'Drop a legacy OCX for static-only media extraction, recognized original files, or a prepared semantic-name pack here. The OCX is never executed, registered, or retained.');
+        drop.tabIndex = 0; drop.setAttribute('role', 'button'); drop.setAttribute('aria-label', `Choose Classic artwork and sound for ${String(status.displayName || 'this game')}`);
+        const progress = document.createElement('progress'); progress.max = Number(status.requiredCount || 1); progress.value = 0; progress.setAttribute('aria-label', 'Recognized Classic media slots');
+        const selectionStatus = element('p', 'minor settings-five-dice-media-selection', 'No files selected.'); selectionStatus.setAttribute('role', 'status'); selectionStatus.setAttribute('aria-live', 'polite');
+        const actionStatus = element('p', 'settings-five-dice-media-action-status', ''); actionStatus.dataset.gameMediaStatus = extensionId; actionStatus.setAttribute('role', 'status'); actionStatus.setAttribute('aria-live', 'polite');
+        const install = element('button', 'btn btn-primary', status.installedCount ? 'Replace Pack' : 'Install Classic Artwork & Sound'); install.type = 'button'; install.disabled = true;
+        const verify = element('button', 'btn', 'Verify Pack'); verify.type = 'button';
+        const remove = element('button', 'btn btn-danger', 'Remove Pack'); remove.type = 'button'; remove.disabled = !status.installedCount;
+        const actions = element('div', 'settings-five-dice-media-actions'); actions.append(install, verify, remove);
+        const confirmation = element('div', 'settings-entry-error settings-five-dice-media-confirmation'); confirmation.hidden = true;
+        confirmation.appendChild(element('p', '', 'Remove this active Classic pack? The game immediately uses Built-in presentation; game state, scores, records, saves, and presentation preferences remain unchanged.'));
+        const confirmRemove = element('button', 'btn btn-danger', 'Remove Classic Pack'); confirmRemove.type = 'button';
+        const cancelRemove = element('button', 'btn', 'Cancel'); cancelRemove.type = 'button'; confirmation.append(confirmRemove, cancelRemove);
+        const accepted = new Map(Object.entries(status.acceptedFilenameSlots || {}).map(([name, slot]) => [String(name).toLocaleLowerCase(), String(slot)]));
+        let selectedFiles = [];
+        let selectionCanInstall = false;
+        const updateSelection = async files => {
+          actionStatus.textContent = '';
+          const bySlot = new Map(); const ocxFiles = []; let ignored = 0; let identicalDuplicates = 0; let conflictingDuplicates = 0;
+          for (const file of files) {
+            if (String(file.name || '').toLocaleLowerCase().endsWith('.ocx')) { ocxFiles.push(file); continue; }
+            const slot = accepted.get(String(file.name || '').toLocaleLowerCase());
+            if (!slot) { ignored++; continue; }
+            if (bySlot.has(slot)) {
+              if (await this.mediaPackFilesAreIdentical(bySlot.get(slot), file)) identicalDuplicates++;
+              else conflictingDuplicates++;
+              continue;
+            }
+            bySlot.set(slot, file);
+          }
+          selectedFiles = [...bySlot.values(), ...ocxFiles]; progress.value = bySlot.size;
+          const required = Number(status.requiredCount || 0); const missing = Math.max(0, required - bySlot.size);
+          const duplicateCopy = `${identicalDuplicates} identical duplicate file${identicalDuplicates === 1 ? '' : 's'} collapsed safely; ${conflictingDuplicates} conflicting duplicate${conflictingDuplicates === 1 ? '' : 's'}.`;
+          if (ocxFiles.length === 1) {
+            const nextAction = this.locked
+              ? `Unlock settings changes, then click ${install.textContent}.`
+              : `Click ${install.textContent} to statically extract and validate all ${required} required media slots.`;
+            const supplemental = bySlot.size
+              ? `${bySlot.size}/${required} supplemental files directly recognized.`
+              : 'No supplemental files are selected or required for raw-OCX import.';
+            selectionStatus.textContent = `1 OCX recognized. ${nextAction} ${supplemental} ${duplicateCopy} ${ignored} unrelated file${ignored === 1 ? '' : 's'} ignored safely.`;
+          } else if (ocxFiles.length > 1) {
+            selectionStatus.textContent = `${ocxFiles.length} OCX files selected; choose exactly one OCX. ${bySlot.size}/${required} supplemental files directly recognized; ${duplicateCopy} ${ignored} unrelated file${ignored === 1 ? '' : 's'} ignored safely.`;
+          } else {
+            selectionStatus.textContent = `${bySlot.size}/${required} directly recognized; ${missing} not directly supplied; ${duplicateCopy} ${ignored} unrelated file${ignored === 1 ? '' : 's'} ignored safely.`;
+          }
+          selectionStatus.classList.toggle('error', (missing > 0 && ocxFiles.length === 0) || conflictingDuplicates > 0 || ocxFiles.length > 1);
+          selectionCanInstall = conflictingDuplicates === 0 && ocxFiles.length <= 1 && (missing === 0 || ocxFiles.length === 1);
+          install.disabled = this.readOnly || this.locked || !selectionCanInstall;
+        };
+        const choose = files => updateSelection([...(files || [])]).catch(error => { actionStatus.textContent = error.message || 'The selected files could not be compared safely.'; });
+        fileInput.addEventListener('change', () => choose(fileInput.files)); folderInput.addEventListener('change', () => choose(folderInput.files));
+        chooseFiles.addEventListener('click', () => fileInput.click()); chooseFolder.addEventListener('click', () => folderInput.click());
+        drop.addEventListener('keydown', event => { if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); fileInput.click(); });
+        for (const type of ['dragenter', 'dragover']) drop.addEventListener(type, event => { event.preventDefault(); drop.classList.add('is-dragging'); });
+        for (const type of ['dragleave', 'drop']) drop.addEventListener(type, event => { event.preventDefault(); drop.classList.remove('is-dragging'); });
+        drop.addEventListener('drop', async event => { try { await updateSelection(await this.collectFiveDiceDroppedFiles(event.dataTransfer)); } catch (error) { actionStatus.textContent = error.message || 'The dropped folder could not be read safely.'; } });
+        const run = async (action, details = {}) => {
+          if (!this.onMediaPackAction || this.readOnly || this.locked) return;
+          actionStatus.textContent = action === 'verify' ? 'Verifying the active pack…' : `${action === 'remove' ? 'Removing' : 'Validating'} the private pack…`;
+          await this.onMediaPackAction(action, { ...details, game: extensionId }, this);
+        };
+        install.addEventListener('click', () => run(status.installedCount ? 'replace' : 'install', { files: selectedFiles }).catch(error => { actionStatus.textContent = error.message || 'The Classic pack action failed safely.'; }));
+        verify.addEventListener('click', () => run('verify').catch(error => { actionStatus.textContent = error.message || 'Verification failed safely.'; }));
+        remove.addEventListener('click', () => { confirmation.hidden = false; confirmRemove.focus(); });
+        cancelRemove.addEventListener('click', () => { confirmation.hidden = true; remove.focus(); });
+        confirmRemove.addEventListener('click', () => run('remove', { confirmed: true }).catch(error => { actionStatus.textContent = error.message || 'Removal failed safely.'; }));
+        manager.append(fileInput, folderInput, drop, chooseFolder, chooseFiles, progress, selectionStatus, actions, confirmation, actionStatus);
+        section.appendChild(manager); target.appendChild(section);
+      }
+    }
+
     applyDependencyStates() {
       for (const entry of this.entries) {
         const dependencies = Array.isArray(entry.dependencies) ? entry.dependencies : [];
@@ -1335,6 +1779,69 @@
 
       const controlRow = element('div', 'settings-entry-control');
       const control = this.createControl(entry);
+      let authenticationWarning = null;
+      if (entry.id === 'flood_authentication_protection_enabled' && entry.type === 'boolean') {
+        authenticationWarning = element('section', 'settings-auth-protection-warning');
+        authenticationWarning.hidden = true;
+        authenticationWarning.setAttribute('role', 'alert');
+        authenticationWarning.setAttribute('aria-label', 'Authentication Protection disable confirmation');
+        authenticationWarning.appendChild(element(
+          'strong',
+          '',
+          'High severity: disabling Authentication Protection allows repeated authentication attempts without this limiter.',
+        ));
+        const warningActions = element('div', 'shared-form-actions');
+        const keepEnabled = element('button', 'btn', 'No \u2014 Keep Authentication Protection Enabled');
+        keepEnabled.type = 'button';
+        const disable = element('button', 'btn btn-danger', 'Yes \u2014 Disable Authentication Protection');
+        disable.type = 'button';
+        const cancelWarning = (restoreFocus = false) => {
+          authenticationWarning.hidden = true;
+          control.checked = true;
+          this.authenticationProtectionDisableConfirmed = false;
+          if (restoreFocus) control.focus();
+        };
+        keepEnabled.addEventListener('click', () => cancelWarning(true));
+        disable.addEventListener('click', () => {
+          authenticationWarning.hidden = true;
+          this.authenticationProtectionDisableConfirmed = true;
+          control.dataset.authenticationDisableApproved = '1';
+          control.checked = false;
+          control.dispatchEvent(new Event('change', { bubbles: true }));
+          control.focus();
+        });
+        authenticationWarning.addEventListener('keydown', event => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          cancelWarning(true);
+        });
+        authenticationWarning.addEventListener('focusout', () => {
+          window.setTimeout(() => {
+            if (authenticationWarning.hidden) return;
+            if (!authenticationWarning.contains(document.activeElement) && document.activeElement !== control) {
+              cancelWarning(false);
+            }
+          }, 0);
+        });
+        warningActions.append(keepEnabled, disable);
+        authenticationWarning.appendChild(warningActions);
+        control.addEventListener('change', event => {
+          if (control.dataset.authenticationDisableApproved === '1') {
+            delete control.dataset.authenticationDisableApproved;
+            return;
+          }
+          if (control.checked) {
+            this.authenticationProtectionDisableConfirmed = false;
+            authenticationWarning.hidden = true;
+            return;
+          }
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          control.checked = true;
+          authenticationWarning.hidden = false;
+          window.requestAnimationFrame(() => disable.focus());
+        }, true);
+      }
       if (entry.type === 'boolean') {
         const booleanControl = element('div', 'settings-boolean-control');
         const booleanLabel = element('label', 'settings-boolean-label');
@@ -1393,6 +1900,7 @@
       if (adjacent.childElementCount) main.appendChild(adjacent);
       main.appendChild(actions);
       row.appendChild(main);
+      if (authenticationWarning) row.appendChild(authenticationWarning);
 
       if (entry.type !== 'color' && !['asset', 'fixed', 'profile-review'].includes(entry.type)) {
         const error = element('p', 'settings-entry-error');
@@ -1517,6 +2025,7 @@
       }
       this.updateSummaries();
       this.applyDependencyStates();
+      this.syncLimitEnforcementControls();
       this.syncInheritedActions();
       this.refreshRoleColorPresentation();
       this.refreshValidationPresentation();
@@ -1593,6 +2102,14 @@
           headerText.appendChild(sectionCounts);
           header.appendChild(headerText);
           const actions = element('div', 'shared-form-actions');
+          const floodEntries = sectionEntries.filter(entry => entry.bulkGroup === 'flood-protection');
+          if (floodEntries.length) {
+            headerText.appendChild(element('p', 'minor settings-flood-protection-info', 'Disables all optional flood protections except Authentication Protection. Authentication Protection is not changed by Disable All.'));
+            const optionalFloodEntries = floodEntries.filter(entry => entry.id !== 'flood_authentication_protection_enabled');
+            actions.appendChild(this.operationButton('Enable All', 'set_many', { values: Object.fromEntries(floodEntries.map(entry => [entry.id, true])) }, 'btn'));
+            actions.appendChild(this.operationButton('Disable All', 'set_many', { values: Object.fromEntries(optionalFloodEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
+            actions.appendChild(this.operationButton('Restore defaults', 'set_many', { values: Object.fromEntries(sectionEntries.filter(entry => entry.safeToReset).map(entry => [entry.id, entry.defaultValue])) }, 'btn'));
+          }
           if (sectionEntries.some(entry => entry.bulkGroup === 'dances')) {
             actions.appendChild(this.operationButton('Enable All Dances', 'set_many', { values: Object.fromEntries(sectionEntries.map(entry => [entry.id, true])) }, 'btn'));
             actions.appendChild(this.operationButton('Disable All Dances', 'set_many', { values: Object.fromEntries(sectionEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
@@ -1660,6 +2177,29 @@
         'Diagnostics',
         'Other Limits',
       ];
+    }
+
+    limitSections() {
+      return ['Recommended Safeguards', 'Operational Controls', 'Community Preferences', 'Feature-Specific Limits'];
+    }
+
+    limitFeatureInactive(entry) {
+      return (entry.dependencies || []).some(id => this.draft.get(id) === false);
+    }
+
+    syncLimitEnforcementControls() {
+      for (const entry of this.entries.filter(item => this.isLimitEntry(item))) {
+        const enforcementId = entry.enforcementSettingId;
+        if (!enforcementId) continue;
+        const enforced = this.draft.get(enforcementId) !== false;
+        const inactive = this.limitFeatureInactive(entry);
+        const control = this.controls.get(entry.id);
+        if (control) control.disabled = this.readOnly || this.locked || !enforced || inactive;
+        const state = this.container?.querySelector?.(`[data-limit-state-for="${safeId(entry.id)}"]`);
+        if (state) state.textContent = inactive ? 'Inactive - feature disabled' : (enforced ? 'Enabled' : 'Disabled');
+        const noLimit = this.container?.querySelector?.(`[data-limit-unenforced-for="${safeId(entry.id)}"]`);
+        if (noLimit) noLimit.hidden = enforced || inactive;
+      }
     }
 
     limitGroupFor(entry) {
@@ -1746,6 +2286,14 @@
         headerText.appendChild(sectionCounts);
         header.appendChild(headerText);
         const actions = element('div', 'shared-form-actions');
+        const floodEntries = sectionEntries.filter(entry => entry.bulkGroup === 'flood-protection');
+        if (floodEntries.length) {
+          headerText.appendChild(element('p', 'minor settings-flood-protection-info', 'Disables all optional flood protections except Authentication Protection. Authentication Protection is not changed by Disable All.'));
+          const optionalFloodEntries = floodEntries.filter(entry => entry.id !== 'flood_authentication_protection_enabled');
+          actions.appendChild(this.operationButton('Enable All', 'set_many', { values: Object.fromEntries(floodEntries.map(entry => [entry.id, true])) }, 'btn'));
+          actions.appendChild(this.operationButton('Disable All', 'set_many', { values: Object.fromEntries(optionalFloodEntries.map(entry => [entry.id, false])) }, 'btn btn-danger'));
+          actions.appendChild(this.operationButton('Restore defaults', 'set_many', { values: Object.fromEntries(sectionEntries.filter(entry => entry.safeToReset).map(entry => [entry.id, entry.defaultValue])) }, 'btn'));
+        }
         const bulkGroups = [
           ['dances', 'Dances'],
           ['gesture-part-3', 'Browsing and Organization'],
@@ -1793,46 +2341,168 @@
       target.appendChild(categorySection);
     }
 
+    renderLimitEntry(entry) {
+      const card = element('article', 'settings-entry settings-limit-entry');
+      card.dataset.settingId = entry.id;
+      const titleRow = element('div', 'settings-limit-title-row');
+      const title = element('h4', '', entry.label);
+      const state = element('span', 'settings-badge settings-limit-state', entry.limitState || 'Enabled');
+      state.dataset.limitStateFor = safeId(entry.id);
+      titleRow.append(title, state);
+
+      const enforcement = this.entryMap.get(entry.enforcementSettingId);
+      const enforcementWrap = element('div', 'settings-limit-enforcement');
+      if (enforcement) {
+        enforcementWrap.dataset.settingId = enforcement.id;
+        const label = element('label', 'settings-boolean-label');
+        const control = this.createControl(enforcement);
+        label.htmlFor = control.id;
+        label.append(control, element('span', '', 'Enforce limit'));
+        enforcementWrap.appendChild(label);
+      }
+
+      const valueRow = element('div', 'settings-limit-value-row');
+      const valueLabel = element('label', 'settings-entry-label', 'Saved value');
+      const control = this.createControl(entry);
+      valueLabel.htmlFor = control.id;
+      valueRow.append(valueLabel, control);
+      const unit = this.unitFor(entry);
+      if (unit) valueRow.appendChild(element('span', 'settings-entry-unit', unit));
+      const range = this.rangeFor(entry);
+      if (range) valueRow.appendChild(element('span', 'settings-entry-range', `Allowed: ${range}`));
+
+      const recommendation = element('p', 'settings-limit-recommendation', `Recommended: ${entry.recommendedValue ?? entry.defaultValue} ${unit}`.trim());
+      const noLimit = element('p', 'settings-limit-unenforced', 'Configured enforcement is off. The saved value is preserved; mandatory format, storage, protocol, and platform safety boundaries still apply.');
+      noLimit.dataset.limitUnenforcedFor = safeId(entry.id);
+      noLimit.hidden = this.draft.get(entry.enforcementSettingId) !== false;
+      const risk = element('p', 'settings-limit-risk', entry.riskWarning || 'Disabling this limit removes CoreChat enforcement.');
+      risk.setAttribute('role', 'note');
+      const details = element('details', 'settings-limit-help');
+      details.append(element('summary', '', 'Why this limit matters'), element('p', '', entry.helpText || entry.description || entry.riskWarning));
+      const id = element('code', 'settings-limit-id', entry.id);
+      card.append(titleRow, enforcementWrap, valueRow, recommendation, noLimit, risk, details, id);
+      return card;
+    }
+
+    renderLimitEvents(target) {
+      const section = element('section', 'settings-category settings-limit-events');
+      const heading = element('div', 'settings-category-summary');
+      heading.append(element('h2', 'settings-category-title', 'Limit Events'), element('span', 'settings-category-counts', 'Privacy-safe operational log'));
+      const description = element('p', 'minor', 'Records when an enforced limit is reached. Message content, files, credentials, tokens, email addresses, and raw network addresses are not stored.');
+      const filters = element('div', 'settings-limit-event-filters');
+      const search = element('input'); search.type = 'search'; search.placeholder = 'Filter by limit or outcome'; search.setAttribute('aria-label', 'Filter Limit Events');
+      const outcome = element('select'); outcome.setAttribute('aria-label', 'Filter Limit Events by outcome');
+      for (const [value, label] of [['','All outcomes'],['blocked','Blocked'],['warning','Warning'],['allowed','Allowed after review']]) { const option = element('option', '', label); option.value = value; outcome.appendChild(option); }
+      const exportJson = element('a', 'btn', 'Export JSON');
+      const exportCsv = element('a', 'btn', 'Export CSV');
+      const base = String(document.body?.dataset?.appBase || '').replace(/\/$/, '');
+      exportJson.href = `${base}/api/limit_events.php?action=export&format=json`;
+      exportCsv.href = `${base}/api/limit_events.php?action=export&format=csv`;
+      filters.append(search, outcome, exportJson, exportCsv);
+      const status = element('p', 'minor'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+      const table = element('table', 'settings-limit-events-table');
+      const pager = element('div', 'shared-form-actions');
+      const previous = element('button', 'btn', 'Previous'); previous.type = 'button';
+      const next = element('button', 'btn', 'Next'); next.type = 'button';
+      pager.append(previous, next);
+      let page = Number(this.registry?.limitEvents?.page || 1);
+      let snapshot = this.registry?.limitEvents || { items: [], total: 0, pages: 0 };
+      const draw = () => {
+        table.replaceChildren();
+        const head = document.createElement('thead'); const row = document.createElement('tr');
+        for (const label of ['Limit','Outcome','Occurrences','Last reached','Audit','']) row.appendChild(element('th', '', label));
+        head.appendChild(row); table.appendChild(head); const body = document.createElement('tbody');
+        for (const item of snapshot.items || []) {
+          const tr = document.createElement('tr');
+          tr.append(element('td', '', item.limitName || item.settingId), element('td', '', item.outcome), element('td', '', String(item.occurrenceCount || 1)), element('td', '', item.lastReachedAt || ''), element('td', '', item.auditRunPublicId || 'Not linked'));
+          const action = document.createElement('td');
+          if (!String(item.settingId || '').includes('idle')) {
+            const details = element('button', 'btn', 'Details'); details.type = 'button';
+            details.dataset.limitEventDetails = item.publicId;
+            action.appendChild(details);
+          }
+          const remove = element('button', 'btn btn-danger', 'Delete'); remove.type = 'button'; remove.disabled = this.readOnly || this.locked;
+          remove.addEventListener('click', async () => {
+            if (!window.confirm('Delete this privacy-safe Limit Event record?')) return;
+            const csrf = document.querySelector('input[name="csrf"]')?.value || '';
+            const response = await fetch(`${base}/api/limit_events.php`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ action: 'delete', public_id: item.publicId, csrf }) });
+            if (!response.ok) throw new Error('Limit Event could not be deleted.');
+            await load();
+          }); action.appendChild(remove); tr.appendChild(action); body.appendChild(tr);
+        }
+        if (!(snapshot.items || []).length) { const tr = document.createElement('tr'); const td = element('td', 'minor', 'No matching Limit Events.'); td.colSpan = 6; tr.appendChild(td); body.appendChild(tr); }
+        table.appendChild(body); status.textContent = `${snapshot.total || 0} event record${Number(snapshot.total || 0) === 1 ? '' : 's'}; page ${snapshot.page || 1} of ${Math.max(1, snapshot.pages || 1)}`;
+        previous.disabled = page <= 1; next.disabled = page >= Math.max(1, Number(snapshot.pages || 1));
+      };
+      const load = async () => {
+        const params = new URLSearchParams({ page: String(page), page_size: '25', search: search.value, outcome: outcome.value });
+        const response = await fetch(`${base}/api/limit_events.php?${params}`); const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Limit Events could not be loaded.'); snapshot = payload.limitEvents; draw();
+      };
+      let timer = null; search.addEventListener('input', () => { window.clearTimeout(timer); page = 1; timer = window.setTimeout(() => load().catch(error => { status.textContent = error.message; }), 180); });
+      outcome.addEventListener('change', () => { page = 1; load().catch(error => { status.textContent = error.message; }); });
+      previous.addEventListener('click', () => { page = Math.max(1, page - 1); load().catch(error => { status.textContent = error.message; }); });
+      next.addEventListener('click', () => { page += 1; load().catch(error => { status.textContent = error.message; }); });
+      section.append(heading, description, filters, status, table, pager); target.appendChild(section); draw();
+    }
+
     renderLimits(target, entries) {
       const section = element('section', 'settings-category settings-limits-view');
       section.dataset.settingsCategory = 'limits';
       section.dataset.settingsView = 'limits';
       const heading = element('div', 'settings-category-summary');
-      const title = element('h2', 'settings-category-title', 'Limits Settings');
+      const title = element('h2', 'settings-category-title', 'Limit Settings');
       title.tabIndex = -1;
       title.dataset.settingsSelectedHeading = 'true';
       const counts = element('span', 'settings-category-counts', `${entries.length} configurable limits`);
       heading.append(title, counts);
       section.appendChild(heading);
-      const groupOrder = this.limitGroups();
+      const bulk = element('section', 'settings-limit-bulk');
+      bulk.appendChild(element('h3', '', 'Draft configuration controls'));
+      bulk.appendChild(element('p', 'minor', 'These controls update the draft only. Review the changes, then use the shared Save Changes action.'));
+      const bulkActions = element('div', 'shared-form-actions');
+      const companions = entries.map(entry => this.entryMap.get(entry.enforcementSettingId)).filter(Boolean);
+      const draftButton = (label, values, className = 'btn') => { const button = element('button', className, label); button.type = 'button'; button.disabled = this.readOnly || this.locked; button.addEventListener('click', () => this.setDraftValues(values)); return button; };
+      bulkActions.append(
+        draftButton('Apply Recommended Configuration', Object.fromEntries([...entries.map(entry => [entry.id, entry.recommendedValue ?? entry.defaultValue]), ...companions.map(entry => [entry.id, true])])),
+        draftButton('Enable All Limits', Object.fromEntries(companions.map(entry => [entry.id, true]))),
+        draftButton('Restore Saved Values', Object.fromEntries([...entries, ...companions].map(entry => [entry.id, entry.currentValue]))),
+      );
+      const disable = element('button', 'btn btn-danger', 'Disable All Limits'); disable.type = 'button'; disable.disabled = this.readOnly || this.locked;
+      const impact = element('section', 'settings-limit-disable-review'); impact.hidden = true; impact.setAttribute('role', 'alert');
+      impact.appendChild(element('strong', '', 'High impact: CoreChat will stop enforcing every configurable limit while preserving all saved values.'));
+      const confirm = element('button', 'btn btn-danger', 'Confirm draft: Disable All Limits'); confirm.type = 'button';
+      const cancel = element('button', 'btn', 'Cancel'); cancel.type = 'button';
+      disable.addEventListener('click', () => { impact.hidden = false; confirm.focus(); });
+      cancel.addEventListener('click', () => { impact.hidden = true; disable.focus(); });
+      confirm.addEventListener('click', () => { this.setDraftValues(Object.fromEntries(companions.map(entry => [entry.id, false]))); impact.hidden = true; });
+      impact.append(confirm, cancel); bulkActions.appendChild(disable); bulk.append(bulkActions, impact); section.appendChild(bulk);
+      const groupOrder = this.limitSections();
       const groupGrid = element('div', 'settings-subsection-grid settings-limit-group-grid');
       for (const group of groupOrder) {
-        const groupEntries = entries.filter(entry => this.limitGroupFor(entry) === group);
+        const groupEntries = entries.filter(entry => String(entry.limitSection || 'Community Preferences') === group);
         if (!groupEntries.length) continue;
         const groupSection = element('section', 'settings-subsection settings-limit-group');
         groupSection.dataset.settingsSubsection = safeId(group);
         const groupHeading = element('div', 'settings-subsection-heading');
         groupHeading.appendChild(element('h3', '', group));
-        const reset = element('button', 'btn', 'Reset Group');
-        reset.type = 'button';
-        reset.disabled = this.readOnly || this.locked;
-        reset.addEventListener('click', () => this.resetDraft(groupEntries.map(entry => entry.id)));
-        groupHeading.appendChild(reset);
         groupSection.appendChild(groupHeading);
         const grid = element('div', 'settings-entry-grid');
-        for (const entry of groupEntries) grid.appendChild(this.renderEntry(entry));
+        for (const entry of groupEntries) grid.appendChild(this.renderLimitEntry(entry));
         groupSection.appendChild(grid);
         groupGrid.appendChild(groupSection);
       }
       section.appendChild(groupGrid);
       target.appendChild(section);
+      this.renderLimitEvents(target);
+      this.syncLimitEnforcementControls();
     }
 
     render() {
       this.container.textContent = '';
       this.controls.clear();
       const categories = [...(this.registry?.categories || [])].sort((a, b) => Number(a.order) - Number(b.order));
-      const entries = this.entries.filter(entry => this.matches(entry));
+      const entries = this.entries.filter(entry => !entry.limitEnforcementControl && this.matches(entry));
       const searchActive = Boolean(this.query || this.filter !== 'all');
       const shell = element('div', this.categoryNavigation ? 'settings-section-layout' : 'settings-section-content');
       let content = shell;
@@ -1846,7 +2516,7 @@
         const options = [
           ['overview', 'Overview'],
           ...categories.map(category => [category.id, category.label]),
-          ['limits', 'Limits Settings'],
+          ['limits', 'Limit Settings'],
         ];
         for (const [value, label] of options) {
           const option = element('option', '', label);
@@ -1864,7 +2534,7 @@
           if (categoryEntries.length) list.appendChild(this.makeViewControl(category.id, category.label, categoryEntries));
         }
         const limitEntries = this.limitEntries();
-        list.appendChild(this.makeViewControl('limits', 'Limits Settings', limitEntries));
+        list.appendChild(this.makeViewControl('limits', 'Limit Settings', limitEntries));
         navigation.appendChild(list);
         content = element('div', 'settings-section-content');
         shell.append(navigation, content);
@@ -1903,6 +2573,11 @@
             const categoryEntries = entries.filter(entry => entry.categoryId === category.id);
             if (categoryEntries.length) {
               if (category.id === 'voice-media-players') this.renderConnectionCapabilities(content);
+              if (category.id === 'rooms-games') {
+                if (this.registry?.surface === 'admin') window.CoreChatGameRecordings?.render(content, { locked: this.locked, readOnly: this.readOnly });
+                this.renderFiveDiceMediaPack(content);
+                this.renderGameMediaPacks(content);
+              }
               this.renderCategory(content, category, categoryEntries, !searchActive);
             }
           }
@@ -1913,6 +2588,11 @@
           const categoryEntries = entries.filter(entry => entry.categoryId === category.id);
           if (categoryEntries.length) {
             if (category.id === 'voice-media-players') this.renderConnectionCapabilities(content);
+            if (category.id === 'rooms-games') {
+                if (this.registry?.surface === 'admin') window.CoreChatGameRecordings?.render(content, { locked: this.locked, readOnly: this.readOnly });
+              this.renderFiveDiceMediaPack(content);
+              this.renderGameMediaPacks(content);
+            }
             this.renderCategory(content, category, categoryEntries);
           }
         }
@@ -1964,7 +2644,13 @@
         control.disabled = this.readOnly || this.locked;
         this.applyControlLockSemantics(control);
       }
+      for (const control of this.container.querySelectorAll('[data-five-dice-pack-input]')) {
+        control.disabled = this.readOnly || this.locked;
+        this.applyControlLockSemantics(control);
+      }
+      for (const section of this.container.querySelectorAll('[data-game-recordings]')) section.dispatchEvent(new CustomEvent('recording-lock-change', { detail: { locked: this.locked, readOnly: this.readOnly } }));
       for (const button of this.container.querySelectorAll('button')) {
+        if (button.closest('[data-game-recordings]')) continue;
         const presentationOnly = button.matches(
           '.settings-entry-info, .settings-section-nav-item, '
           + '.settings-overview-card, .settings-installed-feature-action'

@@ -12,6 +12,10 @@ const MAX_BUFFERED_BYTES = 256 * 1024;
 const TRANSFER_TIMEOUT_MS = 30_000;
 const TOKEN_CLOCK_SKEW_SECONDS = 5;
 const ALLOWED_MIME = new Set(["image/gif", "image/webp"]);
+const ASSET_KINDS = Object.freeze(["avatar", "nameplate"]);
+const projectionKey = assetKind => assetKind === "nameplate" ? "p2p_nameplate" : "p2p_avatar";
+const responseKey = assetKind => assetKind === "nameplate" ? "p2pNameplate" : "p2pAvatar";
+const claimKey = assetKind => assetKind === "nameplate" ? "nid" : "aid";
 
 export class P2PAvatarService {
 
@@ -65,6 +69,8 @@ export class P2PAvatarService {
             maxBytes: Math.max(1, Number(policy?.maxBytes || 5 * 1024 * 1024)),
             maxWidth: Math.max(1, Number(policy?.maxWidth || 4096)),
             maxHeight: Math.max(1, Number(policy?.maxHeight || 4096)),
+            nameplateMaxWidth: Math.max(1, Number(policy?.nameplateMaxWidth || policy?.maxWidth || 4096)),
+            nameplateMaxHeight: Math.max(1, Number(policy?.nameplateMaxHeight || policy?.maxHeight || 4096)),
             receivedStorage: "session-memory-only"
         });
         if (!effectiveEnabled) this.clearAll("policy-disabled");
@@ -72,74 +78,88 @@ export class P2PAvatarService {
     }
 
     reconcileParticipant(participant) {
+        for (const assetKind of ASSET_KINDS) this.#reconcileParticipantAsset(participant, assetKind);
+    }
+
+    #reconcileParticipantAsset(participant, assetKind) {
         if (this.#destroyed || !participant) return;
         const participantId = Number(participant.id || participant.participant_id || 0);
         const localId = Number(this.#context?.getConfig?.()?.myParticipantId || 0);
         if (!participantId || participantId === localId) return;
 
         const blocked = this.#context?.isBlocked?.(participant) === true;
-        const hidden = this.#context?.isHidden?.(participant) === true;
-        const projection = participant?.p2p_avatar || null;
+        const hidden = this.#context?.isAssetHidden?.(participant, assetKind) === true
+            || (assetKind === "avatar" && this.#context?.isHidden?.(participant) === true);
+        const projection = participant?.[projectionKey(assetKind)] || null;
         const identity = String(projection?.identity || "");
-        const current = this.#received.get(participantId);
+        const current = this.#received.get(this.#assetKey(participantId, assetKind));
 
         if (blocked) {
-            this.clearParticipant(participantId, "blocked");
+            this.#clearViewerState(participantId, assetKind, "blocked");
             return;
         }
         if (hidden || !this.#policy.effectiveEnabled || !this.#validIdentity(identity)) {
-            this.#clearViewerState(participantId, hidden ? "hidden" : "not-eligible");
+            this.#clearViewerState(participantId, assetKind, hidden ? "hidden" : "not-eligible");
             return;
         }
         if (current && current.identity !== identity) {
-            this.#clearReceived(participantId, "identity-changed");
+            this.#clearReceived(participantId, assetKind, "identity-changed");
         }
-        this.prefetchParticipant(participant).catch(error => this.#warn(error));
+        this.prefetchParticipant(participant, assetKind).catch(error => this.#warn(error));
     }
 
-    async prefetchParticipant(participant) {
+    async prefetchParticipant(participant, assetKind = "avatar") {
+        assetKind = this.#assetKind(assetKind);
         if (this.#destroyed || !this.#policy.effectiveEnabled) return false;
         const participantId = Number(participant?.id || participant?.participant_id || 0);
         const localId = Number(this.#context?.getConfig?.()?.myParticipantId || 0);
-        let projection = participant?.p2p_avatar || {};
+        let projection = participant?.[projectionKey(assetKind)] || {};
         let identity = String(projection.identity || "");
         let token = String(projection.authorization || "");
+        const assetKey = this.#assetKey(participantId, assetKind);
         if (!participantId || participantId === localId) return false;
-        if (this.#context?.isBlocked?.(participant) || this.#context?.isHidden?.(participant)) return false;
-        if (this.#received.get(participantId)?.identity === identity) return true;
-        if (this.#requesting.has(participantId)) return false;
+        const hidden = this.#context?.isAssetHidden?.(participant, assetKind) === true
+            || (assetKind === "avatar" && this.#context?.isHidden?.(participant) === true);
+        if (this.#context?.isBlocked?.(participant) || hidden) return false;
+        if (this.#received.get(assetKey)?.identity === identity) return true;
+        if (this.#requesting.has(assetKey)) return false;
 
         let claims = this.#tokenClaims(token);
         if (!this.#validIdentity(identity) || !this.#claimsMatch(claims, {
             viewerParticipantId: localId,
             sourceParticipantId: participantId,
-            identity
+            identity,
+            assetKind
         })) {
             const refreshed = await this.#context?.refreshAuthorization?.(participantId);
-            projection = refreshed?.p2pAvatar || {};
+            projection = refreshed?.[responseKey(assetKind)] || {};
             identity = String(projection.identity || "");
             token = String(projection.authorization || "");
             claims = this.#tokenClaims(token);
             if (!this.#validIdentity(identity) || !this.#claimsMatch(claims, {
                 viewerParticipantId: localId,
                 sourceParticipantId: participantId,
-                identity
+                identity,
+                assetKind
             })) return false;
-            this.#context?.onAuthorization?.(participantId, projection);
+            this.#context?.onAuthorization?.(participantId, projection, assetKind);
         }
 
-        const activePeer = this.#peers.get(token);
+        const peerKey = this.#peerKey(token, assetKind);
+        const activePeer = this.#peers.get(peerKey);
         if (activePeer
             && !activePeer.closed
             && activePeer.role === "viewer"
             && activePeer.remoteId === participantId
             && activePeer.identity === identity) return true;
 
-        this.#requesting.add(participantId);
+        this.#requesting.add(assetKey);
         try {
-            this.#closePeersFor(participantId, "viewer", "authorization-refreshed");
+            this.#closePeersFor(participantId, "viewer", "authorization-refreshed", assetKind);
             const peer = this.#createPeer({
                 token,
+                peerKey,
+                assetKind,
                 role: "viewer",
                 remoteId: participantId,
                 identity,
@@ -153,15 +173,16 @@ export class P2PAvatarService {
             await this.#sendDescription(peer, "offer", peer.pc.localDescription);
             return true;
         } catch (error) {
-            this.#closePeersFor(participantId, "viewer", "request-failed");
+            this.#closePeersFor(participantId, "viewer", "request-failed", assetKind);
             throw error;
         } finally {
-            this.#requesting.delete(participantId);
+            this.#requesting.delete(assetKey);
         }
     }
 
     async handleSignal(signal = {}) {
         if (this.#destroyed || signal?.media !== AVATAR_MEDIA) return false;
+        const assetKind = this.#assetKind(signal?.data?.asset_kind || "avatar");
         const remoteId = Number(signal.from_participant_id || 0);
         const localId = Number(this.#context?.getConfig?.()?.myParticipantId || 0);
         const type = String(signal.type || "");
@@ -171,11 +192,11 @@ export class P2PAvatarService {
 
         if (type === "offer") {
             if (Number(claims.sp) !== localId || Number(claims.vp) !== remoteId) return false;
-            return this.#acceptOffer(signal, claims, token);
+            return this.#acceptOffer(signal, claims, token, assetKind);
         }
         if (type === "answer") {
             if (Number(claims.vp) !== localId || Number(claims.sp) !== remoteId) return false;
-            const peer = this.#peers.get(token);
+            const peer = this.#peers.get(this.#peerKey(token, assetKind));
             if (!peer || peer.role !== "viewer" || peer.remoteId !== remoteId) return false;
             const description = this.#description("answer", signal?.data?.description);
             if (!description) return false;
@@ -189,11 +210,12 @@ export class P2PAvatarService {
                 || localId === remoteId) return false;
             const candidate = this.#candidate(signal?.data?.candidate);
             if (!candidate || (this.#isRelayCandidate(candidate) && !this.#policy.relayAllowed)) return false;
-            const peer = this.#peers.get(token);
+            const peerKey = this.#peerKey(token, assetKind);
+            const peer = this.#peers.get(peerKey);
             if (!peer) {
-                const queued = this.#orphanCandidates.get(token) || [];
+                const queued = this.#orphanCandidates.get(peerKey) || [];
                 if (queued.length < 32) queued.push(candidate);
-                this.#orphanCandidates.set(token, queued);
+                this.#orphanCandidates.set(peerKey, queued);
                 return true;
             }
             if (!peer.pc.remoteDescription) peer.incomingCandidates.push(candidate);
@@ -206,14 +228,15 @@ export class P2PAvatarService {
     clearParticipant(participantId, reason = "participant-cleared") {
         const id = Number(participantId);
         if (!id) return;
-        this.#clearReceived(id, reason);
+        for (const assetKind of ASSET_KINDS) this.#clearReceived(id, assetKind, reason);
         this.#closePeersFor(id, null, reason);
-        this.#requesting.delete(id);
+        for (const assetKind of ASSET_KINDS) this.#requesting.delete(this.#assetKey(id, assetKind));
     }
 
     clearAll(reason = "clear-all") {
         for (const participantId of [...this.#received.keys()]) {
-            this.#clearReceived(participantId, reason);
+            const [assetKind, id] = String(participantId).split(":");
+            this.#clearReceived(Number(id), this.#assetKind(assetKind), reason);
         }
         for (const peer of [...this.#peers.values()]) this.#closePeer(peer, reason);
         this.#orphanCandidates.clear();
@@ -241,19 +264,22 @@ export class P2PAvatarService {
         });
     }
 
-    async #acceptOffer(signal, claims, token) {
+    async #acceptOffer(signal, claims, token, assetKind) {
         const remoteId = Number(signal.from_participant_id);
-        const identity = String(claims.aid || "");
+        const identity = String(claims[claimKey(assetKind)] || "");
         if (!this.#validIdentity(identity)) return false;
-        const authorization = await this.#context?.authorizeSource?.(token);
+        const authorization = await this.#context?.authorizeSource?.(token, assetKind);
         if (!authorization?.ok
             || String(authorization.identity || "") !== identity
             || Number(authorization.viewerParticipantId || 0) !== remoteId) return false;
 
-        const prior = this.#peers.get(token);
+        const peerKey = this.#peerKey(token, assetKind);
+        const prior = this.#peers.get(peerKey);
         if (prior) this.#closePeer(prior, "offer-replaced");
         const peer = this.#createPeer({
             token,
+            peerKey,
+            assetKind,
             role: "source",
             remoteId,
             identity,
@@ -287,7 +313,7 @@ export class P2PAvatarService {
             pc,
             channel: null,
             outgoingCandidates: [],
-            incomingCandidates: this.#orphanCandidates.get(options.token) || [],
+            incomingCandidates: this.#orphanCandidates.get(options.peerKey) || [],
             signalReady: false,
             header: null,
             chunks: [],
@@ -295,8 +321,8 @@ export class P2PAvatarService {
             closed: false,
             timeout: null
         };
-        this.#orphanCandidates.delete(options.token);
-        this.#peers.set(options.token, peer);
+        this.#orphanCandidates.delete(options.peerKey);
+        this.#peers.set(options.peerKey, peer);
         pc.onicecandidate = event => {
             if (!event.candidate || peer.closed) return;
             const candidate = event.candidate.toJSON?.() || event.candidate;
@@ -320,6 +346,7 @@ export class P2PAvatarService {
             kind: type,
             description: { type, sdp: String(description?.sdp || "") },
             avatar_authorization: peer.token
+            ,asset_kind: peer.assetKind
         });
         peer.signalReady = true;
         const candidates = peer.outgoingCandidates.splice(0).sort((left, right) =>
@@ -333,6 +360,7 @@ export class P2PAvatarService {
             kind: "ice",
             candidate,
             avatar_authorization: peer.token
+            ,asset_kind: peer.assetKind
         });
     }
 
@@ -351,7 +379,7 @@ export class P2PAvatarService {
             });
         };
         channel.onclose = () => {
-            if (!peer.closed && !this.#received.has(peer.remoteId)) this.#closePeer(peer, "channel-closed");
+            if (!peer.closed && !this.#received.has(this.#assetKey(peer.remoteId, peer.assetKind))) this.#closePeer(peer, "channel-closed");
         };
     }
 
@@ -390,8 +418,9 @@ export class P2PAvatarService {
         }
         const chunks = Math.ceil(blob.size / CHUNK_BYTES);
         peer.channel.send(JSON.stringify({
-            kind: "avatar-header",
+            kind: peer.assetKind === "nameplate" ? "nameplate-header" : "avatar-header",
             version: 1,
+            assetKind: peer.assetKind,
             identity,
             mime: blob.type,
             size: blob.size,
@@ -411,7 +440,14 @@ export class P2PAvatarService {
         if (typeof data === "string") {
             if (peer.header) throw new Error("Duplicate avatar transfer header.");
             const header = JSON.parse(data);
-            if (header?.kind !== "avatar-header" || Number(header.version) !== 1
+            const expectedHeader = peer.assetKind === "nameplate" ? "nameplate-header" : "avatar-header";
+            const maxWidth = peer.assetKind === "nameplate"
+                ? Number(this.#policy.nameplateMaxWidth || 0)
+                : Number(this.#policy.maxWidth || 0);
+            const maxHeight = peer.assetKind === "nameplate"
+                ? Number(this.#policy.nameplateMaxHeight || 0)
+                : Number(this.#policy.maxHeight || 0);
+            if (header?.kind !== expectedHeader || String(header.assetKind || "avatar") !== peer.assetKind || Number(header.version) !== 1
                 || String(header.identity || "") !== peer.identity
                 || !ALLOWED_MIME.has(String(header.mime || ""))
                 || !Number.isInteger(Number(header.size))
@@ -419,8 +455,8 @@ export class P2PAvatarService {
                 || Number(header.size) > this.#policy.maxBytes
                 || !Number.isInteger(Number(header.width))
                 || !Number.isInteger(Number(header.height))
-                || Number(header.width) < 1 || Number(header.width) > this.#policy.maxWidth
-                || Number(header.height) < 1 || Number(header.height) > this.#policy.maxHeight
+                || Number(header.width) < 1 || maxWidth < 1 || Number(header.width) > maxWidth
+                || Number(header.height) < 1 || maxHeight < 1 || Number(header.height) > maxHeight
                 || (peer.expectedWidth > 0 && Number(header.width) !== peer.expectedWidth)
                 || (peer.expectedHeight > 0 && Number(header.height) !== peer.expectedHeight)
                 || !Number.isInteger(Number(header.chunks))
@@ -449,11 +485,12 @@ export class P2PAvatarService {
         if (await this.#sha256(bytes) !== peer.identity) throw new Error("The received avatar identity does not match.");
         await this.#validateImage(blob, Number(peer.header.width), Number(peer.header.height));
 
-        const prior = this.#received.get(peer.remoteId);
+        const assetKey = this.#assetKey(peer.remoteId, peer.assetKind);
+        const prior = this.#received.get(assetKey);
         if (prior?.objectUrl) this.#context?.window?.URL?.revokeObjectURL?.(prior.objectUrl);
         const objectUrl = this.#context?.window?.URL?.createObjectURL?.(blob);
         if (!objectUrl) throw new Error("The received avatar could not be presented.");
-        this.#received.set(peer.remoteId, Object.freeze({
+        this.#received.set(assetKey, Object.freeze({
             identity: peer.identity,
             blob,
             objectUrl
@@ -461,9 +498,10 @@ export class P2PAvatarService {
         peer.header = null;
         peer.chunks = [];
         peer.receivedBytes = 0;
-        const accepted = this.#context?.onAvatarReady?.(peer.remoteId, objectUrl, peer.identity);
+        const accepted = this.#context?.onAssetReady?.(peer.remoteId, peer.assetKind, objectUrl, peer.identity)
+            ?? (peer.assetKind === "avatar" ? this.#context?.onAvatarReady?.(peer.remoteId, objectUrl, peer.identity) : false);
         if (accepted === false) {
-            this.#clearReceived(peer.remoteId, "presentation-rejected");
+            this.#clearReceived(peer.remoteId, peer.assetKind, "presentation-rejected");
         }
         this.#closePeer(peer, "transfer-complete");
     }
@@ -556,32 +594,47 @@ export class P2PAvatarService {
         return Boolean(claims
             && Number(claims.vp) === Number(expected.viewerParticipantId)
             && Number(claims.sp) === Number(expected.sourceParticipantId)
-            && String(claims.aid) === String(expected.identity));
+            && String(claims[claimKey(this.#assetKind(expected.assetKind))]) === String(expected.identity));
+    }
+
+    #assetKind(value) {
+        return value === "nameplate" ? "nameplate" : "avatar";
+    }
+
+    #assetKey(participantId, assetKind) {
+        return `${this.#assetKind(assetKind)}:${Number(participantId)}`;
+    }
+
+    #peerKey(token, assetKind) {
+        return `${this.#assetKind(assetKind)}:${String(token)}`;
     }
 
     #validIdentity(identity) {
         return /^[a-f0-9]{64}$/.test(String(identity || ""));
     }
 
-    #clearViewerState(participantId, reason) {
-        this.#clearReceived(participantId, reason);
-        this.#closePeersFor(participantId, "viewer", reason);
-        this.#requesting.delete(Number(participantId));
+    #clearViewerState(participantId, assetKind, reason) {
+        this.#clearReceived(participantId, assetKind, reason);
+        this.#closePeersFor(participantId, "viewer", reason, assetKind);
+        this.#requesting.delete(this.#assetKey(participantId, assetKind));
     }
 
-    #clearReceived(participantId, reason) {
+    #clearReceived(participantId, assetKind, reason) {
         const id = Number(participantId);
-        const current = this.#received.get(id);
+        const key = this.#assetKey(id, assetKind);
+        const current = this.#received.get(key);
         if (!current) return;
         this.#context?.window?.URL?.revokeObjectURL?.(current.objectUrl);
-        this.#received.delete(id);
-        this.#context?.onAvatarCleared?.(id, current.identity, reason);
+        this.#received.delete(key);
+        if (this.#context?.onAssetCleared) this.#context.onAssetCleared(id, this.#assetKind(assetKind), current.identity, reason);
+        else if (this.#assetKind(assetKind) === "avatar") this.#context?.onAvatarCleared?.(id, current.identity, reason);
     }
 
-    #closePeersFor(participantId, role, reason) {
+    #closePeersFor(participantId, role, reason, assetKind = null) {
         const id = Number(participantId);
         for (const peer of [...this.#peers.values()]) {
-            if (peer.remoteId === id && (!role || peer.role === role)) this.#closePeer(peer, reason);
+            if (peer.remoteId === id && (!role || peer.role === role)
+                && (!assetKind || peer.assetKind === this.#assetKind(assetKind))) this.#closePeer(peer, reason);
         }
     }
 
@@ -596,8 +649,8 @@ export class P2PAvatarService {
         peer.header = null;
         peer.chunks = [];
         peer.receivedBytes = 0;
-        if (this.#peers.get(peer.token) === peer) this.#peers.delete(peer.token);
-        this.#orphanCandidates.delete(peer.token);
+        if (this.#peers.get(peer.peerKey) === peer) this.#peers.delete(peer.peerKey);
+        this.#orphanCandidates.delete(peer.peerKey);
         this.#context?.recordLifecycle?.({
             event: "p2p-avatar-peer-closed",
             role: peer.role,

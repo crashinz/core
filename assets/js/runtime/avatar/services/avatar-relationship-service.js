@@ -1171,9 +1171,11 @@ export class AvatarRelationshipService {
                             relationship.source === "legacy" ? "bottom-right" : null
                         )
                         : null;
+                // Away is heartbeat freshness, not a room departure. Keep the
+                // member's place until membership or participant removal says
+                // they left; otherwise the row collapses over their avatar.
                 const present = Boolean(
                     participant &&
-                    participant.online !== false &&
                     !participant.exiting
                 );
                 const renderable = Boolean(
@@ -1324,7 +1326,7 @@ export class AvatarRelationshipService {
                     order: Number(member.order || 0),
                     lapHostParticipantId: Number(member.lapHostParticipantId || 0) || null,
                     lapSide,
-                    present: Boolean(participant && participant.online !== false && !participant.exiting),
+                    present: Boolean(participant && !participant.exiting),
                     renderable: Boolean(participant?.avatarEl || participant?.webcam_enabled || participant?.webcam_path),
                     isViewer,
                     actions: Object.freeze({

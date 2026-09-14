@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="78" height="1330" viewBox="0 0 78 1330">
+  <defs>
+    <linearGradient id="paper-a" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8e9189"/>
+      <stop offset=".24" stop-color="#e1dfd2"/>
+      <stop offset=".52" stop-color="#fffef3"/>
+      <stop offset=".8" stop-color="#c4c3ba"/>
+      <stop offset="1" stop-color="#71756f"/>
+    </linearGradient>
+    <linearGradient id="paper-b" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#646a67"/>
+      <stop offset=".2" stop-color="#bebeb5"/>
+      <stop offset=".5" stop-color="#fffdf0"/>
+      <stop offset=".78" stop-color="#d6d3c7"/>
+      <stop offset="1" stop-color="#767a74"/>
+    </linearGradient>
+    <linearGradient id="paper-c" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#747973"/>
+      <stop offset=".28" stop-color="#d0cec3"/>
+      <stop offset=".58" stop-color="#fffef1"/>
+      <stop offset=".82" stop-color="#b4b4ad"/>
+      <stop offset="1" stop-color="#60645f"/>
+    </linearGradient>
+    <path id="fold-a" d="M48 15 L66 19 L61 57 L43 54 L45 35 Z" fill="url(#paper-a)"/>
+    <path id="fold-b" d="M34 18 L52 16 L50 57 L31 55 L29 36 Z" fill="url(#paper-b)"/>
+    <path id="fold-c" d="M20 20 L38 17 L35 53 L17 50 L14 35 Z" fill="url(#paper-c)"/>
+  </defs>
+  <g transform="translate(0 0)"><use href="#fold-a" opacity=".72" transform="translate(59 41) scale(.16 .12) translate(-59 -41)"/></g>
+  <g transform="translate(0 70)"><use href="#fold-a" opacity=".9" transform="translate(59 41) scale(.34 .28) translate(-59 -41)"/></g>
+  <g transform="translate(0 140)"><use href="#fold-a" transform="translate(58 39) scale(.56 .5) rotate(4 58 39) translate(-58 -39)"/></g>
+  <g transform="translate(0 210)"><use href="#fold-a" transform="translate(2 -1) scale(.76 .78) rotate(7 55 36)"/></g>
+  <g transform="translate(0 280)"><use href="#fold-a" transform="rotate(5 55 36)"/><use href="#fold-b" opacity=".7" transform="translate(45 39) scale(.2 .16) translate(-45 -39)"/></g>
+  <g transform="translate(0 350)"><use href="#fold-a" transform="rotate(2 55 36)"/><use href="#fold-b" opacity=".92" transform="translate(44 38) scale(.48 .42) translate(-44 -38)"/></g>
+  <g transform="translate(0 420)"><use href="#fold-a" transform="rotate(-3 55 36)"/><use href="#fold-b" transform="translate(1 0) scale(.78 .84) rotate(-4 43 37)"/></g>
+  <g transform="translate(0 490)"><use href="#fold-a" transform="rotate(-7 55 36)"/><use href="#fold-b" transform="rotate(-2 42 37)"/><use href="#fold-c" opacity=".68" transform="translate(29 38) scale(.18 .15) translate(-29 -38)"/></g>
+  <g transform="translate(0 560)"><use href="#fold-a" transform="rotate(-9 55 36)"/><use href="#fold-b" transform="rotate(3 42 37)"/><use href="#fold-c" opacity=".9" transform="translate(29 38) scale(.46 .4) translate(-29 -38)"/></g>
+  <g transform="translate(0 630)"><use href="#fold-a" transform="rotate(-12 55 36)"/><use href="#fold-b" transform="rotate(7 42 37)"/><use href="#fold-c" transform="translate(1 0) scale(.78 .82) rotate(6 28 36)"/></g>
+  <g transform="translate(0 700)"><use href="#fold-a" transform="translate(-2 2) rotate(-15 55 36)"/><use href="#fold-b" transform="translate(-1 1) rotate(10 42 37)"/><use href="#fold-c" transform="rotate(2 28 36)"/></g>
+  <g transform="translate(0 770)"><use href="#fold-a" transform="translate(-3 2) rotate(-18 55 36)"/><use href="#fold-b" transform="translate(-2 2) rotate(7 42 37)"/><use href="#fold-c" transform="translate(-1 1) rotate(-5 28 36)"/></g>
+  <g transform="translate(0 840)"><use href="#fold-a" transform="translate(-2 1) rotate(-13 55 36)"/><use href="#fold-b" transform="translate(-1 1) rotate(2 42 37)"/><use href="#fold-c" transform="rotate(-8 28 36)"/></g>
+  <g transform="translate(0 910)"><use href="#fold-a" transform="rotate(-8 55 36)"/><use href="#fold-b" transform="rotate(-2 42 37)"/><use href="#fold-c" opacity=".9" transform="translate(28 37) scale(.78 .8) rotate(-7 28 37) translate(-28 -37)"/></g>
+  <g transform="translate(0 980)"><use href="#fold-a" transform="rotate(-3 55 36)"/><use href="#fold-b" transform="rotate(-4 42 37)"/><use href="#fold-c" opacity=".72" transform="translate(28 37) scale(.46 .4) translate(-28 -37)"/></g>
+  <g transform="translate(0 1050)"><use href="#fold-a" transform="rotate(2 55 36)"/><use href="#fold-b" opacity=".8" transform="translate(42 37) scale(.7 .72) translate(-42 -37)"/><use href="#fold-c" opacity=".42" transform="translate(28 37) scale(.2 .16) translate(-28 -37)"/></g>
+  <g transform="translate(0 1120)"><use href="#fold-a" opacity=".92" transform="translate(55 38) scale(.78 .8) rotate(4 55 38) translate(-55 -38)"/><use href="#fold-b" opacity=".55" transform="translate(42 37) scale(.4 .34) translate(-42 -37)"/></g>
+  <g transform="translate(0 1190)"><use href="#fold-a" opacity=".72" transform="translate(56 39) scale(.48 .42) translate(-56 -39)"/></g>
+  <g transform="translate(0 1260)"><use href="#fold-a" opacity=".42" transform="translate(58 40) scale(.2 .16) translate(-58 -40)"/></g>
+</svg>

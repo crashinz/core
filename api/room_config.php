@@ -16,11 +16,17 @@ if (!$room) json_out(['error' => 'Room not found'], 404);
 
 $session = active_session_for_room($pdo, (int)$room['id']);
 $participant = participant_for_user($pdo, (int)$session['id'], $user);
+$authorContext = author_context_for_participant($pdo, (int)$session['id'], $participant);
 touch_participant_presence($pdo, $participant, 1);
 runtime_maintenance_for_session($pdo, (int)$session['id']);
+// Maintenance may validate large installed media packs. Refresh the requesting
+// viewer again so a long local or production maintenance pass cannot age the
+// active room page out of the participant projection it is about to receive.
+touch_participant_presence($pdo, $participant, 1);
+live_website_rooms_cleanup($pdo);
 $canModerateMessages = can_use_host_tools($user, $room);
-$historyLimit = max(1, min(1000, (int)app_setting($pdo, 'room_chat_history_limit', '100')));
-$roomLimitSql = 'LIMIT ' . $historyLimit;
+$historyLimit = corechat_limit_value($pdo, 'room_chat_history_limit', 100);
+$roomLimitSql = $historyLimit === null ? '' : 'LIMIT ' . max(1, min(1000, (int)$historyLimit));
 
 function community_reactions_for(PDO $pdo, array $messageIds): array {
     if (!$messageIds) return [];
@@ -46,6 +52,17 @@ function community_reactions_for(PDO $pdo, array $messageIds): array {
     return $map;
 }
 
+function room_installation_owner_user_id(PDO $pdo): int {
+    static $resolved = false;
+    static $ownerUserId = 0;
+    if (!$resolved) {
+        $owner = moderation_identity_owner($pdo);
+        $ownerUserId = (int)($owner['userId'] ?? 0);
+        $resolved = true;
+    }
+    return $ownerUserId;
+}
+
 function community_message_payload(
     PDO $pdo,
     int $viewerUserId,
@@ -64,6 +81,7 @@ function community_message_payload(
         'avatar_url' => $m['avatar_url'] ?: resolve_avatar($m['avatar_path'] ?? 'preset:Default'),
         'role' => $m['author_role'] ?? 'user',
         'is_owner' => !empty($m['author_is_owner']),
+        'is_installation_owner' => (int)($m['user_id'] ?? 0) === room_installation_owner_user_id($pdo),
         'content' => $m['content'],
         'url_preview' => message_url_preview($m['url_preview_json'] ?? null),
         'reply_to' => message_url_preview($m['reply_to_json'] ?? null),
@@ -103,23 +121,26 @@ $stmt = $pdo->prepare(
     'SELECT p.*, u.role, mp.public_profile_id '
     . 'FROM participants p '
     . 'JOIN users u ON u.id = p.user_id '
-    . 'JOIN member_profiles mp ON mp.user_id = p.user_id '
-    . 'WHERE p.session_id = ? AND p.last_seen_at >= ? ORDER BY p.joined_at ASC'
+    . 'LEFT JOIN member_profiles mp ON mp.user_id = p.user_id '
+    . 'WHERE p.session_id = ? AND (p.last_seen_at >= ? OR p.id = ?) ORDER BY p.joined_at ASC'
 );
-$stmt->execute([(int)$session['id'], stale_cutoff($pdo)]);
+$stmt->execute([(int)$session['id'], stale_cutoff($pdo), (int)$participant['id']]);
 $roomOwnerId = (int)$room['owner_id'];
 $participants = array_map(function(array $p) use ($roomOwnerId, $pdo, $session, $participant): array {
     $projected = webcam_audience_project_participant($pdo, (int)$session['id'], (int)$participant['id'], array_merge([
         'id' => (int)$p['id'],
         'user_id' => (int)$p['user_id'],
-        'public_profile_id' => member_profiles_validate_public_profile_id(
-            $p['public_profile_id'] ?? ''
-        ),
+        'public_profile_id' => !empty($p['public_profile_id'])
+            ? member_profiles_validate_public_profile_id($p['public_profile_id'])
+            : null,
         'display_name' => $p['display_name'],
         'role' => $p['role'] ?: 'user',
         'is_owner' => (int)$p['user_id'] === $roomOwnerId,
+        'is_installation_owner' => (int)$p['user_id'] === room_installation_owner_user_id($pdo),
         'avatar_path' => $p['avatar_path'],
         'avatar_url' => resolve_avatar($p['avatar_path']),
+        'nameplate_path' => resolve_nameplate($p['nameplate_path'] ?? null),
+        'nameplate_url' => resolve_nameplate($p['nameplate_path'] ?? null),
         'avatar_source_width_px' => max(1, (int)($p['avatar_source_width_px'] ?? 150)),
         'avatar_source_height_px' => max(1, (int)($p['avatar_source_height_px'] ?? 150)),
         'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
@@ -133,6 +154,8 @@ $participants = array_map(function(array $p) use ($roomOwnerId, $pdo, $session, 
         'link_mode' => in_array(($p['link_mode'] ?? 'normal'), ['normal', 'lap'], true) ? $p['link_mode'] : 'normal',
         'online' => $p['last_seen_at'] && strtotime($p['last_seen_at']) >= time() - 35,
     ], avatar_size_participant_event_fields($pdo, $p)));
+    $projected = avatar_visibility_project_payload($pdo, (int)$participant['user_id'], $projected);
+    $projected = nameplate_visibility_project_payload($pdo, (int)$participant['user_id'], $projected);
     return p2p_avatar_project_participant($pdo, (int)$session['id'], $participant, $projected);
 }, $stmt->fetchAll());
 
@@ -157,6 +180,9 @@ $stmt = $pdo->prepare(
 );
 $stmt->execute([$roomOwnerId, (int)$session['id'], $canModerateMessages ? 1 : 0]);
 $rawMessages = $stmt->fetchAll();
+if ($historyLimit !== null && count($rawMessages) >= (int)$historyLimit) {
+    limit_event_record_reached($pdo, 'room_chat_history_limit', 'room', 'room:' . (int)$room['id'], 'truncated', ['returnedMessages' => count($rawMessages)]);
+}
 $messageIds = array_map(fn(array $m): int => (int)$m['id'], $rawMessages);
 $reactionsMap = [];
 if ($messageIds) {
@@ -190,6 +216,7 @@ $messages = array_map(function(array $m) use ($canModerateMessages, $reactionsMa
         'avatar_url' => ($m['author_avatar_url'] ?: resolve_avatar($m['author_avatar_path'] ?? 'preset:Default')),
         'role' => $m['author_role'] ?: 'user',
         'is_owner' => !empty($m['author_is_owner']),
+        'is_installation_owner' => (int)($m['author_user_id'] ?? 0) === room_installation_owner_user_id($pdo),
         'content' => $m['content'],
         'url_preview' => message_url_preview($m['url_preview_json'] ?? null),
         'reply_to' => message_url_preview($m['reply_to_json'] ?? null),
@@ -399,6 +426,11 @@ $roomConfig = [
     'roomName' => $room['name'],
     'backgroundThumbPath' => $room['background_thumb_path'] ?? null,
     'isRoomOwner' => (int)$room['owner_id'] === (int)$user['id'],
+    'isInstallationOwner' => !empty($authorContext['is_installation_owner']),
+    'importantMessagePermissions' => [
+        'room' => can_send_important_message($pdo, $authorContext, 'room'),
+        'community' => can_send_important_message($pdo, $authorContext, 'community'),
+    ],
     'canEditRoom' => (int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true),
     'canUseHostTools' => $canModerateMessages,
     'canModerateMessages' => $canModerateMessages,
@@ -482,6 +514,7 @@ $roomConfig = [
     'voiceWebcamPreferences' => voice_webcam_preferences($pdo, (int)$user['id']),
     'webcamViewerPreferences' => webcam_viewer_preferences($pdo, (int)$user['id']),
     'avatarVisibilityPreferences' => avatar_visibility_preferences($pdo, (int)$user['id']),
+    'nameplateVisibilityPreferences' => nameplate_visibility_preferences($pdo, (int)$user['id']),
     'p2pAvatarPolicy' => p2p_avatar_policy($pdo, true),
     'p2pTransferPolicy' => p2p_transfer_policy($pdo),
     'serverMediaPolicy' => server_media_policy($pdo),
@@ -491,5 +524,6 @@ $roomConfig = [
     'importUrl' => $room['import_url'] ?? null,
     'importLayout' => !empty($room['import_layout_json']) ? json_decode((string)$room['import_layout_json'], true) : null,
     'musicPlaylist' => !empty($room['music_playlist_json']) ? json_decode((string)$room['music_playlist_json'], true) : [],
+    'liveWebsiteRoom' => live_website_room_projection($pdo, (int)$room['id'], (int)$user['id']),
 ];
 json_out(avatar_visibility_project_payload($pdo, (int)$user['id'], $roomConfig));

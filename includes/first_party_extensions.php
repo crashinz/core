@@ -16,6 +16,20 @@ const FIRST_PARTY_EXTENSION_STORAGE_QUOTA_BYTES = 65536;
 
 function first_party_extension_sources(): array {
     return [
+        'tetris-versus' => [
+            'manifest' => dirname(__DIR__) . '/extensions/tetris-versus/extension.json',
+            'adapter' => __DIR__ . '/tetris_arcade_extension.php',
+            'factory' => 'tetris_arcade_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1, 'publicFallbackName' => 'Tetris Versus',
+        ],
+        'space-invasion' => [
+            'manifest' => dirname(__DIR__) . '/extensions/space-invasion/extension.json',
+            'adapter' => __DIR__ . '/space_arcade_extension.php',
+            'factory' => 'space_arcade_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1, 'publicFallbackName' => 'Space Invasion',
+        ],
         'private-site-branding' => [
             'manifest' => dirname(__DIR__) . '/extensions/private-site-branding/extension.json',
             'adapter' => __DIR__ . '/private_site_branding.php',
@@ -29,6 +43,117 @@ function first_party_extension_sources(): array {
             'factory' => 'gesture_maker_extension_adapter',
             'activationCapability' => 'presentation.gesture-maker',
             'introducedStorageSchema' => 1,
+        ],
+        'canvas' => [
+            'manifest' => dirname(__DIR__) . '/extensions/canvas/extension.json',
+            'adapter' => __DIR__ . '/canvas_extension.php',
+            'factory' => 'canvas_extension_adapter',
+            'activationCapability' => 'presentation.canvas',
+            'introducedStorageSchema' => 1,
+        ],
+        'five-dice' => [
+            'manifest' => dirname(__DIR__) . '/extensions/five-dice/extension.json',
+            'adapter' => __DIR__ . '/five_dice_extension.php',
+            'factory' => 'five_dice_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Five Dice',
+        ],
+        'checkers' => [
+            'manifest' => dirname(__DIR__) . '/extensions/checkers/extension.json',
+            'adapter' => __DIR__ . '/checkers_extension.php',
+            'factory' => 'checkers_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Checkers',
+        ],
+        'chess' => [
+            'manifest' => dirname(__DIR__) . '/extensions/chess/extension.json',
+            'adapter' => __DIR__ . '/chess_extension.php',
+            'factory' => 'chess_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Chess',
+        ],
+        'acey-deucy' => [
+            'manifest' => dirname(__DIR__) . '/extensions/acey-deucy/extension.json',
+            'adapter' => __DIR__ . '/acey_deucy_extension.php',
+            'factory' => 'acey_deucy_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Acey Deucy',
+        ],
+        'battleship' => [
+            'manifest' => dirname(__DIR__) . '/extensions/battleship/extension.json',
+            'adapter' => __DIR__ . '/battleship_extension.php',
+            'factory' => 'battleship_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Battleship',
+        ],
+        'spades' => [
+            'manifest' => dirname(__DIR__) . '/extensions/spades/extension.json',
+            'adapter' => __DIR__ . '/spades_extension.php',
+            'factory' => 'spades_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Spades',
+        ],
+        'blackjack' => [
+            'manifest' => dirname(__DIR__) . '/extensions/blackjack/extension.json',
+            'adapter' => __DIR__ . '/blackjack_extension.php',
+            'factory' => 'blackjack_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Blackjack',
+        ],
+        'hearts' => [
+            'manifest' => dirname(__DIR__) . '/extensions/hearts/extension.json',
+            'adapter' => __DIR__ . '/hearts_extension.php',
+            'factory' => 'hearts_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Hearts',
+        ],
+        'uno' => [
+            'manifest' => dirname(__DIR__) . '/extensions/uno/extension.json',
+            'adapter' => __DIR__ . '/uno_extension.php',
+            'factory' => 'uno_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'UNO',
+        ],
+        'chinese-checkers' => [
+            'manifest' => dirname(__DIR__) . '/extensions/chinese-checkers/extension.json',
+            'adapter' => __DIR__ . '/chinese_checkers_extension.php',
+            'factory' => 'chinese_checkers_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Chinese Checkers',
+        ],
+        'nested-four' => [
+            'manifest' => dirname(__DIR__) . '/extensions/nested-four/extension.json',
+            'adapter' => __DIR__ . '/nested_four_extension.php',
+            'factory' => 'nested_four_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Nested Four',
+        ],
+        'puppy-panic' => [
+            'manifest' => dirname(__DIR__) . '/extensions/puppy-panic/extension.json',
+            'adapter' => __DIR__ . '/puppy_panic_extension.php',
+            'factory' => 'puppy_panic_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Puppy Panic!',
+        ],
+        'backgammon-first-party' => [
+            'manifest' => dirname(__DIR__) . '/extensions/backgammon-first-party/extension.json',
+            'adapter' => __DIR__ . '/backgammon_extension.php',
+            'factory' => 'backgammon_extension_adapter',
+            'activationCapability' => 'game.rules.authoritative',
+            'introducedStorageSchema' => 1,
+            'publicFallbackName' => 'Backgammon',
         ],
     ];
 }
@@ -49,6 +174,18 @@ function first_party_extension_capability_catalog(): array {
         'gesture.preview',
         'gesture.protected-media.reference',
         'presentation.gesture-maker',
+        'canvas.document.read',
+        'canvas.document.write',
+        'canvas.comment',
+        'canvas.manage',
+        'canvas.publish',
+        'presentation.canvas',
+        'game.registry.describe',
+        'game.session.use',
+        'game.rules.authoritative',
+        'game.presentation.private-media',
+        'game.presentation.pack',
+        'game.rules.help',
     ];
 }
 
@@ -62,6 +199,8 @@ function first_party_extension_subscription_catalog(): array {
         'presentation.gesture-editor',
         'presentation.gesture-preview',
         'presentation.gesture-package',
+        'presentation.canvas',
+        'presentation.games',
     ];
 }
 
@@ -75,6 +214,62 @@ function first_party_extension_setting_defaults(): array {
         'first_party_extension.gesture-maker.lifecycle_revision' => '1',
         'first_party_extension.gesture-maker.storage_schema' => '1',
         'first_party_extension.gesture-maker.last_failure' => '',
+        'first_party_extension.canvas.enabled' => '1',
+        'first_party_extension.canvas.lifecycle_revision' => '1',
+        'first_party_extension.canvas.storage_schema' => '1',
+        'first_party_extension.canvas.last_failure' => '',
+        'first_party_extension.five-dice.enabled' => '1',
+        'first_party_extension.five-dice.lifecycle_revision' => '1',
+        'first_party_extension.five-dice.storage_schema' => '1',
+        'first_party_extension.five-dice.last_failure' => '',
+        'first_party_extension.checkers.enabled' => '1',
+        'first_party_extension.checkers.lifecycle_revision' => '1',
+        'first_party_extension.checkers.storage_schema' => '1',
+        'first_party_extension.checkers.last_failure' => '',
+        'first_party_extension.chess.enabled' => '1',
+        'first_party_extension.chess.lifecycle_revision' => '1',
+        'first_party_extension.chess.storage_schema' => '1',
+        'first_party_extension.chess.last_failure' => '',
+        'first_party_extension.acey-deucy.enabled' => '1',
+        'first_party_extension.acey-deucy.lifecycle_revision' => '1',
+        'first_party_extension.acey-deucy.storage_schema' => '1',
+        'first_party_extension.acey-deucy.last_failure' => '',
+        'first_party_extension.battleship.enabled' => '1',
+        'first_party_extension.battleship.lifecycle_revision' => '1',
+        'first_party_extension.battleship.storage_schema' => '1',
+        'first_party_extension.battleship.last_failure' => '',
+        'first_party_extension.spades.enabled' => '1',
+        'first_party_extension.spades.lifecycle_revision' => '1',
+        'first_party_extension.spades.storage_schema' => '1',
+        'first_party_extension.spades.last_failure' => '',
+        'first_party_extension.blackjack.enabled' => '1',
+        'first_party_extension.blackjack.lifecycle_revision' => '1',
+        'first_party_extension.blackjack.storage_schema' => '1',
+        'first_party_extension.blackjack.last_failure' => '',
+        'first_party_extension.hearts.enabled' => '1',
+        'first_party_extension.hearts.lifecycle_revision' => '1',
+        'first_party_extension.hearts.storage_schema' => '1',
+        'first_party_extension.hearts.last_failure' => '',
+        'first_party_extension.uno.enabled' => '1',
+        'first_party_extension.uno.lifecycle_revision' => '1',
+        'first_party_extension.uno.storage_schema' => '1',
+        'first_party_extension.uno.last_failure' => '',
+        'first_party_extension.chinese-checkers.enabled' => '1',
+        'first_party_extension.chinese-checkers.lifecycle_revision' => '1',
+        'first_party_extension.chinese-checkers.storage_schema' => '1',
+        'first_party_extension.chinese-checkers.last_failure' => '',
+        'first_party_extension.nested-four.enabled' => '1',
+        'first_party_extension.nested-four.lifecycle_revision' => '1',
+        'first_party_extension.nested-four.storage_schema' => '1',
+        'first_party_extension.nested-four.last_failure' => '',
+        'first_party_extension.puppy-panic.enabled' => '1',
+        'first_party_extension.puppy-panic.lifecycle_revision' => '1',
+        'first_party_extension.puppy-panic.storage_schema' => '1',
+        'first_party_extension.puppy-panic.last_failure' => '',
+        'first_party_extension.backgammon-first-party.enabled' => '1',
+        'first_party_extension.backgammon-first-party.lifecycle_revision' => '1',
+        'first_party_extension.backgammon-first-party.storage_schema' => '1',
+        'first_party_extension.backgammon-first-party.last_failure' => '',
     ];
 }
 
@@ -86,6 +281,15 @@ function first_party_extension_service_catalog(): array {
         'gesture.package.export' => 'gesture.package.export',
         'gesture.preview.references' => 'gesture.preview',
         'gesture.protected-media.references' => 'gesture.protected-media.reference',
+        'canvas.document.projection' => 'canvas.document.read',
+        'canvas.document.commands' => 'canvas.document.write',
+        'canvas.comment.commands' => 'canvas.comment',
+        'canvas.permissions' => 'canvas.manage',
+        'canvas.publish' => 'canvas.publish',
+        'game.registry.projection' => 'game.registry.describe',
+        'game.framework.sessions' => 'game.session.use',
+        'game.rules.authoritative' => 'game.rules.authoritative',
+        'game.presentation.private-media' => 'game.presentation.private-media',
     ];
 }
 
@@ -147,6 +351,78 @@ function first_party_extension_validate_manifest(string $extensionId, array $dec
     if (($integrity['algorithm'] ?? '') !== 'sha256' || !$integrityFiles) {
         throw new RuntimeException('First-party extension integrity declaration is invalid.');
     }
+    if (array_key_exists('game', $decoded)) {
+        $game = $decoded['game'];
+        if (!is_array($game)
+            || !in_array('game.registry.describe', $capabilities, true)
+            || !in_array('game.session.use', $capabilities, true)
+            || !in_array('game.registry.projection', $services, true)
+            || !in_array('game.framework.sessions', $services, true)
+            || !in_array('presentation.games', $subscriptions, true)
+            || !preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', (string)($game['key'] ?? ''))
+            || trim((string)($game['name'] ?? '')) === ''
+            || !in_array((string)($game['profile'] ?? ''), ['one-player','versus'], true)
+            || (int)($game['minPlayers'] ?? 0) < 1
+            || (int)($game['maxPlayers'] ?? 0) < (int)($game['minPlayers'] ?? 0)
+            || (int)($game['maxPlayers'] ?? 0) > 10
+            || (int)($game['practiceMinPlayers'] ?? $game['minPlayers']) < 1
+            || (int)($game['practiceMinPlayers'] ?? $game['minPlayers']) > (int)$game['maxPlayers']
+            || (int)($game['recordedMinPlayers'] ?? $game['minPlayers']) < 1
+            || (int)($game['recordedMinPlayers'] ?? $game['minPlayers']) > (int)$game['maxPlayers']
+            || !preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', (string)($game['path'] ?? ''))
+            || !preg_match('/^[A-Za-z0-9._-]{1,96}$/', (string)($game['entry'] ?? ''))
+            || !preg_match('/^[A-Za-z0-9._-]{1,96}$/', (string)($game['icon'] ?? ''))
+            || !preg_match('/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i', (string)($game['adaptationVersion'] ?? ''))
+            || !is_array($game['seats'] ?? null)
+            || count($game['seats']) !== (int)$game['maxPlayers']
+            || !is_array($game['presentationPacks'] ?? null)
+            || ($game['presentationPacks'] ?? []) === []) {
+            throw new RuntimeException('First-party game extension descriptor is invalid.');
+        }
+        if (array_key_exists('displayNameSettingKey', $game)
+            && !preg_match('/^[a-z0-9][a-z0-9._-]{0,127}$/', (string)$game['displayNameSettingKey'])) {
+            throw new RuntimeException('First-party game display-name setting identity is invalid.');
+        }
+        $selectionOwner = (string)($game['presentationSelectionOwner'] ?? 'viewer');
+        if (!in_array($selectionOwner, ['viewer', 'installation-owner'], true)) {
+            throw new RuntimeException('First-party game presentation selection owner is invalid.');
+        }
+        if ($selectionOwner === 'installation-owner'
+            && !preg_match('/^[a-z0-9][a-z0-9._-]{0,127}$/', (string)($game['presentationPackSettingKey'] ?? ''))) {
+            throw new RuntimeException('First-party game presentation setting identity is invalid.');
+        }
+        $packIds = array_column((array)$game['presentationPacks'], 'id');
+        if (array_key_exists('defaultPresentationPack', $game)
+            && !in_array((string)$game['defaultPresentationPack'], $packIds, true)) {
+            throw new RuntimeException('First-party game default presentation pack is invalid.');
+        }
+        if (array_key_exists('scoreRecordsSurface', $game)) {
+            $surface = $game['scoreRecordsSurface'];
+            if (!is_array($surface)
+                || trim((string)($surface['label'] ?? '')) === ''
+                || empty($surface['separate'])
+                || empty($surface['presentationOnly'])) {
+                throw new RuntimeException('First-party game Score & Records descriptor is invalid.');
+            }
+        }
+        if (array_key_exists('soundDefaults', $game)) {
+            $sound = $game['soundDefaults'];
+            if (!is_array($sound)
+                || !is_int($sound['masterVolume'] ?? null)
+                || (int)$sound['masterVolume'] < 0
+                || (int)$sound['masterVolume'] > 100
+                || !is_bool($sound['musicEnabled'] ?? null)
+                || !is_bool($sound['voiceEnabled'] ?? null)
+                || !is_bool($sound['effectsEnabled'] ?? null)) {
+                throw new RuntimeException('First-party game sound defaults are invalid.');
+            }
+        }
+        foreach ($game['seats'] as $seat) {
+            if (trim((string)$seat) === '' || strlen((string)$seat) > 64) {
+                throw new RuntimeException('First-party game extension seat label is invalid.');
+            }
+        }
+    }
     $decoded['capabilities'] = $capabilities;
     $decoded['subscriptions'] = $subscriptions;
     $decoded['services'] = $services;
@@ -159,6 +435,7 @@ function first_party_extension_validate_manifest(string $extensionId, array $dec
 
 function first_party_extension_manifest(string $extensionId): array {
     static $cache = [];
+    static $integrityHashCache = [];
     if (isset($cache[$extensionId])) return $cache[$extensionId];
     $source = first_party_extension_sources()[$extensionId] ?? null;
     if (!$source) throw new RuntimeException('Unknown first-party extension.');
@@ -176,9 +453,15 @@ function first_party_extension_manifest(string $extensionId): array {
             throw new RuntimeException('First-party extension integrity path is invalid.');
         }
         $absolute = dirname(__DIR__) . '/' . $relative;
-        if (!is_file($absolute)
-            || !preg_match('/^[a-f0-9]{64}$/i', (string)$expectedHash)
-            || !hash_equals(strtolower((string)$expectedHash), hash_file('sha256', $absolute))) {
+        if (!is_file($absolute) || !preg_match('/^[a-f0-9]{64}$/i', (string)$expectedHash)) {
+            throw new RuntimeException('First-party extension integrity verification failed.');
+        }
+        if (!array_key_exists($absolute, $integrityHashCache)) {
+            $integrityHashCache[$absolute] = hash_file('sha256', $absolute);
+        }
+        $actualHash = $integrityHashCache[$absolute];
+        if (!is_string($actualHash)
+            || !hash_equals(strtolower((string)$expectedHash), $actualHash)) {
             throw new RuntimeException('First-party extension integrity verification failed.');
         }
     }
@@ -228,12 +511,23 @@ function first_party_extension_registry(): array {
 function first_party_extension_enabled(PDO $pdo, string $extensionId, bool $safeMode = false): bool {
     if ($safeMode) return false;
     if (!isset(first_party_extension_sources()[$extensionId])) return false;
-    return app_setting($pdo, "first_party_extension.{$extensionId}.enabled", '1') === '1';
+    $legacyKey = ['tetris-versus' => 'tetris', 'space-invasion' => 'spaceinvasion'][$extensionId] ?? null;
+    $default = $legacyKey === null ? '1' : app_setting($pdo, 'multiplayer_game_enabled_' . $legacyKey, '1');
+    return app_setting($pdo, "first_party_extension.{$extensionId}.enabled", $default) === '1';
 }
 
 function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeMode = false): array {
     try {
         $manifest = first_party_extension_manifest($extensionId);
+        $displayName = (string)$manifest['name'];
+        $displayNameSetting = trim((string)($manifest['game']['displayNameSettingKey'] ?? ''));
+        if ($displayNameSetting !== '' && preg_match('/^[a-z0-9][a-z0-9._-]{2,127}$/', $displayNameSetting)) {
+            $configuredName = trim((string)app_setting($pdo, $displayNameSetting, $displayName));
+            if ($configuredName !== '' && strlen($configuredName) <= 64
+                && !preg_match('/[\x00-\x1F\x7F]/', $configuredName)) {
+                $displayName = $configuredName;
+            }
+        }
         $enabled = first_party_extension_enabled($pdo, $extensionId, $safeMode);
         $expectedStorageSchema = (int)$manifest['storage']['schemaVersion'];
         $introducedStorageSchema = max(
@@ -251,7 +545,7 @@ function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeM
             : ($storageReady ? 'enabled' : 'update-required');
         return [
             'id' => $extensionId,
-            'name' => (string)$manifest['name'],
+            'name' => $displayName,
             'version' => (string)$manifest['version'],
             'enabled' => $enabled,
             'safeModeSuppressed' => $safeMode,
@@ -266,9 +560,10 @@ function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeM
             'failure' => '',
         ];
     } catch (Throwable $error) {
+        $fallbackName = trim((string)(first_party_extension_sources()[$extensionId]['publicFallbackName'] ?? 'Installed feature'));
         return [
             'id' => $extensionId,
-            'name' => $extensionId,
+            'name' => $fallbackName !== '' ? $fallbackName : 'Installed feature',
             'version' => '',
             'enabled' => false,
             'safeModeSuppressed' => $safeMode,
@@ -347,6 +642,36 @@ function first_party_extension_service_facade(
         throw new RuntimeException('First-party extension service denied.');
     }
     return match ($service) {
+        'canvas.document.projection' => [
+            'service' => $service,
+            'endpoint' => '/api/canvas.php',
+            'methods' => ['GET'],
+            'projection' => 'permission-filtered-canvas',
+        ],
+        'canvas.document.commands' => [
+            'service' => $service,
+            'endpoint' => '/api/canvas.php',
+            'methods' => ['POST'],
+            'commands' => ['save_draft'],
+        ],
+        'canvas.comment.commands' => [
+            'service' => $service,
+            'endpoint' => '/api/canvas.php',
+            'methods' => ['POST'],
+            'commands' => ['add_comment', 'remove_comment'],
+        ],
+        'canvas.permissions' => [
+            'service' => $service,
+            'endpoint' => '/api/canvas.php',
+            'methods' => ['POST'],
+            'commands' => ['set_permission'],
+        ],
+        'canvas.publish' => [
+            'service' => $service,
+            'endpoint' => '/api/canvas.php',
+            'methods' => ['POST'],
+            'commands' => ['publish'],
+        ],
         'gesture.catalog.projection' => [
             'service' => $service,
             'endpoint' => '/api/gestures.php',
@@ -381,6 +706,33 @@ function first_party_extension_service_facade(
             'endpoint' => '/api/gesture_media.php',
             'methods' => ['GET'],
             'referenceOnly' => true,
+        ],
+        'game.registry.projection' => [
+            'service' => $service,
+            'endpoint' => '/api/game_framework.php?action=catalog',
+            'methods' => ['GET'],
+            'projection' => 'registry-derived-installed-games',
+        ],
+        'game.framework.sessions' => [
+            'service' => $service,
+            'endpoint' => '/api/game_framework.php',
+            'methods' => ['GET', 'POST'],
+            'projection' => 'authenticated-authoritative-game-sessions',
+        ],
+        'game.rules.authoritative' => [
+            'service' => $service,
+            'endpoint' => '/api/game_framework.php',
+            'methods' => ['POST'],
+            'commands' => ['extension-action'],
+            'clientStateAcceptedAsTruth' => false,
+        ],
+        'game.presentation.private-media' => [
+            'service' => $service,
+            'endpoint' => $extensionId === 'five-dice'
+                ? '/api/five_dice_media.php'
+                : '/api/game_media.php?game=' . rawurlencode($extensionId),
+            'methods' => ['GET'],
+            'privateStorageOnly' => true,
         ],
     };
 }

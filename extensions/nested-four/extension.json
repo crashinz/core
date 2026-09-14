@@ -1,0 +1,96 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "nested-four",
+  "name": "Nested Four",
+  "version": "1.0.21",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_b63c0a05",
+    "name": "Nested Four",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_b63c0a05",
+    "gameId": 68,
+    "path": "nested-four-first-party",
+    "entry": "index.html",
+    "icon": "nested-four-first-party-icon.svg",
+    "profile": "versus",
+    "minPlayers": 2,
+    "practiceMinPlayers": 2,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 2,
+    "seats": [
+      "Coral",
+      "Blue"
+    ],
+    "adaptationVersion": "1.0.11",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_b63c0a05",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": false,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.45,
+      "minimumReadableWidth": 600,
+      "minimumReadableHeight": 500
+    },
+    "rulesHelp": {
+      "label": "Nested Four rules",
+      "description": "Cover, reveal, and connect four with committed pieces in four nested sizes."
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "assets/images/nested-four-first-party-icon.svg": "71bc36278c03d09be075b0784af0c7a113f57338aecbc5fc2c4b69988c82604f",
+      "games/nested-four-first-party/style.css": "4094cd7c340e5ec37e693f629d462c4bda2a4092cf4c47e9eae01fddcf218536",
+      "games/nested-four-first-party/app.js": "f3b910b2a946abfe3302b6a42f67d50b8c9c46bf7ba50d63c65b2c5e2d6582c8",
+      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/nested-four-first-party/index.html": "cdff8d04cc86a98e8b4879df78da3fc67a4075aab2440018a1e460dc6931da9b",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+    }
+  }
+}

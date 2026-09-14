@@ -39,7 +39,7 @@ if ($action === 'set_orientation') {
 
 if ($action === 'set_display_preferences') {
     $changes = [];
-    foreach (['avatar_display_size_px', 'webcam_display_width_px', 'webcam_display_height_px'] as $field) {
+    foreach (['avatar_display_size_px', 'avatar_display_width_px', 'avatar_display_height_px', 'webcam_display_width_px', 'webcam_display_height_px'] as $field) {
         if (array_key_exists($field, $_POST)) $changes[$field] = $_POST[$field];
     }
     $result = avatar_size_preferences_update(
@@ -73,47 +73,69 @@ if ($action === 'set_display_preferences') {
     ]);
 }
 
-if (empty($_FILES['avatar']['tmp_name'])
+$selectedAsset = null;
+if ($action === 'select') {
+    csrf_protect_post();
+    security_authorize_outside_content_or_json($pdo, ['id' => (int)$p['user_id']], 'avatar_upload', ['session_id' => $sessionId]);
+    try {
+        $selectedAsset = server_media_select_library_asset($pdo, (int)$p['user_id'], 'avatar', (string)($_POST['library_id'] ?? ''));
+    } catch (ServerMediaException $error) {
+        json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
+    }
+    $public = (string)$selectedAsset['source_key'];
+    $dest = (string)$selectedAsset['storage_path'];
+    $dims = $selectedAsset['selection_dimensions'];
+    $mime = $selectedAsset['selection_mime'];
+} else {
+    if (empty($_FILES['avatar']['tmp_name'])
     || (int)($_FILES['avatar']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
     || !is_uploaded_file($_FILES['avatar']['tmp_name'])) {
     json_out(['error' => 'Avatar image required'], 400);
-}
-security_authorize_outside_content_or_json($pdo, ['id' => (int)$p['user_id']], 'avatar_upload', ['session_id' => $sessionId]);
+    }
+    security_authorize_outside_content_or_json($pdo, ['id' => (int)$p['user_id']], 'avatar_upload', ['session_id' => $sessionId]);
 
-$finfo = new finfo(FILEINFO_MIME_TYPE);
-$mime = $finfo->file($_FILES['avatar']['tmp_name']) ?: '';
-$allowed = ['image/gif' => 'gif', 'image/webp' => 'webp'];
-$allowedImageTypes = ['image/gif' => IMAGETYPE_GIF, 'image/webp' => IMAGETYPE_WEBP];
-$maxBytes = app_setting_bytes($pdo, 'avatar_max_size_mb', 5);
-$sizePolicy = avatar_size_policy($pdo);
-$dims = @getimagesize($_FILES['avatar']['tmp_name']);
-$validDecodedType = $dims
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime = $finfo->file($_FILES['avatar']['tmp_name']) ?: '';
+    $allowed = ['image/gif' => 'gif', 'image/webp' => 'webp'];
+    $allowedImageTypes = ['image/gif' => IMAGETYPE_GIF, 'image/webp' => IMAGETYPE_WEBP];
+    $sizePolicy = avatar_size_policy($pdo);
+    $maxBytes = $sizePolicy['avatarMaxBytes'];
+    $dims = @getimagesize($_FILES['avatar']['tmp_name']);
+    $validDecodedType = $dims
     && isset($allowedImageTypes[$mime])
     && (int)($dims[2] ?? 0) === $allowedImageTypes[$mime];
-if (!isset($allowed[$mime]) || !$validDecodedType) {
+    if (!isset($allowed[$mime]) || !$validDecodedType) {
     json_out(['error' => 'Use a valid GIF or WebP avatar image.'], 400);
-}
-if ((int)$_FILES['avatar']['size'] > $maxBytes) {
+    }
+    if ($maxBytes !== null && (int)$_FILES['avatar']['size'] > $maxBytes) {
+    limit_event_record_reached($pdo, 'avatar_max_size_mb', 'member', 'user:' . (int)$p['user_id'], 'rejected', ['submittedBytes' => (int)$_FILES['avatar']['size']]);
     json_out(['error' => 'Avatar images must be under ' . app_setting($pdo, 'avatar_max_size_mb', '5') . ' MB.'], 400);
-}
-if ((int)$dims[0] < AVATAR_UPLOAD_MIN_DIMENSION_PX || (int)$dims[1] < AVATAR_UPLOAD_MIN_DIMENSION_PX
+    }
+    if ((int)$dims[0] < AVATAR_UPLOAD_MIN_DIMENSION_PX || (int)$dims[1] < AVATAR_UPLOAD_MIN_DIMENSION_PX
     || (int)$dims[0] > (int)$sizePolicy['avatarUploadMaxWidthPx']
     || (int)$dims[1] > (int)$sizePolicy['avatarUploadMaxHeightPx']) {
+    if ((int)$dims[0] > (int)$sizePolicy['avatarUploadMaxWidthPx']) {
+        limit_event_record_reached($pdo, 'avatar_upload_max_width_px', 'member', 'user:' . (int)$p['user_id'], 'rejected', ['submittedWidthPx' => (int)$dims[0]]);
+    }
+    if ((int)$dims[1] > (int)$sizePolicy['avatarUploadMaxHeightPx']) {
+        limit_event_record_reached($pdo, 'avatar_upload_max_height_px', 'member', 'user:' . (int)$p['user_id'], 'rejected', ['submittedHeightPx' => (int)$dims[1]]);
+    }
     json_out([
         'error' => 'Avatar images must be at least ' . AVATAR_UPLOAD_MIN_DIMENSION_PX . 'x'
             . AVATAR_UPLOAD_MIN_DIMENSION_PX . ' and no larger than '
             . (int)$sizePolicy['avatarUploadMaxWidthPx'] . 'x'
             . (int)$sizePolicy['avatarUploadMaxHeightPx'] . ' pixels.',
     ], 400);
-}
+    }
 
-$file = bin2hex(random_bytes(12)) . '.' . $allowed[$mime];
-$dest = __DIR__ . '/../assets/uploads/avatars/' . $file;
-if (!move_uploaded_file($_FILES['avatar']['tmp_name'], $dest)) {
+    $file = bin2hex(random_bytes(12)) . '.' . $allowed[$mime];
+    $dest = __DIR__ . '/../assets/uploads/avatars/' . $file;
+    if (!move_uploaded_file($_FILES['avatar']['tmp_name'], $dest)) {
     json_out(['error' => 'Avatar image could not be stored. Try again.'], 500);
+    }
+    $public = '/assets/uploads/avatars/' . $file;
+    security_assert_storage_destination('avatar_upload', $public);
 }
-$public = '/assets/uploads/avatars/' . $file;
-security_assert_storage_destination('avatar_upload', $public);
 $avatarIdentity = avatar_identity_for_source($public, $dest);
 $avatarWidth = max(1, (int)$dims[0]);
 $avatarHeight = max(1, (int)$dims[1]);
@@ -133,11 +155,15 @@ try {
         (int)$p['user_id'],
         'participant-avatar-source-change'
     );
-    server_media_register_avatar($pdo, (int)$p['user_id'], $public, $dest, $mime, false);
+    $avatarLibraryId = $selectedAsset['public_id'] ?? null;
+    if ($selectedAsset === null) {
+        $avatarLibraryId = server_media_register_avatar($pdo, (int)$p['user_id'], $public, $dest, $mime, false);
+        set_app_setting($pdo, 'avatar_library.name.' . $avatarLibraryId, mb_substr(basename(str_replace('\\', '/', (string)($_FILES['avatar']['name'] ?? 'Avatar'))), 0, 180));
+    }
     $pdo->commit();
 } catch (Throwable $error) {
     if ($pdo->inTransaction()) $pdo->rollBack();
-    @unlink($dest);
+    if ($selectedAsset === null) @unlink($dest);
     throw $error;
 }
 
@@ -155,6 +181,8 @@ emit_event($pdo, $sessionId, 'avatar', array_merge([
     'participant_id' => (int)$p['id'],
     'avatar_path' => $public,
     'avatar_url' => $public,
+    'avatar_identity' => $avatarIdentity,
+    'library_id' => $avatarLibraryId,
     'avatar_source_width_px' => $avatarWidth,
     'avatar_source_height_px' => $avatarHeight,
     'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),
@@ -167,6 +195,8 @@ json_out([
     'ok' => true,
     'avatar_path' => $public,
     'avatar_url' => $public,
+    'avatar_identity' => $avatarIdentity,
+    'library_id' => $avatarLibraryId,
     'avatar_source_width_px' => $avatarWidth,
     'avatar_source_height_px' => $avatarHeight,
     'avatar_orientation' => avatar_orientation_normalize($p['avatar_orientation'] ?? null),

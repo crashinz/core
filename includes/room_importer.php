@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/base.php';
+require_once __DIR__ . '/room_import_presentation.php';
 
 function room_import_safe_url(string $url): string {
     if (trim($url) === '') throw new RuntimeException('URL required.');
@@ -83,10 +84,15 @@ function room_import_css_size(string $value): string {
     return preg_match('~^[0-9.]+(?:px|pt|em|rem|%)$~i', $value) ? $value : '';
 }
 
-function room_import_style_from_node(DOMNode $node, array $parent = []): array {
+function room_import_css_image_size(string $value): string {
+    return strtolower(trim($value)) === 'auto' ? 'auto' : room_import_css_size($value);
+}
+
+function room_import_style_from_node(DOMNode $node, array $parent = [], array $sourceStyles = [], array $variables = []): array {
     $style = $parent;
     if (!$node instanceof DOMElement) return $style;
-    $inline = (string)$node->getAttribute('style');
+    $inline = room_import_resolve_css_variables((string)$node->getAttribute('style'), $variables)
+        . ';' . ($sourceStyles[$node->getNodePath()] ?? '');
     $color = room_import_css_color(room_import_style_value($inline, 'color') ?: (string)$node->getAttribute('color') ?: (string)$node->getAttribute('text'));
     if ($color !== '') $style['color'] = $color;
     $fontSize = room_import_style_value($inline, 'font-size');
@@ -117,6 +123,18 @@ function room_import_candidate_media_url(string $value, string $baseUrl): string
     if (!$parts || $assetHost === '') return '';
     if ($assetHost !== $baseHost && !room_import_allowed_external_link_host($assetHost) && !preview_host_is_safe($assetHost)) return '';
     return $absolute;
+}
+
+// Links navigate only after a viewer clicks; never fetch or execute their targets.
+function room_import_clickable_url(string $value, string $baseUrl): string {
+    $value = trim(html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    if ($value === '' || preg_match('~[\x00-\x20\x7f]~', $value)) return '';
+    if (preg_match('~^[a-z][a-z0-9+.-]*:~i', $value) && !preg_match('~^https?://~i', $value)) return '';
+    $url = absolutize_preview_url($value, $baseUrl);
+    $parts = parse_url($url);
+    if (!$parts || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http', 'https'], true)
+        || empty($parts['host']) || isset($parts['user']) || isset($parts['pass'])) return '';
+    return $url;
 }
 
 function room_import_allowed_external_link_host(string $host): bool {
@@ -189,6 +207,9 @@ function room_import_css_asset_manifest(string $html, string $sourceUrl): array 
     'desktop_image_max_width' => '',
     'main_image_width' => '',
     'mobile_image_width' => '',
+    'poem_image_width' => '',
+    'poem_image_max_width' => '',
+    'mobile_poem_image_width' => '',
     'audio_player_bg' => '',
     'audio_player_text_buttons' => '',
     'music' => []
@@ -199,7 +220,7 @@ function room_import_css_asset_manifest(string $html, string $sourceUrl): array 
     foreach ($matches as $match) {
         $key = strtolower((string)$match[1]);
         $rawValue = (string)($match[2] !== '' ? $match[2] : ($match[3] !== '' ? $match[3] : $match[4]));
-        $value = room_import_clean_manifest_value($rawValue);
+        $value = room_import_clean_manifest_value(room_import_resolve_css_variables($rawValue, room_import_css_variables($html)));
         if ($value === '') continue;
     if ($key === 'main-image') {
     $url = room_import_candidate_media_url($value, $sourceUrl);
@@ -267,7 +288,7 @@ elseif ($key === 'text-size') {
     if ($size !== '') $manifest['text_size'] = $size;
 }
 elseif ($key === 'desktop-image-width') {
-    $size = room_import_css_size($value);
+    $size = room_import_css_image_size($value);
     if ($size !== '') $manifest['desktop_image_width'] = $size;
 }
 elseif ($key === 'desktop-image-max-width') {
@@ -275,12 +296,16 @@ elseif ($key === 'desktop-image-max-width') {
     if ($size !== '') $manifest['desktop_image_max_width'] = $size;
 }
 elseif ($key === 'main-image-width') {
-    $size = room_import_css_size($value);
+    $size = room_import_css_image_size($value);
     if ($size !== '') $manifest['main_image_width'] = $size;
 }
 elseif ($key === 'mobile-image-width') {
-    $size = room_import_css_size($value);
+    $size = room_import_css_image_size($value);
     if ($size !== '') $manifest['mobile_image_width'] = $size;
+}
+elseif (in_array($key, ['poem-image-width', 'poem-image-max-width', 'mobile-poem-image-width'], true)) {
+    $size = $key === 'poem-image-max-width' ? room_import_css_size($value) : room_import_css_image_size($value);
+    if ($size !== '') $manifest[str_replace('-', '_', $key)] = $size;
 }
 elseif ($key === 'audio-player-bg') {
     $color = room_import_css_color($value);
@@ -310,6 +335,7 @@ function room_import_parse(string $html, string $sourceUrl): array {
     libxml_use_internal_errors($previous);
 
     $xpath = new DOMXPath($dom);
+    $presentation = room_import_source_presentation($dom);
     $title = trim((string)($xpath->evaluate('string(//title)') ?: ''));
     $body = $dom->getElementsByTagName('body')->item(0);
     $bodyStyle = $body instanceof DOMElement ? (string)$body->getAttribute('style') : '';
@@ -328,12 +354,12 @@ function room_import_parse(string $html, string $sourceUrl): array {
 	$textSize = room_import_css_size((string)($cssManifest['text_size'] ?? ''));
     $mainImageWidthSource = (string)($cssManifest['desktop_image_width'] ?? '');
     if ($mainImageWidthSource === '') $mainImageWidthSource = (string)($cssManifest['main_image_width'] ?? '');
-    if ($mainImageWidthSource === '') $mainImageWidthSource = '45%';
-	$mainImageWidth = room_import_css_size($mainImageWidthSource);
+    if ($mainImageWidthSource === '') $mainImageWidthSource = 'auto';
+	$mainImageWidth = room_import_css_image_size($mainImageWidthSource);
     $mainImageMaxWidthSource = (string)($cssManifest['desktop_image_max_width'] ?? '');
     if ($mainImageMaxWidthSource === '') $mainImageMaxWidthSource = '1200px';
 	$mainImageMaxWidth = room_import_css_size($mainImageMaxWidthSource);
-	$mobileImageWidth = room_import_css_size((string)(
+	$mobileImageWidth = room_import_css_image_size((string)(
         $cssManifest['mobile_image_width']
         ?? ''
     ));
@@ -349,16 +375,42 @@ function room_import_parse(string $html, string $sourceUrl): array {
     $seenImages = [];
     $textBuffer = '';
     $textStyle = [];
+    $textGroup = 0;
     $textBudget = 1800;
+    $hiddenText = [];
+    $accessibleText = [];
 
-    $flushText = function () use (&$sections, &$textBuffer, &$textStyle, &$textBudget): void {
-        $text = trim(preg_replace('~[ \t\r\n]+~u', ' ', $textBuffer) ?? '');
+    $flushText = function (bool $boundary = true, bool $lineBreak = false) use (&$sections, &$textBuffer, &$textStyle, &$textGroup, &$textBudget, &$hiddenText, &$accessibleText): void {
+        $group = $textGroup;
+        if ($boundary) $textGroup++;
+        $text = preg_replace('~[ \t\r\n]+~u', ' ', $textBuffer) ?? '';
+        if ($lineBreak) $text .= "\n";
         $textBuffer = '';
-        if ($text === '' || $textBudget <= 0) return;
+        if (trim($text) !== '' && !empty($textStyle['_import_visibility'])) {
+            if (count($hiddenText) < 80) {
+                $text = trim($text);
+                $text = function_exists('mb_substr') ? mb_substr($text, 0, 4096, 'UTF-8') : substr($text, 0, 4096);
+                $hiddenText[] = $text;
+                if ($textStyle['_import_visibility'] === 'screen-reader') $accessibleText[] = $text;
+            }
+            return;
+        }
+        if (!empty($textStyle['_import_visibility']) || $text === '' || $textBudget <= 0) return;
+        $last = count($sections) - 1;
+        $sameParagraph = $last >= 0 && ($sections[$last]['type'] ?? '') === 'text'
+            && ($sections[$last]['text_group'] ?? null) === $group;
+        if (trim($text) === '' && !$sameParagraph && !$lineBreak) return;
         if (function_exists('mb_substr')) $text = mb_substr($text, 0, $textBudget, 'UTF-8');
         else $text = substr($text, 0, $textBudget);
         $textBudget -= strlen($text);
-        $sections[] = ['type' => 'text', 'text' => $text, 'style' => $textStyle];
+        $run = ['text' => $text, 'style' => $textStyle];
+        if ($sameParagraph) {
+            $sections[$last]['runs'][] = $run;
+            $sections[$last]['text'] = trim(implode('', array_column($sections[$last]['runs'], 'text')));
+        } else {
+            $sections[] = ['type' => 'text', 'text' => trim($text), 'style' => $textStyle,
+                'text_group' => $group, 'runs' => [$run]];
+        }
     };
 
     $rememberAudio = function (string $url, bool $force = false) use (&$audio, &$seenAudio): void {
@@ -394,13 +446,14 @@ function room_import_parse(string $html, string $sourceUrl): array {
     }
 
 
-    $walk = function (DOMNode $node, array $style = []) use (&$walk, &$sections, &$textBuffer, &$textStyle, $sourceUrl, $flushText, $rememberAudio, $rememberImage): void {
+    $walk = function (DOMNode $node, array $style = []) use (&$walk, &$sections, &$textBuffer, &$textStyle, $sourceUrl, $flushText, $rememberAudio, $rememberImage, $presentation): void {
         if (count($sections) >= 24) return;
         if ($node instanceof DOMText) {
-            $text = trim($node->wholeText);
+            $text = preg_replace('~[ \t\r\n]+~u', ' ', (string)$node->nodeValue) ?? '';
             if ($text !== '') {
+                if ($textBuffer !== '' && $textStyle !== $style) $flushText(false);
                 if ($textBuffer === '') $textStyle = $style;
-                $textBuffer .= ' ' . $text;
+                $textBuffer .= $text;
             }
             return;
         }
@@ -410,6 +463,17 @@ function room_import_parse(string $html, string $sourceUrl): array {
         }
         $tag = strtolower($node->tagName);
         if (in_array($tag, ['script', 'style', 'noscript', 'iframe'], true)) return;
+        $inlineStyle = (string)$node->getAttribute('style');
+        $display = strtolower(preg_replace('/\s*!important\s*$/i', '', room_import_style_value($inlineStyle, 'display')) ?? '');
+        $visibility = strtolower(preg_replace('/\s*!important\s*$/i', '', room_import_style_value($inlineStyle, 'visibility')) ?? '');
+        $classes = preg_split('/\s+/', strtolower(trim((string)$node->getAttribute('class')))) ?: [];
+        $screenReaderOnly = array_intersect($classes, ['visually-hidden', 'sr-only', 'screen-reader-only', 'screen-reader-text']) !== [];
+        $ownVisibility = $screenReaderOnly ? 'screen-reader' : ($node->hasAttribute('hidden') || $display === 'none' || in_array($visibility, ['hidden', 'collapse'], true) ? 'hidden' : '');
+        $visibilityBoundary = $ownVisibility !== '' && $ownVisibility !== ($style['_import_visibility'] ?? '');
+        if ($visibilityBoundary) {
+            $flushText();
+            $style['_import_visibility'] = $ownVisibility;
+        }
 
         foreach (['src', 'href', 'data', 'url', 'filename', 'FileName', 'dynsrc', 'lowsrc'] as $attr) {
             if ($node->hasAttribute($attr)) {
@@ -448,11 +512,17 @@ function room_import_parse(string $html, string $sourceUrl): array {
             }
             return;
         }
-        $childStyle = room_import_style_from_node($node, $style);
+        $childStyle = room_import_style_from_node($node, $style, $presentation['styles'], $presentation['variables']);
+        if ($tag === 'a') {
+            $href = room_import_clickable_url((string)$node->getAttribute('href'), $sourceUrl);
+            if ($href !== '') $childStyle['link_href'] = $href;
+            else unset($childStyle['link_href']);
+        }
+        if ($tag === 'br') { $flushText(false, true); return; }
         $isBlock = in_array($tag, ['address', 'article', 'aside', 'blockquote', 'center', 'div', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p', 'pre', 'section', 'table', 'tbody', 'td', 'th', 'tr', 'ul', 'ol', 'br'], true);
         if ($isBlock) $flushText();
         foreach ($node->childNodes as $child) $walk($child, $childStyle);
-        if ($isBlock) $flushText();
+        if ($isBlock || $visibilityBoundary) $flushText();
     };
 
     if ($body) {
@@ -461,6 +531,29 @@ function room_import_parse(string $html, string $sourceUrl): array {
         $walk($body, $rootStyle);
     }
     $flushText();
+
+// CSS-manifest images may be deduplicated before the DOM walk reaches them.
+// Attach the actual source image's compositing to that retained section.
+foreach ($dom->getElementsByTagName('img') as $imageNode) {
+    $imageStyle = array_replace(
+        $presentation['image_styles'][$imageNode->getNodePath()] ?? [],
+        room_import_image_presentation((string)$imageNode->getAttribute('style'), $presentation['variables'])
+    );
+    $imageSource = '';
+    foreach (['src', 'data-src', 'data-original', 'lowsrc', 'dynsrc'] as $attribute) {
+        $imageSource = room_import_candidate_media_url((string)$imageNode->getAttribute($attribute), $sourceUrl);
+        if ($imageSource !== '') break;
+    }
+    foreach ($sections as &$imageSection) {
+        if (($imageSection['type'] ?? '') !== 'image') continue;
+        $matchesSource = $imageSource !== '' && ($imageSection['src'] ?? '') === $imageSource;
+        // The supported source manifest supplies poemImage.src at runtime.
+        $matchesPoem = $imageSource === '' && strtolower((string)$imageNode->getAttribute('id')) === 'poemimage'
+            && ($imageSection['role'] ?? '') === 'poem';
+        if ($matchesSource || $matchesPoem) $imageSection['image_style'] = $imageStyle;
+    }
+    unset($imageSection);
+}
 
 $roleSet = false;
 
@@ -541,10 +634,17 @@ if ($header && $avatars && count($other) >= 2) {
 		'main_image_width' => $mainImageWidth,
 		'main_image_max_width' => $mainImageMaxWidth,
 		'mobile_image_width' => $mobileImageWidth,
+        'poem_image_width' => $cssManifest['poem_image_width'] ?? '',
+        'poem_image_max_width' => $cssManifest['poem_image_max_width'] ?? '',
+        'mobile_poem_image_width' => $cssManifest['mobile_poem_image_width'] ?? '',
 		'audio_player_bg' => $audioPlayerBg,
 		'audio_player_text_buttons' => $audioPlayerTextButtons,
         'background_image' => $backgroundImage,
         'sections' => array_slice($sections, 0, 24),
+        'hidden_text' => $hiddenText,
+        'accessible_text' => $accessibleText,
+        'player_style' => $presentation['player_style'],
+        'hide_audio_iframe' => $presentation['hide_audio_iframe'],
         'music' => $audio,
     ];
 }
@@ -593,6 +693,10 @@ return $baseUrl . $publicPath;
 
 function room_import_localize(array $preview): array {
     $layout = [
+    'text_visibility_version' => 1,
+    'player_style' => (array)($preview['player_style'] ?? []),
+    'hide_audio_iframe' => !empty($preview['hide_audio_iframe']),
+    'accessible_text' => (array)($preview['accessible_text'] ?? []),
     'source_url' => $preview['source_url'] ?? '',
     'background_color' => $preview['background_color'] ?? '#000000',
     'text_color' => $preview['text_color'] ?? '',
@@ -600,6 +704,9 @@ function room_import_localize(array $preview): array {
     'main_image_width' => $preview['main_image_width'] ?? '',
     'main_image_max_width' => $preview['main_image_max_width'] ?? '',
     'mobile_image_width' => $preview['mobile_image_width'] ?? '',
+    'poem_image_width' => $preview['poem_image_width'] ?? '',
+    'poem_image_max_width' => $preview['poem_image_max_width'] ?? '',
+    'mobile_poem_image_width' => $preview['mobile_poem_image_width'] ?? '',
     'audio_player_bg' => $preview['audio_player_bg'] ?? '',
     'audio_player_text_buttons' => $preview['audio_player_text_buttons'] ?? '',
     'sections' => [],
@@ -617,6 +724,8 @@ function room_import_localize(array $preview): array {
             $layout['sections'][] = [
                 'type' => 'image',
                 'path' => $path,
+                'source_src' => (string)($section['src'] ?? ''),
+                'image_style' => is_array($section['image_style'] ?? null) ? $section['image_style'] : [],
                 'alt' => (string)($section['alt'] ?? ''),
                 'role' => (string)($section['role'] ?? ''),
             ];
@@ -627,6 +736,7 @@ function room_import_localize(array $preview): array {
                 'type' => 'text',
                 'text' => $text,
                 'style' => is_array($section['style'] ?? null) ? $section['style'] : [],
+                'runs' => is_array($section['runs'] ?? null) ? $section['runs'] : [],
             ];
         }
     }
@@ -664,12 +774,44 @@ function room_import_tile_image_from_layout(?string $layoutJson): string {
     if (!$layoutJson) return '';
     $layout = json_decode($layoutJson, true);
     if (!is_array($layout)) return '';
-    foreach (($layout['sections'] ?? []) as $section) {
-        if (is_array($section) && ($section['type'] ?? '') === 'image' && !empty($section['path'])) {
-            return (string)$section['path'];
+    $sections = is_array($layout['sections'] ?? null) ? $layout['sections'] : [];
+    $candidates = [];
+    foreach (array_slice($sections, 0, 24) as $section) {
+        if (!is_array($section) || ($section['type'] ?? '') !== 'image' || empty($section['path'])) continue;
+        $role = (string)($section['role'] ?? '');
+        if (in_array($role, ['main', 'header'], true)) return (string)$section['path'];
+        if (str_starts_with($role, 'avatar') || $role === 'background-piece') continue;
+        $candidates[] = (string)$section['path'];
+    }
+    $best = '';
+    $largest = -1;
+    foreach ($candidates as $path) {
+        $area = room_import_tile_image_area($path);
+        if ($area > $largest) {
+            $best = $path;
+            $largest = $area;
         }
     }
-    return '';
+    return $best;
+}
+
+function room_import_tile_image_area(string $path): int {
+    static $areas = [];
+    if (isset($areas[$path])) return $areas[$path];
+    $areas[$path] = 0;
+    // Inspect only already-downloaded import images, never remote URLs or
+    // arbitrary filesystem paths while serving a lobby refresh.
+    if (parse_url($path, PHP_URL_SCHEME) || parse_url($path, PHP_URL_HOST)) return 0;
+    $prefix = '/assets/uploads/imported-rooms/';
+    $offset = strpos($path, $prefix);
+    if ($offset === false) return 0;
+    $root = realpath(__DIR__ . '/../assets/uploads/imported-rooms');
+    if ($root === false) return 0;
+    $file = realpath($root . DIRECTORY_SEPARATOR . substr($path, $offset + strlen($prefix)));
+    if ($file === false || !str_starts_with($file, $root . DIRECTORY_SEPARATOR) || !is_file($file)) return 0;
+    $size = @getimagesize($file);
+    if (is_array($size)) $areas[$path] = (int)$size[0] * (int)$size[1];
+    return $areas[$path];
 }
 
 function room_import_file_paths(?string $layoutJson, ?string $musicJson): array {

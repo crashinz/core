@@ -184,6 +184,9 @@ function selectAccountTab(tabId, pushHistory = true) {
   document.querySelectorAll('[data-account-panel]').forEach(panel => {
     panel.classList.toggle('active', panel.dataset.accountPanel === button.dataset.accountTab);
   });
+  globalThis.requestAnimationFrame(() => {
+    button.scrollIntoView({ block: 'nearest', inline: 'center' });
+  });
   if (pushHistory || button.dataset.accountTab !== requested) {
     const url = new URL(globalThis.location.href);
     url.searchParams.set('tab', button.dataset.accountTab);

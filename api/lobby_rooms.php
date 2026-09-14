@@ -15,7 +15,7 @@ if ($communityEjection) {
 function lobby_room_rows(PDO $pdo, array $user): array {
     $onlineCutoff = stale_cutoff($pdo);
     $stmt = $pdo->prepare(
-        'SELECT r.*, u.display_name AS owner_name,
+        'SELECT r.*, u.display_name AS owner_name, l.target_host AS live_website_target_host,
             (
               SELECT COUNT(DISTINCT p.user_id)
                 FROM participants p
@@ -24,6 +24,7 @@ function lobby_room_rows(PDO $pdo, array $user): array {
                  AND p.last_seen_at >= ?
             ) AS online_count
          FROM rooms r JOIN users u ON u.id = r.owner_id
+         LEFT JOIN live_website_rooms l ON l.room_id = r.id
          WHERE NOT EXISTS (
             SELECT 1 FROM room_ejections re
              WHERE re.room_id = r.id
@@ -40,12 +41,10 @@ function lobby_room_payload(array $room, array $user): array {
     $backgroundPath = (string)($room['background_path'] ?? '');
     $backgroundMime = (string)($room['background_mime'] ?? '');
     $thumbPath = (string)($room['background_thumb_path'] ?? '');
-    $tileBg = $backgroundPath;
-    if ($backgroundPath !== '' && str_starts_with($backgroundMime, 'video/')) {
-        $tileBg = $thumbPath;
-    }
+    $tileBg = room_import_tile_image_from_layout($room['import_layout_json'] ?? null);
+    if ($tileBg === '' && !empty($room['live_website_target_host'])) $tileBg = $thumbPath;
     if ($tileBg === '') {
-        $tileBg = room_import_tile_image_from_layout($room['import_layout_json'] ?? null);
+        $tileBg = str_starts_with($backgroundMime, 'video/') ? $thumbPath : $backgroundPath;
     }
     return [
         'id' => (int)$room['id'],
@@ -61,8 +60,10 @@ function lobby_room_payload(array $room, array $user): array {
         'tile_background_url' => $tileBg !== '' ? media_url($tileBg) : '',
         'background_url' => $backgroundPath !== '' ? media_url($backgroundPath) : '',
         'thumb_url' => $thumbPath !== '' ? media_url($thumbPath) : '',
-        'video_without_thumb' => $backgroundPath !== '' && str_starts_with($backgroundMime, 'video/') && $thumbPath === '',
-        'can_edit' => (int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true),
+        'video_without_thumb' => $tileBg === '' && $backgroundPath !== '' && str_starts_with($backgroundMime, 'video/'),
+        'live_website_target_host' => (string)($room['live_website_target_host'] ?? ''),
+        'can_refresh_preview' => !empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || live_website_rooms_is_admin($user)),
+        'can_edit' => empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true)),
         'enter_url' => app_url('/chatroom.php?id=' . rawurlencode((string)$room['public_id'])),
     ];
 }

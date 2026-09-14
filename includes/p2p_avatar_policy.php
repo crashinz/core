@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/nameplate_policy.php';
+
 /**
  * Build 000054 server-authoritative P2P Avatar policy and pair authorization.
  *
@@ -72,9 +74,12 @@ function p2p_avatar_policy(PDO $pdo, bool $includeCredential = false): array
         'fallback' => 'built-in-generated',
         'serverPayloadStorage' => false,
         'tokenLifetimeSeconds' => P2P_AVATAR_TOKEN_SECONDS,
-        'maxBytes' => app_setting_bytes($pdo, 'avatar_max_size_mb', 5),
+        'maxBytes' => $sizePolicy['avatarMaxBytes'],
+        'maxBytesEnforced' => $sizePolicy['avatarMaxBytes'] !== null,
         'maxWidth' => (int)$sizePolicy['avatarUploadMaxWidthPx'],
         'maxHeight' => (int)$sizePolicy['avatarUploadMaxHeightPx'],
+        'nameplateMaxWidth' => NAMEPLATE_UPLOAD_MAX_WIDTH_PX,
+        'nameplateMaxHeight' => NAMEPLATE_UPLOAD_MAX_HEIGHT_PX,
     ];
 }
 
@@ -126,10 +131,38 @@ function p2p_avatar_pair_blocked(PDO $pdo, int $leftUserId, int $rightUserId): b
     return (bool)$stmt->fetchColumn();
 }
 
+function p2p_avatar_source_asset(string $path, string $kind = 'avatar'): ?array
+{
+    if ($path === '' || str_starts_with($path, 'preset:')) return null;
+    $file = avatar_source_file($path);
+    if (!$file || !is_file($file)) return null;
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file) ?: '';
+    $allowed = ['image/gif' => IMAGETYPE_GIF, 'image/webp' => IMAGETYPE_WEBP];
+    $dimensions = @getimagesize($file);
+    $size = filesize($file);
+    $identity = hash_file('sha256', $file);
+    if (!isset($allowed[$mime]) || !$dimensions || (int)$dimensions[2] !== $allowed[$mime]
+        || !is_int($size) || $size < 1 || !is_string($identity)
+        || !avatar_identity_is_valid($identity)) return null;
+    if ($kind === 'nameplate'
+        && ((int)$dimensions[0] > NAMEPLATE_UPLOAD_MAX_WIDTH_PX
+            || (int)$dimensions[1] > NAMEPLATE_UPLOAD_MAX_HEIGHT_PX)) return null;
+    return [
+        'kind' => $kind,
+        'path' => $path,
+        'file' => $file,
+        'identity' => $identity,
+        'mime' => $mime,
+        'size' => $size,
+        'width' => max(1, (int)$dimensions[0]),
+        'height' => max(1, (int)$dimensions[1]),
+    ];
+}
+
 function p2p_avatar_pair_claims(PDO $pdo, int $sessionId, int $viewerParticipantId, int $sourceParticipantId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT id,user_id,avatar_path,avatar_identity,avatar_source_width_px,avatar_source_height_px
+        'SELECT id,user_id,avatar_path,avatar_identity,avatar_source_width_px,avatar_source_height_px,nameplate_path
            FROM participants WHERE session_id=? AND id IN (?,?) ORDER BY id'
     );
     $stmt->execute([$sessionId, $viewerParticipantId, $sourceParticipantId]);
@@ -143,6 +176,8 @@ function p2p_avatar_pair_claims(PDO $pdo, int $sessionId, int $viewerParticipant
     $identity = avatar_identity_is_valid($source['avatar_identity'] ?? null)
         ? (string)$source['avatar_identity']
         : avatar_identity_ensure_user($pdo, (int)$source['user_id'])['identity'];
+    $avatarAsset = p2p_avatar_source_asset((string)($source['avatar_path'] ?? ''), 'avatar');
+    $nameplateAsset = p2p_avatar_source_asset((string)($source['nameplate_path'] ?? ''), 'nameplate');
     return [
         'session_id' => $sessionId,
         'viewer_participant_id' => $viewerParticipantId,
@@ -153,16 +188,28 @@ function p2p_avatar_pair_claims(PDO $pdo, int $sessionId, int $viewerParticipant
         'avatar_path' => (string)($source['avatar_path'] ?? 'preset:Default'),
         'width' => max(1, (int)($source['avatar_source_width_px'] ?? 150)),
         'height' => max(1, (int)($source['avatar_source_height_px'] ?? 150)),
+        'avatar_asset' => $avatarAsset,
+        'nameplate_asset' => $nameplateAsset,
+        'nameplate_identity' => (string)($nameplateAsset['identity'] ?? ''),
+        'nameplate_path' => (string)($nameplateAsset['path'] ?? ''),
     ];
+}
+
+function p2p_avatar_pair_asset_allowed(PDO $pdo, array $claims, string $kind): bool
+{
+    if (!p2p_avatar_policy($pdo)['effectiveEnabled']) return false;
+    if (p2p_avatar_pair_blocked($pdo, (int)$claims['viewer_user_id'], (int)$claims['source_user_id'])) return false;
+    $visibility = $kind === 'nameplate'
+        ? nameplate_visibility_effective($pdo, (int)$claims['viewer_user_id'], (int)$claims['source_user_id'])
+        : avatar_visibility_effective($pdo, (int)$claims['viewer_user_id'], (int)$claims['source_user_id']);
+    if ($visibility['hidden']) return false;
+    return is_array($claims[$kind . '_asset'] ?? null);
 }
 
 function p2p_avatar_pair_allowed(PDO $pdo, array $claims): bool
 {
-    if (!p2p_avatar_policy($pdo)['effectiveEnabled']) return false;
-    if (p2p_avatar_pair_blocked($pdo, (int)$claims['viewer_user_id'], (int)$claims['source_user_id'])) return false;
-    if (avatar_visibility_effective($pdo, (int)$claims['viewer_user_id'], (int)$claims['source_user_id'])['hidden']) return false;
-    if (str_starts_with((string)$claims['avatar_path'], 'preset:')) return false;
-    return avatar_source_file((string)$claims['avatar_path']) !== null;
+    return p2p_avatar_pair_asset_allowed($pdo, $claims, 'avatar')
+        || p2p_avatar_pair_asset_allowed($pdo, $claims, 'nameplate');
 }
 
 function p2p_avatar_issue_token(PDO $pdo, array $claims): string
@@ -175,6 +222,7 @@ function p2p_avatar_issue_token(PDO $pdo, array $claims): string
         'sp' => (int)$claims['source_participant_id'],
         'su' => (int)$claims['source_user_id'],
         'aid' => (string)$claims['avatar_identity'],
+        'nid' => (string)($claims['nameplate_identity'] ?? ''),
         'exp' => time() + P2P_AVATAR_TOKEN_SECONDS,
         'nonce' => bin2hex(random_bytes(8)),
     ];
@@ -206,7 +254,8 @@ function p2p_avatar_validate_token(PDO $pdo, string $token): array
     );
     if ((int)$payload['vu'] !== (int)$claims['viewer_user_id']
         || (int)$payload['su'] !== (int)$claims['source_user_id']
-        || !hash_equals((string)$payload['aid'], (string)$claims['avatar_identity'])) {
+        || !hash_equals((string)$payload['aid'], (string)$claims['avatar_identity'])
+        || !hash_equals((string)($payload['nid'] ?? ''), (string)($claims['nameplate_identity'] ?? ''))) {
         throw new P2PAvatarPolicyException('Avatar synchronization authorization is stale.', 'P2P_AVATAR_TOKEN_STALE', 409);
     }
     if (!p2p_avatar_pair_allowed($pdo, $claims)) {
@@ -271,27 +320,49 @@ function p2p_avatar_project_participant(
     }
     if ($sourceParticipantId === $viewerParticipantId) {
         $participant['avatar_delivery'] = 'owner-source';
+        $participant['nameplate_delivery'] = 'owner-source';
         return $participant;
     }
     if ((string)$policy['deliveryMode'] !== 'p2p-plus-built-in-generated') {
         $participant['avatar_delivery'] = (string)$policy['deliveryMode'];
+        $participant['nameplate_delivery'] = (string)$policy['deliveryMode'];
+        if ((string)$policy['deliveryMode'] === 'built-in-generated-only') {
+            $participant['nameplate_path'] = null;
+            $participant['nameplate_url'] = null;
+        }
         return $participant;
     }
     $participant['avatar_path'] = null;
     $participant['avatar_url'] = null;
     $participant['avatar_delivery'] = 'built-in-generated-fallback';
-    if (!empty($participant['avatar_hidden'])) return $participant;
+    $participant['nameplate_path'] = null;
+    $participant['nameplate_url'] = null;
+    $participant['nameplate_delivery'] = 'none-fallback';
     try {
         $claims = p2p_avatar_pair_claims($pdo, $sessionId, $viewerParticipantId, $sourceParticipantId);
         if (!p2p_avatar_pair_allowed($pdo, $claims)) return $participant;
-        $participant['p2p_avatar'] = [
-            'identity' => (string)$claims['avatar_identity'],
-            'width' => (int)$claims['width'],
-            'height' => (int)$claims['height'],
-            'authorization' => p2p_avatar_issue_token($pdo, $claims),
-            'expiresInSeconds' => P2P_AVATAR_TOKEN_SECONDS,
-        ];
-        $participant['avatar_delivery'] = 'p2p-prefetch';
+        $authorization = p2p_avatar_issue_token($pdo, $claims);
+        if (p2p_avatar_pair_asset_allowed($pdo, $claims, 'avatar')) {
+            $participant['p2p_avatar'] = [
+                'identity' => (string)$claims['avatar_identity'],
+                'width' => (int)$claims['width'],
+                'height' => (int)$claims['height'],
+                'authorization' => $authorization,
+                'expiresInSeconds' => P2P_AVATAR_TOKEN_SECONDS,
+            ];
+            $participant['avatar_delivery'] = 'p2p-prefetch';
+        }
+        if (p2p_avatar_pair_asset_allowed($pdo, $claims, 'nameplate')) {
+            $nameplate = $claims['nameplate_asset'];
+            $participant['p2p_nameplate'] = [
+                'identity' => (string)$nameplate['identity'],
+                'width' => (int)$nameplate['width'],
+                'height' => (int)$nameplate['height'],
+                'authorization' => $authorization,
+                'expiresInSeconds' => P2P_AVATAR_TOKEN_SECONDS,
+            ];
+            $participant['nameplate_delivery'] = 'p2p-prefetch';
+        }
     } catch (P2PAvatarPolicyException) {
         // Deliberately neutral fallback; never disclose private denial detail.
     }
@@ -302,34 +373,37 @@ function p2p_avatar_authorize_source(
     PDO $pdo,
     array $sourceParticipant,
     int $sessionId,
-    string $token
+    string $token,
+    string $assetKind = 'avatar'
 ): array {
+    if (!in_array($assetKind, ['avatar', 'nameplate'], true)) {
+        throw new P2PAvatarPolicyException('Identity asset synchronization is invalid.', 'P2P_AVATAR_ASSET_INVALID', 400);
+    }
     $claims = p2p_avatar_validate_token($pdo, $token);
     if ((int)$claims['session_id'] !== $sessionId
         || (int)$claims['source_participant_id'] !== (int)$sourceParticipant['id']
         || (int)$claims['source_user_id'] !== (int)$sourceParticipant['user_id']) {
         throw new P2PAvatarPolicyException('Avatar synchronization authorization is invalid.', 'P2P_AVATAR_SOURCE_DENIED', 403);
     }
-    $file = avatar_source_file((string)$claims['avatar_path']);
-    if (!$file || !is_file($file)) {
-        throw new P2PAvatarPolicyException('The current avatar is unavailable.', 'P2P_AVATAR_SOURCE_UNAVAILABLE', 404);
+    if (!p2p_avatar_pair_asset_allowed($pdo, $claims, $assetKind)) {
+        throw new P2PAvatarPolicyException('The current identity asset is unavailable.', 'P2P_AVATAR_SOURCE_UNAVAILABLE', 404);
     }
-    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file) ?: '';
-    $allowed = ['image/gif' => IMAGETYPE_GIF, 'image/webp' => IMAGETYPE_WEBP];
-    $dimensions = @getimagesize($file);
-    $size = filesize($file);
-    if (!isset($allowed[$mime]) || !$dimensions || (int)$dimensions[2] !== $allowed[$mime]
-        || !is_int($size) || $size < 1 || $size > app_setting_bytes($pdo, 'avatar_max_size_mb', 5)) {
-        throw new P2PAvatarPolicyException('The current avatar did not pass validation.', 'P2P_AVATAR_SOURCE_INVALID', 422);
+    $asset = $claims[$assetKind . '_asset'];
+    $avatarMaxBytes = avatar_size_policy($pdo)['avatarMaxBytes'];
+    if ($avatarMaxBytes !== null && (int)$asset['size'] > $avatarMaxBytes) {
+        throw new P2PAvatarPolicyException('The current identity asset did not pass validation.', 'P2P_AVATAR_SOURCE_INVALID', 422);
     }
     return [
         'ok' => true,
-        'sourceUrl' => resolve_avatar((string)$claims['avatar_path']),
-        'identity' => (string)$claims['avatar_identity'],
-        'mime' => $mime,
-        'size' => $size,
-        'width' => (int)$dimensions[0],
-        'height' => (int)$dimensions[1],
+        'assetKind' => $assetKind,
+        'sourceUrl' => $assetKind === 'nameplate'
+            ? resolve_nameplate((string)$asset['path'])
+            : resolve_avatar((string)$asset['path']),
+        'identity' => (string)$asset['identity'],
+        'mime' => (string)$asset['mime'],
+        'size' => (int)$asset['size'],
+        'width' => (int)$asset['width'],
+        'height' => (int)$asset['height'],
         'viewerParticipantId' => (int)$claims['viewer_participant_id'],
         'expiresAt' => (int)$claims['expires_at'],
     ];

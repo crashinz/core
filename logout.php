@@ -11,6 +11,9 @@ if ($user) {
     if (function_exists('p2p_transfer_terminate_user')) {
         p2p_transfer_terminate_user($pdo, (int)$user['id'], 'Explicit logout');
     }
+    if (function_exists('multiplayer_game_terminate_user')) {
+        multiplayer_game_terminate_user($pdo, (int)$user['id']);
+    }
     $stmt = $pdo->prepare('SELECT id, session_id FROM participants WHERE user_id = ? AND last_seen_at IS NOT NULL');
     $stmt->execute([(int)$user['id']]);
     $participants = $stmt->fetchAll();

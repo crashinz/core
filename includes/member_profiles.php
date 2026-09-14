@@ -108,7 +108,8 @@ function member_profiles_effective_limits(PDO $pdo): array
 {
     $limits = [];
     foreach (member_profiles_limit_definitions() as $settingId => $definition) {
-        $stored = (int)app_setting($pdo, $settingId, (string)$definition['default']);
+        $stored = corechat_limit_value($pdo, $settingId, (int)$definition['default']);
+        if ($stored === null) $stored = (int)$definition['maximum'];
         $limits[$definition['field']] = max(
             (int)$definition['minimum'],
             min((int)$definition['maximum'], $stored)
@@ -134,11 +135,34 @@ function member_profiles_assert_effective_length(
         );
     }
     if (member_profiles_text_length($value) > $maximum) {
+        $definition = member_profiles_limit_definition_for_field($field);
+        if (is_array($definition)) {
+            limit_event_record_reached(
+                $pdo,
+                (string)$definition['settingId'],
+                'profile-field',
+                'field:' . $field,
+                'rejected',
+                ['submittedLength' => member_profiles_text_length($value)]
+            );
+        }
         throw new MemberProfileException(
             $label . ' must be ' . $maximum . ' characters or less.',
-            'MEMBER_PROFILE_FIELD_TOO_LONG'
+            'MEMBER_PROFILE_FIELD_TOO_LONG',
+            400,
+            null,
+            is_array($definition) ? ['settingId' => (string)$definition['settingId'], 'field' => $field, 'submittedLength' => member_profiles_text_length($value)] : []
         );
     }
+}
+
+function member_profiles_limit_enforcement(PDO $pdo): array
+{
+    $enforcement = [];
+    foreach (member_profiles_limit_definitions() as $settingId => $definition) {
+        $enforcement[$definition['field']] = corechat_limit_is_enforced($pdo, $settingId);
+    }
+    return $enforcement;
 }
 
 function member_profiles_limit_impacts(PDO $pdo, array $proposed): array
@@ -193,7 +217,8 @@ final class MemberProfileException extends RuntimeException
         string $message,
         public readonly string $errorCode,
         public readonly int $httpStatus = 400,
-        ?Throwable $previous = null
+        ?Throwable $previous = null,
+        public readonly array $limitEvent = []
     ) {
         parent::__construct($message, 0, $previous);
     }
@@ -263,6 +288,23 @@ function member_profiles_validate_display_name(mixed $raw): string
     $value = member_profiles_normalize_single((string)$raw);
     member_profiles_assert_length('Display name', $value, MEMBER_PROFILE_DISPLAY_NAME_MAX);
     return $value;
+}
+
+/** Called only after an operation rolls back a transaction that it owned. */
+function member_profiles_record_limit_rejection_after_rollback(PDO $pdo, Throwable $error): void
+{
+    static $recorded = null;
+    while ((!$error instanceof MemberProfileException || $error->errorCode !== 'MEMBER_PROFILE_FIELD_TOO_LONG' || !$error->limitEvent) && $error->getPrevious() !== null) {
+        $error = $error->getPrevious();
+    }
+    if (!$error instanceof MemberProfileException || $error->errorCode !== 'MEMBER_PROFILE_FIELD_TOO_LONG' || !$error->limitEvent) return;
+    $recorded ??= new WeakMap();
+    if (isset($recorded[$error])) return;
+    $facts = $error->limitEvent;
+    $definition = member_profiles_limit_definition_for_field((string)($facts['field'] ?? ''));
+    if (!is_array($definition) || (string)$definition['settingId'] !== (string)($facts['settingId'] ?? '')) return;
+    limit_event_record_reached($pdo, (string)$definition['settingId'], 'profile-field', 'field:' . (string)$facts['field'], 'rejected', ['submittedLength' => (int)$facts['submittedLength']]);
+    $recorded[$error] = true;
 }
 
 function member_profiles_validate_discord_username(mixed $raw): string
@@ -1075,7 +1117,7 @@ function member_profiles_import_identity(
     }
     $requestedDisplayName = member_profiles_validate_display_name($displayNameRaw);
     $displayName = $requestedDisplayName === '' ? $currentUsername : $requestedDisplayName;
-    if ($requestedDisplayName !== '') {
+    if ($requestedDisplayName !== '' && !hash_equals((string)$current['display_name'], $displayName)) {
         member_profiles_assert_effective_length(
             $pdo,
             'display_name',
@@ -1476,16 +1518,14 @@ function member_profiles_editor_projection(PDO $pdo, int $userId): array
         && trim((string)($row['discord_username'] ?? '')) !== '';
     $profile['profileVersion'] = max(1, (int)$row['profile_version']);
     $profile['fieldLimits'] = member_profiles_effective_limits($pdo);
+    $profile['fieldLimitEnforcement'] = member_profiles_limit_enforcement($pdo);
     $profile['fieldLimits']['discord_username'] = MEMBER_PROFILE_DISCORD_USERNAME_MAX;
     return $profile;
 }
 
-function member_profiles_begin_write(PDO $pdo): bool
+function member_profiles_begin_write(PDO $pdo): array
 {
-    if ($pdo->inTransaction()) return false;
-    if (db_driver($pdo) === 'mysql') $pdo->beginTransaction();
-    else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-    return true;
+    return database_transaction_begin($pdo, db_driver($pdo) === 'sqlite');
 }
 
 function member_profiles_lock_account_for_update(PDO $pdo, int $userId): void
@@ -1567,7 +1607,8 @@ function member_profiles_update(
         (string)json_encode($fingerprintInput, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
     ));
 
-    $ownsTransaction = member_profiles_begin_write($pdo);
+    $profileTransaction = member_profiles_begin_write($pdo);
+    $ownsTransaction = !empty($profileTransaction['owned']);
     try {
         member_profiles_lock_account_for_update($pdo, $userId);
         member_profiles_initialize_user($pdo, $userId);
@@ -1594,7 +1635,7 @@ function member_profiles_update(
                     409
                 );
             }
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+            if ($ownsTransaction) database_transaction_commit($pdo, $profileTransaction);
             $result = json_decode((string)$replay['result_json'], true);
             return [
                 'ok' => true,
@@ -1755,7 +1796,7 @@ function member_profiles_update(
             $requestSha,
             (string)json_encode($resultRecord, JSON_UNESCAPED_SLASHES),
         ]);
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        if ($ownsTransaction) database_transaction_commit($pdo, $profileTransaction);
         return [
             'ok' => true,
             'idempotentReplay' => false,
@@ -1764,7 +1805,10 @@ function member_profiles_update(
             'profile' => member_profiles_editor_projection($pdo, $userId),
         ];
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        if ($ownsTransaction) {
+            database_transaction_rollback($pdo, $profileTransaction);
+            member_profiles_record_limit_rejection_after_rollback($pdo, $error);
+        }
         if ($error instanceof MemberProfileException) throw $error;
         throw new MemberProfileException(
             'The public profile could not be saved.',

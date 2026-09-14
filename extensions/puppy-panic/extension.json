@@ -1,0 +1,136 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "puppy-panic",
+  "name": "Puppy Panic!",
+  "version": "1.0.6",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.private-media",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative",
+    "game.presentation.private-media"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_b63c0a06",
+    "name": "Puppy Panic!",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_b63c0a06",
+    "gameId": 69,
+    "path": "puppy-panic-first-party",
+    "entry": "index.html",
+    "icon": "puppy-panic-first-party-icon.svg",
+    "profile": "versus",
+    "minPlayers": 2,
+    "practiceMinPlayers": 2,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 5,
+    "seats": [
+      "Player 1",
+      "Player 2",
+      "Player 3",
+      "Player 4",
+      "Player 5"
+    ],
+    "adaptationVersion": "1.0.3",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_b63c0a06",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": true,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.363636,
+      "minimumReadableWidth": 600,
+      "minimumReadableHeight": 440
+    },
+    "rulesHelp": {
+      "label": "Puppy Panic! rules",
+      "description": "Two to five authenticated players play puppy-themed draw-and-defuse cards. Calm a drawn Chaos Puppy or be eliminated; the last active player wins. The optional Mischief Pack adds private reorder and retrieval effects."
+    }
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "assets/images/puppy-panic-first-party-icon.svg": "da40f41106604a32ea30a7039ee05b48a5ffe09574a5180b6712cab9124b4c69",
+      "assets/images/puppy-panic/table-layout.png": "c297cc09af54418855c2c9d07b7888ebc866e27a5479383a8042c91baf227f7d",
+      "assets/images/puppy-panic/player-station-frame.svg": "bb6ccb26cef098421e6a55b7d34c42d17cda31b63a63ebd15692511e6c3d8c52",
+      "assets/images/puppy-panic/cards/approved-card-frame.png": "209d9607a78195eb2e11aa468fcb4f7ca5aff389c66e6709636333795c65eb8b",
+      "assets/images/puppy-panic/treat-jar.svg": "3b81c8a3bc7cb2d7e91fdf28a2b3bc1daa4971f8ba7616bfa9966aa193a01cb6",
+      "assets/images/puppy-panic/toy-basket.svg": "82c1d43d242dbeae2b379aa705cd970ebdf5be26deb74052255892e70e11a524",
+      "games/puppy-panic-first-party/app.js": "a56c6c748ec5bc43f7b2678eab5b5e621f2b9399c3cb04596bcaa2741b752bef",
+      "games/puppy-panic-first-party/style.css": "9beaf9585855192922c7455bcf5eec0975a44d3fe571c9b3cf4d905b59190d26",
+      "games/ocx-extension-game.css": "6f59b70186a706a3c4eb79622757913fdf145ac483fecc9970bf6b8b9c3111a0",
+      "includes/puppy_panic_extension.php": "4e4abe1eec9455b0a21c4d28b942673ec5a8e88b5340b6322b4c2ee0365c07cc",
+      "assets/images/puppy-panic/cards/action-nap-time.png": "dbfdb666fc78bf9f7ff065ddadca1020b4773b68c7e759d4664c28b204b91d7b",
+      "assets/images/puppy-panic/cards/action-not-today.png": "f69aca337f2a4af953c196c2c02bde5b4bfebbb709717c006c26385fbad115c8",
+      "assets/images/puppy-panic/cards/action-puppy-cam.png": "5b9ea23f454c1b959dd78bc5d5b9ff2ba25f2fe56d91d4b209e0a61a97247a6b",
+      "assets/images/puppy-panic/cards/action-puppy-eyes.png": "835756788bf7dd6bded2297e49ee2e28a21d362b76392a26e6e107a6786d66c3",
+      "assets/images/puppy-panic/cards/action-puppy-pile-on.png": "a9299f1f101f05bc346b98a492ef1ef7ad656a6acb2da9d54230f98275293148",
+      "assets/images/puppy-panic/cards/action-squirrel-corgi.png": "ad821de4a12a4c04e87ed4bce41df42924aa9cc69cb05b39f26ffd9c0831205a",
+      "assets/images/puppy-panic/cards/base-card-front.png": "cfca146cf55f83d0d4afe9a372badcf29f53d90b2998c92ca085a8ca80118479",
+      "assets/images/puppy-panic/cards/calm-belly-rub.png": "3d3f6c0545a959d61f449c9cb7aa5beb0e41a3bdb9aa1e0e56268c1198d96570",
+      "assets/images/puppy-panic/cards/calm-cozy-blanket.png": "e33c9cfd8b3a7f00ce5a80e9c1b621a472eb25cec3cd431a335dc85da06ae0a5",
+      "assets/images/puppy-panic/cards/calm-good-pup.png": "e3602383b813596f7f236987d4d34cad1a2f7cb13f4939f712d702e038b46a3c",
+      "assets/images/puppy-panic/cards/calm-peanut-butter-puzzle.png": "0823318bb94e4424ce54ffa70ab5b73422cfe0182b7a31191658ded4a94d325d",
+      "assets/images/puppy-panic/cards/calm-squeaky-toy.png": "ccc006d6fd507047735895b05b16a6be8d83c970412af289e9b1e4a6d07ea43c",
+      "assets/images/puppy-panic/cards/calm-treat-trail.png": "3626c4d6747c6e5c253f87e626fe78f5deaf2530c155420fbefde334521b95ec",
+      "assets/images/puppy-panic/cards/card-back.png": "5fe80c0748db63e33002b99e4e4631baba111ff3f05a86cd333ebdfc072f43b8",
+      "assets/images/puppy-panic/cards/chaos-couch-cushion-catastrophe.png": "e40be8924c628ffc56dc7a8f70e2a650203cc44e9b07e23cb8a7eb7bca0982fc",
+      "assets/images/puppy-panic/cards/chaos-midnight-zoomies-corgi.png": "345b71603fe60ca6ca8a8b048bd324513af3cdb1159d5efd4007626a554accfc",
+      "assets/images/puppy-panic/cards/chaos-mudroom-stampede.png": "a16c5eda1d812de7ed3b137f12b123f75d0a8c9471ee5aae85b2b1feb1883ee7",
+      "assets/images/puppy-panic/cards/chaos-shoe-shredder-brindle.png": "faada890215918ed56cc77c7144a72db6ab162eb5ca83f81f543f37a7dd785cf",
+      "assets/images/puppy-panic/cards/disabled-card-frame.png": "8da6662ef4d35d3dc56b492634752584269db78374daf768f2bffc04877f9181",
+      "assets/images/puppy-panic/cards/family-bubble-beard-bath-pup.png": "7c3d0df63aa9636c7d407659b0dd92f5a2d5f690a0e68290827cfb19df5e0702",
+      "assets/images/puppy-panic/cards/family-doorbell-detective.png": "01abc8531541682cd38d55f6c0d56b8c5188d13541fd2ffc23189540c1dd02d5",
+      "assets/images/puppy-panic/cards/family-sock-bandit.png": "418fc6091b6529849504a4453a24e5cf7984371acaf3b8ff1d787081e52bf254",
+      "assets/images/puppy-panic/cards/family-vacuum-nemesis.png": "37f09a7907d98eee7dd701f3849453aa7c4db5e28b3136850b0fd3ab2879b363",
+      "assets/images/puppy-panic/cards/mischief-fetch-this.png": "711145908a1ca36aa295a5439d8db6432dfcfc7ab0131deba7c0312194f9a98f",
+      "assets/images/puppy-panic/cards/mischief-pack-card-front.png": "743e8a16b88f228f991269ca19da9a395fea630a3f7bbcb01941f9a58c8b4d82",
+      "assets/images/puppy-panic/cards/mischief-toy-basket-flip.png": "ba388ac3400351e9ab11fd96eac27c56a941b582bad80346d5a8766cfd87c758",
+      "assets/images/puppy-panic/cards/mischief-trainers-plan.png": "22fc8fbf71da2a45bcaf723cc7b0119babbf664d2b5d4b0f924597aaad82a464",
+      "assets/images/puppy-panic/cards/mischief-under-the-couch.png": "f0bb781ecde1f81d8720bb116a4f999b8d4e81ea712334a0385ba829d52d449c",
+      "assets/images/puppy-panic/cards/selected-card-frame.png": "424ffef53e8f45769517562e0bae0621d599f45577b974f0602cf541d1c35a00",
+      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
+      "games/ocx-extension-game.js": "55272de9db1d5dafb9bd5213eb7d6799ee9311c985672b20cf84d25a3c14247d",
+      "games/puppy-panic-first-party/index.html": "03f622542e030bae3bb8ddfc8dabc278d497164ce71e8ecc3b538a81e6b843b8",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+    }
+  }
+}

@@ -101,10 +101,11 @@ export class PollingRuntime extends CoreModule {
      * @param {string} job.id
      * @param {Function} job.run
      * @param {number} job.interval
+     * @param {number} [job.initialDelay]
      *
      * @returns {Object}
      */
-    registerJob({ id, run, interval }) {
+    registerJob({ id, run, interval, initialDelay = interval }) {
 
         if (!id) {
             throw new TypeError("Job id is required.");
@@ -118,6 +119,10 @@ export class PollingRuntime extends CoreModule {
             throw new TypeError("Job interval must be a positive number.");
         }
 
+        if (!Number.isFinite(initialDelay) || initialDelay < 0) {
+            throw new TypeError("Job initial delay must be zero or a positive number.");
+        }
+
         this.unregisterJob(id);
 
         const job = {
@@ -127,6 +132,8 @@ export class PollingRuntime extends CoreModule {
             run,
 
             interval,
+
+            initialDelay,
 
             timer:
                 null,
@@ -166,7 +173,10 @@ export class PollingRuntime extends CoreModule {
                 job.id,
 
             interval:
-                job.interval
+                job.interval,
+
+            initialDelay:
+                job.initialDelay
 
         });
 
@@ -269,6 +279,9 @@ export class PollingRuntime extends CoreModule {
                         interval:
                             job.interval,
 
+                        initialDelay:
+                            job.initialDelay,
+
                         running:
                             Boolean(job.timer),
 
@@ -356,9 +369,36 @@ export class PollingRuntime extends CoreModule {
             return;
         }
 
-        job.timer = setInterval(
-            () => this.#runJob(job),
-            job.interval
+        const beginInterval = () => {
+
+            if (!this.#running || job.paused || !this.#jobs.has(job.id)) {
+
+                job.timer = null;
+
+                return;
+
+            }
+
+            job.timer = setInterval(
+                () => this.#runJob(job),
+                job.interval
+            );
+
+            this.#runJob(job);
+
+        };
+
+        if (job.initialDelay === 0) {
+
+            beginInterval();
+
+            return;
+
+        }
+
+        job.timer = setTimeout(
+            beginInterval,
+            job.initialDelay
         );
 
     }
@@ -374,6 +414,7 @@ export class PollingRuntime extends CoreModule {
             return;
         }
 
+        clearTimeout(job.timer);
         clearInterval(job.timer);
 
         job.timer = null;

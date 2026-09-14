@@ -12,12 +12,9 @@ function import_lobby_room_payload(array $room, array $user): array {
     $backgroundPath = (string)($room['background_path'] ?? '');
     $backgroundMime = (string)($room['background_mime'] ?? '');
     $thumbPath = (string)($room['background_thumb_path'] ?? '');
-    $tileBg = $backgroundPath;
-    if ($backgroundPath !== '' && str_starts_with($backgroundMime, 'video/')) {
-        $tileBg = $thumbPath;
-    }
+    $tileBg = room_import_tile_image_from_layout($room['import_layout_json'] ?? null);
     if ($tileBg === '') {
-        $tileBg = room_import_tile_image_from_layout($room['import_layout_json'] ?? null);
+        $tileBg = str_starts_with($backgroundMime, 'video/') ? $thumbPath : $backgroundPath;
     }
     return [
         'id' => (int)$room['id'],
@@ -33,7 +30,7 @@ function import_lobby_room_payload(array $room, array $user): array {
         'tile_background_url' => $tileBg !== '' ? media_url($tileBg) : '',
         'background_url' => $backgroundPath !== '' ? media_url($backgroundPath) : '',
         'thumb_url' => $thumbPath !== '' ? media_url($thumbPath) : '',
-        'video_without_thumb' => $backgroundPath !== '' && str_starts_with($backgroundMime, 'video/') && $thumbPath === '',
+        'video_without_thumb' => $tileBg === '' && $backgroundPath !== '' && str_starts_with($backgroundMime, 'video/'),
         'can_edit' => (int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true),
         'enter_url' => app_url('/chatroom.php?id=' . rawurlencode((string)$room['public_id'])),
     ];
@@ -48,6 +45,86 @@ $action = (string)($body['action'] ?? '');
 $url = trim((string)($body['url'] ?? ''));
 
 try {
+    if ($action === 'refresh_text') {
+        csrf_protect_post();
+        $statement = $pdo->prepare('SELECT id,owner_id,import_url,import_layout_json FROM rooms WHERE public_id=? LIMIT 1');
+        $statement->execute([trim((string)($body['room_public_id'] ?? ''))]);
+        $room = $statement->fetch();
+        if (!is_array($room)) json_out(['error' => 'Room not found.'], 404);
+        if ((int)$room['owner_id'] !== (int)$user['id'] && !in_array((string)($user['role'] ?? ''), ['admin', 'developer'], true)) {
+            json_out(['error' => 'Only the room owner or an administrator can refresh imported text.'], 403);
+        }
+        if (empty($room['import_url'])) json_out(['error' => 'This is not an imported room.'], 400);
+        security_authorize_outside_content_or_json($pdo, $user, 'room_import_preview', ['source' => 'room_import_text_refresh']);
+        $original = (string)$room['import_layout_json'];
+        $layout = json_decode($original, true);
+        if (!is_array($layout)) json_out(['error' => 'The saved import layout is unavailable.'], 409);
+        // Re-read only the saved source. Keep image files, room identity,
+        // player configuration and unrelated visible text unchanged.
+        if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+        $preview = room_import_preview_from_url((string)$room['import_url']);
+        $normalize = static fn(string $text): string => trim(preg_replace('~[\s\x{00A0}]+~u', ' ', $text) ?? $text);
+        $hidden = array_fill_keys(array_map($normalize, (array)($preview['hidden_text'] ?? [])), true);
+        foreach ((array)($preview['sections'] ?? []) as $section) {
+            if (($section['type'] ?? '') === 'text') unset($hidden[$normalize((string)($section['text'] ?? ''))]);
+        }
+        $removed = 0;
+        $layout['sections'] = array_values(array_filter((array)($layout['sections'] ?? []), static function(array $section) use ($hidden, $normalize, &$removed): bool {
+            if (($section['type'] ?? '') === 'text' && isset($hidden[$normalize((string)($section['text'] ?? ''))])) {
+                $removed++;
+                return false;
+            }
+            return true;
+        }));
+        $layout['accessible_text'] = (array)($preview['accessible_text'] ?? []);
+        $sourceTextStyles = [];
+        foreach ((array)($preview['sections'] ?? []) as $section) {
+            if (($section['type'] ?? '') === 'text') {
+                $sourceTextStyles[$normalize((string)($section['text'] ?? ''))][] = (array)($section['style'] ?? []);
+            }
+        }
+        foreach ($layout['sections'] as &$section) {
+            if (($section['type'] ?? '') !== 'text') continue;
+            $key = $normalize((string)($section['text'] ?? ''));
+            if (!empty($sourceTextStyles[$key])) $section['style'] = array_shift($sourceTextStyles[$key]);
+        }
+        unset($section);
+        foreach (['text_size', 'text_color', 'audio_player_bg', 'audio_player_text_buttons', 'player_style', 'hide_audio_iframe', 'poem_image_width', 'poem_image_max_width', 'mobile_poem_image_width'] as $key) {
+            if (array_key_exists($key, $preview)) $layout[$key] = $preview[$key];
+        }
+        $sourceImages = array_values(array_filter((array)($preview['sections'] ?? []), static fn(array $item): bool => ($item['type'] ?? '') === 'image'));
+        $savedRoleCounts = [];
+        foreach ($layout['sections'] as $item) {
+            if (($item['type'] ?? '') === 'image') {
+                $role = (string)($item['role'] ?? '');
+                $savedRoleCounts[$role] = ($savedRoleCounts[$role] ?? 0) + 1;
+            }
+        }
+        foreach ($layout['sections'] as &$section) {
+            if (($section['type'] ?? '') !== 'image') continue;
+            $source = (string)($section['source_src'] ?? '');
+            $role = (string)($section['role'] ?? '');
+            $matches = array_values(array_filter($sourceImages, static fn(array $item): bool => $source !== ''
+                ? (string)($item['src'] ?? '') === $source
+                : ($role !== '' && ($savedRoleCounts[$role] ?? 0) === 1 && (string)($item['role'] ?? '') === $role)));
+            // Older saved imports have only local paths. Match a unique role,
+            // never guess across ambiguous images or replace their local files.
+            if (count($matches) === 1) {
+                $section['image_style'] = (array)($matches[0]['image_style'] ?? []);
+                $section['source_src'] = (string)($matches[0]['src'] ?? '');
+            }
+        }
+        unset($section);
+        $layout['text_visibility_version'] = 1;
+        $json = json_encode($layout, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        if ($json !== $original) {
+            $update = $pdo->prepare('UPDATE rooms SET import_layout_json=? WHERE id=? AND import_url=? AND import_layout_json=?');
+            $update->execute([$json, (int)$room['id'], (string)$room['import_url'], $original]);
+            if ($update->rowCount() !== 1) json_out(['error' => 'The room changed during refresh. Please try again.'], 409);
+        }
+        json_out(['ok' => true, 'layout' => $layout, 'removedHiddenTextSections' => $removed]);
+    }
+
     if ($action === 'preview') {
         security_authorize_outside_content_or_json($pdo, $user, 'room_import_preview', ['source' => 'room_import']);
         $preview = room_import_preview_from_url($url);
@@ -56,6 +133,7 @@ try {
 
     if ($action === 'create') {
         security_authorize_outside_content_or_json($pdo, $user, 'room_import_create', ['source' => 'room_import']);
+        live_website_rooms_require_import_capacity($pdo, $user);
         $preview = room_import_preview_from_url($url);
         $localized = room_import_localize($preview);
         $sourceName = trim((string)($body['name'] ?? ''));

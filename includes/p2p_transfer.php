@@ -281,6 +281,9 @@ function p2p_transfer_policy(PDO $pdo, bool $includeCredential = false): array
     $gestures = app_setting($pdo, P2P_TRANSFER_SEND_GESTURE_ENABLED_SETTING, '1') === '1'
         && in_array($serverMedia['sendGestureMode'], ['p2p-only','both'], true);
     $transport = p2p_transport_policy($pdo, $includeCredential);
+    $maxFileMb = corechat_limit_value($pdo, P2P_TRANSFER_MAX_FILE_MB_SETTING, 100.0);
+    $maxConcurrent = corechat_limit_value($pdo, P2P_TRANSFER_MAX_CONCURRENT_SETTING, 2);
+    $hourlyOffers = corechat_limit_value($pdo, P2P_TRANSFER_HOURLY_OFFERS_SETTING, 20);
     return [
         'filesEnabled' => $files,
         'sendGestureEnabled' => $gestures,
@@ -288,9 +291,14 @@ function p2p_transfer_policy(PDO $pdo, bool $includeCredential = false): array
         'directFirst' => true,
         'relayAllowed' => !empty($transport['relayAllowed']),
         'iceServers' => $files || $gestures ? $transport['iceServers'] : [],
-        'maxFileBytes' => app_setting_bytes($pdo, P2P_TRANSFER_MAX_FILE_MB_SETTING, 100),
-        'maxConcurrent' => max(1, min(8, (int)app_setting($pdo, P2P_TRANSFER_MAX_CONCURRENT_SETTING, '2'))),
-        'hourlyOffers' => max(1, min(200, (int)app_setting($pdo, P2P_TRANSFER_HOURLY_OFFERS_SETTING, '20'))),
+        'maxFileBytes' => $maxFileMb === null ? null : (int)round($maxFileMb * 1024 * 1024),
+        'maxConcurrent' => $maxConcurrent === null ? null : max(1, min(8, (int)$maxConcurrent)),
+        'hourlyOffers' => $hourlyOffers === null ? null : max(1, min(200, (int)$hourlyOffers)),
+        'limitEnforcement' => [
+            P2P_TRANSFER_MAX_FILE_MB_SETTING => $maxFileMb !== null,
+            P2P_TRANSFER_MAX_CONCURRENT_SETTING => $maxConcurrent !== null,
+            P2P_TRANSFER_HOURLY_OFFERS_SETTING => $hourlyOffers !== null,
+        ],
         'offerLifetimeSeconds' => P2P_TRANSFER_OFFER_SECONDS,
         'acceptedSessionLifetimeSeconds' => P2P_TRANSFER_ACCEPTED_SESSION_SECONDS,
         'acceptedSessionDeadlineSliding' => false,
@@ -398,22 +406,36 @@ function p2p_transfer_safe_relative_path(string $value): string
 
 function p2p_transfer_create_offer(PDO $pdo, array $sender, int $sessionId, array $input): array
 {
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         if (db_uses_mysql_syntax($pdo)) {
             $lock = $pdo->prepare('SELECT id FROM users WHERE id=? LIMIT 1 FOR UPDATE');
             $lock->execute([(int)$sender['user_id']]);
             if (!$lock->fetchColumn()) throw new P2PTransferException('The sender is unavailable.', 'P2P_TRANSFER_ACCESS_DENIED', 403);
         }
         $result = p2p_transfer_create_offer_locked($pdo, $sender, $sessionId, $input);
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         return $result;
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
+        if ($error instanceof P2PTransferException) {
+            $settingId = match ($error->errorCode) {
+                'P2P_TRANSFER_SIZE_LIMIT', 'P2P_TRANSFER_BATCH_SIZE_LIMIT' => P2P_TRANSFER_MAX_FILE_MB_SETTING,
+                'P2P_TRANSFER_RATE_LIMIT' => P2P_TRANSFER_HOURLY_OFFERS_SETTING,
+                'P2P_TRANSFER_CONCURRENCY_LIMIT' => P2P_TRANSFER_MAX_CONCURRENT_SETTING,
+                default => '',
+            };
+            if ($settingId !== '') {
+                limit_event_record_reached($pdo, $settingId, 'member', 'user:' . (int)($sender['user_id'] ?? 0), 'rejected', ['errorCode' => $error->errorCode]);
+            }
+            if ($error->errorCode === 'P2P_TRANSFER_AVATAR_POLICY_INVALID') {
+                foreach ((array)($error->facts['limitSettings'] ?? []) as $avatarLimit) {
+                    if (in_array($avatarLimit, ['avatar_max_size_mb','avatar_upload_max_width_px','avatar_upload_max_height_px'], true)) {
+                        limit_event_record_reached($pdo, $avatarLimit, 'member', 'user:' . (int)($sender['user_id'] ?? 0), 'rejected', ['assetKind' => 'avatar']);
+                    }
+                }
+            }
+        }
         throw $error;
     }
 }
@@ -460,7 +482,7 @@ function p2p_transfer_create_offer_locked(PDO $pdo, array $sender, int $sessionI
         if (isset($seenPaths[$pathKey])) throw new P2PTransferException('The selected files contain duplicate or deceptive paths.', 'P2P_TRANSFER_PATH_COLLISION', 422);
         $seenPaths[$pathKey] = true;
         $size = max(0, (int)($candidate['size'] ?? 0));
-        if ($size <= 0 || $size > $policy['maxFileBytes']) throw new P2PTransferException('A file exceeds the configured direct-transfer limit.', 'P2P_TRANSFER_SIZE_LIMIT', 413);
+        if ($size <= 0 || ($policy['maxFileBytes'] !== null && $size > $policy['maxFileBytes'])) throw new P2PTransferException('A file exceeds the configured direct-transfer limit.', 'P2P_TRANSFER_SIZE_LIMIT', 413);
         $declaredMime = trim((string)($candidate['declared_mime'] ?? 'application/octet-stream'));
         if ($declaredMime === '' || strlen($declaredMime) > 191) $declaredMime = 'application/octet-stream';
         $detectedMime = strtolower(trim((string)($candidate['detected_mime'] ?? 'application/octet-stream')));
@@ -485,13 +507,17 @@ function p2p_transfer_create_offer_locked(PDO $pdo, array $sender, int $sessionI
             $supportedAvatarMimes = ['image/jpeg','image/png','image/gif','image/webp'];
             if ($detectedType !== 'avatar'
                 || !in_array($detectedMime, $supportedAvatarMimes, true)
-                || $size > (int)$avatarPolicy['avatarMaxBytes']
+                || ($avatarPolicy['avatarMaxBytes'] !== null && $size > (int)$avatarPolicy['avatarMaxBytes'])
                 || $width === false || $height === false
                 || (int)$width < AVATAR_UPLOAD_MIN_DIMENSION_PX
                 || (int)$height < AVATAR_UPLOAD_MIN_DIMENSION_PX
                 || (int)$width > (int)$avatarPolicy['avatarUploadMaxWidthPx']
                 || (int)$height > (int)$avatarPolicy['avatarUploadMaxHeightPx']) {
-                throw new P2PTransferException('The prepared avatar does not meet the current avatar policy.', 'P2P_TRANSFER_AVATAR_POLICY_INVALID', 422);
+                $limitSettings = [];
+                if ($avatarPolicy['avatarMaxBytes'] !== null && $size > (int)$avatarPolicy['avatarMaxBytes']) $limitSettings[] = 'avatar_max_size_mb';
+                if ($width !== false && (int)$width > (int)$avatarPolicy['avatarUploadMaxWidthPx']) $limitSettings[] = 'avatar_upload_max_width_px';
+                if ($height !== false && (int)$height > (int)$avatarPolicy['avatarUploadMaxHeightPx']) $limitSettings[] = 'avatar_upload_max_height_px';
+                throw new P2PTransferException('The prepared avatar does not meet the current avatar policy.', 'P2P_TRANSFER_AVATAR_POLICY_INVALID', 422, ['limitSettings' => $limitSettings]);
             }
         }
         $riskClass = trim((string)($candidate['risk_class'] ?? 'Cannot be inspected'));
@@ -519,8 +545,8 @@ function p2p_transfer_create_offer_locked(PDO $pdo, array $sender, int $sessionI
             ],
         ];
     }
-    $batchLimit = $policy['maxFileBytes'] * min(count($manifestFiles), 10);
-    if ($byteSize > $batchLimit) throw new P2PTransferException('The batch exceeds the bounded direct-transfer total.', 'P2P_TRANSFER_BATCH_SIZE_LIMIT', 413);
+    $batchLimit = $policy['maxFileBytes'] === null ? null : $policy['maxFileBytes'] * min(count($manifestFiles), 10);
+    if ($batchLimit !== null && $byteSize > $batchLimit) throw new P2PTransferException('The batch exceeds the bounded direct-transfer total.', 'P2P_TRANSFER_BATCH_SIZE_LIMIT', 413);
     $safeName = count($manifestFiles) > 1 ? count($manifestFiles) . ' files' : $manifestFiles[0]['safeName'];
     $declared = count($manifestFiles) > 1 ? 'application/x-corechat-file-batch' : $manifestFiles[0]['declaredMime'];
     $detectedType = count($manifestFiles) > 1 ? 'archive' : $manifestFiles[0]['detectedType'];
@@ -556,13 +582,17 @@ function p2p_transfer_create_offer_locked(PDO $pdo, array $sender, int $sessionI
             $policy
         ) + ['idempotentReplay' => true];
     }
-    $hourAgo = gmdate('Y-m-d H:i:s', time() - 3600);
-    $rate = $pdo->prepare('SELECT COUNT(*) FROM p2p_transfer_offers WHERE sender_user_id=? AND created_at>=?');
-    $rate->execute([(int)$sender['user_id'],$hourAgo]);
-    if ((int)$rate->fetchColumn() >= $policy['hourlyOffers']) throw new P2PTransferException('Try the transfer again later.', 'P2P_TRANSFER_RATE_LIMIT', 429);
-    $active = $pdo->prepare("SELECT COUNT(*) FROM p2p_transfer_offers WHERE sender_user_id=? AND status IN ('offered','accepted','connecting','transferring','paused') AND expires_at>=CURRENT_TIMESTAMP");
-    $active->execute([(int)$sender['user_id']]);
-    if ((int)$active->fetchColumn() >= $policy['maxConcurrent']) throw new P2PTransferException('Finish an active transfer before starting another.', 'P2P_TRANSFER_CONCURRENCY_LIMIT', 409);
+    if ($policy['hourlyOffers'] !== null) {
+        $hourAgo = gmdate('Y-m-d H:i:s', time() - 3600);
+        $rate = $pdo->prepare('SELECT COUNT(*) FROM p2p_transfer_offers WHERE sender_user_id=? AND created_at>=?');
+        $rate->execute([(int)$sender['user_id'],$hourAgo]);
+        if ((int)$rate->fetchColumn() >= $policy['hourlyOffers']) throw new P2PTransferException('Try the transfer again later.', 'P2P_TRANSFER_RATE_LIMIT', 429);
+    }
+    if ($policy['maxConcurrent'] !== null) {
+        $active = $pdo->prepare("SELECT COUNT(*) FROM p2p_transfer_offers WHERE sender_user_id=? AND status IN ('offered','accepted','connecting','transferring','paused') AND expires_at>=CURRENT_TIMESTAMP");
+        $active->execute([(int)$sender['user_id']]);
+        if ((int)$active->fetchColumn() >= $policy['maxConcurrent']) throw new P2PTransferException('Finish an active transfer before starting another.', 'P2P_TRANSFER_CONCURRENCY_LIMIT', 409);
+    }
     $senderEpoch = trim((string)($input['sender_epoch'] ?? ''));
     $registeredSenderEpoch = media_signal_recipient_epoch($pdo, $sessionId, (int)$sender['id']) ?? '';
     $recipientEpoch = media_signal_recipient_epoch($pdo, $sessionId, $recipientId) ?? '';
@@ -880,7 +910,7 @@ function p2p_transfer_signal_create(PDO $pdo, array $actor, string $publicId, st
 function p2p_transfer_signal_poll(PDO $pdo, array $actor): array
 {
     $userId = (int)($actor['user_id'] ?? $actor['id'] ?? 0);
-    $pdo->prepare('DELETE FROM p2p_transfer_signals WHERE expires_at<CURRENT_TIMESTAMP OR delivered_at IS NOT NULL')->execute();
+    p2p_transfer_prune_signals($pdo);
     $stmt = $pdo->prepare("SELECT s.*,o.public_id FROM p2p_transfer_signals s JOIN p2p_transfer_offers o ON o.id=s.offer_id WHERE s.to_user_id=? AND s.delivered_at IS NULL AND s.expires_at>=CURRENT_TIMESTAMP AND (o.status IN ('accepted','connecting','transferring','paused') OR (o.status='offered' AND o.preview_requested_at IS NOT NULL)) AND o.expires_at>=CURRENT_TIMESTAMP ORDER BY s.id LIMIT 100");
     $stmt->execute([$userId]);
     $signals = [];
@@ -909,17 +939,13 @@ function p2p_transfer_signal_acknowledge(PDO $pdo, array $actor, int $signalId):
 
 function p2p_transfer_update(PDO $pdo, array $actor, string $publicId, string $action, array $input = []): array
 {
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         $result = p2p_transfer_update_locked($pdo, $actor, $publicId, $action, $input);
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         return $result;
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 }
@@ -1032,12 +1058,8 @@ function p2p_transfer_update_locked(PDO $pdo, array $actor, string $publicId, st
         if (strlen($reportReason) < 8 || strlen($reportReason) > 2000) {
             throw new P2PTransferException('Enter a specific report reason.', 'P2P_TRANSFER_REPORT_REASON_REQUIRED', 422);
         }
-        $ownsTransaction = !$pdo->inTransaction();
+        $transaction = database_transaction_begin($pdo, true);
         try {
-            if ($ownsTransaction) {
-                if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-                else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-            }
             $report = moderation_safety_submit_report($pdo, $actorUserId, [
                 'origin_type' => 'file',
                 'origin_reference' => (string)$offer['public_id'],
@@ -1056,9 +1078,9 @@ function p2p_transfer_update_locked(PDO $pdo, array $actor, string $publicId, st
                 ],
             ]);
             p2p_transfer_event($pdo, $offer, $actorUserId, 'reported', 'Recipient submitted a privacy-safe transfer report; payload not included.');
-            if ($ownsTransaction) $pdo->commit();
+            database_transaction_commit($pdo, $transaction);
         } catch (Throwable $error) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             if ($error instanceof P2PTransferException) throw $error;
             if ($error instanceof ModerationSafetyException) {
                 throw new P2PTransferException($error->getMessage(), $error->errorCode, $error->httpStatus);
@@ -1091,11 +1113,30 @@ function p2p_transfer_update_locked(PDO $pdo, array $actor, string $publicId, st
     return $projection;
 }
 
+// A zero-row mutation still takes a SQLite writer lock. Idle polls must not.
+function p2p_transfer_expire_offers(PDO $pdo): void
+{
+    $probe = $pdo->query("SELECT 1 FROM p2p_transfer_offers WHERE status IN ('offered','accepted','connecting','transferring','paused') AND expires_at<CURRENT_TIMESTAMP LIMIT 1");
+    $due = $probe->fetchColumn() !== false;
+    $probe->closeCursor();
+    if (!$due) return;
+    $pdo->prepare("UPDATE p2p_transfer_offers SET status='failed',status_reason='Offer expired',updated_at=CURRENT_TIMESTAMP WHERE status='offered' AND expires_at<CURRENT_TIMESTAMP")->execute();
+    $pdo->prepare("UPDATE p2p_transfer_offers SET status='failed',status_reason='Transfer expired',updated_at=CURRENT_TIMESTAMP WHERE status IN ('accepted','connecting','transferring','paused') AND expires_at<CURRENT_TIMESTAMP")->execute();
+}
+
+function p2p_transfer_prune_signals(PDO $pdo): void
+{
+    $probe = $pdo->query('SELECT 1 FROM p2p_transfer_signals WHERE expires_at<CURRENT_TIMESTAMP OR delivered_at IS NOT NULL LIMIT 1');
+    $due = $probe->fetchColumn() !== false;
+    $probe->closeCursor();
+    if (!$due) return;
+    $pdo->prepare('DELETE FROM p2p_transfer_signals WHERE expires_at<CURRENT_TIMESTAMP OR delivered_at IS NOT NULL')->execute();
+}
+
 function p2p_transfer_poll_account(PDO $pdo, array $actor): array
 {
     $userId = (int)($actor['user_id'] ?? $actor['id'] ?? 0);
-    $pdo->prepare("UPDATE p2p_transfer_offers SET status='failed',status_reason='Offer expired',updated_at=CURRENT_TIMESTAMP WHERE status='offered' AND expires_at<CURRENT_TIMESTAMP")->execute();
-    $pdo->prepare("UPDATE p2p_transfer_offers SET status='failed',status_reason='Transfer expired',updated_at=CURRENT_TIMESTAMP WHERE status IN ('accepted','connecting','transferring','paused') AND expires_at<CURRENT_TIMESTAMP")->execute();
+    p2p_transfer_expire_offers($pdo);
     $stmt = $pdo->prepare("SELECT o.*,COALESCE(sp.display_name,su.display_name) AS sender_name,COALESCE(rp.display_name,ru.display_name) AS recipient_name FROM p2p_transfer_offers o JOIN users su ON su.id=o.sender_user_id JOIN users ru ON ru.id=o.recipient_user_id LEFT JOIN participants sp ON sp.id=o.sender_participant_id LEFT JOIN participants rp ON rp.id=o.recipient_participant_id WHERE (o.sender_user_id=? OR o.recipient_user_id=?) AND o.created_at>=? ORDER BY o.id DESC LIMIT 50");
     $stmt->execute([$userId,$userId,gmdate('Y-m-d H:i:s', time() - (P2P_TRANSFER_ACCEPTED_SESSION_SECONDS + 3600))]);
     $policy = p2p_transfer_policy($pdo);

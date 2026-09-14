@@ -93,13 +93,13 @@ import {
 
     AvatarRelationshipService
 
-} from "./services/avatar-relationship-service.js";
+} from "./services/avatar-relationship-service.js?v=20260913-away-layout";
 
 import {
 
     AvatarOrderService
 
-} from "./services/avatar-order-service.js";
+} from "./services/avatar-order-service.js?v=20260913-avatar-front";
 
 import {
 
@@ -123,19 +123,19 @@ import {
 
     AvatarDisplayPolicyService
 
-} from "./services/avatar-display-policy-service.js";
+} from "./services/avatar-display-policy-service.js?v=20260913-exact-size";
 
 import {
 
     AvatarVisibilityService
 
-} from "./services/avatar-visibility-service.js";
+} from "./services/avatar-visibility-service.js?v=20260830-avatar-visibility-r2";
 
 import {
 
     P2PAvatarService
 
-} from "./services/p2p-avatar-service.js";
+} from "./services/p2p-avatar-service.js?v=20260830-nameplate-separation-r1";
 
 import {
 
@@ -147,19 +147,19 @@ import {
 
     AvatarDanceService
 
-} from "./services/avatar-dance-service.js";
+} from "./services/avatar-dance-service.js?v=20260913-server-clock-r2";
 
 import {
 
     AvatarRelationshipManagementService
 
-} from "./services/avatar-relationship-management-service.js";
+} from "./services/avatar-relationship-management-service.js?v=20260913-requests";
 
 import {
 
     AvatarRenderer
 
-} from "./renderers/avatar-renderer.js";
+} from "./renderers/avatar-renderer.js?v=20260914-bubble-emojis";
 
 import {
 
@@ -171,13 +171,13 @@ import {
 
     AvatarCoordinator
 
-} from "./coordinators/avatar-coordinator.js";
+} from "./coordinators/avatar-coordinator.js?v=20260913-away-layout";
 
 import {
 
     AvatarDragController
 
-} from "./controllers/avatar-drag-controller.js";
+} from "./controllers/avatar-drag-controller.js?v=20260913-capture-recovery";
 
 //--------------------------------------------------
 // Avatar Runtime

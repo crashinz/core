@@ -18,6 +18,7 @@ function avatar_relationship_capacity_setting_defaults(): array {
 }
 
 function avatar_relationship_capacity_policy(PDO $pdo): array {
+    $limitEnforced = corechat_limit_is_enforced($pdo, AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_SETTING);
     $stored = filter_var(
         app_setting(
             $pdo,
@@ -26,12 +27,14 @@ function avatar_relationship_capacity_policy(PDO $pdo): array {
         ),
         FILTER_VALIDATE_INT
     );
-    $limit = $stored === false
+    $limit = !$limitEnforced
+        ? AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_MAX
+        : ($stored === false
         ? AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_DEFAULT
         : max(
             AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_MIN,
             min(AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_MAX, (int)$stored)
-        );
+        ));
     return [
         'settingKey' => AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_SETTING,
         'revision' => max(1, (int)app_setting(
@@ -40,6 +43,7 @@ function avatar_relationship_capacity_policy(PDO $pdo): array {
             '1'
         )),
         'maximumRegularAvatarLinks' => $limit,
+        'limitEnforced' => $limitEnforced,
         'defaultMaximumRegularAvatarLinks' => AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_DEFAULT,
         'minimumRegularAvatarLinks' => AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_MIN,
         'maximumConfigurableRegularAvatarLinks' => AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_MAX,
@@ -125,12 +129,8 @@ function avatar_relationship_capacity_update(
         ];
     }
 
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = database_transaction_begin($pdo, true);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
         $lockSql = 'SELECT setting_key, value FROM app_settings WHERE setting_key IN (?,?) ORDER BY setting_key';
         if (db_uses_mysql_syntax($pdo)) $lockSql .= ' FOR UPDATE';
         $lock = $pdo->prepare($lockSql);
@@ -144,7 +144,7 @@ function avatar_relationship_capacity_update(
         $current = (int)$before['maximumRegularAvatarLinks'];
         $next = (int)$validation['value'];
         if ($next === $current) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+            database_transaction_commit($pdo, $transaction);
             return [
                 'ok' => true,
                 'idempotent' => true,
@@ -153,7 +153,7 @@ function avatar_relationship_capacity_update(
             ];
         }
         if ((int)$revision !== (int)$before['revision']) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             return [
                 'ok' => false,
                 'code' => 'RELATIONSHIP_CAPACITY_SETTING_STALE',
@@ -167,7 +167,7 @@ function avatar_relationship_capacity_update(
             ? avatar_relationship_capacity_relationships_above_limit($pdo, $next)
             : 0;
         if ($aboveLimit > 0 && !$confirmed) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             return [
                 'ok' => false,
                 'code' => 'RELATIONSHIP_CAPACITY_CONFIRMATION_REQUIRED',
@@ -193,7 +193,7 @@ function avatar_relationship_capacity_update(
                 . "{$aboveLimit} existing relationship" . ($aboveLimit === 1 ? '' : 's')
                 . ' remain above the new limit.'
         );
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
         return [
             'ok' => true,
             'idempotent' => false,
@@ -201,7 +201,7 @@ function avatar_relationship_capacity_update(
             'relationshipsAboveNewLimit' => $aboveLimit,
         ];
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 }
@@ -632,6 +632,7 @@ function avatar_relationship_capacity_admission(
     if ($relationshipRole === 'normal') {
         $limit = (int)avatar_relationship_capacity_policy($pdo)['maximumRegularAvatarLinks'];
         if (avatar_relationship_capacity_regular_member_count($members) + 1 > $limit) {
+            limit_event_record_reached($pdo, AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_SETTING, 'relationship', 'relationship:' . (int)($relationship['id'] ?? 0), 'rejected');
             return avatar_relationship_capacity_limit_error($limit);
         }
     }
@@ -699,6 +700,7 @@ function avatar_relationship_capacity_pair_admission(
         ];
     $limit = (int)avatar_relationship_capacity_policy($pdo)['maximumRegularAvatarLinks'];
     if (avatar_relationship_capacity_regular_member_count($members) > $limit) {
+        limit_event_record_reached($pdo, AVATAR_RELATIONSHIP_REGULAR_LINK_LIMIT_SETTING, 'relationship', 'relationship:' . (int)($relationship['id'] ?? 0), 'rejected');
         return avatar_relationship_capacity_limit_error($limit);
     }
     $projection = avatar_relationship_capacity_geometry_projection($pdo, $relationship, $members, [$initiator, $target]);

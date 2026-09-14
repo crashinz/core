@@ -40,13 +40,25 @@ import {
 
     GameLifecycleService
 
-} from "./services/game-lifecycle-service.js";
+} from "./services/game-lifecycle-service.js?v=b075f1589f29";
 
 import {
 
     GameStageRenderer
 
-} from "./renderers/game-stage-renderer.js";
+} from "./renderers/game-stage-renderer.js?v=8dbe798644a5";
+
+import {
+
+    GameAdaptiveLayoutService
+
+} from "./services/game-adaptive-layout-service.js?v=20260824-pregame-board-visible-r3";
+
+import {
+
+    GameWebcamOverlayService
+
+} from "./services/game-webcam-overlay-service.js?v=20260902-shared-webcams-r1";
 
 //--------------------------------------------------
 // Game Runtime
@@ -70,6 +82,16 @@ export class GameRuntime extends CoreModule {
      * Game stage presentation renderer.
      */
     #stage = null;
+
+    /**
+     * Presentation-only adaptive game/chat layout owner.
+     */
+    #layout = null;
+
+    /**
+     * Shared parent-shell in-game webcam presentation owner.
+     */
+    #webcams = null;
 
     //--------------------------------------------------
     // Constructor
@@ -127,6 +149,28 @@ export class GameRuntime extends CoreModule {
 
     }
 
+    /**
+     * Returns the adaptive game/chat layout service.
+     *
+     * @returns {GameAdaptiveLayoutService}
+     */
+    get layout() {
+
+        return this.#layout;
+
+    }
+
+    /**
+     * Returns the shared in-game webcam overlay service.
+     *
+     * @returns {GameWebcamOverlayService}
+     */
+    get webcams() {
+
+        return this.#webcams;
+
+    }
+
     //--------------------------------------------------
     // Public Diagnostics
     //--------------------------------------------------
@@ -150,7 +194,13 @@ export class GameRuntime extends CoreModule {
                 this.#lifecycle?.getDiagnostics() ?? null,
 
             stage:
-                this.#stage?.getDiagnostics() ?? null
+                this.#stage?.getDiagnostics() ?? null,
+
+            layout:
+                this.#layout?.getDiagnostics() ?? null,
+
+            webcams:
+                this.#webcams?.getDiagnostics() ?? null
 
         });
 
@@ -165,7 +215,9 @@ export class GameRuntime extends CoreModule {
      */
     onInitialize() {
 
+        this.#createLayoutService();
         this.#createStageRenderer();
+        this.#createWebcamOverlayService();
         this.#createLifecycleService();
 
     }
@@ -176,7 +228,9 @@ export class GameRuntime extends CoreModule {
     onDestroy() {
 
         this.#lifecycle?.destroy();
+        this.#webcams?.destroy();
         this.#stage?.destroy();
+        this.#layout?.destroy();
 
     }
 
@@ -199,6 +253,20 @@ export class GameRuntime extends CoreModule {
     }
 
     /**
+     * Creates the presentation-only adaptive layout service.
+     */
+    #createLayoutService() {
+
+        this.#layout =
+            new GameAdaptiveLayoutService(
+                this
+            );
+
+        this.#layout.initialize();
+
+    }
+
+    /**
      * Creates the Game Lifecycle Service runtime component.
      */
     #createLifecycleService() {
@@ -210,6 +278,16 @@ export class GameRuntime extends CoreModule {
             );
 
         this.#lifecycle.initialize();
+
+    }
+
+    /**
+     * Creates the parent-shell webcam presentation owner.
+     */
+    #createWebcamOverlayService() {
+
+        this.#webcams =
+            new GameWebcamOverlayService(this);
 
     }
 

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 76" role="img" aria-label="Brass and teal two-row player nameplate">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#173840"/>
+      <stop offset="0.48" stop-color="#0b242c"/>
+      <stop offset="1" stop-color="#06161c"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff0ad"/>
+      <stop offset="0.28" stop-color="#d89b42"/>
+      <stop offset="0.62" stop-color="#7f4d1f"/>
+      <stop offset="1" stop-color="#efc66f"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-35%" width="140%" height="180%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.75"/>
+    </filter>
+  </defs>
+  <path d="M15 3h226c7 0 12 5 12 12v46c0 7-5 12-12 12H15C8 73 3 68 3 61V15C3 8 8 3 15 3Z" fill="url(#brass)" filter="url(#shadow)"/>
+  <path d="M16 7h224c5 0 9 4 9 9v44c0 5-4 9-9 9H16c-5 0-9-4-9-9V16c0-5 4-9 9-9Z" fill="url(#plate)" stroke="#183d45" stroke-width="2"/>
+  <path d="M13 38h230" stroke="#d9a650" stroke-width="1.4" opacity="0.75"/>
+  <path d="M18 12h220M18 64h220" stroke="#f5d889" stroke-width="1" opacity="0.38"/>
+  <path d="m13 19 7-7m-7 52 7-7m223-38-7-7m7 52-7-7" stroke="#f3cf79" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
+</svg>

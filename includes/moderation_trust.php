@@ -109,13 +109,13 @@ function moderation_trust_capability_catalog(): array
         ],
         'create-temporary-live-website-room' => [
             'label' => 'Create Temporary Live Website Room',
-            'available' => false,
-            'implementationOwner' => 'not-yet-available',
+            'available' => true,
+            'implementationOwner' => 'live-website-rooms',
         ],
         'send-direct-p2p-files' => [
             'label' => 'Send Direct P2P Files',
-            'available' => false,
-            'implementationOwner' => 'not-yet-available',
+            'available' => true,
+            'implementationOwner' => 'p2p-transfer',
         ],
     ];
 }

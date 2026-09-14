@@ -407,6 +407,8 @@ export class AvatarRenderer {
         );
 
         image.classList.toggle("webcam", Boolean(options.webcam));
+        image.style.objectFit = Number(participant.avatar_display_width_px) > 0
+            && Number(participant.avatar_display_height_px) > 0 ? "fill" : "";
         image.classList.toggle("lap-avatar", Boolean(options.lapInitiator));
         image.classList.toggle("lap-primary-avatar", Boolean(options.lapTarget));
         image.classList.toggle("lap-side-left", options.lapSide === "bottom-left");
@@ -473,6 +475,10 @@ export class AvatarRenderer {
      */
     renderedAvatarDimensions(participant, options = {}) {
 
+        const lapInitiator = options.lapInitiator === undefined
+            ? Boolean(this.#runtime.relationships?.isLapLinkInitiator?.(participant))
+            : Boolean(options.lapInitiator);
+
         const fallbackSize =
             Number(options.fallbackSize || DEFAULT_AVATAR_FALLBACK_SIZE);
 
@@ -484,7 +490,7 @@ export class AvatarRenderer {
                 participant,
                 {
                     baseSize: fallbackSize,
-                    lapInitiator: Boolean(options.lapInitiator),
+                    lapInitiator,
                     webcam: options.webcam === undefined
                         ? Boolean(
                             participant?.webcam_enabled &&
@@ -498,11 +504,11 @@ export class AvatarRenderer {
                 maxEdge: Number(options.visualMaxSize || 200)
             };
 
-        if (constraints.kind === "webcam") {
-            return Object.freeze({
+        if (constraints.kind === "webcam" || constraints.kind === "avatar-exact") {
+            return this.#fitLapToHost(participant, {
                 width: constraints.width,
                 height: constraints.height
-            });
+            }, { ...options, lapInitiator });
         }
 
         const naturalWidth =
@@ -526,22 +532,36 @@ export class AvatarRenderer {
                 maxSide / Math.max(naturalWidth, naturalHeight, 1)
             );
 
-        return Object.freeze({
+        return this.#fitLapToHost(participant, {
+            width: Math.max(1, Math.round(naturalWidth * scale)),
+            height: Math.max(1, Math.round(naturalHeight * scale))
+        }, { ...options, lapInitiator });
 
-            width:
-                Math.max(
-                    1,
-                    Math.round(naturalWidth * scale)
-                ),
+    }
 
-            height:
-                Math.max(
-                    1,
-                    Math.round(naturalHeight * scale)
-                )
-
+    #fitLapToHost(participant, dimensions, options) {
+        if (!options.lapInitiator) return Object.freeze(dimensions);
+        const relationship = this.#runtime.relationships?.relationshipForParticipant?.(participant?.id);
+        const member = relationship?.members?.find(item =>
+            Number(item.participantId) === Number(participant?.id));
+        const hostId = Number(member?.lapHostParticipantId || participant?.linked_to || 0);
+        const host = this.#runtime.state?.get?.(hostId);
+        if (!host || hostId === Number(participant?.id)) return Object.freeze(dimensions);
+        // Explicitly non-lap prevents recursive sizing even with malformed links.
+        const hostSize = this.renderedAvatarDimensions(host, {
+            fallbackSize: options.fallbackSize,
+            visualMaxSize: options.visualMaxSize,
+            lapInitiator: false
         });
-
+        // Preserve the existing half-width / 65-of-150-height anchor. The same
+        // footprint fits its mirrored left-hand seat without crossing the edge.
+        const maxWidth = Math.max(1, Math.floor(hostSize.width * 0.5));
+        const maxHeight = Math.max(1, Math.floor(hostSize.height * (85 / 150)));
+        const scale = Math.min(1, maxWidth / dimensions.width, maxHeight / dimensions.height);
+        return Object.freeze({
+            width: Math.min(maxWidth, Math.max(1, Math.round(dimensions.width * scale))),
+            height: Math.min(maxHeight, Math.max(1, Math.round(dimensions.height * scale)))
+        });
     }
 
     /**
@@ -587,10 +607,14 @@ export class AvatarRenderer {
                     avatar_source_width_px: maximumEdge,
                     avatar_source_height_px: maximumEdge,
                     avatar_display_size_px: maximumEdge,
+                    avatar_display_width_px: null,
+                    avatar_display_height_px: null,
                     avatarEl: image
                 }
                 : {
                     ...participant,
+                    avatar_display_width_px: null,
+                    avatar_display_height_px: null,
                     avatarEl: image
                 };
 
@@ -606,6 +630,7 @@ export class AvatarRenderer {
                     {
                         fallbackSize: maximumEdge,
                         visualMaxSize: maximumEdge,
+                        lapInitiator: false,
                         webcam: false
                     }
                 );
@@ -1776,8 +1801,41 @@ export class AvatarRenderer {
         if (!participant?.speechEl) return;
 
         this.#renderCount += 1;
-        participant.speechEl.textContent =
-            text.length > 180 ? `${text.slice(0, 177)}...` : text;
+        const bubble = participant.speechEl;
+        const documentRef = bubble.ownerDocument;
+        const source = String(text || "");
+        const parts = [];
+        let offset = 0;
+        for (const match of source.matchAll(/\[emoji:([a-f0-9]{32})(?::([a-z0-9_-]{1,32}))?\]/g)) {
+            if (match.index > offset) parts.push({ text: source.slice(offset, match.index) });
+            parts.push({ id: match[1], name: match[2] || "custom-emoji" });
+            offset = match.index + match[0].length;
+        }
+        if (offset < source.length) parts.push({ text: source.slice(offset) });
+        const length = parts.reduce((total, part) => total + (part.id ? 1 : part.text.length), 0);
+        let remaining = length > 180 ? 177 : 180;
+        const fragment = documentRef.createDocumentFragment();
+        const appBase = (documentRef.body?.dataset.appBase || "").replace(/\/$/, "");
+        for (const part of parts) {
+            if (remaining <= 0) break;
+            if (part.id) {
+                const image = documentRef.createElement("img");
+                image.className = "chat-custom-emoji";
+                image.src = `${appBase}/api/custom_emojis.php?action=image&id=${part.id}`;
+                image.alt = `:${part.name}:`;
+                image.title = image.alt;
+                image.width = 32;
+                image.height = 32;
+                fragment.appendChild(image);
+                remaining -= 1;
+            } else {
+                const content = part.text.slice(0, remaining);
+                fragment.appendChild(documentRef.createTextNode(content));
+                remaining -= content.length;
+            }
+        }
+        if (length > 180) fragment.appendChild(documentRef.createTextNode("..."));
+        bubble.replaceChildren(fragment);
 
     }
 

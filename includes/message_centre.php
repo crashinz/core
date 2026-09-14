@@ -81,6 +81,7 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
         'avatar_url' => $avatarUrl,
         'role' => (string)($payload['role'] ?? $authorContext['role'] ?? 'user'),
         'is_owner' => (bool)($payload['is_owner'] ?? $authorContext['is_owner'] ?? false),
+        'is_installation_owner' => (bool)($payload['is_installation_owner'] ?? $authorContext['is_installation_owner'] ?? false),
         'content' => (string)($payload['content'] ?? ''),
         'url_preview' => $urlPreview,
         'reply_to' => $replyTo,
@@ -197,29 +198,32 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
     }
 
     if ($channel === 'game') {
-        if ($protection['mode'] !== 'standard') {
-            throw new MessageProtectionException(
-                'This message-protection mode is unavailable for game chat.',
-                'MESSAGE_PROTECTION_MODE_UNAVAILABLE',
-                422
-            );
-        }
         $stmt = $pdo->prepare(
             'INSERT INTO game_chat_messages '
             . '(lobby_code, participant_id, user_id, display_name, content, '
-            . 'message_type, file_size, mime_type, original_name) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?)'
+            . 'original_content, url_preview_json, reply_to_json, message_type, '
+            . 'file_size, mime_type, original_name, protection_mode, '
+            . 'protection_version, protection_key_epoch, protection_envelope_json, client_message_id) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
             (string)($payload['lobby_code'] ?? ''),
             $participantId,
             $userId,
             $displayName,
-            $baseMsg['content'],
+            $protection['storageContent'],
+            null,
+            $protection['storageUrlPreview'],
+            $protection['storageReplyTo'],
             $type,
             $baseMsg['file_size'],
             $baseMsg['mime_type'],
             $baseMsg['original_name'],
+            $protection['mode'],
+            $protection['version'],
+            $protection['keyEpoch'],
+            $protection['envelopeJson'],
+            $protection['clientMessageId'],
         ]);
         return ['id' => (int)$pdo->lastInsertId(), 'channel' => 'game', 'lobby_code' => (string)($payload['lobby_code'] ?? '')] + $baseMsg;
     }

@@ -5,8 +5,22 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'POST required']
 $body = input_json();
 $pdo = db();
 $sessionId = resolve_session_id($pdo, $body['session_id'] ?? '');
+$roomIdStatement = $pdo->prepare('SELECT room_id FROM room_sessions WHERE id=? LIMIT 1');
+$roomIdStatement->execute([$sessionId]);
+$roomId = (int)($roomIdStatement->fetchColumn() ?: 0);
 $joinToken = (string)($body['join_token'] ?? '');
 $p = auth_participant($pdo, $sessionId, $joinToken);
+
+$gameDisconnect = multiplayer_game_disconnect_room_participant(
+    $pdo,
+    $sessionId,
+    (int)$p['id'],
+    (int)$p['user_id'],
+    'room-leave'
+);
+foreach ((array)($gameDisconnect['sessions'] ?? []) as $gameSession) {
+    emit_event($pdo, $sessionId, 'game_update', ['lobby_code' => (string)$gameSession['publicId']]);
+}
 
 $relationshipDeparture = avatar_relationship_force_participant_departure(
     $pdo,
@@ -18,6 +32,7 @@ $pdo->prepare("UPDATE participants SET last_seen_at = NULL, webcam_path = NULL, 
     ->execute([(int)$p['id'], (int)$p['id']]);
 $pdo->prepare('DELETE FROM voice_sessions WHERE participant_id = ?')->execute([(int)$p['id']]);
 $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([(int)$p['user_id']]);
+live_website_rooms_mark_empty_if_unoccupied($pdo, $roomId);
 emit_event($pdo, $sessionId, 'voice', [
     'participant_id' => (int)$p['id'],
     'active' => false,
@@ -28,4 +43,8 @@ emit_event($pdo, $sessionId, 'presence_leave', [
     'participant_id' => (int)$p['id'],
     'display_name' => $p['display_name'],
 ]);
-json_out(['ok' => true, 'relationship_departure' => $relationshipDeparture]);
+json_out([
+    'ok' => true,
+    'relationship_departure' => $relationshipDeparture,
+    'game_disconnect' => $gameDisconnect,
+]);

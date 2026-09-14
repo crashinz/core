@@ -150,7 +150,7 @@ export class ImportedRoomWebsiteCompatibilityService {
      *
      * @returns {string}
      */
-    inlinePlayerHtml(track) {
+    inlinePlayerHtml(track, capability = {}) {
 
         if (!track?.url) return "";
 
@@ -171,7 +171,7 @@ export class ImportedRoomWebsiteCompatibilityService {
 
         }
 
-        if (track.type === "youtube") {
+        if (track.type === "youtube" && capability.available) {
 
             return `
       <div class="vp-import-player">

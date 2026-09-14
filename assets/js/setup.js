@@ -143,6 +143,8 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
   });
   const updateHidden = state => {
     if (hiddenValues) hiddenValues.value = JSON.stringify(state.values);
+    const confirmation = document.getElementById('setup-authentication-protection-disable-confirmed');
+    if (confirmation) confirmation.value = setupSettingsUI?.authenticationProtectionDisableConfirmed ? '1' : '0';
     if (compatibilityState) compatibilityState.textContent = stateLabel(state.compatibilityState);
   };
   const idsForScope = details => registry.visibleEntries
@@ -178,7 +180,9 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
       if (operation === 'set_many') {
         const enabling = Object.values(details.values || {}).some(Boolean);
         const ids = Object.keys(details.values || {});
-        const label = ids.length && ids.every(id => id.startsWith('gesture_part3_'))
+        const label = ids.length && ids.every(id => id.startsWith('flood_'))
+          ? 'flood protections'
+          : (ids.length && ids.every(id => id.startsWith('gesture_part3_'))
           ? 'gesture browsing and organization features'
           : (ids.length && ids.every(id => id.startsWith('gesture_part4_'))
             ? 'gesture creation, package, and media features'
@@ -188,7 +192,7 @@ if (setupSettingsData && setupSettingsContainer && window.SettingsRegistryUI) {
               'allow_personal_gestures',
               'allow_user_gesture_mutation',
               'allow_gesture_audio_delivery',
-            ].includes(id)) ? 'gesture capabilities' : 'dances'));
+            ].includes(id)) ? 'gesture capabilities' : 'dances')));
         return applyDraftValues(details.values, `All ${label} ${enabling ? 'enabled' : 'disabled'}.`);
       }
       if (operation === 'reset_setting') {

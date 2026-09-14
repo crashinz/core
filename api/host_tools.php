@@ -74,6 +74,7 @@ if ($action === 'kick') {
         ->execute([$sessionId, (int)$target['user_id']]);
     $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')
         ->execute([(int)$target['user_id']]);
+    live_website_rooms_mark_empty_if_unoccupied($pdo, (int)$room['id']);
 
     emit_event($pdo, $sessionId, 'host_ejection', [
         'ejection_id' => $ejectionId,
@@ -114,6 +115,7 @@ if ($action === 'community_eject') {
         ->execute([(int)$target['user_id']]);
     $pdo->prepare('UPDATE users SET current_room_id = NULL, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?')
         ->execute([(int)$target['user_id']]);
+    live_website_rooms_mark_empty_if_unoccupied($pdo, (int)$room['id']);
 
     emit_event($pdo, $sessionId, 'community_ejection', [
         'ejection_id' => $ejectionId,

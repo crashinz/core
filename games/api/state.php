@@ -1,17 +1,26 @@
 <?php
-require_once __DIR__ . '/../../includes/base.php';
+require_once __DIR__ . '/_auth.php';
 $pdo = db();
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $lobby = (string)($_GET['lobby'] ?? '');
+    try {
+    $auth = game_compatibility_auth($pdo, $_GET);
+    $lobby = (string)$auth['lobby'];
     $stmt = $pdo->prepare('SELECT state_json FROM game_state WHERE lobby_code = ? LIMIT 1');
     $stmt->execute([$lobby]);
     $state = $stmt->fetchColumn();
     json_out(['state' => $state ? json_decode((string)$state, true) : null]);
+    } catch (MultiplayerGameException $error) {
+        json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
+    }
 }
 $body = input_json();
-$lobby = (string)($body['lobby_id'] ?? $body['lobby'] ?? '');
+try {
+$auth = game_compatibility_auth($pdo, $body);
+$body = $auth['source'];
+$lobby = (string)$auth['lobby'];
 if ($lobby === '') json_out(['error' => 'missing lobby'], 400);
 $incoming = $body['state'] ?? [];
+game_compatibility_record($pdo, $auth, 'legacy-state', ['stateSha256' => strtoupper(hash('sha256', multiplayer_game_canonical_json($incoming)))]);
 if (is_array($incoming) && array_intersect(array_keys($incoming), ['p1', 'p2'])) {
     $pdo->beginTransaction();
     try {
@@ -44,3 +53,6 @@ $pdo->prepare(db_uses_mysql_syntax($pdo)
 )
     ->execute([$lobby, json_encode($incoming)]);
 json_out(['ok' => true]);
+} catch (MultiplayerGameException $error) {
+    json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
+}

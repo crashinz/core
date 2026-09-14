@@ -49,6 +49,7 @@ let voiceRuntime = null;
 let gameRuntime = null;
 let roomEffectsRuntime = null;
 let importedRoomRuntime = null;
+let liveWebsiteRoomRuntime = null;
 let avatarRuntime = null;
 let pollingRuntime = null;
 let runtimeDiagnosticsInstallation = null;
@@ -63,15 +64,44 @@ let gestureCatalogBroadcastChannel = null;
 let GestureCatalogControllerClass = null;
 const messageProtectionPending = new Set();
 const messageProtectionContextCache = new Map();
+function isMissingRoomResponse(error) {
+  return error?.details?.status === 404
+    && error?.responsePayload?.code === 'ROOM_SESSION_NOT_FOUND';
+}
+
+function handleMissingRoomResponse(error) {
+  if (!isMissingRoomResponse(error)) return false;
+  if (roomExitInProgress) return true;
+  const notice = document.createElement('div');
+  notice.id = 'room-session-ended-notice';
+  notice.setAttribute('role', 'alert');
+  notice.style.cssText = 'position:fixed;top:12px;left:12px;right:12px;z-index:2147483647;padding:16px;background:#151b28;color:#fff;border:2px solid #f3c969;border-radius:8px;';
+  const message = document.createElement('span');
+  message.textContent = 'This room is no longer available. Live updates have stopped. ';
+  const link = document.createElement('a');
+  link.href = appUrl('/lobby.php');
+  link.textContent = 'Return to lobby';
+  link.style.cssText = 'color:#f3c969;text-decoration:underline;font-weight:bold;';
+  notice.append(message, link);
+  document.body.append(notice);
+  recordRuntimeDiagnostic('requests', 'room-session-ended', { code: 'ROOM_SESSION_NOT_FOUND' });
+  stopRoomForDocumentExit('room-session-not-found');
+  return true;
+}
+
 const runtimeRequestAbortController = new AbortController();
+let gameChatRequestAbortController = new AbortController();
 function stopRoomForDocumentExit(reason) {
   roomExitInProgress = true;
   avatarRuntime?.p2pAvatar?.clearAll(reason);
   p2pTransferService?.destroy(reason);
   chatRuntime?.poll?.stop();
   if (chatRuntimeCore?.state === 'started') chatRuntimeCore.stop();
+  voiceRuntime?.destroy?.();
+  gameChatRequestAbortController.abort(reason);
   runtimeRequestAbortController.abort(reason);
   runtimeIssueCaptureService?.destroy();
+  liveWebsiteRoomRuntime?.destroy(reason);
   gestureCatalogBroadcastChannel?.close();
   gestureCatalogBroadcastChannel = null;
   avatarRuntime?.coordinator?.cancelPendingLinkChoice(reason);
@@ -81,6 +111,7 @@ window.addEventListener('beforeunload', () => stopRoomForDocumentExit('before-un
 let frameQueued = false;
 let pendingLayout = false;
 let layoutLocked = false;
+let avatarViewportReflowFrame = null;
 const roomLayout = document.querySelector('.room-layout');
 const mainEl = document.querySelector('.main');
 const roomStage = document.getElementById('room-stage');
@@ -122,6 +153,32 @@ const memberProfileActions = document.getElementById('member-profile-actions');
 const ctxProfile = document.getElementById('ctx-profile');
 const gameListEl = document.getElementById('active-games');
 const gameStartMenu = document.getElementById('game-start-menu');
+const roomGamesMenu = document.getElementById('room-games-menu');
+const roomGamesListEl = document.getElementById('room-games-list');
+const roomGamesCount = document.getElementById('room-games-count');
+const roomGamesEmpty = document.getElementById('room-games-empty');
+const roomGamesSummary = document.getElementById('room-games-summary');
+const gamePickerCatalog = document.getElementById('game-picker-catalog');
+const gamePickerSearch = document.getElementById('game-picker-search');
+const gamePickerSelection = document.getElementById('game-picker-selection');
+const gamePickerContinue = document.getElementById('game-picker-continue');
+const gamePickerEmpty = document.getElementById('game-picker-empty');
+const gamePickerCount = document.getElementById('game-picker-count');
+const gameModeModal = document.getElementById('game-mode-modal');
+const gameModeForm = document.getElementById('game-mode-form');
+const gameModeTitle = document.getElementById('game-mode-title');
+const gameModeRecordedChoice = document.getElementById('game-mode-recorded-choice');
+const gameModeStatus = document.getElementById('game-mode-status');
+const gameRecordsModal = document.getElementById('game-records-modal');
+let gameModeDefinition = null;
+let gameModeReturnFocus = null;
+let gameRecordsReturnFocus = null;
+let gameCatalogDefinitions = [];
+let gameCatalogLoaded = false;
+let gameCatalogFilter = 'all';
+let selectedGameCatalogKey = '';
+let gamePickerDragState = null;
+let roomGamesDragState = null;
 const voiceSideSection = document.getElementById('voice-side-section');
 const voiceTitleEl = document.getElementById('voice-title');
 const voiceListEl = document.getElementById('voice-list');
@@ -149,6 +206,229 @@ const roomMenu = document.getElementById('room-menu');
 const roomActionMenu = document.getElementById('room-action-menu');
 const gameStage = document.getElementById('game-stage');
 const gameFrame = document.getElementById('game-frame');
+const gamePresentationActions = document.getElementById('game-presentation-actions');
+const gamePauseFollowupActions = document.getElementById('game-pause-followup-actions');
+const gameTerminalActions = document.getElementById('game-terminal-actions');
+const embeddedGamePresentationButtons = {
+  soundFx: document.getElementById('game-sfx-toggle'),
+  visualFx: document.getElementById('game-gfx-toggle'),
+  music: document.getElementById('game-music-toggle'),
+};
+const embeddedGamePrimaryButtons = {
+  pause: document.getElementById('game-pause'),
+};
+const embeddedGameActionRows = {
+  pause: gamePauseFollowupActions,
+  terminal: gameTerminalActions,
+};
+let embeddedGameControlsObserver = null;
+let embeddedGameControlsSyncFrame = 0;
+const embeddedGameActionProxyRows = new WeakMap();
+
+function embeddedGameControlNode(controlId) {
+  try {
+    return gameFrame?.contentDocument?.querySelector?.(`[data-separate-control="${controlId}"]`) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function embeddedGamePrimaryControlNode(controlId) {
+  try {
+    return gameFrame?.contentDocument?.querySelector?.(`[data-external-game-control="${controlId}"]`) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function embeddedGameControlAvailable(node) {
+  if (!node || node.hidden) return false;
+  for (let current = node.parentElement; current; current = current.parentElement) {
+    if (current.hidden) return false;
+  }
+  return true;
+}
+
+function embeddedGameActionContext() {
+  try {
+    const frameDocument = gameFrame?.contentDocument;
+    const lobbyCode = String(gameRuntime?.lifecycle?.getActiveGame?.()?.lobby_code || '');
+    const source = gameFrame?.getAttribute('src');
+    if (!gameFrame?.isConnected || !frameDocument || !lobbyCode || !source) return null;
+    const expected = new URL(source, window.location.href);
+    const actual = new URL(frameDocument.location.href);
+    const sourceLobby = expected.searchParams.get('game_session_id') || expected.searchParams.get('lobby') || '';
+    if (expected.origin !== window.location.origin || actual.origin !== expected.origin
+        || actual.pathname !== expected.pathname || actual.search !== expected.search
+        || sourceLobby !== lobbyCode) return null;
+    expected.hash = '';
+    return { frameDocument, lobbyCode, source: expected.href };
+  } catch (_) {
+    return null;
+  }
+}
+
+function syncEmbeddedGameActionRows() {
+  const context = embeddedGameActionContext();
+  for (const [rowId, host] of Object.entries(embeddedGameActionRows)) {
+    if (!host) continue;
+    let binding = embeddedGameActionProxyRows.get(host);
+    if (!context) {
+      if (host.childElementCount) host.replaceChildren();
+      host.hidden = true;
+      embeddedGameActionProxyRows.delete(host);
+      continue;
+    }
+    if (!binding || binding.context.frameDocument !== context.frameDocument
+        || binding.context.lobbyCode !== context.lobbyCode || binding.context.source !== context.source) {
+      if (host.childElementCount) host.replaceChildren();
+      binding = { context, proxies: new Map() };
+      embeddedGameActionProxyRows.set(host, binding);
+    }
+    const selector = '[data-external-game-row="' + rowId + '"]';
+    const sources = Array.from(context.frameDocument.querySelectorAll(selector));
+    const sourceSet = new Set(sources);
+    for (const [source, proxy] of binding.proxies) {
+      if (!sourceSet.has(source)) {
+        proxy.remove();
+        binding.proxies.delete(source);
+      }
+    }
+    let visibleCount = 0;
+    for (const [index, source] of sources.entries()) {
+      let proxy = binding.proxies.get(source);
+      if (!proxy) {
+        proxy = document.createElement('button');
+        proxy.type = 'button';
+        proxy.addEventListener('click', () => {
+          const current = embeddedGameActionContext();
+          if (!current || embeddedGameActionProxyRows.get(host) !== binding
+              || current.frameDocument !== context.frameDocument || current.lobbyCode !== context.lobbyCode
+              || current.source !== context.source || !host.isConnected || !proxy.isConnected
+              || proxy.parentElement !== host
+              || binding.proxies.get(source) !== proxy || source.ownerDocument !== current.frameDocument
+              || !embeddedGameControlAvailable(gameFrame) || !embeddedGameControlAvailable(proxy)
+              || !embeddedGameControlAvailable(source) || proxy.disabled || source.disabled
+              || source.matches(':disabled')
+              || !Array.from(current.frameDocument.querySelectorAll(selector)).includes(source)) return;
+          source.click();
+          scheduleEmbeddedGamePresentationSync();
+        });
+        binding.proxies.set(source, proxy);
+      }
+      const visible = embeddedGameControlAvailable(source);
+      const label = String(source.textContent || '').trim() || 'Game action';
+      const className = 'btn' + (source.classList.contains('lifecycle-confirm') ? ' btn-danger' : '');
+      const title = String(source.title || '');
+      if (proxy.textContent !== label) proxy.textContent = label;
+      if (proxy.className !== className) proxy.className = className;
+      if (proxy.title !== title) proxy.title = title;
+      proxy.hidden = !visible;
+      proxy.disabled = !visible || source.disabled || source.matches(':disabled');
+      if (visible) visibleCount += 1;
+      if (host.children[index] !== proxy) host.insertBefore(proxy, host.children[index] || null);
+    }
+    host.hidden = visibleCount === 0;
+  }
+}
+
+function syncEmbeddedGamePresentationControls() {
+  embeddedGameControlsSyncFrame = 0;
+  for (const [controlId, button] of Object.entries(embeddedGamePrimaryButtons)) {
+    if (!button) continue;
+    const source = embeddedGamePrimaryControlNode(controlId);
+    if (!source) continue;
+    const visible = embeddedGameControlAvailable(source);
+    button.hidden = !visible;
+    button.disabled = !visible || source.disabled;
+    button.textContent = String(source.textContent || '').trim() || 'Pause game';
+  }
+  let visibleCount = 0;
+  for (const [controlId, button] of Object.entries(embeddedGamePresentationButtons)) {
+    if (!button) continue;
+    const source = embeddedGameControlNode(controlId);
+    const visible = embeddedGameControlAvailable(source);
+    button.hidden = !visible;
+    button.disabled = !visible || source.disabled;
+    if (!visible) {
+      button.removeAttribute('aria-pressed');
+      continue;
+    }
+    visibleCount += 1;
+    const pressed = source.getAttribute('aria-pressed') === 'true';
+    const label = controlId === 'soundFx' ? 'SFX' : controlId === 'visualFx' ? 'GFX' : 'Music';
+    button.textContent = `${label} ${pressed ? 'On' : 'Off'}`;
+    button.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+  }
+  if (gamePresentationActions) gamePresentationActions.hidden = visibleCount === 0;
+
+  syncEmbeddedGameActionRows();
+}
+
+function scheduleEmbeddedGamePresentationSync() {
+  if (embeddedGameControlsSyncFrame) return;
+  embeddedGameControlsSyncFrame = requestAnimationFrame(syncEmbeddedGamePresentationControls);
+}
+
+function observeEmbeddedGamePresentationControls() {
+  embeddedGameControlsObserver?.disconnect();
+  embeddedGameControlsObserver = null;
+  if (embeddedGameControlsSyncFrame) cancelAnimationFrame(embeddedGameControlsSyncFrame);
+  embeddedGameControlsSyncFrame = 0;
+  let body = null;
+  try {
+    body = gameFrame?.contentDocument?.body || null;
+  } catch (_) {
+    body = null;
+  }
+  if (!body) {
+    syncEmbeddedGamePresentationControls();
+    return;
+  }
+  body.dataset.externalGameControls = 'true';
+  embeddedGameControlsObserver = new MutationObserver(scheduleEmbeddedGamePresentationSync);
+  embeddedGameControlsObserver.observe(body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['hidden', 'disabled', 'aria-pressed'],
+  });
+  syncEmbeddedGamePresentationControls();
+}
+
+for (const [controlId, button] of Object.entries(embeddedGamePresentationButtons)) {
+  button?.addEventListener('click', () => {
+    const source = embeddedGameControlNode(controlId);
+    if (!embeddedGameControlAvailable(source) || source.disabled) return;
+    source.click();
+    scheduleEmbeddedGamePresentationSync();
+  });
+}
+for (const [controlId, button] of Object.entries(embeddedGamePrimaryButtons)) {
+  button?.addEventListener('click', (event) => {
+    const source = embeddedGamePrimaryControlNode(controlId);
+    if (!embeddedGameControlAvailable(source) || source.disabled) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    source.click();
+    scheduleEmbeddedGamePresentationSync();
+  }, true);
+}
+gameFrame?.addEventListener('load', () => {
+  if (gamePresentationActions) gamePresentationActions.hidden = true;
+  if (gamePauseFollowupActions) {
+    gamePauseFollowupActions.replaceChildren();
+    gamePauseFollowupActions.hidden = true;
+  }
+  if (gameTerminalActions) {
+    gameTerminalActions.replaceChildren();
+    gameTerminalActions.hidden = true;
+  }
+  for (const button of Object.values(embeddedGamePresentationButtons)) {
+    if (button) button.hidden = true;
+  }
+  window.setTimeout(observeEmbeddedGamePresentationControls, 0);
+});
 const mediaPicker = document.getElementById('media-picker');
 const mediaSearchInput = document.getElementById('media-search-input');
 const gifResults = document.getElementById('gif-results');
@@ -207,11 +487,17 @@ const auraOptionsEl = document.getElementById('aura-options');
 const auraPreviewAvatar = document.getElementById('aura-preview-avatar');
 const auraPreviewLayer = document.querySelector('#aura-modal .aura-preview-layer');
 const avatarFileInput = document.getElementById('avatar-file-input');
+const nameplateFileInput = document.getElementById('nameplate-file-input');
+const ctxChangeNameplate = document.getElementById('ctx-change-nameplate');
+const ctxRemoveNameplate = document.getElementById('ctx-remove-nameplate');
 const ctxToggleWebcam = document.getElementById('ctx-toggle-webcam');
+const sidebarWebcamToggle = document.getElementById('webcam-toggle');
 const ctxWebcamVisibility = document.getElementById('ctx-webcam-visibility');
 const ctxWebcamReceive = document.getElementById('ctx-webcam-receive');
 const ctxAvatarVisibility = document.getElementById('ctx-avatar-visibility');
 const ctxAvatarUserVisibility = document.getElementById('ctx-avatar-user-visibility');
+const ctxNameplateVisibility = document.getElementById('ctx-nameplate-visibility');
+const ctxNameplateUserVisibility = document.getElementById('ctx-nameplate-user-visibility');
 const ctxGestureSenderVisibility = document.getElementById('ctx-gesture-sender-visibility');
 const ctxSendFileGesture = document.getElementById('ctx-send-file-gesture');
 const ctxAuras = document.getElementById('ctx-auras');
@@ -226,6 +512,10 @@ const avatarSizeCurrent = document.getElementById('avatar-size-current');
 const avatarSizeAvatarFields = document.getElementById('avatar-size-avatar-fields');
 const avatarSizeWebcamFields = document.getElementById('avatar-size-webcam-fields');
 const avatarSizeEdge = document.getElementById('avatar-size-edge');
+const avatarSizeMode = document.getElementById('avatar-size-mode');
+const avatarExactWidth = document.getElementById('avatar-exact-width');
+const avatarExactHeight = document.getElementById('avatar-exact-height');
+const avatarExactMatchParticipant = document.getElementById('avatar-exact-match-participant');
 const avatarSizeWebcamPreset = document.getElementById('avatar-size-webcam-preset');
 const avatarSizeWebcamWidth = document.getElementById('avatar-size-webcam-width');
 const avatarSizeWebcamHeight = document.getElementById('avatar-size-webcam-height');
@@ -255,15 +545,44 @@ const gestureShowText = document.getElementById('gesture-show-text');
 const gesturePlaySounds = document.getElementById('gesture-play-sounds');
 const gestureOptionsReset = document.getElementById('gesture-options-reset');
 const gestureOptionsStatus = document.getElementById('gesture-options-status');
+const showRoleMessageColors = document.getElementById('show-role-message-colors');
+const showRoleMessageTitles = document.getElementById('show-role-message-titles');
+const showIdentityNameplates = document.getElementById('show-identity-nameplates');
+const importantMessageControl = document.getElementById('important-message-control');
+const importantMessageToggle = document.getElementById('important-message-toggle');
+const CHAT_ROLE_MESSAGE_COLORS_KEY = 'corechat.chat.role-message-colors.v1';
+const CHAT_ROLE_MESSAGE_TITLES_KEY = 'corechat.chat.role-message-titles.v1';
+const CHAT_IDENTITY_NAMEPLATES_KEY = 'corechat.chat.identity-nameplates.v1';
+const storedChatBoolean = (key, fallback = true) => {
+  try {
+    const value = window.localStorage.getItem(key);
+    return value === null ? fallback : value !== 'false';
+  } catch (_) {
+    return fallback;
+  }
+};
+let chatAppearancePreferences = {
+  showRoleMessageColors: storedChatBoolean(CHAT_ROLE_MESSAGE_COLORS_KEY, false),
+  showRoleMessageTitles: storedChatBoolean(CHAT_ROLE_MESSAGE_TITLES_KEY, false),
+  showIdentityNameplates: storedChatBoolean(CHAT_IDENTITY_NAMEPLATES_KEY),
+};
+if (showRoleMessageTitles) showRoleMessageTitles.checked = chatAppearancePreferences.showRoleMessageTitles;
 let webcamPreferencesPending = false;
 let gesturePreferencesPending = false;
 let bootstrapped = false;
 let textMenuMode = 'copy';
 let lastLatencyMs = null;
+const latencySamples = [];
+const isLoopbackHost = /^(?:127(?:\.\d{1,3}){3}|localhost)$/.test(location.hostname);
 let ctxMenuParticipantId = null;
 let memberProfileUserId = null;
+const memberProfileCache = new Map();
+const memberProfileRequests = new Map();
 let memberProfileReturnFocus = null;
 let memberProfileSnapshot = null;
+let memberProfileRequestVersion = 0;
+const MEMBER_PROFILE_IDENTITY_WAIT_TIMEOUT_MS = 2000;
+const MEMBER_PROFILE_IDENTITY_WAIT_INTERVAL_MS = 40;
 let avatarOrientationPending = false;
 let avatarOrientationIntentGeneration = 0;
 let avatarOrientationQueuedIntent = null;
@@ -289,9 +608,23 @@ let webcamAudienceDecision = null;
 let webcamAudienceReturnFocus = null;
 let privateVoiceReturnFocus = null;
 const pendingRemoteVideoStreams = new Map();
+
+function syncLocalWebcamToggleButton() {
+  if (!sidebarWebcamToggle) return;
+  const active = Boolean(webcamIntent || webcamStream);
+  const blocked = !webcamUseAllowed() && !active;
+  sidebarWebcamToggle.textContent = active ? 'Stop Camera' : 'Start Camera';
+  sidebarWebcamToggle.disabled = blocked;
+  sidebarWebcamToggle.title = blocked ? 'Webcam use is disabled for this installation.' : '';
+  sidebarWebcamToggle.setAttribute('aria-pressed', active ? 'true' : 'false');
+}
 const AVATAR_STAGE_SIZE = 150;
 const blockedUserIds = new Set();
 const mutedUserPolicies = new Map();
+const revealedPersonalMuteMessages = new Set();
+const PERSONAL_MUTE_SCOPES = ['text-bubbles', 'gestures-audio', 'notices-unread', 'voice', 'avatar-webcam-placeholder'];
+const MUTED_MESSAGE_PLACEHOLDER = 'Muted message — reveal this one message from its message actions.';
+let muteExpiryTimer = null;
 let voiceNoteRecorder = null;
 let voiceNoteChunks = [];
 let voiceNoteStream = null;
@@ -308,6 +641,7 @@ let roomDeleteInProgress = false;
 const seenRoomHistoryClears = new Set();
 
 let gifSearchTimer = null;
+let gifSearchState = null;
 const gifDurationCache = new Map();
 let activeMediaTab = 'gifs';
 let gesturePage = 1;
@@ -326,26 +660,31 @@ const EMOJI_OPTIONS = [
   '👍','👎','👏','🙏','💅','👑','💬','🌐','✉️','➕','🔒','🔓','⚠️','💀','🫶','🫦','😌','😏','😉','😈'
 ];
 
+let roomServerClock = null;
+
 async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
+  initializeEmojiComposer();
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }, ServerClock] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
-    import(appUrl('/assets/js/runtime/chat/chat-runtime.js')),
+    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260914-custom-emojis')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
-    import(appUrl('/assets/js/runtime/game/game-runtime.js')),
+    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=9951ddcc1828')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
-    import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js')),
-    import(appUrl('/assets/js/runtime/avatar/avatar-runtime.js')),
-    import(appUrl('/assets/js/runtime/polling/polling-runtime.js')),
+    import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js?v=20260913-regression')),
+    import(`${appUrl('/assets/js/runtime/avatar/avatar-runtime.js?v=20260914-bubble-emojis')}?v=20260913-away-layout`),
+    import(`${appUrl('/assets/js/runtime/polling/polling-runtime.js')}?v=20260901-latency-phase-r1`),
     import(appUrl('/assets/js/core/runtime-diagnostics.js')),
-    import(appUrl('/assets/js/core/runtime-request-client.js')),
-    import(appUrl('/assets/js/core/runtime-issue-capture-service.js')),
+    import(appUrl('/assets/js/core/runtime-request-client.js?v=20260913-server-clock-r2')),
+  import(appUrl('/assets/js/core/runtime-issue-capture-service.js?v=20260913-local-failure-recovery')),
     import(appUrl('/assets/js/runtime/gesture/gesture-presentation-service.js')),
-    import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js')),
-    import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js')),
+    import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js?v=20260914-menu-position')),
+    import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js?v=20260913-server-clock')),
+    import(appUrl('/assets/js/core/animation-server-clock.js?v=20260913-r2')),
   ]);
+  roomServerClock = ServerClock;
 
   if (!runtimeDiagnosticsInstallation) {
     const diagnosticsCapability = runtimeDiagnosticsCapability();
@@ -376,8 +715,21 @@ async function initializeAvatarRuntime() {
       endpoint: appUrl('/api/runtime_issues.php'),
       csrfToken: CSRF_TOKEN,
       diagnostics: runtimeDiagnostics,
-      buildId: '000045',
+      buildId: '000063-admin-game-diagnostics-r2',
     }).start();
+    runtimeIssueCaptureService.observeGameFrame(gameFrame, {
+      getContext: () => {
+        const activeGame = gameRuntime?.lifecycle?.getActiveGame?.() || null;
+          return {
+            gameType: String(activeGame?.game_type || ''),
+            sessionStatus: String(activeGame?.framework?.status || ''),
+            gameKey: String(activeGame?.game_key || activeGame?.id || ''),
+          };
+      },
+    });
+    runtimeVerificationControls.register('capture-game-diagnostic', details =>
+      runtimeIssueCaptureService.captureGameDiagnostic(details || {})
+    );
   }
 
   runtimeRequestClient = new RuntimeRequestClient({
@@ -385,12 +737,24 @@ async function initializeAvatarRuntime() {
     csrfToken: CSRF_TOKEN,
     lifecycleSignal: runtimeRequestAbortController.signal,
     onFailure(error) {
+      if (error?.code === 'REQUEST_ABORTED') return;
+      if (handleMissingRoomResponse(error)) return;
+      if (
+        error?.details?.endpointCategory === 'game-chat'
+        && error?.details?.requestContext?.ownerCurrentAtOutcome === false
+      ) return;
       recordRuntimeDiagnostic('requests', 'runtime-request-failure', {
         code: error.code,
         message: error.message,
         ...error.details,
       });
-      runtimeIssueCaptureService?.captureRequestFailure(error)?.catch(() => {});
+      if (error?.details?.endpointCategory === 'games') {
+        runtimeIssueCaptureService?.captureGameRequestFailure(error, {
+          gameType: String(error?.details?.requestContext?.gameType || 'room-game-runtime'),
+        })?.catch(() => {});
+      } else {
+        runtimeIssueCaptureService?.captureRequestFailure(error)?.catch(() => {});
+      }
     },
   });
 
@@ -697,14 +1061,22 @@ function configureAvatarAura() {
 function configureAvatarVisibility() {
   avatarRuntime?.visibility?.configure({
     mutate(body) {
-      return apiPost('/api/avatar_visibility_preferences.php', {
+      return mutateVisibilityWithRetry({
+        url: '/api/avatar_visibility_preferences.php',
+        staleCode: 'AVATAR_VISIBILITY_STALE',
+        body: {
         ...body,
         session_id: cfg?.sessionId,
         join_token: cfg?.myJoinToken,
+        },
+        applyStaleProjection(projection) {
+          avatarRuntime?.visibility?.applyServerProjection(projection, 'avatar-visibility:stale-refresh');
+        },
       });
     },
     onMutationResult(result) {
       applyRevealedAvatarSources(result?.revealedAvatars || []);
+      applyNameplateVisibilityProjection(result?.nameplateVisibilityPreferences || {});
     },
     onChange(change) {
       reconcileAvatarVisibility(change);
@@ -737,6 +1109,7 @@ function configureParticipantActionCatalog() {
   roomRuntime?.participantActions?.configure({
     getViewer: () => participants.get(Number(cfg?.myParticipantId)) || null,
     getAvatarVisibility: participant => avatarVisibilityFor(participant),
+    getNameplateVisibility: participant => nameplateVisibilityFor(participant),
     getGestureMediaVisibility: participant => ({
       hidden: gesturePresentation?.isSenderHidden?.(participant?.user_id) === true,
     }),
@@ -777,6 +1150,12 @@ function configureChatMessageRenderer() {
     avatarPresentationHtml,
     participantRoleClass,
     participantRoleLabel,
+    participantRoleBadgeHtml,
+    getChatAppearancePreferences: () => ({
+      ...chatAppearancePreferences,
+      showRoleMessageTitles: showRoleMessageTitles?.checked === true,
+    }),
+    identityNameplateUrl,
     displayNameFor,
     messageVisible,
     gestureFromMessage,
@@ -787,6 +1166,21 @@ function configureChatMessageRenderer() {
     openMemberProfile,
     applyReaction,
   });
+}
+
+async function mutateVisibilityWithRetry({ url, staleCode, body, applyStaleProjection }) {
+  try {
+    return await apiPost(url, body);
+  } catch (error) {
+    const payload = error?.responsePayload;
+    const projection = payload?.preferences;
+    if (String(payload?.code || '') !== staleCode || !projection) throw error;
+    applyStaleProjection?.(projection);
+    return apiPost(url, {
+      ...body,
+      expected_version: Math.max(1, Number(projection.version || 1)),
+    });
+  }
 }
 
 function configureP2PTransferRuntime() {
@@ -831,13 +1225,14 @@ function configureP2PAvatarRuntime() {
     sendSignal(media, participantId, type, data) {
       return voiceRuntime?.media?.sendExternalSignal(media, participantId, type, data);
     },
-    authorizeSource(authorization) {
+    authorizeSource(authorization, assetKind = 'avatar') {
       return apiPost('/api/p2p_avatar.php', {
         action: 'authorize_source',
         session_id: cfg?.sessionId,
         participant_id: cfg?.myParticipantId,
         join_token: cfg?.myJoinToken,
         authorization,
+        asset_kind: assetKind,
       });
     },
     refreshAuthorization(targetParticipantId) {
@@ -849,13 +1244,55 @@ function configureP2PAvatarRuntime() {
         target_participant_id: Number(targetParticipantId),
       });
     },
-    onAuthorization(participantId, projection) {
+    onAuthorization(participantId, projection, assetKind = 'avatar') {
       const person = participants.get(Number(participantId));
       if (!person) return;
-      participants.update(Number(participantId), {
+      participants.update(Number(participantId), assetKind === 'nameplate' ? {
+        p2p_nameplate: projection,
+        nameplate_delivery: 'p2p-prefetch',
+      } : {
         p2p_avatar: projection,
         avatar_delivery: 'p2p-prefetch',
       });
+    },
+    onAssetReady(participantId, assetKind, objectUrl, identity) {
+      const person = participants.get(Number(participantId));
+      const projection = assetKind === 'nameplate' ? person?.p2p_nameplate : person?.p2p_avatar;
+      if (!person || String(projection?.identity || '') !== String(identity)) return false;
+      participants.update(Number(participantId), assetKind === 'nameplate' ? {
+        nameplate_path: null,
+        nameplate_url: objectUrl,
+        p2p_nameplate_object_identity: identity,
+      } : {
+        avatar_path: null,
+        avatar_url: objectUrl,
+        p2p_avatar_object_identity: identity,
+        avatar_version: Date.now(),
+      });
+      renderParticipant(person, { animateJoin: false });
+      renderActiveChat();
+      return true;
+    },
+    onAssetCleared(participantId, assetKind, identity, reason) {
+      const person = participants.get(Number(participantId));
+      const current = assetKind === 'nameplate'
+        ? person?.p2p_nameplate_object_identity
+        : person?.p2p_avatar_object_identity;
+      if (!person || String(current || '') !== String(identity)) return;
+      participants.update(Number(participantId), assetKind === 'nameplate' ? {
+        nameplate_path: null,
+        nameplate_url: null,
+        p2p_nameplate_object_identity: null,
+      } : {
+        avatar_path: null,
+        avatar_url: null,
+        p2p_avatar_object_identity: null,
+        avatar_version: Date.now(),
+      });
+      if (!roomExitInProgress && reason !== 'participant-removed' && reason !== 'service-destroyed') {
+        renderParticipant(person, { animateJoin: false });
+        renderActiveChat();
+      }
     },
     onAvatarReady(participantId, objectUrl, identity) {
       const person = participants.get(Number(participantId));
@@ -884,6 +1321,9 @@ function configureP2PAvatarRuntime() {
         renderActiveChat();
       }
     },
+    isAssetHidden: (participant, assetKind = 'avatar') => assetKind === 'nameplate'
+      ? nameplateVisibilityFor(participant).hidden
+      : avatarVisibilityFor(participant).hidden,
     isHidden: participant => avatarVisibilityFor(participant).hidden,
     isBlocked: participant => isUserBlocked(participant?.user_id),
     recordLifecycle(entry = {}) {
@@ -911,6 +1351,33 @@ function configureChatPrivateChats() {
     focusComposer() {
       document.getElementById('chat-input')?.focus();
     },
+  });
+}
+
+function configureChatNotifications() {
+  if (!cfg?.myUserId) return;
+  chatRuntime?.notifications?.configure({
+    document, window,
+    getConfig: () => cfg,
+    getActiveChat: () => activeChatKey(),
+    storageKey: `corechat.message-chime.v1:${APP_BASE}:${cfg.myUserId}`,
+    soundUrl: appUrl('/assets/audio/message-chime.wav'),
+    toggle: document.getElementById('message-chime-toggle'),
+    focusedToggle: document.getElementById('message-chime-focused-toggle'),
+    roomToggle: document.getElementById('room-message-chime-toggle'),
+    roomIntervalDown: document.getElementById('room-message-chime-interval-down'),
+    roomIntervalUp: document.getElementById('room-message-chime-interval-up'),
+    roomIntervalValue: document.getElementById('room-message-chime-interval-value'),
+    roomIntervalPresets: document.getElementById('room-message-chime-interval-presets'),
+    preview: document.getElementById('message-chime-preview'),
+    volumeDown: document.getElementById('message-chime-volume-down'),
+    volumeUp: document.getElementById('message-chime-volume-up'),
+    volumeValue: document.getElementById('message-chime-volume-value'),
+    intervalDown: document.getElementById('message-chime-interval-down'),
+    intervalUp: document.getElementById('message-chime-interval-up'),
+    intervalValue: document.getElementById('message-chime-interval-value'),
+    intervalPresets: document.getElementById('message-chime-interval-presets'),
+    status: document.getElementById('message-chime-status'),
   });
 }
 
@@ -952,6 +1419,21 @@ function configureChatUnread() {
 
 function configureChatNavigation() {
   chatRuntime?.navigation?.configure({
+    readComposerDraft() {
+      const input = document.getElementById('chat-input');
+      return { text: input?.value || '', start: input?.selectionStart || 0, end: input?.selectionEnd || 0,
+        important: Boolean(document.getElementById('important-message-toggle')?.checked) };
+    },
+    restoreComposerDraft(draft) {
+      const input = document.getElementById('chat-input');
+      if (!input) return;
+      input.value = draft?.text || '';
+      input.setSelectionRange(draft?.start || 0, draft?.end || 0);
+      const important = document.getElementById('important-message-toggle');
+      if (important) important.checked = Boolean(draft?.important);
+      const counter = document.getElementById('char-counter');
+      if (counter) counter.textContent = `${input.value.length}/${input.maxLength > 0 ? input.maxLength : 1000}`;
+    },
     clearUnread,
     stopTypingNow,
     stopGameTypingNow,
@@ -963,6 +1445,7 @@ function configureChatNavigation() {
     updateComposerPlaceholder,
     renderReplyDraft,
     syncActiveTabs(chatKey) {
+      chatRuntime?.notifications?.syncAttention();
       document.querySelectorAll('.chat-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.chatTab === chatKey);
       });
@@ -1071,6 +1554,10 @@ function messageProtectionConversation(chatKey = activeChatKey()) {
     const key = String(cfg?.messageProtection?.room?.conversationKey || '');
     return key ? { kind: 'room', key } : null;
   }
+  if (chatKey.startsWith('game:')) {
+    const key = String(chatKey.slice(5));
+    return key ? { kind: 'game', key } : null;
+  }
   return null;
 }
 
@@ -1081,6 +1568,16 @@ function messageProtectionPolicyFor(chatKey = activeChatKey()) {
   if (conversation.kind === 'dm') {
     return (projection.dm || []).find(policy => policy.conversationKey === conversation.key) || {
       conversationKind: 'dm',
+      conversationKey: conversation.key,
+      mode: 'standard',
+      protocolVersion: 1,
+      keyEpoch: 1,
+      revision: 0,
+    };
+  }
+  if (conversation.kind === 'game') {
+    return projection.game?.[conversation.key] || {
+      conversationKind: 'game',
       conversationKey: conversation.key,
       mode: 'standard',
       protocolVersion: 1,
@@ -1100,6 +1597,9 @@ function messageProtectionUpdatePolicy(policy) {
     if (index >= 0) policies[index] = policy;
     else policies.push(policy);
     cfg.messageProtection.dm = policies;
+  } else if (policy.conversationKind === 'game') {
+    cfg.messageProtection.game = cfg.messageProtection.game || {};
+    cfg.messageProtection.game[policy.conversationKey] = policy;
   } else {
     cfg.messageProtection[policy.conversationKind] = policy;
   }
@@ -1157,6 +1657,7 @@ async function messageProtectionFetchContext(conversation, deviceId = '', fresh 
     operation: 'message-protection-context',
     endpointCategory: 'message-protection',
     cache: 'no-store',
+    shouldReportFailure: error => !messageProtectionRequiresAuthentication(error),
   });
   messageProtectionContextCache.set(cacheKey, promise);
   try {
@@ -1524,7 +2025,18 @@ async function sendProtectedTextMessage(content, chatKey) {
     payload = { ...payload, channel: 'dm', target_user_id: dmUserId };
   }
   stopTypingNow();
-  const message = await apiPost('/api/messages.php', payload);
+  let message;
+  if (conversation.kind === 'game') {
+    message = await apiPost('/api/game_chat.php', {
+      ...payload,
+      action: 'message',
+      channel: 'game',
+      lobby_code: conversation.key,
+    });
+    chatGameChat().addMessage(message, false);
+  } else {
+    message = await apiPost('/api/messages.php', payload);
+  }
   chatReply().clearDraft();
   if (message.channel === 'link') {
     addMessageToChannel(message, relationship?.chatKey || chatKey, false);
@@ -1625,6 +2137,32 @@ function closeMessageProtectionDialog({ restoreFocus = true } = {}) {
   if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
 }
 
+let messageProtectionAuthenticationReturnFocus = null;
+
+function messageProtectionRequiresAuthentication(error) {
+  return error?.code === 'AUTH_REDIRECT'
+    || [401, 403].includes(Number(error?.details?.status || 0))
+    || Boolean(error?.reauthenticationRequired);
+}
+
+function openMessageProtectionAuthenticationDialog(returnFocus = document.activeElement) {
+  const modal = document.getElementById('message-protection-auth-dialog');
+  if (!modal) return;
+  messageProtectionAuthenticationReturnFocus = returnFocus?.isConnected ? returnFocus : null;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  document.getElementById('message-protection-auth-open')?.focus({ preventScroll: true });
+}
+
+function closeMessageProtectionAuthenticationDialog() {
+  const modal = document.getElementById('message-protection-auth-dialog');
+  modal?.classList.remove('open');
+  modal?.setAttribute('aria-hidden', 'true');
+  const returnFocus = messageProtectionAuthenticationReturnFocus;
+  messageProtectionAuthenticationReturnFocus = null;
+  if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+}
+
 async function changeMessageProtectionMode() {
   const chatKey = activeChatKey();
   const conversation = messageProtectionConversation(chatKey);
@@ -1648,7 +2186,7 @@ async function changeMessageProtectionMode() {
     input.checked = input.value === policy.mode;
   });
   const e2eeChoice = elements.form.querySelector('input[name="message_protection_mode"][value="e2ee-private"]');
-  if (!['dm', 'link'].includes(conversation.kind)) {
+  if (!['dm', 'link', 'game'].includes(conversation.kind)) {
     e2eeChoice.disabled = true;
     elements.availability.hidden = false;
     elements.availability.textContent = 'End-to-end encryption is available only for direct and private relationship conversations.';
@@ -1709,6 +2247,12 @@ async function submitMessageProtectionChange(event) {
     closeMessageProtectionDialog({ restoreFocus: true });
   } catch (error) {
     messageProtectionDialogState.busy = false;
+    if (messageProtectionRequiresAuthentication(error)) {
+      const returnFocus = messageProtectionDialogState.returnFocus;
+      closeMessageProtectionDialog({ restoreFocus: false });
+      openMessageProtectionAuthenticationDialog(returnFocus);
+      return;
+    }
     messageProtectionSetDialogStatus(error?.message || 'Message protection could not change.', 'error');
     syncMessageProtectionDialog();
     elements.status.focus({ preventScroll: true });
@@ -1727,6 +2271,7 @@ function messageProtectionChatKeyForConversation(kind, key) {
     const tab = tabs.find(candidate => messageProtectionConversation(candidate.dataset.chatTab)?.key === key);
     return tab?.dataset.chatTab || null;
   }
+  if (kind === 'game') return `game:${key}`;
   return null;
 }
 
@@ -1767,7 +2312,13 @@ function syncMessageProtectionControl() {
     button.className = 'btn';
     button.type = 'button';
     button.addEventListener('click', () => {
-      changeMessageProtectionMode().catch(error => showWarning(error.message || 'Message protection could not change.'));
+      changeMessageProtectionMode().catch(error => {
+        if (messageProtectionRequiresAuthentication(error)) {
+          openMessageProtectionAuthenticationDialog(button);
+          return;
+        }
+        showWarning(error.message || 'Message protection could not change.');
+      });
     });
     const submit = composer.querySelector('[type="submit"]');
     const actions = submit?.parentElement;
@@ -1788,6 +2339,12 @@ function syncMessageProtectionControl() {
 const messageProtectionDialog = messageProtectionDialogElements();
 messageProtectionDialog.form?.addEventListener('submit', submitMessageProtectionChange);
 messageProtectionDialog.cancel?.addEventListener('click', () => closeMessageProtectionDialog());
+document.getElementById('message-protection-auth-close')?.addEventListener('click', closeMessageProtectionAuthenticationDialog);
+document.getElementById('message-protection-auth-dialog')?.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  closeMessageProtectionAuthenticationDialog();
+});
 messageProtectionDialog.form?.addEventListener('change', syncMessageProtectionDialog);
 messageProtectionDialog.note?.addEventListener('input', () => {
   if (!messageProtectionDialogState.busy) messageProtectionSetDialogStatus();
@@ -1845,11 +2402,39 @@ function configureChatGameChat() {
     getActiveGame: () => gameRuntime?.lifecycle?.getActiveGame(),
     addMessageToChannel,
     renderGameStagePlayers: updateGameStagePlayers,
-    fetchGameChat(query) {
+    fetchGameChat(query, options = {}) {
+      const lobbyCode = String(query?.get?.('lobby_code') || '');
+      const isTerminalNotFound = error => (
+        error?.code === 'HTTP_ERROR'
+        && Number(error?.details?.status || 0) === 404
+        && error?.responsePayload?.error === 'Game not found'
+      );
       return runtimeRequestClient.getJson('/api/game_chat.php?' + query, {
         operation: 'poll-game-chat',
         endpointCategory: 'game-chat',
+        signal: gameChatRequestAbortController.signal,
+        requestContext: () => {
+          const currentLobbyCode = String(gameRuntime?.lifecycle?.getActiveGame?.()?.lobby_code || '');
+          const ownerCurrentAtOutcome = Boolean(lobbyCode && currentLobbyCode === lobbyCode);
+          return {
+            gameType: 'game-chat',
+            requestPurpose: 'game-session-read',
+            ownerCurrentAtOutcome,
+            sameGameAtOutcome: ownerCurrentAtOutcome,
+          };
+        },
+        shouldReportFailure(error) {
+          if (isTerminalNotFound(error)) return false;
+          return options.shouldReportFailure?.(error) !== false;
+        },
       });
+    },
+    onGameChatClosed(lobbyCode, isCurrent) {
+      if (!isCurrent() || gameRuntime?.lifecycle?.getActiveGame()?.lobby_code !== lobbyCode) return;
+      return gameRuntime?.lifecycle?.refreshFromRoomEvent();
+    },
+    reportGameChatFailure(error) {
+      return runtimeIssueCaptureService?.captureRequestFailure(error);
     },
     warnError(error) {
       warnRuntimeRequest(error);
@@ -1859,6 +2444,22 @@ function configureChatGameChat() {
 
 function configureRoomEventRouter() {
   roomRuntime?.events?.configure({
+    onParticipantNameplate(payload) {
+      const person = participants.get(Number(payload.participant_id));
+      if (!person) return;
+      const p2pProjection = Number(payload.participant_id) !== Number(cfg.myParticipantId)
+        && String(payload.nameplate_delivery || '') === 'p2p-prefetch';
+      participants.update(Number(payload.participant_id), {
+        nameplate_path: p2pProjection ? null : (payload.nameplate_path ?? null),
+        nameplate_url: p2pProjection ? null : (payload.nameplate_url ?? null),
+        p2p_nameplate: p2pProjection ? (payload.p2p_nameplate || null) : null,
+        nameplate_delivery: payload.nameplate_delivery || 'server-stored',
+        p2p_nameplate_object_identity: null,
+      });
+      avatarRuntime?.p2pAvatar?.reconcileParticipant(person);
+      renderParticipant(person, { animateJoin: false });
+      renderActiveChat();
+    },
     onParticipantJoin(payload) {
       const alreadyKnown = participants.has(payload.id);
       const hadStageAvatar = Boolean(participants.get(payload.id)?.avatarEl);
@@ -1889,6 +2490,7 @@ function configureRoomEventRouter() {
       const person = participants.get(Number(leavingId));
       if (person && person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
       removeParticipant(leavingId);
+      gameRuntime?.lifecycle?.refreshFromRoomEvent().catch(warnRuntimeRequest);
     },
     onParticipantPosition(payload) {
       const person = participants.get(payload.participant_id);
@@ -1973,6 +2575,8 @@ function configureRoomEventRouter() {
       const incomingSizeVersion = Number(payload.avatar_size_version || currentSizeVersion);
       const staleSizeProjection = incomingSizeVersion < currentSizeVersion;
       const nextSizeProjection = staleSizeProjection ? {} : {
+        avatar_display_width_px: payload.avatar_display_width_px === undefined ? person.avatar_display_width_px : payload.avatar_display_width_px,
+        avatar_display_height_px: payload.avatar_display_height_px === undefined ? person.avatar_display_height_px : payload.avatar_display_height_px,
         avatar_source_width_px: payload.avatar_source_width_px === undefined
           ? person.avatar_source_width_px
           : payload.avatar_source_width_px,
@@ -1993,6 +2597,8 @@ function configureRoomEventRouter() {
       const sizeProjectionChanged = !staleSizeProjection && (
         Number(nextSizeProjection.avatar_size_version || 1) !== currentSizeVersion
         || nextSizeProjection.avatar_display_size_px !== person.avatar_display_size_px
+        || nextSizeProjection.avatar_display_width_px !== person.avatar_display_width_px
+        || nextSizeProjection.avatar_display_height_px !== person.avatar_display_height_px
         || nextSizeProjection.webcam_display_width_px !== person.webcam_display_width_px
         || nextSizeProjection.webcam_display_height_px !== person.webcam_display_height_px
       );
@@ -2087,7 +2693,7 @@ function configureRoomEventRouter() {
     onRoleColorsUpdate(payload) {
       document.body.dataset.roleColorsMode = payload?.mode || 'enabled';
       for (const [role, colors] of Object.entries(payload?.palette || {})) {
-        if (!['admin', 'developer', 'guide', 'owner', 'user'].includes(role)) continue;
+      if (!['admin', 'developer', 'guide', 'moderator', 'owner', 'user'].includes(role)) continue;
         if (/^#[0-9a-f]{6}$/i.test(colors?.background || '')) document.body.style.setProperty(`--role-${role}-bg`, colors.background);
         if (/^#[0-9a-f]{6}$/i.test(colors?.text || '')) document.body.style.setProperty(`--role-${role}-text`, colors.text);
       }
@@ -2116,9 +2722,11 @@ function configureRoomEventRouter() {
         online: false,
         webcam_path: null,
       });
-      avatarRuntime?.coordinator?.clearParticipantRelationship(person.id);
-      removeParticipant(person.id);
-      if (person.id !== cfg.myParticipantId) addSystemMessage(`${person.display_name} left the room.`);
+      // A presence timeout means Away, not that the participant left the
+      // room. Keep the avatar and relationship placement visible so an idle
+      // member is not visually ejected from the room stage.
+      renderParticipant(person, { animateJoin: false });
+      gameRuntime?.lifecycle?.refreshFromRoomEvent().catch(warnRuntimeRequest);
     },
     onRemoteLink(payload) {
       avatarRuntime?.coordinator?.reconcileRemoteLink(payload);
@@ -2276,6 +2884,7 @@ function configureVoiceRuntime() {
       trackId: webcamStream?.getVideoTracks?.()[0]?.id || null,
     }),
     updateToggleButton: updateVoiceToggleButton,
+    setDeviceStatus: setVoiceDeviceStatus,
     renderVoiceList,
     attachParticipantVideo,
     detachParticipantVideo,
@@ -2355,6 +2964,7 @@ function warnRuntimeRequest(error) {
 function configureGameRuntime() {
   gameRuntime?.lifecycle?.configure({
     document,
+    window,
     apiPost,
     appUrl,
     mediaUrl,
@@ -2370,6 +2980,7 @@ function configureGameRuntime() {
     stopGameChatPolling,
     stopGameTypingNow,
     renderPeople,
+    showWarning,
     renderLinkTabs,
     isGameTyping(participantId) {
       return chatGameChat().isTyping(participantId);
@@ -2380,11 +2991,65 @@ function configureGameRuntime() {
         endpointCategory: 'games',
       });
     },
+    fetchFramework(query, { requestContext = null } = {}) {
+      return runtimeRequestClient.getJson('/api/game_framework.php?' + query, {
+        operation: 'load-game-framework-state',
+        endpointCategory: 'games',
+        requestContext,
+      });
+    },
+    openGameRecords,
+    renderGameCatalog(catalog, { error = '' } = {}) {
+      gameCatalogLoaded = true;
+      gameCatalogDefinitions = Array.isArray(catalog) ? catalog.slice() : [];
+      if (!gameCatalogDefinitions.some(game => String(game.key || '') === selectedGameCatalogKey)) {
+        selectedGameCatalogKey = '';
+      }
+      renderGamePickerCatalog();
+      document.getElementById('game-start-btn').hidden = false;
+      if (error) {
+        if (gamePickerCount) gamePickerCount.textContent = 'Game library unavailable';
+        if (gamePickerSelection) gamePickerSelection.textContent = error;
+      }
+    },
     getGameListElement() {
       return gameListEl;
     },
+    getRoomGameListElement() {
+      return roomGamesListEl;
+    },
+    getRoomGameCountElement() {
+      return roomGamesCount;
+    },
+    getRoomGameEmptyElement() {
+      return roomGamesEmpty;
+    },
+    getRoomGameSummaryElement() {
+      return roomGamesSummary;
+    },
+    onGameOpened() {
+      closeRoomGamesMenu({ restoreFocus: false });
+      gameRuntime?.webcams?.reconcile?.({ reason: 'game-opened' });
+      window.requestAnimationFrame(() => {
+        gameRuntime?.webcams?.reconcile?.({ reason: 'game-opened-layout-settled' });
+      });
+    },
     getGameStageElement() {
       return gameStage;
+    },
+    getMainElement() {
+      return mainEl;
+    },
+    getGameStartButtonElement() {
+      return document.getElementById('game-start-btn');
+    },
+    onAdaptiveGameLayout(measurement) {
+      recordRuntimeDiagnostic('gameLayout', 'adaptive-game-layout', measurement);
+      participants.forEach(positionAvatar);
+      avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
+        all: true,
+        reason: measurement?.visible ? 'game-layout-fit' : 'game-layout-restore',
+      });
     },
     getGameFrameElement() {
       return gameFrame;
@@ -2395,11 +3060,20 @@ function configureGameRuntime() {
     getStageIconElement() {
       return document.getElementById('game-stage-icon');
     },
+    getStageStatusElement() {
+      return document.getElementById('game-stage-status');
+    },
+    getGameAcceptElement() {
+      return document.getElementById('game-accept');
+    },
     getPlayerOneElement() {
       return document.getElementById('game-player-one');
     },
     getPlayerTwoElement() {
       return document.getElementById('game-player-two');
+    },
+    getGamePlayerElements() {
+      return Array.from(document.querySelectorAll('[data-game-seat]'));
     },
     origin() {
       return window.location.origin;
@@ -2510,7 +3184,7 @@ function configureChatPoll() {
   chatRuntime?.poll?.configure({
     getConfig: () => cfg,
     shouldStop: () => roomExitInProgress,
-    pollInterval: 25,
+    pollInterval: isLoopbackHost ? 2500 : 250,
     failureBackoffBase: 1000,
     failureBackoffMax: 30000,
     getTransportPolicy: () => cfg.transport || {},
@@ -2568,6 +3242,22 @@ function configureChatPoll() {
         retryDelay: Number(state.retryDelay || 0),
       });
     },
+  });
+  gameRuntime?.webcams?.configure({
+    document,
+    window,
+    storage: window.localStorage,
+    getActiveGame: () => gameRuntime?.lifecycle?.getActiveGame?.() || null,
+    getParticipants: () => participants,
+    getMedia: () => voiceRuntime?.media,
+    getViewerPolicy: () => voiceRuntime?.viewerPolicy,
+    getCurrentUserId: () => cfg?.myUserId,
+    getFrame: () => gameFrame,
+    getFrameWrap: () => gameFrame?.closest?.('.game-frame-wrap'),
+    getLayer: () => document.getElementById('game-webcam-layer'),
+    getPanel: () => document.getElementById('game-webcams-panel'),
+    getToggle: () => document.getElementById('game-webcams-toggle'),
+    recordDiagnostic: recordRuntimeDiagnostic,
   });
 }
 
@@ -2769,10 +3459,116 @@ function avatarUrl(p) {
   return mediaUrl(p.avatar_path || cfg.avatarPresets.Default);
 }
 
+// Same-origin first-party game frames reuse only this viewer's authorized
+// room avatar. Blob URLs remain local; no P2P assets are uploaded to hosting.
+Object.defineProperty(window, 'coreChatGameAvatar', { value(userId) {
+  const person = Array.from(participants.values()).find(item => Number(item.user_id) === Number(userId));
+  if (!person || !cfg || roomExitInProgress) return null;
+  if (avatarVisibilityFor(person).hidden) return { hidden: true, url: '' };
+  return { hidden: false, url: avatarUrl(person) };
+} });
+
 function avatarVisibilityFor(subject, own = false) {
   return avatarRuntime?.visibility?.effectiveFor(subject, {
     own: own || Number(subject?.user_id || 0) === Number(cfg?.myUserId || 0),
   }) || Object.freeze({ hidden: Boolean(subject?.avatar_hidden), exact: false, user: false, scope: null, notice: null });
+}
+
+let nameplateVisibilityProjection = { version: 1, entries: [] };
+
+function applyNameplateVisibilityProjection(projection = {}) {
+  const version = Math.max(1, Number(projection?.version || 1));
+  if (version < Number(nameplateVisibilityProjection.version || 1)) return false;
+  nameplateVisibilityProjection = {
+    version,
+    entries: Array.isArray(projection?.entries) ? projection.entries.slice() : [],
+  };
+  return true;
+}
+
+function nameplateVisibilityFor(subject, own = false) {
+  const userId = Number(subject?.user_id || 0);
+  const available = Boolean(subject?.nameplate_url || subject?.nameplate_path || subject?.p2p_nameplate);
+  if (own || userId <= 0 || userId === Number(cfg?.myUserId || 0)) {
+    return { hidden: false, exact: false, user: false, available };
+  }
+  const identity = String(subject?.p2p_nameplate?.identity || subject?.nameplate_identity || '');
+  const entries = nameplateVisibilityProjection.entries.filter(entry => Number(entry.targetUserId) === userId);
+  const user = entries.some(entry => entry.scope === 'nameplate_user');
+  const exact = entries.some(entry => entry.scope === 'nameplate'
+    && (!identity || String(entry.nameplateIdentity || '') === identity));
+  return { hidden: user || exact || Boolean(subject?.nameplate_hidden), exact, user, available: available || exact };
+}
+
+async function setNameplateVisibility(participant, scope, hidden) {
+  const presentedSource = identityNameplateUrl(participant);
+  const lastVisibleSource = participant?.nameplate_last_visible_url
+    || participant?.nameplate_url
+    || participant?.nameplate_path
+    || presentedSource
+    || null;
+  const priorSource = {
+    nameplate_path: participant?.nameplate_path ?? null,
+    nameplate_url: participant?.nameplate_url ?? lastVisibleSource,
+    nameplate_identity: participant?.nameplate_identity ?? null,
+    p2p_nameplate: participant?.p2p_nameplate ?? null,
+    nameplate_delivery: participant?.nameplate_delivery ?? null,
+    nameplate_last_visible_url: lastVisibleSource,
+  };
+  const action = scope === 'user'
+    ? (hidden ? 'hide_nameplate_user' : 'show_nameplate_user')
+    : (hidden ? 'hide_nameplate' : 'show_nameplate');
+  const result = await mutateVisibilityWithRetry({
+    url: '/api/nameplate_visibility_preferences.php',
+    staleCode: 'NAMEPLATE_VISIBILITY_STALE',
+    body: {
+      action,
+      target_user_id: Number(participant.user_id),
+      expected_version: Number(nameplateVisibilityProjection.version || 1),
+      session_id: cfg.sessionId,
+      join_token: cfg.myJoinToken,
+    },
+    applyStaleProjection(projection) {
+      applyNameplateVisibilityProjection(projection);
+    },
+  });
+  applyNameplateVisibilityProjection(result?.preferences || {});
+  if (!hidden) {
+    const clearedScope = scope === 'user' ? 'nameplate_user' : 'nameplate';
+    nameplateVisibilityProjection = {
+      ...nameplateVisibilityProjection,
+      entries: nameplateVisibilityProjection.entries.filter(entry => !(
+        Number(entry.targetUserId) === Number(participant.user_id)
+        && entry.scope === clearedScope
+      )),
+    };
+  }
+  avatarRuntime?.visibility?.applyServerProjection(
+    result?.avatarVisibilityPreferences || {},
+    `nameplate-visibility:${action}`
+  );
+  let revealedApplied = false;
+  (result?.revealedNameplates || []).forEach(revealed => {
+    participants.forEach(person => {
+      if (Number(person.user_id) === Number(revealed.user_id)) {
+        participants.update(person.id, { ...revealed, nameplate_hidden: false });
+        revealedApplied = true;
+      }
+    });
+  });
+  participants.update(Number(participant.id), hidden ? {
+    nameplate_hidden: true,
+    nameplate_last_visible_url: lastVisibleSource,
+  } : {
+    ...(!revealedApplied ? priorSource : {}),
+    nameplate_hidden: false,
+    nameplate_hidden_scope: null,
+    nameplate_hidden_notice: null,
+  });
+  avatarRuntime?.p2pAvatar?.reconcileParticipant(participant);
+  renderPeople();
+  renderVoiceList(lastVoiceParticipants);
+  renderActiveChat();
 }
 
 function avatarPresentationHtml(subject, options = {}) {
@@ -2901,6 +3697,7 @@ function attachParticipantVideo(participantId, stream, own = false, presentation
     presentationReason: viewerPolicy.reason,
     onWebcamPresentationDiagnostic: recordVoiceLifecycleDiagnostic,
     onWebcamPresentationError(error, detail) {
+      if (error?.name === 'NotAllowedError') return;
       console.error('Webcam playback failed.', detail, error);
     },
     addContextListeners: addAvatarContextListeners,
@@ -2928,6 +3725,7 @@ function attachParticipantVideo(participantId, stream, own = false, presentation
     hasVideoElement: Boolean(person.webcamVideoEl),
     videoSrcObjectTrackCount: person.webcamVideoEl?.srcObject?.getTracks?.().length || 0,
   });
+  gameRuntime?.webcams?.reconcile?.({ reason: 'webcam-attached' });
   if (own) {
     const localTrackId = stream.getVideoTracks?.()[0]?.id || null;
     recordVoiceLifecycleDiagnostic({
@@ -2949,8 +3747,14 @@ function attachParticipantVideo(participantId, stream, own = false, presentation
   });
 }
 
-function detachParticipantVideo(participantId, flip = true, reason = 'explicit-detach') {
+function detachParticipantVideo(
+  participantId,
+  flip = true,
+  reason = 'explicit-detach',
+  options = {},
+) {
   const person = participants.get(Number(participantId));
+  const preserveAvailability = Boolean(options?.preserveAvailability);
   const previousTrackId = person?.webcamVideoEl?.srcObject?.getVideoTracks?.()[0]?.id || null;
   recordVoiceLifecycleDiagnostic({
     event: 'detachParticipantVideo-called',
@@ -2966,20 +3770,31 @@ function detachParticipantVideo(participantId, flip = true, reason = 'explicit-d
     webcam_enabled: Boolean(person.webcam_enabled),
     webcam_path: person.webcam_path || null,
   };
-  participants.update(participantId, {
-    webcam_enabled: false,
-    webcam_path: null,
-  });
-  recordVoiceLifecycleDiagnostic({
-    event: 'webcam-state-change',
-    source: 'detachParticipantVideo',
-    participantId: Number(participantId),
-    previous,
-    next: {
+  if (preserveAvailability) {
+    recordVoiceLifecycleDiagnostic({
+      event: 'webcam-presentation-detached-state-preserved',
+      source: 'detachParticipantVideo',
+      participantId: Number(participantId),
+      reason,
+      webcam_enabled: previous.webcam_enabled,
+      webcam_path: previous.webcam_path,
+    });
+  } else {
+    participants.update(participantId, {
       webcam_enabled: false,
       webcam_path: null,
-    },
-  });
+    });
+    recordVoiceLifecycleDiagnostic({
+      event: 'webcam-state-change',
+      source: 'detachParticipantVideo',
+      participantId: Number(participantId),
+      previous,
+      next: {
+        webcam_enabled: false,
+        webcam_path: null,
+      },
+    });
+  }
   avatarRuntime?.renderer?.detachWebcam(person, {
     flip,
     window,
@@ -3004,6 +3819,7 @@ function detachParticipantVideo(participantId, flip = true, reason = 'explicit-d
     participant: person,
     reason: 'webcam-frame-change',
   });
+  gameRuntime?.webcams?.reconcile?.({ reason: 'webcam-detached' });
 }
 
 function applyWebcamState(participantId, enabled, webcamPath = null, source = 'unknown') {
@@ -3089,23 +3905,200 @@ function isUserBlocked(userId) {
   return blockedUserIds.has(Number(userId));
 }
 
+function muteExpiryMs(policy) {
+  const value = policy?.expires_at || policy?.expiresAt || '';
+  if (!value) return Number.POSITIVE_INFINITY;
+  const parsed = parseServerDate(value);
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed.getTime() : 0;
+}
+
+function activeMutedPolicyFor(userId) {
+  const key = Number(userId || 0);
+  const policy = mutedUserPolicies.get(key) || null;
+  if (policy && roomServerClock?.serverDeadlineExpired(muteExpiryMs(policy))) {
+    mutedUserPolicies.delete(key);
+    clearPersonalMuteRevealsForUser(key);
+    return null;
+  }
+  return policy;
+}
+
+function authoritativeGameOrSystemMessage(message, chatKey = '') {
+  return Boolean(message?.system)
+    || String(chatKey || message?.channel || '').startsWith('game:')
+    || ['game_action', 'game_score', 'system', 'required_state'].includes(String(message?.message_type || ''));
+}
+
+function messageMuteScope(message) {
+  return ['gesture', 'voice_note'].includes(String(message?.message_type || ''))
+    ? 'gestures-audio'
+    : 'text-bubbles';
+}
+
+function personalMuteMessageKey(message, chatKey = '') {
+  const userId = Number(message?.user_id || participants.get(Number(message?.participant_id))?.user_id || 0);
+  const messageId = String(message?.id || message?.client_message_id || '');
+  return userId > 0 && messageId ? `${userId}:${String(chatKey || message?.channel || 'room')}:${messageId}` : '';
+}
+
+function clearPersonalMuteRevealsForUser(userId) {
+  const prefix = `${Number(userId || 0)}:`;
+  [...revealedPersonalMuteMessages].forEach(key => {
+    if (key.startsWith(prefix)) revealedPersonalMuteMessages.delete(key);
+  });
+}
+
+function captureMutedMessageOriginal(message) {
+  if (message._personalMuteOriginal) return;
+  message._personalMuteOriginal = {
+    content: message.content,
+    message_type: message.message_type,
+    url_preview: message.url_preview,
+    reply_to: message.reply_to,
+    original_name: message.original_name,
+    mime_type: message.mime_type,
+    file_size: message.file_size,
+  };
+  message.muted_original_content = message.content;
+}
+
+function restoreMutedMessageOriginal(message, { revealed = false } = {}) {
+  const original = message?._personalMuteOriginal;
+  if (original) Object.assign(message, original);
+  message.muted_collapsed = false;
+  message.one_message_reveal_allowed = Boolean(revealed);
+  message.muted_revealed = Boolean(revealed);
+  if (!revealed) {
+    delete message._personalMuteOriginal;
+    delete message.muted_original_content;
+    delete message.one_message_reveal_allowed;
+    delete message.muted_revealed;
+  }
+  return message;
+}
+
+function applyPersonalMutePresentation(message, chatKey = '') {
+  const userId = Number(message?.user_id || participants.get(Number(message?.participant_id))?.user_id || 0);
+  const policy = activeMutedPolicyFor(userId);
+  const scopes = Array.isArray(policy?.scopes) ? policy.scopes : [];
+  const shouldCollapse = Boolean(policy)
+    && !authoritativeGameOrSystemMessage(message, chatKey)
+    && scopes.includes(messageMuteScope(message));
+  if (!shouldCollapse) {
+    if (message?._personalMuteOriginal) restoreMutedMessageOriginal(message);
+    return message;
+  }
+  const revealKey = personalMuteMessageKey(message, chatKey);
+  if (message.muted_revealed || (revealKey && revealedPersonalMuteMessages.has(revealKey))) {
+    if (message?._personalMuteOriginal) restoreMutedMessageOriginal(message, { revealed: true });
+    else {
+      message.muted_collapsed = false;
+      message.one_message_reveal_allowed = true;
+      message.muted_revealed = true;
+    }
+    return message;
+  }
+  captureMutedMessageOriginal(message);
+  Object.assign(message, {
+    content: MUTED_MESSAGE_PLACEHOLDER,
+    message_type: 'text',
+    url_preview: null,
+    reply_to: null,
+    original_name: null,
+    mime_type: null,
+    file_size: null,
+    muted_collapsed: true,
+    one_message_reveal_allowed: true,
+  });
+  return message;
+}
+
+function reconcilePersonalMuteMessages() {
+  chatMessageState()?.forEachChannelMessage?.(message => {
+    applyPersonalMutePresentation(message, String(message?.channel || ''));
+  });
+  renderActiveChat();
+}
+
+function schedulePersonalMuteExpiry() {
+  if (muteExpiryTimer) clearTimeout(muteExpiryTimer);
+  muteExpiryTimer = null;
+  const expiries = [...mutedUserPolicies.values()]
+    .map(muteExpiryMs)
+    .filter(value => Number.isFinite(value));
+  if (!expiries.length) return;
+  const serverNow = roomServerClock?.serverEpochNow({conservative: true});
+  const delay = serverNow == null ? 1000
+    : Math.max(0, Math.min(Math.min(...expiries) - serverNow, 2147483647));
+  muteExpiryTimer = setTimeout(() => {
+    [...mutedUserPolicies.keys()].forEach(activeMutedPolicyFor);
+    reconcilePersonalMuteMessages();
+    schedulePersonalMuteExpiry();
+    if (memberProfileSnapshot && memberProfileUserId) renderMemberProfileActions(memberProfileSnapshot);
+  }, delay);
+}
+
+function replacePersonalMuteProjection(policies = []) {
+  const previousMutedUserIds = new Set(mutedUserPolicies.keys());
+  mutedUserPolicies.clear();
+  (Array.isArray(policies) ? policies : []).forEach(policy => {
+    const userId = Number(policy?.muted_user_id || policy?.mutedUserId || 0);
+    if (userId > 0 && !roomServerClock?.serverDeadlineExpired(muteExpiryMs(policy))) mutedUserPolicies.set(userId, policy);
+  });
+  previousMutedUserIds.forEach(userId => {
+    if (!mutedUserPolicies.has(userId)) clearPersonalMuteRevealsForUser(userId);
+  });
+  reconcilePersonalMuteMessages();
+  schedulePersonalMuteExpiry();
+}
+
+async function setPersonalMuteState(userId, muted, duration = 'until-unmute') {
+  const targetUserId = Number(userId || 0);
+  if (!targetUserId || targetUserId === Number(cfg.myUserId)) return;
+  const response = await apiPost('/api/moderation.php', {
+    action: muted ? 'mute' : 'unmute',
+    target_user_id: targetUserId,
+    ...(muted ? { duration, scopes: PERSONAL_MUTE_SCOPES } : {}),
+  });
+  if (Array.isArray(response?.mutes)) {
+    replacePersonalMuteProjection(response.mutes);
+  } else {
+    if (muted) {
+      mutedUserPolicies.set(targetUserId, {
+        muted_user_id: targetUserId,
+        scopes: PERSONAL_MUTE_SCOPES,
+        expires_at: response?.expiresAt || null,
+      });
+    } else {
+      mutedUserPolicies.delete(targetUserId);
+      clearPersonalMuteRevealsForUser(targetUserId);
+    }
+    reconcilePersonalMuteMessages();
+    schedulePersonalMuteExpiry();
+  }
+  return response;
+}
+
 function displayNameFor(p) {
   return isUserBlocked(p?.user_id) ? 'Blocked' : (p?.display_name || 'Someone');
 }
 
 function participantRoleKey(p) {
   const role = String(p?.role || 'user').replace(/[^a-z]/g, '') || 'user';
-  if (['admin', 'developer', 'guide'].includes(role)) return role;
-  if (p?.is_owner) return 'owner';
+  if (p?.is_installation_owner) return 'owner';
+  if (['admin', 'developer', 'guide', 'moderator'].includes(role)) return role;
+  if (p?.is_owner) return 'roomowner';
   return role;
 }
 
 function participantRoleLabel(p) {
   const key = participantRoleKey(p);
-  if (key === 'owner') return 'Room Owner';
+  if (key === 'owner') return 'CoreChat Owner';
+  if (key === 'roomowner') return 'Room Owner';
   if (key === 'developer') return 'Developer';
   if (key === 'admin') return 'Admin';
   if (key === 'guide') return 'Guide';
+  if (key === 'moderator') return 'Moderator';
   return 'User';
 }
 
@@ -3113,11 +4106,100 @@ function participantRoleClass(p) {
   return `role-${participantRoleKey(p)}`;
 }
 
+function participantRoleLabels(p) {
+  const labels = [];
+  const role = String(p?.role || 'user').replace(/[^a-z]/g, '') || 'user';
+  if (p?.is_installation_owner) labels.push('CoreChat Owner');
+  const primaryLabels = {
+    admin: 'Administrator',
+    developer: 'Developer',
+    moderator: 'Moderator',
+    guide: 'Guide',
+  };
+  if (primaryLabels[role]) labels.push(primaryLabels[role]);
+  if (p?.is_owner) labels.push('Room Owner');
+  return labels.length ? [...new Set(labels)] : ['User'];
+}
+
+function participantRoleBadgeHtml(p) {
+  const key = participantRoleKey(p);
+  const badges = {
+    owner: ['♛', 'OWNER'],
+    roomowner: ['⌂', 'ROOM OWNER'],
+    admin: ['◆', 'ADMIN'],
+    moderator: ['⬟', 'MOD'],
+    guide: ['✦', 'GUIDE'],
+    developer: ['⌘', 'DEV'],
+  };
+  const badge = badges[key];
+  if (!badge) return '';
+  const label = participantRoleLabel(p);
+  return `<span class="role-badge role-${key}" title="${esc(label)}" aria-label="${esc(label)}"><span class="role-badge-icon" aria-hidden="true">${badge[0]}</span><span>${badge[1]}</span></span>`;
+}
+
+function identityNameplateUrl(subject, participant = null) {
+  const person = participant || subject;
+  if (!person || nameplateVisibilityFor(person).hidden || isUserBlocked(person.user_id)) return '';
+  return String(person.nameplate_url || person.nameplate_path || '').trim();
+}
+
+function applyIdentityNameplate(element, person) {
+  if (!element) return;
+  const source = chatAppearancePreferences.showIdentityNameplates ? identityNameplateUrl(person) : '';
+  element.classList.toggle('identity-nameplate', Boolean(source));
+  element.style.removeProperty('--identity-nameplate-image');
+  let artwork = [...element.children].find(child => child.classList.contains('identity-nameplate-artwork'));
+  let content = [...element.children].find(child => child.classList.contains('identity-nameplate-content'));
+  if (!source) {
+    artwork?.remove();
+    if (content) content.replaceWith(...content.childNodes);
+    return;
+  }
+  if (!content) {
+    content = document.createElement(element.tagName === 'STRONG' ? 'span' : 'div');
+    content.className = 'identity-nameplate-content';
+    [...element.childNodes].filter(child => child !== artwork).forEach(child => content.appendChild(child));
+    element.appendChild(content);
+  }
+  if (!artwork) {
+    artwork = document.createElement('img');
+    artwork.className = 'identity-nameplate-artwork';
+    artwork.alt = '';
+    artwork.setAttribute('aria-hidden', 'true');
+    artwork.draggable = false;
+    element.prepend(artwork);
+  }
+  // A real image supplies its intrinsic ratio and preserves GIF/WebP/APNG playback.
+  // Do not reset an unchanged source during presence refreshes: that restarts GIFs.
+  if (artwork.getAttribute('src') !== source) artwork.src = source;
+}
+
+function persistChatAppearancePreference(key, value) {
+  try { window.localStorage.setItem(key, value ? 'true' : 'false'); } catch (_) {}
+}
+
+function rerenderChatAppearance() {
+  document.body.classList.toggle('hide-identity-nameplates', !chatAppearancePreferences.showIdentityNameplates);
+  document.body.classList.toggle('hide-chat-role-titles', !chatAppearancePreferences.showRoleMessageTitles);
+  if (!cfg) return;
+  const previousTop = messagesEl?.scrollTop || 0;
+  const pinned = messagesEl ? messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 24 : true;
+  renderPeople();
+  renderVoiceList(lastVoiceParticipants);
+  renderActiveChat();
+  if (messagesEl && !pinned) messagesEl.scrollTop = previousTop;
+}
+
+document.body.classList.toggle('hide-identity-nameplates', !chatAppearancePreferences.showIdentityNameplates);
+document.body.classList.toggle('hide-chat-role-titles', !chatAppearancePreferences.showRoleMessageTitles);
+
 function setPermissionUI() {
   const actionBtn = document.getElementById('room-action-btn');
   if (actionBtn) actionBtn.hidden = !(cfg?.canEditRoom || cfg?.canUseHostTools);
   const editAction = document.getElementById('room-action-edit');
   if (editAction) editAction.hidden = !cfg?.canEditRoom;
+  const refreshImportText = document.getElementById('room-action-refresh-import-text');
+  if (refreshImportText) refreshImportText.hidden = !(cfg?.canEditRoom && cfg?.importUrl);
   const effectsAction = document.getElementById('room-action-effects');
   if (effectsAction) effectsAction.hidden = !cfg?.canUseHostTools;
   const clearHistoryAction = document.getElementById('room-action-clear-history');
@@ -3357,10 +4439,21 @@ function preloadImage(src) {
       return;
     }
     const img = new Image();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
+    let settled = false;
+    let timeoutId = null;
+    const finish = loaded => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      img.onload = null;
+      img.onerror = null;
+      resolve(loaded);
+    };
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false);
+    timeoutId = window.setTimeout(() => finish(false), 5000);
     img.src = src;
-    if (img.complete) resolve(true);
+    if (img.complete) finish(true);
   });
 }
 
@@ -3420,6 +4513,7 @@ function renderParticipant(p, options = {}) {
     flipImage: hadImage && wasWebcam !== nowWebcam,
     fallbackSize: AVATAR_STAGE_SIZE,
     onRenderedSizeChange(participant, detail = {}) {
+      positionAvatar(participant);
       avatarRuntime?.coordinator?.scheduleRelationshipRefresh({
         participant,
         reason: detail.reason || 'rendered-size-change',
@@ -3430,6 +4524,7 @@ function renderParticipant(p, options = {}) {
   refreshLinkClasses();
   positionAvatar(merged);
   applyParticipantAura(merged);
+  avatarRuntime?.order?.syncFrontParticipant(merged);
   const pendingVideo = pendingRemoteVideoStreams.get(Number(merged.id));
   if (pendingVideo) {
     const pendingStream = pendingVideo.stream || pendingVideo;
@@ -3443,6 +4538,7 @@ function renderParticipant(p, options = {}) {
   if (Number(merged.id) === Number(cfg.myParticipantId)) {
     syncLocalWebcamPreview('participant-render');
   }
+  gameRuntime?.webcams?.reconcile?.({ reason: 'participant-rendered' });
   if (wasWebcam && !nowWebcam) {
     recordVoiceLifecycleDiagnostic({
       event: 'avatar-fallback-detected',
@@ -3545,6 +4641,65 @@ function positionFloatingMenu(menu, x, y) {
   if (verticalCorrection) menu.style.top = `${top + verticalCorrection}px`;
 }
 
+function isInsideAvatarContextMenu(target) {
+  return Boolean(ctxMenu?.contains(target)
+    || (ctxOrientationWrap?.classList.contains('open') && ctxOrientationSubmenu?.contains(target))
+    || (document.getElementById('ctx-tools-wrap')?.classList.contains('open')
+      && document.getElementById('ctx-tools-submenu')?.contains(target)));
+}
+
+function closeContextSubmenu(wrap, trigger, submenu) {
+  wrap?.classList.remove('open');
+  trigger?.setAttribute('aria-expanded', 'false');
+  if (submenu && wrap && submenu.parentElement !== wrap) wrap.appendChild(submenu);
+  ['display', 'position', 'left', 'top', 'max-height', 'overflow-y', 'visibility']
+    .forEach(property => submenu?.style.removeProperty(property));
+  const originLeft = ctxMenu?.dataset.submenuOriginLeft;
+  if (ctxMenu && originLeft !== undefined) {
+    ctxMenu.style.left = originLeft;
+    delete ctxMenu.dataset.submenuOriginLeft;
+  }
+}
+
+function openContextSubmenu(wrap, trigger, submenu) {
+  if (!ctxMenu || !wrap || !trigger || !submenu) return;
+  wrap.classList.add('open');
+  trigger.setAttribute('aria-expanded', 'true');
+  if (ctxMenu.dataset.submenuOriginLeft === undefined) {
+    ctxMenu.dataset.submenuOriginLeft = ctxMenu.style.left || '8px';
+  }
+  document.body.appendChild(submenu);
+  Object.assign(submenu.style, {
+    display: 'block',
+    position: 'fixed',
+    left: '8px',
+    top: '8px',
+    visibility: 'hidden',
+    maxHeight: 'calc(100vh - 16px)',
+    overflowY: 'auto',
+  });
+  const gap = 8;
+  const submenuRect = submenu.getBoundingClientRect();
+  let menuRect = ctxMenu.getBoundingClientRect();
+  const overflow = menuRect.right + gap + submenuRect.width + gap - window.innerWidth;
+  if (overflow > 0) {
+    ctxMenu.style.left = `${Math.max(gap, menuRect.left - overflow)}px`;
+    menuRect = ctxMenu.getBoundingClientRect();
+  }
+  const triggerRect = trigger.getBoundingClientRect();
+  let left = menuRect.right + gap;
+  if (left + submenuRect.width > window.innerWidth - gap) {
+    left = Math.max(gap, window.innerWidth - submenuRect.width - gap);
+  }
+  const top = Math.max(
+    gap,
+    Math.min(triggerRect.top, window.innerHeight - submenuRect.height - gap)
+  );
+  submenu.style.left = `${left}px`;
+  submenu.style.top = `${top}px`;
+  submenu.style.visibility = 'visible';
+}
+
 function relationshipCanvasSize() {
   return {
     width: Math.max(1, relationshipCanvas?.clientWidth || roomStage?.clientWidth || 0),
@@ -3559,12 +4714,19 @@ function relationshipViewportSize() {
   };
 }
 
+function roomStageUsesGameScrollOwnership() {
+  return Boolean(
+    mainEl?.classList.contains('game-surface-visible')
+    && roomStage?.querySelector('.game-frame-wrap[data-scroll-owner="room-stage"]')
+  );
+}
+
 function beginRelationshipCanvasMeasurement() {
   relationshipCanvas?.style.removeProperty('--relationship-canvas-width');
   relationshipCanvas?.style.removeProperty('--relationship-canvas-height');
   relationshipCanvasResolvedWidth = 0;
   relationshipCanvasResolvedHeight = 0;
-  if (roomStage) {
+  if (roomStage && !roomStageUsesGameScrollOwnership()) {
     roomStage.scrollLeft = 0;
     roomStage.scrollTop = 0;
   }
@@ -3591,7 +4753,7 @@ function setRelationshipCanvasSize(size = {}) {
   relationshipCanvasResolvedHeight = height;
   relationshipCanvas?.style.setProperty('--relationship-canvas-width', `${width}px`);
   relationshipCanvas?.style.setProperty('--relationship-canvas-height', `${height}px`);
-  if (roomStage) {
+  if (roomStage && !roomStageUsesGameScrollOwnership()) {
     if (width <= roomStage.clientWidth) roomStage.scrollLeft = 0;
     if (height <= roomStage.clientHeight) roomStage.scrollTop = 0;
   }
@@ -3688,6 +4850,88 @@ function participantStage(participant) {
   return relationship ? relationshipCanvas : avatarViewportLayer || roomStage;
 }
 
+function scheduleAvatarViewportReflow() {
+  if (avatarViewportReflowFrame !== null) return;
+  avatarViewportReflowFrame = window.requestAnimationFrame(() => {
+    avatarViewportReflowFrame = null;
+    if ([...document.querySelectorAll('img.avatar')]
+      .some(avatar => avatar.style.cursor === 'grabbing')) return;
+    const groups = new Map();
+    participants.forEach(person => {
+      if (!person?.avatarEl || !person?.labelEl || avatarRuntime?.relationships?.isLinked(person)) return;
+      const stage = participantStage(person);
+      if (!stage || person.avatarEl.isConnected === false) return;
+      const list = groups.get(stage) || [];
+      list.push(person);
+      groups.set(stage, list);
+    });
+
+    groups.forEach((people, stage) => {
+      const stageWidth = Number(stage.clientWidth || 0);
+      const stageHeight = Number(stage.clientHeight || 0);
+      if (people.length < 5 || stageWidth > 1100 || stageWidth <= 0 || stageHeight <= 0) return;
+
+      const desired = people.map(person => {
+        const dimensions = avatarRenderedDimensions(person);
+        return {
+          person,
+          dimensions,
+          x: Math.max(0, Math.min(stageWidth - dimensions.width, Number(person.position_x || 0) * stageWidth)),
+          y: Math.max(0, Math.min(stageHeight - dimensions.height, Number(person.position_y || 0) * stageHeight)),
+        };
+      });
+      const overlaps = desired.some((first, index) => desired.slice(index + 1).some(second => (
+        first.x < second.x + second.dimensions.width
+        && first.x + first.dimensions.width > second.x
+        && first.y < second.y + second.dimensions.height + 22
+        && first.y + first.dimensions.height + 22 > second.y
+      )));
+      if (!overlaps) return;
+
+      const gap = 8;
+      const columns = Math.max(2, Math.min(
+        people.length,
+        Math.ceil(Math.sqrt(people.length * stageWidth / Math.max(stageHeight, 1)))
+      ));
+      const rows = Math.ceil(people.length / columns);
+      const cellWidth = stageWidth / columns;
+      const cellHeight = stageHeight / rows;
+      const maximumEdge = Math.max(44, Math.min(92, cellWidth - gap * 2, cellHeight - 30));
+      const availableCells = Array.from({ length: people.length }, (_, index) => ({
+        index,
+        column: index % columns,
+        row: Math.floor(index / columns),
+      }));
+
+      desired.sort((a, b) => Number(a.person.id || 0) - Number(b.person.id || 0)).forEach(entry => {
+        const desiredCenterX = entry.x + entry.dimensions.width / 2;
+        const desiredCenterY = entry.y + entry.dimensions.height / 2;
+        availableCells.sort((a, b) => {
+          const distance = cell => Math.abs((cell.column + .5) * cellWidth - desiredCenterX)
+            + Math.abs((cell.row + .5) * cellHeight - desiredCenterY);
+          return distance(a) - distance(b) || a.index - b.index;
+        });
+        const cell = availableCells.shift();
+        const sourceEdge = Math.max(entry.dimensions.width, entry.dimensions.height, 1);
+        const scale = Math.min(1, maximumEdge / sourceEdge);
+        const width = Math.max(1, Math.round(entry.dimensions.width * scale));
+        const height = Math.max(1, Math.round(entry.dimensions.height * scale));
+        const frame = {
+          width,
+          height,
+          x: Math.max(0, Math.min(stageWidth - width, (cell.column + .5) * cellWidth - width / 2)),
+          y: Math.max(0, Math.min(stageHeight - height - 22, (cell.row + .5) * cellHeight - (height + 22) / 2)),
+        };
+        avatarRuntime?.renderer?.applyParticipantFrame(entry.person, frame, { stage });
+        entry.person.labelEl.style.maxWidth = `${Math.max(40, Math.floor(cellWidth - gap * 2))}px`;
+        entry.person.labelEl.style.overflow = 'hidden';
+        entry.person.labelEl.style.textOverflow = 'ellipsis';
+      });
+      stage.dataset.avatarDensityLayout = 'compact';
+    });
+  });
+}
+
 function positionAvatar(p) {
   const img = p.avatarEl;
   const label = p.labelEl;
@@ -3712,6 +4956,7 @@ function positionAvatar(p) {
   avatarRuntime?.renderer?.applyParticipantFrame(p, frame, {
     stage,
   });
+  scheduleAvatarViewportReflow();
   updateStageLinkIcons();
 }
 
@@ -3727,6 +4972,9 @@ function refreshLinkClasses() {
 
 function pulseParticipantAvatar(participantId) {
   const person = participants.get(Number(participantId));
+  if (Number(participantId) === Number(cfg.myParticipantId)) {
+    avatarRuntime?.order?.bringParticipantToFront(person);
+  }
   avatarRuntime?.effects?.pulseParticipant(person, {
     window,
   });
@@ -3901,30 +5149,55 @@ function rebuildLinkGroups() {
 }
 
 function renderPeople() {
-  userListEl.innerHTML = '';
+  const configuredCurrentParticipant = (cfg?.participants || []).find(person =>
+    Number(person?.id) === Number(cfg?.myParticipantId)) || null;
 
   if (participants && participants.size > 0) {
     rebuildLinkGroups();
   }
 
-  if (!participants || participants.size === 0) {
+  if ((!participants || participants.size === 0) && !configuredCurrentParticipant) {
+    userListEl.replaceChildren();
+    document.getElementById('participant-count-label').textContent = '(0)';
     return;
   }
 
-  const people = avatarRuntime?.order?.visibleParticipants(participants.values()) || [...participants.values()]
+  const participantSource = participants ? [...participants.values()] : [];
+  if (configuredCurrentParticipant
+      && !participantSource.some(person => Number(person?.id) === Number(configuredCurrentParticipant.id))) {
+    participantSource.push(configuredCurrentParticipant);
+  }
+  const orderedPeople = avatarRuntime?.order?.visibleParticipants(participantSource) || participantSource
     .filter(p => p && typeof p === 'object' && p.id)
     .sort((a, b) =>
       (a.display_name || '').localeCompare(b.display_name || '')
     );
+  const people = [...orderedPeople].sort((a, b) =>
+    Number(Number(b.id) === Number(cfg.myParticipantId))
+      - Number(Number(a.id) === Number(cfg.myParticipantId))
+  );
   document.getElementById('participant-count-label').textContent = `(${people.length})`;
   const rendered = new Set();
+  const desiredRows = [];
   const roleClass = participantRoleClass;
   const makePersonBits = p => {
     const game = gameRuntime?.lifecycle?.gameForParticipant(p.id);
     const gameBadge = game ? `<span class="user-game-badge" title="${esc(gameName(game.game_type))}"><img src="${esc(gameIconUrl(game.game_type))}" alt=""></span>` : '';
     const nameIcon = game ? `<img class="person-game-name-icon" src="${esc(gameIconUrl(game.game_type))}" alt="" title="${esc(gameName(game.game_type))}">` : '';
-    return `<span class="user-avatar-wrap">${avatarPresentationHtml(p, { displayName: displayNameFor(p), title: false })}<span class="status-dot ${p.online ? 'on' : ''}"></span>${gameBadge}</span><div><strong class="person-name-line">${nameIcon}<span>${esc(displayNameFor(p) || '')}</span></strong><div class="minor">${p.id === cfg.myParticipantId ? 'You' : (p.online ? 'Online' : 'Away')}</div></div>`;
+    const presence = Number(p.id) === Number(cfg.myParticipantId) || p.online
+      ? ''
+      : '<div class="minor">Away</div>';
+    return `<span class="user-avatar-wrap">${avatarPresentationHtml(p, { displayName: displayNameFor(p), title: false })}<span class="status-dot ${p.online ? 'on' : ''}" role="img" aria-label="${p.online ? 'Online' : 'Away'}" title="${p.online ? 'Online' : 'Away'}"></span>${gameBadge}</span><div class="person-identity"><strong class="person-name-line person-nameplate">${nameIcon}<span class="person-name-text">${esc(displayNameFor(p) || '')}</span>${participantRoleBadgeHtml(p)}</strong>${presence}</div>`;
   };
+  const updatePersonBits = (element, person) => {
+    const signature = makePersonBits(person);
+    if (element.__corechatPersonBitsSignature !== signature) {
+      element.innerHTML = signature;
+      element.__corechatPersonBitsSignature = signature;
+    }
+    applyIdentityNameplate(element, person);
+  };
+  const findReusableRow = key => [...userListEl.children].find(row => row.dataset?.peopleRowKey === key) || null;
 people.forEach(p => {
   // optional but safe (prevents flicker states)
   const name = p.display_name || '';
@@ -3943,33 +5216,62 @@ if (presentationGroup.length > 1 && !presentationGroup.some(member => rendered.h
     presentation.visibleMemberIds
   ) || presentationGroup;
 
-  const row = document.createElement('div');
+  const rowKey = `linked:${orderedGroup.map(member => Number(member.id)).join(',')}`;
+  const row = findReusableRow(rowKey) || document.createElement('div');
   row.className = 'person-row linked-row';
+  row.dataset.peopleRowKey = rowKey;
 
-  row.innerHTML = orderedGroup.map(member => `
-    <div class="linked-half"
-         data-participant-id="${member.id}"
-         style="touch-action:none; cursor:grab;">
-      ${makePersonBits(member)}
-    </div>
-  `).join('');
-
-  orderedGroup.forEach(member => rendered.add(member.id));
-  userListEl.appendChild(row);
+  orderedGroup.forEach(member => {
+    rendered.add(member.id);
+    let half = [...row.children].find(candidate => Number(candidate.dataset?.participantId) === Number(member.id)) || null;
+    if (!half) {
+      half = document.createElement('div');
+      half.dataset.participantId = String(member.id);
+      half.style.touchAction = 'none';
+      half.style.cursor = 'grab';
+    }
+    half.className = `linked-half ${roleClass(member)}`;
+    if (!half.__corechatLocateListenerAttached) {
+      half.addEventListener('click', () => pulseParticipantAvatar(Number(half.dataset.participantId)));
+      half.addEventListener('contextmenu', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const current = participants.get(Number(half.dataset.participantId));
+        if (current) openAvatarContextMenu(event.clientX, event.clientY, current);
+      });
+      half.__corechatLocateListenerAttached = true;
+    }
+    updatePersonBits(half, member);
+    row.appendChild(half);
+  });
+  [...row.children].forEach(half => {
+    if (!orderedGroup.some(member => Number(member.id) === Number(half.dataset?.participantId))) half.remove();
+  });
+  desiredRows.push(row);
   return;
 }
     rendered.add(p.id);
-    const row = document.createElement('div');
+    const rowKey = `person:${Number(p.id)}`;
+    const row = findReusableRow(rowKey) || document.createElement('div');
     row.className = `person-row ${roleClass(p)}`;
-    row.dataset.participantId = p.id;
-    row.innerHTML = makePersonBits(p);
-    row.addEventListener('click', () => pulseParticipantAvatar(p.id));
-    row.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      openAvatarContextMenu(e.clientX, e.clientY, p);
-    });
-    userListEl.appendChild(row);
+    row.dataset.participantId = String(p.id);
+    row.dataset.peopleRowKey = rowKey;
+    updatePersonBits(row, p);
+    if (!row.__corechatPeopleListenersAttached) {
+      row.addEventListener('click', () => pulseParticipantAvatar(Number(row.dataset.participantId)));
+      row.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const current = participants.get(Number(row.dataset.participantId));
+        if (current) openAvatarContextMenu(e.clientX, e.clientY, current);
+      });
+      row.__corechatPeopleListenersAttached = true;
+    }
+    desiredRows.push(row);
+  });
+  desiredRows.forEach(row => userListEl.appendChild(row));
+  [...userListEl.children].forEach(row => {
+    if (!desiredRows.includes(row)) row.remove();
   });
 }
 
@@ -4072,7 +5374,7 @@ function clearUnread(chatKey) {
 function switchChat(chatKey) {
   const switched = chatNavigation().switchChat(chatKey);
   const conversation = messageProtectionConversation(chatKey);
-  if (conversation && ['dm', 'link'].includes(conversation.kind)) {
+  if (conversation && ['dm', 'link', 'game'].includes(conversation.kind)) {
     messageProtectionFetchContext(conversation, '', true)
       .then(context => messageProtectionUpdatePolicy(context.conversation?.policy))
       .catch(warnRuntimeRequest);
@@ -4127,23 +5429,16 @@ function addMessageToChannel(msg, chatKey, live = false) {
     return;
   }
   if (!messageVisible(msg)) return;
-  const mutedPolicy = mutedUserPolicies.get(Number(msg.user_id || participants.get(msg.participant_id)?.user_id || 0));
-  const authoritativeGameOrSystem = Boolean(msg.system)
-    || chatKey.startsWith('game:')
-    || ['game_action', 'game_score', 'system', 'required_state'].includes(String(msg.message_type || ''));
-  if (mutedPolicy && !authoritativeGameOrSystem && mutedPolicy.scopes.includes('text-bubbles')) {
-    msg = {
-      ...msg,
-      muted_original_content: msg.content,
-      content: 'Muted message — reveal this one message from its message actions.',
-      muted_collapsed: true,
-      one_message_reveal_allowed: true,
-    };
-  }
+  const mutedPolicy = activeMutedPolicyFor(Number(msg.user_id || participants.get(msg.participant_id)?.user_id || 0));
+  msg = applyPersonalMutePresentation(msg, chatKey);
   const activeChat = activeChatKey();
   const result = chatMessageState().addMessageToChannel(msg, chatKey);
   const existing = result.existing;
   const storedMessage = result.message || msg;
+  chatRuntime?.notifications?.consider(storedMessage, chatKey, {
+    live, existing: Boolean(existing),
+    suppressed: Boolean(mutedPolicy && mutedPolicy.scopes.includes('notices-unread')),
+  });
   if (existing && chatKey === activeChat) {
     renderActiveChat();
     return;
@@ -4699,10 +5994,30 @@ function addSystemMessage(text) {
   }, 'room', false);
 }
 
+let emojiComposerReady = null;
+function initializeEmojiComposer() {
+  if (!emojiComposerReady) {
+    emojiComposerReady = import(appUrl('/assets/js/emoji-composer.js?v=20260914-inline-images'))
+      .then(({ enhanceEmojiComposer }) => {
+        enhanceEmojiComposer(document.getElementById('chat-input'), { mediaUrl });
+        updateComposerState();
+      })
+      .catch(error => {
+        console.warn('Custom emoji preview unavailable; the standard message editor remains available.', error);
+      });
+  }
+  return emojiComposerReady;
+}
+
 function updateComposerState() {
   const input = document.getElementById('chat-input');
   const counter = document.getElementById('char-counter');
   if (!input || !counter) return;
+  const activeChat = activeChatKey();
+  const canSendImportant = Boolean(cfg)
+    && Boolean(cfg.importantMessagePermissions?.[activeChat]);
+  if (importantMessageControl) importantMessageControl.hidden = !canSendImportant;
+  if (!canSendImportant && importantMessageToggle) importantMessageToggle.checked = false;
   input.style.height = 'auto';
   input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
   const count = input.value.length;
@@ -4717,18 +6032,29 @@ document.getElementById('composer').addEventListener('submit', async e => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
   if (!content) return;
+  const activeChat = activeChatKey();
+  if (activeChat.startsWith('game:') && chatGameChat().isChatClosed(activeChat.slice(5))) {
+    showWarning('This game chat has ended. Your message was not sent.');
+    return;
+  }
   input.value = '';
   updateComposerState();
-  const activeChat = activeChatKey();
+  const important = Boolean(importantMessageToggle?.checked)
+    && Boolean(cfg?.importantMessagePermissions?.[activeChat]);
+  if (importantMessageToggle) importantMessageToggle.checked = false;
   if (activeChat.startsWith('game:')) {
     stopGameTypingNow();
-    sendGameMessage(content).catch(err => alert(err.message || err));
+    const policy = messageProtectionPolicyFor(activeChat);
+    (policy?.mode === 'e2ee-private'
+      ? sendProtectedTextMessage(content, activeChat)
+      : sendGameMessage(content)
+    ).catch(err => alert(err.message || err));
     return;
   }
   const policy = messageProtectionPolicyFor(activeChat);
   try {
     if (policy?.mode === 'e2ee-private') await sendProtectedTextMessage(content, activeChat);
-    else await chatComposer().sendTextMessage(content, activeChat);
+    else await chatComposer().sendTextMessage(content, activeChat, { important });
   } catch (error) {
     showWarning(error.message || 'Message could not be sent.');
   }
@@ -4744,26 +6070,30 @@ function renderLatency(ms) {
   }
   const rounded = Math.max(1, Math.round(ms));
   latencyMonitorEl.textContent = `${rounded}ms`;
-  latencyMonitorEl.classList.add(rounded < 180 ? 'latency-good' : (rounded < 500 ? 'latency-warn' : 'latency-bad'));
+  latencyMonitorEl.classList.add(rounded < 100 ? 'latency-good' : (rounded < 150 ? 'latency-warn' : 'latency-bad'));
 }
 
 async function checkLatency() {
-  if (!latencyMonitorEl || !cfg || roomExitInProgress) return;
+  if (!latencyMonitorEl || !cfg || roomExitInProgress || document.hidden) return;
   try {
-    const qs = new URLSearchParams({
-      session_id: cfg.sessionId,
-      join_token: cfg.myJoinToken,
-      t: String(Date.now()),
-    });
-    const startedAt = performance.now();
-    qs.set('mode', 'latency');
-    await runtimeRequestClient.getJson('/api/heartbeat.php?' + qs, {
-      operation: 'measure-room-latency',
-      endpointCategory: 'heartbeat',
-      cache: 'no-store',
-    });
-    const elapsed = performance.now() - startedAt;
-    lastLatencyMs = lastLatencyMs === null ? elapsed : (lastLatencyMs * .65) + (elapsed * .35);
+    const probeSamples = [];
+    const probeCount = 1;
+    for (let probe = 0; probe < probeCount; probe += 1) {
+      const qs = new URLSearchParams({ t: `${Date.now()}-${probe}` });
+      let startedAt = performance.now();
+      await runtimeRequestClient.getJson('/assets/latency-probe.json?' + qs, {
+        operation: 'measure-room-latency',
+        endpointCategory: 'latency-probe',
+        cache: 'no-store',
+        onRequestStart: () => { startedAt = performance.now(); },
+      });
+      probeSamples.push(performance.now() - startedAt);
+    }
+    const elapsed = Math.min(...probeSamples);
+    latencySamples.push(elapsed);
+    if (latencySamples.length > 5) latencySamples.shift();
+    const orderedSamples = [...latencySamples].sort((a, b) => a - b);
+    lastLatencyMs = orderedSamples[Math.floor(orderedSamples.length / 2)];
     renderLatency(lastLatencyMs);
   } catch (err) {
     warnRuntimeRequest(err);
@@ -4774,6 +6104,11 @@ async function checkLatency() {
 function poll() {
   chatPoll().start();
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || roomExitInProgress || !cfg) return;
+  gameRuntime?.lifecycle?.loadGames().catch(warnRuntimeRequest);
+});
 
 function showTyping(participantId, active) {
   chatTyping().showTyping(participantId, active);
@@ -4918,7 +6253,7 @@ function stopTypingNow() {
   chatTyping().stopTypingNow();
 }
 
-document.getElementById('chat-input').addEventListener('input', () => {
+document.getElementById('composer').addEventListener('input', e => {
   updateComposerState();
   const activeChat = activeChatKey();
   if (activeChat.startsWith('game:')) {
@@ -4928,7 +6263,7 @@ document.getElementById('chat-input').addEventListener('input', () => {
   chatTyping().handleComposerInput(activeChat);
 });
 
-document.getElementById('chat-input').addEventListener('keydown', e => {
+document.getElementById('composer').addEventListener('keydown', e => {
   if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
   e.preventDefault();
   document.getElementById('composer').requestSubmit();
@@ -4967,7 +6302,7 @@ function pastedImageFile(event) {
   return files.find(file => String(file.type || '').startsWith('image/')) || null;
 }
 
-document.getElementById('chat-input').addEventListener('paste', e => {
+document.getElementById('composer').addEventListener('paste', e => {
   const file = pastedImageFile(e);
   if (!file) return;
   e.preventDefault();
@@ -5121,7 +6456,7 @@ async function refreshPresence() {
           online: p.online,
         });
         if (p.online) applyWebcamState(existing.id, Boolean(p.webcam_enabled || p.webcam_path), p.webcam_path || null, 'heartbeat-presence');
-        else if (existing.avatarEl) removeParticipant(existing.id, { keepRecord: true });
+        else if (existing.avatarEl) renderParticipant(existing, { animateJoin: false });
       }
     });
     recordVoiceLifecycleDiagnostic({
@@ -5275,20 +6610,24 @@ function setAvatarOrientation(requestedOrientation) {
 function participantSizeFields(preferences = {}) {
   return {
     avatar_display_size_px: preferences.avatarDisplayPreferencePx ?? null,
+    avatar_display_width_px: preferences.avatarDisplayWidthPreferencePx ?? null,
+    avatar_display_height_px: preferences.avatarDisplayHeightPreferencePx ?? null,
     webcam_display_width_px: preferences.webcamDisplayWidthPreferencePx ?? null,
     webcam_display_height_px: preferences.webcamDisplayHeightPreferencePx ?? null,
     avatar_size_version: Number(preferences.displayPreferenceVersion || 1),
   };
 }
 
-function applyLocalDisplayPreferences(preferences, reason = 'local-display-size-save') {
+function applyLocalDisplayPreferences(preferences, reason = 'local-display-size-save', options = {}) {
   const me = participants.get(cfg.myParticipantId);
   if (!me || !preferences) return false;
   const currentVersion = Number(me.avatar_size_version || 1);
   const next = participantSizeFields(preferences);
-  if (next.avatar_size_version < currentVersion) return false;
+  if (next.avatar_size_version < currentVersion && options.authoritative !== true) return false;
   const changed = next.avatar_size_version !== currentVersion
     || next.avatar_display_size_px !== me.avatar_display_size_px
+    || next.avatar_display_width_px !== me.avatar_display_width_px
+    || next.avatar_display_height_px !== me.avatar_display_height_px
     || next.webcam_display_width_px !== me.webcam_display_width_px
     || next.webcam_display_height_px !== me.webcam_display_height_px;
   if (!changed) return false;
@@ -5380,6 +6719,69 @@ function refreshWebcamPresetLabels() {
   });
 }
 
+function syncAvatarExactSizeMode() {
+  const exact = avatarSizeMode.value === 'exact';
+  document.getElementById('avatar-exact-size-fields').hidden = !exact;
+  avatarExactWidth.disabled = !exact;
+  avatarExactHeight.disabled = !exact;
+  avatarSizeEdge.disabled = exact;
+}
+
+function populateAvatarExactMatches(me) {
+  const relationship = avatarRuntime?.relationships?.relationshipForParticipant(me.id);
+  avatarExactMatchParticipant.innerHTML = '';
+  (relationship?.status === 'active' ? relationship.members || [] : []).forEach(member => {
+    if (member.status !== 'active' || Number(member.participantId) === Number(me.id)) return;
+    const target = participants.get(Number(member.participantId));
+    if (!target) return;
+    const size = avatarRenderedDimensions(target, { webcam: false });
+    const option = document.createElement('option');
+    option.value = String(target.id);
+    option.textContent = (target.display_name || 'Member') + ' (' + Math.round(size.width) + ' x ' + Math.round(size.height) + ')';
+    avatarExactMatchParticipant.appendChild(option);
+  });
+  document.getElementById('avatar-exact-match-wrap').hidden = avatarExactMatchParticipant.options.length === 0;
+}
+
+avatarSizeMode.addEventListener('change', () => {
+  avatarSizeResetRequested = false;
+  syncAvatarExactSizeMode();
+  setAvatarSizeStatus();
+});
+[avatarExactWidth, avatarExactHeight].forEach(input => input.addEventListener('input', () => {
+  avatarSizeResetRequested = false;
+  setAvatarSizeStatus();
+}));
+document.getElementById('avatar-size-reset').addEventListener('click', () => {
+  if (avatarSizeModalMode !== 'avatar') return;
+  avatarSizeMode.value = 'natural';
+  syncAvatarExactSizeMode();
+});
+document.getElementById('avatar-exact-match').addEventListener('click', () => {
+  const me = participants.get(cfg.myParticipantId);
+  const target = participants.get(Number(avatarExactMatchParticipant.value));
+  const relationship = me && avatarRuntime?.relationships?.relationshipForParticipant(me.id);
+  if (!target || relationship?.status !== 'active' || Number(target.id) === Number(me.id)
+    || !(relationship.members || []).some(member => member.status === 'active' && Number(member.participantId) === Number(target.id))) {
+    setAvatarSizeStatus('That linked member is no longer available.', 'error');
+    return;
+  }
+  const dimensions = avatarRenderedDimensions(target, { webcam: false });
+  const width = Math.round(dimensions.width);
+  const height = Math.round(dimensions.height);
+  const cap = Number(avatarRuntime?.displayPolicy?.policy?.().avatarDisplayMaxPx || cfg.avatarSizePolicy?.avatarDisplayMaxPx || 200);
+  if (![width, height].every(value => Number.isInteger(value) && value >= 42 && value <= cap)) {
+    setAvatarSizeStatus('Their displayed size cannot be matched exactly within the 42-' + cap + 'px community limits.', 'error');
+    return;
+  }
+  avatarSizeMode.value = 'exact';
+  avatarExactWidth.value = String(width);
+  avatarExactHeight.value = String(height);
+  avatarSizeResetRequested = false;
+  syncAvatarExactSizeMode();
+  setAvatarSizeStatus(width + ' x ' + height + 'px copied. Press Save to apply.', 'ok');
+});
+
 function openAvatarSizeModal(mode, options = {}) {
   const me = participants.get(cfg.myParticipantId);
   if (!me || !avatarSizeModal) return;
@@ -5387,7 +6789,7 @@ function openAvatarSizeModal(mode, options = {}) {
   avatarSizeModalMode = mode === 'webcam' ? 'webcam' : 'avatar';
   avatarSizeStartWebcam = Boolean(options.startWebcam);
   avatarSizeResetRequested = avatarSizeModalMode === 'avatar'
-    ? me.avatar_display_size_px == null
+    ? me.avatar_display_size_px == null && me.avatar_display_width_px == null && me.avatar_display_height_px == null
     : me.webcam_display_width_px == null && me.webcam_display_height_px == null;
   avatarSizeAvatarFields.hidden = avatarSizeModalMode !== 'avatar';
   avatarSizeWebcamFields.hidden = avatarSizeModalMode !== 'webcam';
@@ -5398,7 +6800,7 @@ function openAvatarSizeModal(mode, options = {}) {
     control.disabled = avatarSizeModalMode !== 'webcam';
   });
   avatarSizeTitle.textContent = avatarSizeModalMode === 'avatar'
-    ? 'Maximum Avatar Display Size'
+    ? 'Avatar Display Size'
     : (avatarSizeStartWebcam ? 'Webcam Display Size Before Starting' : 'Webcam Display Size');
 
   if (avatarSizeModalMode === 'avatar') {
@@ -5408,6 +6810,12 @@ function openAvatarSizeModal(mode, options = {}) {
     avatarSizeCurrent.textContent = `Current displayed size: ${Math.round(dimensions.width)} × ${Math.round(dimensions.height)} px`;
     avatarSizeEdge.max = String(cap);
     avatarSizeEdge.value = String(avatarRuntime.displayPolicy.effectiveAvatarMaxEdge(me));
+    avatarSizeMode.value = me.avatar_display_width_px != null && me.avatar_display_height_px != null ? 'exact' : 'natural';
+    avatarExactWidth.max = avatarExactHeight.max = String(cap);
+    avatarExactWidth.value = String(Math.max(42, Math.min(cap, Math.round(Number(me.avatar_display_width_px) || dimensions.width))));
+    avatarExactHeight.value = String(Math.max(42, Math.min(cap, Math.round(Number(me.avatar_display_height_px) || dimensions.height))));
+    syncAvatarExactSizeMode();
+    populateAvatarExactMatches(me);
   } else {
     avatarSizeResetRequested = false;
     const maxWidth = Number(policy.webcamDisplayMaxWidthPx || 200);
@@ -5463,14 +6871,21 @@ function openAvatarSizeModal(mode, options = {}) {
   avatarSizeModal.classList.add('open');
   avatarSizeModal.setAttribute('aria-hidden', 'false');
   requestAnimationFrame(() => (
-    avatarSizeModalMode === 'avatar' ? avatarSizeEdge : avatarSizeWebcamPreset
+    avatarSizeModalMode === 'avatar' ? avatarSizeMode : avatarSizeWebcamPreset
   )?.focus());
 }
 
-async function saveAvatarSizePreferences() {
+async function saveAvatarSizePreferences(options = {}) {
   if (avatarSizePending) return;
   const me = participants.get(cfg.myParticipantId);
   if (!me) return;
+  if (avatarSizeModalMode === 'avatar' && avatarSizeMode.value === 'exact' && !avatarSizeResetRequested) {
+    const cap = Number(avatarRuntime?.displayPolicy?.policy?.().avatarDisplayMaxPx || cfg.avatarSizePolicy?.avatarDisplayMaxPx || 200);
+    if (![avatarExactWidth.value, avatarExactHeight.value].every(value => Number.isInteger(Number(value)) && Number(value) >= 42 && Number(value) <= cap)) {
+      setAvatarSizeStatus('Choose whole-number width and height between 42 and ' + cap + 'px.', 'error');
+      return;
+    }
+  }
   if (avatarSizeModalMode === 'webcam') {
     const resolution = avatarRuntime?.displayPolicy?.resolveWebcamDisplayChoice?.('custom', {
       width: avatarSizeWebcamWidth.value,
@@ -5493,6 +6908,9 @@ async function saveAvatarSizePreferences() {
   formData.append('expected_size_version', String(me.avatar_size_version || 1));
   if (avatarSizeModalMode === 'avatar') {
     formData.append('avatar_display_size_px', avatarSizeResetRequested ? '' : avatarSizeEdge.value);
+    const exact = !avatarSizeResetRequested && avatarSizeMode.value === 'exact';
+    formData.append('avatar_display_width_px', exact ? avatarExactWidth.value : '');
+    formData.append('avatar_display_height_px', exact ? avatarExactHeight.value : '');
   } else {
     formData.append('webcam_display_width_px', avatarSizeResetRequested ? '' : avatarSizeWebcamWidth.value);
     formData.append('webcam_display_height_px', avatarSizeResetRequested ? '' : avatarSizeWebcamHeight.value);
@@ -5501,6 +6919,10 @@ async function saveAvatarSizePreferences() {
     const response = await runtimeRequestClient.postForm('/api/avatar.php', formData, {
       operation: 'set-avatar-display-preferences',
       endpointCategory: 'avatar',
+      shouldReportFailure: error => !(
+        Number(error?.details?.status || 0) === 409
+        && String(error?.responsePayload?.code || '') === 'AVATAR_SIZE_PREFERENCE_STALE'
+      ),
     });
     avatarRuntime?.displayPolicy?.configure(response.avatarSizePolicy || {});
     cfg.avatarSizePolicy = avatarRuntime?.displayPolicy?.policy?.() || cfg.avatarSizePolicy;
@@ -5513,6 +6935,26 @@ async function saveAvatarSizePreferences() {
       ctxToggleWebcam.click();
     }
   } catch (error) {
+    const stalePayload = error?.responsePayload;
+    if (
+      options.retryStale !== false
+      && stalePayload?.code === 'AVATAR_SIZE_PREFERENCE_STALE'
+      && stalePayload?.preferences
+    ) {
+      applyLocalDisplayPreferences(
+        stalePayload.preferences,
+        'stale-display-size-reconciled',
+        { authoritative: true }
+      );
+      recordRuntimeDiagnostic('avatarDisplayPolicy', 'display-size-stale-reconciled', {
+        participantId: Number(me.id),
+        mode: avatarSizeModalMode,
+        displayPreferenceVersion: Number(stalePayload.preferences.displayPreferenceVersion || 1),
+      });
+      avatarSizePending = false;
+      saveButton.disabled = false;
+      return await saveAvatarSizePreferences({ retryStale: false });
+    }
     setAvatarSizeStatus(error?.message || 'Display size could not be saved.', 'error');
     recordRuntimeDiagnostic('avatarDisplayPolicy', 'display-size-save-failed', {
       participantId: Number(me.id),
@@ -5542,14 +6984,14 @@ function relationshipEligibilityLabel(reason) {
 
 function syncParticipantIdentityHeader(participant) {
   const displayElement = document.getElementById('ctx-identity-display-name');
-  const usernameElement = document.getElementById('ctx-identity-username');
+  const rolesElement = document.getElementById('ctx-identity-roles');
   const currentDisplayName = String(participant?.display_name || 'Member').trim();
   if (displayElement) {
     displayElement.textContent = currentDisplayName;
     displayElement.hidden = false;
   }
-  if (usernameElement) {
-    usernameElement.textContent = 'Authenticated community member';
+  if (rolesElement) {
+    rolesElement.textContent = `Roles: ${participantRoleLabels(participant).join(' · ')}`;
   }
   ctxMenu?.setAttribute('aria-label', `Actions for ${currentDisplayName}`);
 }
@@ -5559,16 +7001,23 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
   closeRoomMenu();
   closeMediaPicker();
   ctxMenuParticipantId = participant.id;
-  const isOwn = participant.id === cfg.myParticipantId;
-  const isLinked = avatarRuntime?.relationships?.isLinked(participant) || false;
+  const isOwn = Number(participant.id) === Number(cfg.myParticipantId);
+  const viewerRelationship = avatarRuntime?.relationships?.relationshipForParticipant(Number(cfg.myParticipantId)) || null;
   const relationship = avatarRuntime?.relationships?.relationshipForParticipant(participant.id) || null;
   const isBlocked = isUserBlocked(participant.user_id);
+  const isMuted = Boolean(activeMutedPolicyFor(participant.user_id));
   const me = participants.get(Number(cfg.myParticipantId));
   const interaction = !isOwn && me
     ? avatarRuntime?.coordinator?.relationshipEligibility(me, participant)
     : null;
+  const sameRelationship = Boolean(relationship && viewerRelationship && relationship.id === viewerRelationship.id);
+  const canRequestGroup = Boolean(relationship && !viewerRelationship && !isOwn && !isBlocked && participant.online !== false);
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
   syncParticipantIdentityHeader(participant);
+  if (ctxChangeNameplate) ctxChangeNameplate.style.display = isOwn ? 'block' : 'none';
+  if (ctxRemoveNameplate) {
+    ctxRemoveNameplate.style.display = isOwn && Boolean(identityNameplateUrl(participant)) ? 'block' : 'none';
+  }
   document.getElementById('ctx-change-avatar').style.display = isOwn ? 'block' : 'none';
   document.getElementById('ctx-avatar-size').style.display = isOwn ? 'block' : 'none';
   if (ctxOrientationWrap) ctxOrientationWrap.style.display = isOwn ? 'block' : 'none';
@@ -5582,18 +7031,32 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
   document.getElementById('ctx-dm').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   if (ctxInteract) {
     ctxInteract.style.display = !isOwn ? 'block' : 'none';
-    ctxInteract.disabled = !interaction?.allowed;
-    ctxInteract.title = interaction?.allowed ? 'Link Avatars or Sit in Lap' : relationshipEligibilityLabel(interaction?.reason);
+    ctxInteract.textContent = canRequestGroup ? 'Request to Link / Sit in Lap' : 'Interact';
+    ctxInteract.disabled = !canRequestGroup && !interaction?.allowed;
+    ctxInteract.title = canRequestGroup ? 'Request to join this group as a linked member or lap occupant'
+      : interaction?.allowed ? 'Link Avatars or Sit in Lap' : relationshipEligibilityLabel(interaction?.reason);
   }
   document.getElementById('ctx-tools-wrap').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-tools-divider').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-community-eject').style.display = showHostTools && Boolean(cfg.canCommunityEject) ? 'block' : 'none';
-  document.getElementById('ctx-tools-wrap').classList.remove('open');
-  ctxOrientationWrap?.classList.remove('open');
+  closeContextSubmenu(
+    document.getElementById('ctx-tools-wrap'),
+    document.getElementById('ctx-tools'),
+    document.getElementById('ctx-tools-submenu')
+  );
+  closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
   document.getElementById('ctx-manage-relationship').style.display = relationship ? 'block' : 'none';
-  document.getElementById('ctx-unlink').style.display = isLinked && !isBlocked ? 'block' : 'none';
+  document.getElementById('ctx-unlink').style.display = sameRelationship && !isBlocked ? 'block' : 'none';
+  document.getElementById('ctx-manage-relationship').textContent = relationship && !sameRelationship ? 'View Relationship / Request to Join' : 'Manage Relationship';
   syncParticipantActionMenu(participant, isOwn);
+  const muteAction = document.getElementById('ctx-mute');
+  if (muteAction) {
+    muteAction.style.display = !isOwn ? 'block' : 'none';
+    muteAction.textContent = isMuted ? 'Unmute' : 'Mute';
+    muteAction.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
+  }
   ctxToggleWebcam.textContent = (webcamIntent || webcamStream) ? 'Disable Webcam' : 'Enable Webcam';
+  syncLocalWebcamToggleButton();
   syncAvatarOrientationControls(participant);
   ctxMenuReturnFocus = options.returnFocus || null;
   ctxMenu.classList.add('visible');
@@ -5622,6 +7085,8 @@ function syncParticipantActionMenu(participant, isOwn = false) {
   const block = actions.get('user.block');
   syncParticipantActionButton(ctxAvatarVisibility, exact, !isOwn);
   syncParticipantActionButton(ctxAvatarUserVisibility, user, !isOwn);
+  syncParticipantActionButton(ctxNameplateVisibility, actions.get('nameplate.current-visibility'), !isOwn);
+  syncParticipantActionButton(ctxNameplateUserVisibility, actions.get('nameplate.user-visibility'), !isOwn);
   syncParticipantActionButton(
     ctxGestureSenderVisibility,
     actions.get('gesture.sender-media-visibility'),
@@ -5640,9 +7105,12 @@ function syncParticipantActionMenu(participant, isOwn = false) {
 
 function closeContextMenu(options = {}) {
   ctxMenu.classList.remove('visible');
-  document.getElementById('ctx-tools-wrap')?.classList.remove('open');
-  ctxOrientationWrap?.classList.remove('open');
-  ctxOrientation?.setAttribute('aria-expanded', 'false');
+  closeContextSubmenu(
+    document.getElementById('ctx-tools-wrap'),
+    document.getElementById('ctx-tools'),
+    document.getElementById('ctx-tools-submenu')
+  );
+  closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
   ctxMenuParticipantId = null;
   const returnFocus = ctxMenuReturnFocus;
   ctxMenuReturnFocus = null;
@@ -5695,6 +7163,12 @@ function openMessageActionMenu(x, y, msg) {
   const gesture = gestureFromMessage(msg);
   const gesturePublicId = gesturePresentation?.publicId?.(gesture) || '';
   const gestureVisibilityAction = document.getElementById('msg-gesture-visibility-action');
+  const mutedRevealAction = document.getElementById('msg-muted-reveal-action');
+  if (mutedRevealAction) {
+    const revealAllowed = Boolean(msg.muted_collapsed && msg.one_message_reveal_allowed);
+    mutedRevealAction.hidden = !revealAllowed;
+    mutedRevealAction.style.display = revealAllowed ? 'block' : 'none';
+  }
   const gestureVisibilityAllowed = cfg.gesturePart3?.features?.message_hide_unhide !== false
     && gesturePublicId !== ''
     && Number(gesture?.owner_user_id || 0) !== Number(cfg.myUserId);
@@ -5721,6 +7195,7 @@ function closeRoomActionMenu() {
 }
 
 function closeMediaPicker() {
+  gestureCatalogController?.closeActionMenu();
   if (mediaPicker) mediaPicker.hidden = true;
 }
 
@@ -5728,8 +7203,555 @@ function closeAttachMenu() {
   attachMenu.hidden = true;
 }
 
-function closeGameStartMenu() {
+function gamePickerCategory(game) {
+  const key = String(game?.name || game?.extensionId || game?.key || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .replace(/^tetrisversus$/, 'tetris');
+  if (['blackjack', 'hearts', 'spades', 'uno'].includes(key)) return 'card';
+  if (['spaceinvasion', 'tetris'].includes(key)) return 'arcade';
+  return 'table';
+}
+
+function gamePickerPlayerLabel(game) {
+  const minimum = Math.max(1, Number(game?.minPlayers || 1));
+  const maximum = Math.max(minimum, Number(game?.maxPlayers || minimum));
+  if (minimum === maximum) return `${minimum} ${minimum === 1 ? 'player' : 'players'}`;
+  return `${minimum}-${maximum} players`;
+}
+
+function renderGamePickerCatalog() {
+  if (!gamePickerCatalog) return;
+  if (!gameCatalogLoaded) {
+    const loading = document.createElement('p');
+    loading.className = 'minor game-picker-loading';
+    loading.setAttribute('role', 'status');
+    loading.textContent = 'Loading installed games...';
+    gamePickerCatalog.replaceChildren(loading);
+    if (gamePickerCount) gamePickerCount.textContent = 'Loading installed games...';
+    if (gamePickerSelection) gamePickerSelection.textContent = 'Waiting for game library';
+    if (gamePickerContinue) gamePickerContinue.disabled = true;
+    if (gamePickerEmpty) gamePickerEmpty.hidden = true;
+    return;
+  }
+  const categories = [
+    { key: 'card', label: 'Card Games' },
+    { key: 'table', label: 'Table Games' },
+    { key: 'arcade', label: 'Arcade' },
+  ];
+  const query = String(gamePickerSearch?.value || '').trim().toLocaleLowerCase();
+  const visibleGames = gameCatalogDefinitions
+    .filter(game => {
+      const category = gamePickerCategory(game);
+      const categoryMatches = gameCatalogFilter === 'all' || category === gameCatalogFilter;
+      const searchMatches = !query || String(game.name || game.key || '').toLocaleLowerCase().includes(query);
+      return categoryMatches && searchMatches;
+    })
+    .sort((left, right) => String(left.name || left.key || '').localeCompare(String(right.name || right.key || ''), undefined, { sensitivity: 'base' }));
+
+  if (selectedGameCatalogKey && !visibleGames.some(game => String(game.key || '') === selectedGameCatalogKey)) {
+    selectedGameCatalogKey = '';
+  }
+
+  const fragment = document.createDocumentFragment();
+  categories.forEach(category => {
+    const games = visibleGames.filter(game => gamePickerCategory(game) === category.key);
+    if (!games.length) return;
+    const section = document.createElement('section');
+    section.className = 'game-picker-section';
+    section.dataset.gameCategory = category.key;
+    const heading = document.createElement('div');
+    heading.className = 'game-picker-section-head';
+    const title = document.createElement('strong');
+    title.textContent = category.label;
+    const count = document.createElement('span');
+    count.textContent = `${games.length} ${games.length === 1 ? 'game' : 'games'}`;
+    heading.append(title, count);
+    const grid = document.createElement('div');
+    grid.className = 'game-picker-grid';
+    games.forEach(game => {
+      const key = String(game.key || '');
+      const selected = key === selectedGameCatalogKey;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `game-picker-card${selected ? ' is-selected' : ''}`;
+      button.dataset.game = key;
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      const iconWrap = document.createElement('span');
+      iconWrap.className = 'game-picker-icon';
+      const icon = document.createElement('img');
+      icon.src = appUrl(`/assets/images/${game.icon}`);
+      icon.alt = '';
+      iconWrap.append(icon);
+      const copy = document.createElement('span');
+      copy.className = 'game-picker-card-copy';
+      const name = document.createElement('strong');
+      name.textContent = String(game.name || key || 'Installed game');
+      const details = document.createElement('small');
+      details.textContent = gamePickerPlayerLabel(game);
+      copy.append(name, details);
+      const action = document.createElement('span');
+      action.className = 'game-picker-card-action';
+      action.textContent = selected ? 'Selected' : 'Choose';
+      button.append(iconWrap, copy, action);
+      button.addEventListener('click', () => {
+        selectedGameCatalogKey = key;
+        renderGamePickerCatalog();
+      });
+      grid.append(button);
+    });
+    section.append(heading, grid);
+    fragment.append(section);
+  });
+  gamePickerCatalog.replaceChildren(fragment);
+  const selectedGame = gameCatalogDefinitions.find(game => String(game.key || '') === selectedGameCatalogKey);
+  if (gamePickerSelection) gamePickerSelection.textContent = String(selectedGame?.name || 'No game selected');
+  if (gamePickerContinue) gamePickerContinue.disabled = !selectedGame;
+  if (gamePickerEmpty) gamePickerEmpty.hidden = visibleGames.length > 0;
+  if (gamePickerCount) {
+    const count = gameCatalogDefinitions.length;
+    gamePickerCount.textContent = `${count} installed ${count === 1 ? 'game' : 'games'}`;
+  }
+}
+
+function centerGameStartMenu() {
+  if (!gameStartMenu) return;
+  const centerX = window.innerWidth / 2;
+  const centerY = window.innerHeight / 2;
+  gameStartMenu.dataset.positioned = 'false';
+  gameStartMenu.style.left = `${centerX}px`;
+  gameStartMenu.style.top = `${centerY}px`;
+  gameStartMenu.style.right = '';
+  gameStartMenu.style.bottom = '';
+  gameStartMenu.style.transform = 'translate(-50%, -50%)';
+}
+
+function openGameStartMenu() {
+  if (!gameStartMenu) return;
+  closeRoomGamesMenu({ restoreFocus: false });
+  gameStartMenu.hidden = false;
+  centerGameStartMenu();
+  const browser = gameStartMenu.querySelector('.game-picker-browser');
+  if (browser) browser.scrollTop = 0;
+  document.getElementById('game-start-btn')?.setAttribute('aria-expanded', 'true');
+  gameCatalogLoaded = false;
+  gameCatalogDefinitions = [];
+  selectedGameCatalogKey = '';
+  renderGamePickerCatalog();
+  gameRuntime?.lifecycle?.loadCatalog().catch(warnRuntimeRequest);
+  requestAnimationFrame(() => gamePickerSearch?.focus({ preventScroll: true }));
+}
+
+function closeGameStartMenu({ restoreFocus = true } = {}) {
   if (gameStartMenu) gameStartMenu.hidden = true;
+  document.getElementById('game-start-btn')?.setAttribute('aria-expanded', 'false');
+  gamePickerDragState = null;
+  if (restoreFocus) document.getElementById('game-start-btn')?.focus({ preventScroll: true });
+}
+
+function beginGamePickerDrag(event) {
+  if (!gameStartMenu || event.button !== 0 || event.target.closest('button, input')) return;
+  const rectangle = gameStartMenu.getBoundingClientRect();
+  gamePickerDragState = {
+    pointerId: event.pointerId,
+    offsetX: event.clientX - rectangle.left,
+    offsetY: event.clientY - rectangle.top,
+    handle: event.currentTarget,
+  };
+  gameStartMenu.dataset.positioned = 'true';
+  gameStartMenu.style.left = `${rectangle.left}px`;
+  gameStartMenu.style.top = `${rectangle.top}px`;
+  gameStartMenu.style.transform = 'none';
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function moveGamePicker(event) {
+  if (!gameStartMenu || !gamePickerDragState || event.pointerId !== gamePickerDragState.pointerId) return;
+  const maximumLeft = Math.max(8, window.innerWidth - gameStartMenu.offsetWidth - 8);
+  const maximumTop = Math.max(8, window.innerHeight - gameStartMenu.offsetHeight - 8);
+  const left = Math.min(maximumLeft, Math.max(8, event.clientX - gamePickerDragState.offsetX));
+  const top = Math.min(maximumTop, Math.max(8, event.clientY - gamePickerDragState.offsetY));
+  gameStartMenu.style.left = `${left}px`;
+  gameStartMenu.style.top = `${top}px`;
+}
+
+function endGamePickerDrag(event) {
+  if (!gamePickerDragState || event.pointerId !== gamePickerDragState.pointerId) return;
+  gamePickerDragState.handle?.releasePointerCapture?.(event.pointerId);
+  gamePickerDragState = null;
+}
+
+function centerRoomGamesMenu() {
+  if (!roomGamesMenu) return;
+  const anchorRect = document.querySelector('.main')?.getBoundingClientRect();
+  const centerX = anchorRect ? (anchorRect.left + anchorRect.right) / 2 : window.innerWidth / 2;
+  roomGamesMenu.dataset.positioned = 'false';
+  roomGamesMenu.style.left = `${centerX}px`;
+  roomGamesMenu.style.top = `${window.innerHeight / 2}px`;
+  roomGamesMenu.style.right = '';
+  roomGamesMenu.style.bottom = '';
+  roomGamesMenu.style.transform = 'translate(-50%, -50%)';
+}
+
+function openRoomGamesMenu() {
+  if (!roomGamesMenu) return;
+  closeGameStartMenu({ restoreFocus: false });
+  centerRoomGamesMenu();
+  roomGamesMenu.hidden = false;
+  document.getElementById('room-games-btn')?.setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => document.getElementById('room-games-close')?.focus({ preventScroll: true }));
+}
+
+function closeRoomGamesMenu({ restoreFocus = true } = {}) {
+  if (roomGamesMenu) roomGamesMenu.hidden = true;
+  document.getElementById('room-games-btn')?.setAttribute('aria-expanded', 'false');
+  roomGamesDragState = null;
+  if (restoreFocus) document.getElementById('room-games-btn')?.focus({ preventScroll: true });
+}
+
+function beginRoomGamesDrag(event) {
+  if (!roomGamesMenu || event.button !== 0 || event.target.closest('button, input')) return;
+  const rectangle = roomGamesMenu.getBoundingClientRect();
+  roomGamesDragState = {
+    pointerId: event.pointerId,
+    offsetX: event.clientX - rectangle.left,
+    offsetY: event.clientY - rectangle.top,
+    handle: event.currentTarget,
+  };
+  roomGamesMenu.dataset.positioned = 'true';
+  roomGamesMenu.style.left = `${rectangle.left}px`;
+  roomGamesMenu.style.top = `${rectangle.top}px`;
+  roomGamesMenu.style.transform = 'none';
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function moveRoomGamesMenu(event) {
+  if (!roomGamesMenu || !roomGamesDragState || event.pointerId !== roomGamesDragState.pointerId) return;
+  const maximumLeft = Math.max(8, window.innerWidth - roomGamesMenu.offsetWidth - 8);
+  const maximumTop = Math.max(8, window.innerHeight - roomGamesMenu.offsetHeight - 8);
+  roomGamesMenu.style.left = `${Math.min(maximumLeft, Math.max(8, event.clientX - roomGamesDragState.offsetX))}px`;
+  roomGamesMenu.style.top = `${Math.min(maximumTop, Math.max(8, event.clientY - roomGamesDragState.offsetY))}px`;
+}
+
+function endRoomGamesDrag(event) {
+  if (!roomGamesDragState || event.pointerId !== roomGamesDragState.pointerId) return;
+  roomGamesDragState.handle?.releasePointerCapture?.(event.pointerId);
+  roomGamesDragState = null;
+}
+
+function projectedGameSettingValue(control) {
+  const type = String(control?.dataset?.gameSettingType || 'checkbox');
+  if (type === 'stepper') return Number(control.dataset.gameSettingValue);
+  if (type === 'choice-grid') return JSON.parse(control.dataset.gameSettingValue);
+  if (type === 'button-choice') return JSON.parse(control.dataset.gameSettingValue);
+  if (type === 'select') return JSON.parse(control.value);
+  return Boolean(control.checked);
+}
+
+function renderGameModeRules(game) {
+  const surface = document.getElementById('game-mode-rules');
+  const description = document.getElementById('game-mode-rules-description');
+  const host = document.getElementById('game-mode-rule-controls');
+  if (!surface || !description || !host) return;
+  const projection = game?.settingsControls || {};
+  const controls = Array.isArray(projection.controls) ? projection.controls : [];
+  host.replaceChildren();
+  surface.hidden = controls.length === 0;
+  if (!controls.length) return;
+  const originalDescription = String(projection.description || 'Choose the exact rules that every player will accept.');
+  const updateClassification = () => {
+    const defaultLabel = String(projection.defaultClassificationLabel || '');
+    const customLabel = String(projection.customClassificationLabel || '');
+    if (!defaultLabel || !customLabel) {
+      description.textContent = originalDescription;
+      return;
+    }
+    const custom = controls.some(control => {
+      const input = host.querySelector(`[data-game-setting-key="${CSS.escape(String(control.key || ''))}"]`);
+      return input && JSON.stringify(projectedGameSettingValue(input)) !== JSON.stringify(control.defaultValue);
+    });
+    const detail = originalDescription.replace(/^[^.]+\.\s*/, '');
+    description.textContent = `${custom ? customLabel : defaultLabel}. ${detail}`;
+  };
+  controls.forEach(control => {
+    const isStepper = control.type === 'stepper';
+    const isChoiceGrid = control.type === 'choice-grid';
+    const isButtonChoice = control.type === 'button-choice';
+    const label = document.createElement(isStepper || isChoiceGrid || isButtonChoice ? 'div' : 'label');
+    label.className = 'game-mode-rule-control';
+    const title = document.createElement('strong');
+    title.textContent = String(control.label || 'Game rule');
+    const help = document.createElement('small');
+    help.textContent = String(control.description || '');
+    if (isStepper) {
+      label.classList.add('is-stepper');
+      const minimum = Number(control.minimum);
+      const maximum = Number(control.maximum);
+      const step = Number(control.step);
+      let currentValue = Math.max(minimum, Math.min(maximum, Number(control.value)));
+      const input = document.createElement('div');
+      input.className = 'game-rule-stepper';
+      input.setAttribute('role', 'group');
+      input.setAttribute('aria-label', String(control.label || 'Game rule'));
+      input.dataset.gameSettingKey = String(control.key || '');
+      input.dataset.gameSettingType = 'stepper';
+      const decrease = document.createElement('button');
+      decrease.type = 'button';
+      decrease.className = 'btn game-rule-stepper-button';
+      decrease.textContent = `−${step}`;
+      decrease.setAttribute('aria-label', `Decrease ${String(control.label || 'value')} by ${step}`);
+      const output = document.createElement('output');
+      output.className = 'game-rule-stepper-value';
+      output.setAttribute('aria-live', 'polite');
+      const increase = document.createElement('button');
+      increase.type = 'button';
+      increase.className = 'btn game-rule-stepper-button';
+      increase.textContent = `+${step}`;
+      increase.setAttribute('aria-label', `Increase ${String(control.label || 'value')} by ${step}`);
+      const setValue = next => {
+        currentValue = Math.max(minimum, Math.min(maximum, Math.round((Number(next) - minimum) / step) * step + minimum));
+        input.dataset.gameSettingValue = String(currentValue);
+        output.value = String(currentValue);
+        output.textContent = String(currentValue);
+        output.setAttribute('aria-label', `${String(control.label || 'Game rule')} ${currentValue}`);
+        decrease.disabled = currentValue <= minimum;
+        increase.disabled = currentValue >= maximum;
+        updateClassification();
+      };
+      decrease.addEventListener('click', () => setValue(currentValue - step));
+      increase.addEventListener('click', () => setValue(currentValue + step));
+      input.append(decrease, output, increase);
+      for (const shortcut of Array.isArray(control.shortcuts) ? control.shortcuts : []) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn game-rule-stepper-shortcut';
+        button.textContent = String(shortcut.label || shortcut.value);
+        button.addEventListener('click', () => setValue(Number(shortcut.value)));
+        input.append(button);
+      }
+      label.append(title, help, input);
+      host.append(label);
+      setValue(currentValue);
+      return;
+    }
+    if (isChoiceGrid) {
+      label.classList.add('is-choice-grid');
+      const group = document.createElement('div');
+      group.className = 'game-rule-choice-grid';
+      group.setAttribute('role', 'radiogroup');
+      group.setAttribute('aria-label', String(control.label || 'Game rule'));
+      group.dataset.gameSettingKey = String(control.key || '');
+      group.dataset.gameSettingType = 'choice-grid';
+      group.dataset.gameSettingValue = JSON.stringify(control.value);
+      for (const choice of Array.isArray(control.options) ? control.options : []) {
+        const card = document.createElement('label');
+        card.className = 'game-rule-choice-card';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = `game-mode-${String(control.key || 'choice')}`;
+        radio.value = JSON.stringify(choice.value);
+        radio.checked = radio.value === JSON.stringify(control.value);
+        const text = document.createElement('span');
+        text.textContent = String(choice.label || choice.value);
+        radio.addEventListener('change', () => {
+          if (!radio.checked) return;
+          group.dataset.gameSettingValue = radio.value;
+          updateClassification();
+        });
+        card.append(radio, text);
+        group.append(card);
+      }
+      label.append(title, help, group);
+      host.append(label);
+      return;
+    }
+    if (isButtonChoice) {
+      label.classList.add('is-button-choice');
+      const group = document.createElement('div');
+      group.className = 'game-rule-button-choices';
+      group.setAttribute('role', 'group');
+      group.setAttribute('aria-label', String(control.label || 'Game rule'));
+      group.dataset.gameSettingKey = String(control.key || '');
+      group.dataset.gameSettingType = 'button-choice';
+      group.dataset.gameSettingValue = JSON.stringify(control.value);
+      const choices = [];
+      const setChoice = button => {
+        group.dataset.gameSettingValue = String(button.dataset.value);
+        choices.forEach(candidate => {
+          const selected = candidate === button;
+          candidate.classList.toggle('is-selected', selected);
+          candidate.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        });
+        updateClassification();
+      };
+      for (const choice of Array.isArray(control.options) ? control.options : []) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'game-rule-button-choice';
+        button.dataset.value = JSON.stringify(choice.value);
+        const name = document.createElement('strong');
+        name.textContent = String(choice.label || choice.value);
+        const detail = document.createElement('small');
+        detail.textContent = String(choice.description || '');
+        button.append(name, detail);
+        button.addEventListener('click', () => setChoice(button));
+        choices.push(button);
+        group.append(button);
+      }
+      label.append(title, help, group);
+      host.append(label);
+      setChoice(choices.find(button => button.dataset.value === JSON.stringify(control.value)) || choices[0]);
+      return;
+    }
+    const input = document.createElement(control.type === 'select' ? 'select' : 'input');
+    if (control.type === 'select') {
+      for (const choice of Array.isArray(control.options) ? control.options : []) {
+        const option = document.createElement('option');
+        option.value = JSON.stringify(choice.value);
+        option.textContent = String(choice.label || choice.value);
+        option.selected = option.value === JSON.stringify(control.value);
+        input.append(option);
+      }
+    } else {
+      input.type = 'checkbox';
+      input.checked = control.value === true;
+    }
+    input.dataset.gameSettingKey = String(control.key || '');
+    input.dataset.gameSettingType = String(control.type || 'checkbox');
+    label.append(input, title, help);
+    host.append(label);
+    input.addEventListener('change', updateClassification);
+  });
+  updateClassification();
+}
+
+function syncGameModeInactivityProfile(mode) {
+  const input = gameModeForm?.querySelector('[data-game-setting-key="inactivityProfile"][data-game-setting-type="select"]');
+  if (!input) return;
+  const recorded = mode === 'recorded';
+  const options = Array.from(input.options || []);
+  const unlimited = options.find(option => option.value === JSON.stringify('unlimited'));
+  const standard = options.find(option => option.value === JSON.stringify('default'));
+  if (unlimited) {
+    unlimited.disabled = recorded;
+    unlimited.hidden = recorded;
+  }
+  if (recorded && input.value === JSON.stringify('unlimited') && standard && !standard.disabled) {
+    input.value = JSON.stringify('default');
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+}
+
+function selectedGameModeSettings() {
+  const settings = {};
+  document.querySelectorAll('#game-mode-rule-controls [data-game-setting-key]').forEach(input => {
+    settings[String(input.dataset.gameSettingKey)] = projectedGameSettingValue(input);
+  });
+  return settings;
+}
+
+function openGameModeDialog(game) {
+  if (!gameModeModal || !gameModeForm || !game) return;
+  gameModeDefinition = game;
+  gameModeReturnFocus = document.activeElement;
+  if (gameModeTitle) gameModeTitle.textContent = `Start ${game.name || 'Game'}`;
+  if (gameModeStatus) gameModeStatus.textContent = '';
+  const radios = Array.from(gameModeForm.querySelectorAll('input[name="game_mode"]'));
+  const practice = radios.find(input => input.value === 'practice');
+  const recorded = radios.find(input => input.value === 'recorded');
+  const recordedAvailable = String(game.profile || '') !== 'one-player'
+    && Number(game.maxPlayers || 1) >= 2;
+  if (gameModeRecordedChoice) gameModeRecordedChoice.hidden = !recordedAvailable;
+  if (recorded) recorded.disabled = !recordedAvailable;
+  if (practice) practice.checked = true;
+  renderGameModeRules(game);
+  gameModeModal.classList.add('open');
+  gameModeModal.setAttribute('aria-hidden', 'false');
+  const box = gameModeModal.querySelector('.game-mode-box');
+  if (box) {
+    box.scrollTop = 0;
+    box.scrollLeft = 0;
+  }
+  practice?.focus({ preventScroll: true });
+}
+
+function closeGameModeDialog({ restoreFocus = true } = {}) {
+  gameModeModal?.classList.remove('open');
+  gameModeModal?.setAttribute('aria-hidden', 'true');
+  gameModeDefinition = null;
+  if (gameModeStatus) gameModeStatus.textContent = '';
+  if (restoreFocus) {
+    const target = gameModeReturnFocus?.isConnected
+      ? gameModeReturnFocus
+      : document.getElementById('game-start-btn');
+    target?.focus?.({ preventScroll: true });
+  }
+  gameModeReturnFocus = null;
+}
+
+async function openGameRecords() {
+  if (!gameRecordsModal) return {};
+  gameRecordsReturnFocus = document.activeElement;
+  const content = document.getElementById('game-records-content');
+  const status = document.getElementById('game-records-status');
+  if (content) content.innerHTML = '';
+  if (status) status.textContent = 'Loading records...';
+  gameRecordsModal.classList.add('open');
+  gameRecordsModal.setAttribute('aria-hidden', 'false');
+  try {
+    const records = await gameRuntime?.lifecycle?.gameRecords() || {};
+    const totals = records.lifetime || {};
+    const displayName = String(records.displayName || 'Game');
+    const title = document.getElementById('game-records-title');
+    if (title) title.textContent = `${displayName} Records`;
+    if (content) {
+      const summary = document.createElement('dl');
+      summary.className = 'game-record-totals';
+      for (const [label, value] of [['Wins', totals.win], ['Losses', totals.loss], ['Draws', totals.draw], ['Recorded matchups', totals.recorded]]) {
+        const item = document.createElement('div');
+        const term = document.createElement('dt');
+        const detail = document.createElement('dd');
+        term.textContent = label;
+        detail.textContent = String(Number(value || 0));
+        item.append(term, detail);
+        summary.appendChild(item);
+      }
+      content.appendChild(summary);
+      const opponents = Array.isArray(records.opponents) ? records.opponents : [];
+      if (opponents.length) {
+        const heading = document.createElement('h3');
+        heading.textContent = 'By opponent';
+        const list = document.createElement('ul');
+        list.className = 'game-record-opponents';
+        for (const opponent of opponents) {
+          const item = document.createElement('li');
+          item.textContent = `${String(opponent.displayName || 'Member')}: ${Number(opponent.win || 0)} wins, ${Number(opponent.loss || 0)} losses, ${Number(opponent.draw || 0)} draws`;
+          list.appendChild(item);
+        }
+        content.append(heading, list);
+      }
+      const note = document.createElement('p');
+      note.className = 'minor';
+      note.textContent = `Records stay attached to ${displayName} if its display name changes and cannot be reset by members.`;
+      content.appendChild(note);
+    }
+    if (status) status.textContent = Array.isArray(records.results) && records.results.length ? `${records.results.length} recorded matchup entries.` : 'No recorded results yet.';
+    document.getElementById('game-records-close')?.focus?.({ preventScroll: true });
+    return records;
+  } catch (error) {
+    if (status) status.textContent = error?.message || 'Game records could not be loaded.';
+    return {};
+  }
+}
+
+function closeGameRecords({ restoreFocus = true } = {}) {
+  gameRecordsModal?.classList.remove('open');
+  gameRecordsModal?.setAttribute('aria-hidden', 'true');
+  if (restoreFocus) (gameRecordsReturnFocus?.isConnected ? gameRecordsReturnFocus : document.getElementById('game-records'))?.focus?.({ preventScroll: true });
+  gameRecordsReturnFocus = null;
 }
 
 function closeFloatingShells(except = []) {
@@ -5740,7 +7762,7 @@ function closeFloatingShells(except = []) {
   if (!skip.has('tab')) closeTabContextMenu();
   if (!skip.has('room')) closeRoomMenu();
   if (!skip.has('roomAction')) closeRoomActionMenu();
-  if (!skip.has('game')) closeGameStartMenu();
+  if (!skip.has('game')) closeGameStartMenu({ restoreFocus: false });
   if (!skip.has('media')) closeMediaPicker();
   if (!skip.has('attach')) closeAttachMenu();
 }
@@ -5762,6 +7784,7 @@ function openEmojiPicker() {
   mediaSearchInput?.focus();
   if (activeMediaTab === 'gestures') loadGestures();
   if (activeMediaTab === 'emojis') renderEmojiGrid();
+  if (activeMediaTab === 'custom-emojis') openCustomEmojiPicker();
 }
 
 function openRoomMenu() {
@@ -5773,6 +7796,27 @@ function openRoomMenu() {
   roomMenu.style.left = `${Math.max(8, Math.min(r.right - mr.width, window.innerWidth - mr.width - 8))}px`;
   roomMenu.style.top = `${Math.min(r.bottom + 6, window.innerHeight - mr.height - 8)}px`;
 }
+
+document.getElementById('room-action-refresh-import-text')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  if (button.disabled || !cfg?.canEditRoom || !cfg?.importUrl) return;
+  closeRoomActionMenu();
+  button.disabled = true;
+  button.textContent = 'Refreshing imported appearance...';
+  try {
+    const result = await apiPost('/api/room_import.php', {
+      action: 'refresh_text', room_public_id: document.body.dataset.roomId,
+    });
+    cfg.importLayout = result.layout;
+    importedRoomRuntime?.layout?.render(cfg.importLayout);
+    alert(`Imported appearance refreshed. ${Number(result.removedHiddenTextSections || 0)} hidden text sections removed; source text and player styling updated. Other viewers can reload to see the update.`);
+  } catch (error) {
+    alert(error?.message || 'Imported text could not be refreshed.');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Refresh imported appearance';
+  }
+});
 
 function openRoomActionMenu() {
   if (!roomActionMenu) return;
@@ -5915,6 +7959,7 @@ document.getElementById('room-menu-btn').addEventListener('click', e => {
 });
 
 function syncChatOptions() {
+  chatRuntime?.notifications?.syncControls();
   const mode = chatMessageRenderer().displayMode;
   document.querySelectorAll('input[name="chat-display-mode"]').forEach(input => {
     input.checked = input.value === mode;
@@ -5925,6 +7970,9 @@ function syncChatOptions() {
       ? 'Hides avatars and places the timestamp, username, and message inline.'
       : 'Shows avatars and the full message layout.';
   }
+  if (showRoleMessageColors) showRoleMessageColors.checked = chatAppearancePreferences.showRoleMessageColors;
+  if (showRoleMessageTitles) showRoleMessageTitles.checked = chatAppearancePreferences.showRoleMessageTitles;
+  if (showIdentityNameplates) showIdentityNameplates.checked = chatAppearancePreferences.showIdentityNameplates;
   const webcamPreferences = voiceRuntime?.viewerPolicy?.preferences?.() || {
     showWebcams: true,
     receiveWebcams: true,
@@ -6296,6 +8344,31 @@ function closeChatOptions() {
 
 document.getElementById('chat-options-btn')?.addEventListener('click', openChatOptions);
 document.getElementById('chat-options-close')?.addEventListener('click', closeChatOptions);
+showRoleMessageColors?.addEventListener('change', () => {
+  chatAppearancePreferences = { ...chatAppearancePreferences, showRoleMessageColors: showRoleMessageColors.checked };
+  persistChatAppearancePreference(CHAT_ROLE_MESSAGE_COLORS_KEY, showRoleMessageColors.checked);
+  rerenderChatAppearance();
+});
+showRoleMessageTitles?.addEventListener('change', () => {
+  chatAppearancePreferences = { ...chatAppearancePreferences, showRoleMessageTitles: showRoleMessageTitles.checked };
+  persistChatAppearancePreference(CHAT_ROLE_MESSAGE_TITLES_KEY, showRoleMessageTitles.checked);
+  rerenderChatAppearance();
+});
+showIdentityNameplates?.addEventListener('change', () => {
+  chatAppearancePreferences = { ...chatAppearancePreferences, showIdentityNameplates: showIdentityNameplates.checked };
+  persistChatAppearancePreference(CHAT_IDENTITY_NAMEPLATES_KEY, showIdentityNameplates.checked);
+  rerenderChatAppearance();
+});
+document.getElementById('chat-tabs')?.addEventListener('click', () => window.setTimeout(updateComposerState, 0));
+const chatTabsStateObserver = new MutationObserver(() => updateComposerState());
+if (document.getElementById('chat-tabs')) {
+  chatTabsStateObserver.observe(document.getElementById('chat-tabs'), {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+  gameRuntime?.webcams?.reconcile?.({ reason: change.reason || 'viewer-policy' });
+}
 chatOptionsModal?.addEventListener('click', event => {
   if (event.target === chatOptionsModal) closeChatOptions();
 });
@@ -6451,8 +8524,123 @@ document.getElementById('attach-btn').addEventListener('click', e => {
 document.getElementById('game-start-btn')?.addEventListener('click', e => {
   e.stopPropagation();
   closeFloatingShells(['message', 'game']);
-  if (gameStartMenu) gameStartMenu.hidden = !gameStartMenu.hidden;
+  if (!gameStartMenu) return;
+  if (gameStartMenu.hidden) openGameStartMenu();
+  else closeGameStartMenu();
 });
+
+gamePickerSearch?.addEventListener('input', renderGamePickerCatalog);
+document.querySelectorAll('[data-game-filter]').forEach(button => {
+  button.addEventListener('click', () => {
+    gameCatalogFilter = String(button.dataset.gameFilter || 'all');
+    document.querySelectorAll('[data-game-filter]').forEach(filter => {
+      const active = filter === button;
+      filter.classList.toggle('is-active', active);
+      filter.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    renderGamePickerCatalog();
+  });
+});
+document.getElementById('game-picker-close')?.addEventListener('click', () => closeGameStartMenu());
+document.getElementById('game-picker-cancel')?.addEventListener('click', () => closeGameStartMenu());
+document.getElementById('game-picker-center')?.addEventListener('click', centerGameStartMenu);
+gamePickerContinue?.addEventListener('click', () => {
+  const selectedGame = gameCatalogDefinitions.find(game => String(game.key || '') === selectedGameCatalogKey);
+  if (!selectedGame) return;
+  closeGameStartMenu();
+  openGameModeDialog(selectedGame);
+});
+document.querySelectorAll('[data-game-picker-drag-handle]').forEach(handle => {
+  handle.addEventListener('pointerdown', beginGamePickerDrag);
+  handle.addEventListener('pointermove', moveGamePicker);
+  handle.addEventListener('pointerup', endGamePickerDrag);
+  handle.addEventListener('pointercancel', endGamePickerDrag);
+  handle.addEventListener('dblclick', centerGameStartMenu);
+  handle.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    centerGameStartMenu();
+  });
+});
+document.getElementById('room-games-btn')?.addEventListener('click', event => {
+  event.stopPropagation();
+  if (!roomGamesMenu) return;
+  if (roomGamesMenu.hidden) openRoomGamesMenu();
+  else closeRoomGamesMenu();
+});
+document.getElementById('room-games-close')?.addEventListener('click', () => closeRoomGamesMenu());
+document.getElementById('room-games-dismiss')?.addEventListener('click', () => closeRoomGamesMenu());
+document.getElementById('room-games-center')?.addEventListener('click', centerRoomGamesMenu);
+document.querySelectorAll('[data-room-games-drag-handle]').forEach(handle => {
+  handle.addEventListener('pointerdown', beginRoomGamesDrag);
+  handle.addEventListener('pointermove', moveRoomGamesMenu);
+  handle.addEventListener('pointerup', endRoomGamesDrag);
+  handle.addEventListener('pointercancel', endRoomGamesDrag);
+  handle.addEventListener('dblclick', centerRoomGamesMenu);
+  handle.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    centerRoomGamesMenu();
+  });
+});
+window.addEventListener('resize', () => {
+  if (gameStartMenu && !gameStartMenu.hidden) centerGameStartMenu();
+  if (roomGamesMenu && !roomGamesMenu.hidden) centerRoomGamesMenu();
+  scheduleAvatarViewportReflow();
+});
+
+gameModeForm?.addEventListener('change', event => {
+  const input = event.target;
+  if (input?.name !== 'game_mode' || input.type !== 'radio' || !input.checked || input.disabled) return;
+  syncGameModeInactivityProfile(input.value);
+});
+
+gameModeForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!gameModeDefinition) return;
+  const selectedGame = gameModeDefinition;
+  const submit = gameModeForm.querySelector('button[type="submit"]');
+  const mode = String(new FormData(gameModeForm).get('game_mode') || 'practice');
+  syncGameModeInactivityProfile(mode);
+  if (submit) submit.disabled = true;
+  if (gameModeStatus) gameModeStatus.textContent = 'Starting game…';
+  try {
+    closeGameModeDialog({ restoreFocus: false });
+    await gameRuntime?.lifecycle?.startGame(selectedGame.key, mode, selectedGameModeSettings());
+  } catch (error) {
+    gameModeDefinition = selectedGame;
+    gameModeModal?.classList.add('open');
+    gameModeModal?.setAttribute('aria-hidden', 'false');
+    if (gameModeStatus) gameModeStatus.textContent = error?.message || 'The game could not be started.';
+    const box = gameModeModal?.querySelector('.game-mode-box');
+    if (box) {
+      box.scrollTop = 0;
+      box.scrollLeft = 0;
+    }
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+});
+document.getElementById('game-mode-cancel')?.addEventListener('click', () => closeGameModeDialog());
+document.getElementById('game-mode-close')?.addEventListener('click', () => closeGameModeDialog());
+gameModeModal?.addEventListener('click', event => {
+  if (event.target === gameModeModal) closeGameModeDialog();
+});
+gameModeModal?.addEventListener('keydown', event => handleTransferModalKeydown(
+  gameModeModal,
+  event,
+  () => closeGameModeDialog()
+));
+
+document.getElementById('game-records-close')?.addEventListener('click', () => closeGameRecords());
+gameRecordsModal?.addEventListener('click', event => {
+  if (event.target === gameRecordsModal) closeGameRecords();
+});
+gameRecordsModal?.addEventListener('keydown', event => handleTransferModalKeydown(
+  gameRecordsModal,
+  event,
+  () => closeGameRecords()
+));
 
 document.getElementById('attach-file-btn').addEventListener('click', () => {
   closeAttachMenu();
@@ -6468,11 +8656,39 @@ function insertEmoji(emoji) {
   const input = document.getElementById('chat-input');
   const start = input.selectionStart ?? input.value.length;
   const end = input.selectionEnd ?? input.value.length;
-  input.value = (input.value.slice(0, start) + emoji + input.value.slice(end)).slice(0, input.maxLength);
+  input.setRangeText(emoji, start, end, 'end');
   const next = start + emoji.length;
   input.setSelectionRange(Math.min(next, input.value.length), Math.min(next, input.value.length));
   input.focus();
   updateComposerState();
+}
+
+let customEmojiPickerPromise = null;
+function openCustomEmojiPicker() {
+  if (!customEmojiPickerPromise) {
+    customEmojiPickerPromise = import(appUrl('/assets/js/custom-emojis.js?v=20260914-custom-emojis'))
+      .then(({ CustomEmojiPicker }) => new CustomEmojiPicker({
+        root: document.getElementById('custom-emoji-picker'),
+        appUrl,
+        upload: apiUpload,
+        onSelect(emoji) {
+          const input = document.getElementById('chat-input');
+          const token = `[emoji:${emoji.id}:${emoji.name}]`;
+          const selectionLength = (input.selectionEnd ?? input.value.length) - (input.selectionStart ?? input.value.length);
+          if (input.maxLength >= 0 && input.value.length - selectionLength + token.length > input.maxLength) {
+            throw new Error('There is not enough space left in this message for that custom emoji.');
+          }
+          insertEmoji(token);
+        },
+      }))
+      .catch(error => {
+        customEmojiPickerPromise = null;
+        const panel = document.getElementById('custom-emoji-picker');
+        if (panel) panel.textContent = error.message || 'Custom emojis could not be opened. Try the tab again.';
+        return null;
+      });
+  }
+  return customEmojiPickerPromise.then(picker => picker?.activate());
 }
 
 function renderEmojiGrid() {
@@ -6493,7 +8709,7 @@ function setMediaTab(tab) {
     mediaSearchValues[activeMediaTab] = mediaSearchInput.value;
   }
   activeMediaTab = tab;
-  mediaPicker?.classList.remove('media-tab-gifs', 'media-tab-gestures', 'media-tab-server-gestures', 'media-tab-personal-gestures', 'media-tab-emojis');
+  mediaPicker?.classList.remove('media-tab-gifs', 'media-tab-gestures', 'media-tab-server-gestures', 'media-tab-personal-gestures', 'media-tab-emojis', 'media-tab-custom-emojis');
   mediaPicker?.classList.add(`media-tab-${tab}`);
   mediaPicker?.querySelectorAll('[data-media-tab]').forEach(btn => {
     const selected = btn.dataset.mediaTab === tab;
@@ -6519,6 +8735,7 @@ function setMediaTab(tab) {
   if (tab === 'server-gestures') gestureCatalogController?.activate('server');
   if (tab === 'personal-gestures') gestureCatalogController?.activate('personal');
   if (tab === 'emojis') renderEmojiGrid();
+  if (tab === 'custom-emojis') openCustomEmojiPicker();
 }
 
 mediaPicker?.querySelectorAll('[data-media-tab]').forEach(btn => {
@@ -6538,43 +8755,86 @@ mediaPicker?.querySelectorAll('[data-media-tab]').forEach(btn => {
 async function searchGifs(query) {
   if (!gifResults || !cfg?.gifPicker?.enabled) return;
   const q = query.trim();
+  gifSearchState = null;
+  gifResults.scrollTop = 0;
   if (!q) {
     gifResults.innerHTML = '<div class="minor">Search for a GIF.</div>';
     return;
   }
-  gifResults.innerHTML = '<div class="gif-loading">Searching...</div>';
+  gifResults.innerHTML = '';
+  const status = document.createElement('button');
+  status.type = 'button';
+  status.className = 'minor';
+  status.setAttribute('aria-live', 'polite');
+  const state = { q, provider: cfg.gifPicker.defaultProvider || 'giphy', cursor: '',
+    loading: false, failed: false, more: true, seen: new Set(), cursors: new Set(), status };
+  gifSearchState = state;
+  status.addEventListener('click', () => loadGifBatch(state));
+  gifResults.appendChild(status);
+  await loadGifBatch(state);
+}
+
+async function loadGifBatch(state) {
+  if (state !== gifSearchState || state.loading || !state.more || activeMediaTab !== 'gifs'
+      || mediaPicker?.hidden || (mediaSearchInput?.value || '').trim() !== state.q) return;
+  state.loading = true;
+  state.failed = false;
+  state.status.disabled = true;
+  state.status.textContent = state.seen.size ? 'Loading more GIFs...' : 'Searching...';
   try {
     const qs = new URLSearchParams({
       session_id: cfg.sessionId,
       join_token: cfg.myJoinToken,
-      q,
-      provider: cfg.gifPicker.defaultProvider || 'giphy',
+      q: state.q,
+      provider: state.provider,
+      cursor: state.cursor,
     });
     const data = await runtimeRequestClient.getJson(`/api/gif_search.php?${qs}`, {
       operation: 'search-gifs',
       endpointCategory: 'gif-search',
     });
-    const results = data.results || [];
-    if (!results.length) {
-      gifResults.innerHTML = '<div class="minor">No GIFs found.</div>';
-      return;
-    }
-    gifResults.innerHTML = '';
+    if (state !== gifSearchState) return;
+    if (data.error) throw new Error(data.error);
+    const results = Array.isArray(data.results) ? data.results : [];
+    state.provider = data.provider || state.provider;
+    state.cursors.add(state.cursor);
+    const next = data.next_cursor == null ? '' : String(data.next_cursor);
+    state.more = next !== '' && !state.cursors.has(next);
+    state.cursor = next;
     results.forEach(result => {
+      const key = `${result.provider || state.provider}:${result.id || result.url}`;
+      if (!result.url || state.seen.has(key)) return;
+      state.seen.add(key);
       const btn = document.createElement('button');
       btn.className = 'gif-result';
       btn.type = 'button';
       btn.innerHTML = `<img src="${esc(result.preview || result.url)}" alt="${esc(result.title || 'GIF')}">`;
       btn.addEventListener('click', () => sendGif(result));
-      gifResults.appendChild(btn);
+      gifResults.insertBefore(btn, state.status);
     });
+    state.status.disabled = !state.more;
+    state.status.textContent = state.more ? 'Load more GIFs'
+      : (state.seen.size ? 'No more GIFs.' : 'No GIFs found.');
   } catch (err) {
-    gifResults.innerHTML = `<div class="minor">${esc(err.message || 'GIF search failed.')}</div>`;
+    if (state !== gifSearchState) return;
+    state.failed = true;
+    state.status.disabled = false;
+    state.status.textContent = `${err.message || 'GIF search failed.'} Click to retry.`;
+  } finally {
+    state.loading = false;
   }
 }
 
+gifResults?.addEventListener('scroll', () => {
+  const state = gifSearchState;
+  if (state && !state.failed && gifResults.scrollHeight - gifResults.scrollTop - gifResults.clientHeight < 240) {
+    loadGifBatch(state);
+  }
+}, { passive: true });
+
 mediaSearchInput?.addEventListener('input', e => {
   if (activeMediaTab === 'gifs') {
+    gifSearchState = null;
     mediaSearchValues.gifs = e.target.value;
     clearTimeout(gifSearchTimer);
     gifSearchTimer = setTimeout(() => searchGifs(e.target.value), 250);
@@ -6614,7 +8874,7 @@ async function loadGestures() {
     });
     gestureHasMore = Boolean(data.has_more);
     gestureOwnedCount = Number(data.owned_count || 0);
-    gestureOwnedLimit = Number(data.owned_limit ?? 50);
+    gestureOwnedLimit = data.owned_limit_enforced === false ? null : Number(data.owned_limit ?? 50);
     if (gesturePageLabel) gesturePageLabel.textContent = `Page ${data.page || gesturePage}`;
     if (gesturePrev) gesturePrev.disabled = gesturePage <= 1;
     if (gestureNext) gestureNext.disabled = !gestureHasMore;
@@ -6636,10 +8896,10 @@ function gestureTileSelector(id) {
 function updateGestureUploadTileState() {
   const uploadTile = document.querySelector('#personal-gesture-grid .gesture-upload-tile, #gesture-grid .gesture-upload-tile');
   if (!uploadTile) return;
-  const limitReached = gestureOwnedCount >= gestureOwnedLimit;
+  const limitReached = gestureOwnedLimit !== null && gestureOwnedCount >= gestureOwnedLimit;
   uploadTile.disabled = limitReached;
   uploadTile.title = limitReached ? 'Remove some gestures to make room.' : 'Create Gesture';
-  uploadTile.querySelector('em')?.replaceChildren(document.createTextNode(`${gestureOwnedCount}/${gestureOwnedLimit}`));
+  uploadTile.querySelector('em')?.replaceChildren(document.createTextNode(gestureOwnedLimit === null ? `${gestureOwnedCount} / no limit` : `${gestureOwnedCount}/${gestureOwnedLimit}`));
 }
 
 function ensureGestureEmptyState() {
@@ -6708,10 +8968,10 @@ function renderGestureGrid(gestures) {
   const uploadTile = document.createElement('button');
   uploadTile.className = 'gesture-upload-tile';
   uploadTile.type = 'button';
-  const limitReached = gestureOwnedCount >= gestureOwnedLimit;
+  const limitReached = gestureOwnedLimit !== null && gestureOwnedCount >= gestureOwnedLimit;
   uploadTile.disabled = limitReached;
   uploadTile.title = limitReached ? 'Remove some gestures to make room.' : 'Create Gesture';
-  uploadTile.innerHTML = `<span>+</span><small>Create Gesture</small><em>${gestureOwnedCount}/${gestureOwnedLimit}</em><div class="gesture-upload-progress"><i></i></div>`;
+  uploadTile.innerHTML = `<span>+</span><small>Create Gesture</small><em>${gestureOwnedLimit === null ? `${gestureOwnedCount} / no limit` : `${gestureOwnedCount}/${gestureOwnedLimit}`}</em><div class="gesture-upload-progress"><i></i></div>`;
   uploadTile.addEventListener('click', () => {
     if (limitReached) return;
     openGestureEditor();
@@ -6732,7 +8992,7 @@ function renderGestureGrid(gestures) {
 }
 
 async function uploadGesture(file) {
-  if (gestureOwnedCount >= gestureOwnedLimit) {
+  if (gestureOwnedLimit !== null && gestureOwnedCount >= gestureOwnedLimit) {
     alert('Gesture limit reached. Remove some gestures to make room.');
     return;
   }
@@ -6908,17 +9168,24 @@ async function sendGesture(gesture) {
   await chatMediaSend().sendGesture(gesture, activeChatKey());
 }
 
+// Capture before avatar drag/control handlers can stop bubbling. Pointer events
+// inside embedded websites do not reach this document; blur handles that case.
+document.addEventListener('pointerdown', e => {
+  if (ctxMenu && !isInsideAvatarContextMenu(e.target)) closeContextMenu();
+}, true);
+window.addEventListener('blur', () => closeContextMenu());
+
 document.addEventListener('click', e => {
-  if (!ctxMenu.contains(e.target)) closeContextMenu();
+  if (!isInsideAvatarContextMenu(e.target)) closeContextMenu();
   if (!textCtxMenu.contains(e.target)) closeTextContextMenu();
   if (msgActionMenu && !msgActionMenu.contains(e.target) && !e.target.closest('.msg-options')) closeMessageActionMenu();
   if (tabCtxMenu && !tabCtxMenu.contains(e.target)) closeTabContextMenu();
   if (!roomMenu.contains(e.target) && !e.target.closest('#room-menu-btn')) closeRoomMenu();
   if (roomActionMenu && !roomActionMenu.contains(e.target) && !e.target.closest('#room-action-btn')) closeRoomActionMenu();
-  if (gameStartMenu && !gameStartMenu.contains(e.target) && !e.target.closest('#game-start-btn')) closeGameStartMenu();
   if (
     mediaPicker
     && !mediaPicker.contains(e.target)
+    && !e.target.closest('#gesture-action-menu')
     && !e.target.closest('#emoji-btn')
     && !e.target.closest('#gesture-management-modal')
     && !e.target.closest('#gesture-delete-modal')
@@ -6927,6 +9194,11 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (roomGamesMenu && !roomGamesMenu.hidden) {
+      e.preventDefault();
+      closeRoomGamesMenu();
+      return;
+    }
     if (webcamAudienceModal?.classList.contains('open')) {
       e.preventDefault();
       closeWebcamAudienceChooser(false);
@@ -6939,7 +9211,7 @@ document.addEventListener('keydown', e => {
     }
     if (!document.getElementById('gesture-action-menu')?.hidden) return;
     const restoreAvatarFocus = ctxMenu.classList.contains('visible');
-    closeFloatingShells(['game', ...(restoreAvatarFocus ? ['context'] : [])]);
+    closeFloatingShells([...(restoreAvatarFocus ? ['context'] : [])]);
     if (restoreAvatarFocus) closeContextMenu({ restoreFocus: true });
     closeLinkIconModal();
     document.getElementById('host-warn-modal')?.classList.remove('open');
@@ -7028,7 +9300,7 @@ async function cutSelectedInputText() {
   if (start === end) return;
   const text = input.value.slice(start, end);
   await navigator.clipboard.writeText(text);
-  input.value = input.value.slice(0, start) + input.value.slice(end);
+  input.setRangeText('', start, end, 'start');
   input.setSelectionRange(start, start);
   input.focus();
   updateComposerState();
@@ -7039,7 +9311,7 @@ async function pasteIntoInput() {
   const text = await navigator.clipboard.readText();
   const start = input.selectionStart;
   const end = input.selectionEnd;
-  input.value = (input.value.slice(0, start) + text + input.value.slice(end)).slice(0, input.maxLength);
+  input.setRangeText(text, start, end, 'end');
   const pos = start + text.length;
   input.setSelectionRange(Math.min(pos, input.value.length), Math.min(pos, input.value.length));
   input.focus();
@@ -7205,9 +9477,76 @@ document.getElementById('tab-manage-relationship')?.addEventListener('click', ()
   }
 });
 
-document.getElementById('ctx-change-avatar').addEventListener('click', () => {
+document.getElementById('ctx-change-avatar').addEventListener('click', async () => {
   closeContextMenu();
-  avatarFileInput.click();
+  try {
+    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-movable`);
+    await openAvatarLibrary({
+      userId: cfg.myUserId,
+      base: APP_BASE,
+      applyFile: applyAvatarFile,
+      applyAsset: id => applyLibraryAsset('avatar', id),
+      prepareFile: file => window.ChatSpaceAvatar ? window.ChatSpaceAvatar.prepareAvatarFile(file) : Promise.resolve(file),
+      chooseFallback: () => avatarFileInput.click(),
+      postForm: form => {
+        form.append('_csrf', CSRF_TOKEN);
+        return postOutsideContentForm(runtimeRequestClient, '/api/avatar_library.php', form, { operation: 'upload-avatar', endpointCategory: 'avatar' });
+      },
+    });
+  } catch (error) { showWarning(error.message || 'The avatar picker could not be opened.'); }
+});
+
+document.getElementById('msg-muted-reveal-action')?.addEventListener('click', () => {
+  const chatKey = msgActionTargetChat || activeChatKey();
+  const msg = currentActiveMessage(msgActionTargetId, chatKey);
+  closeMessageActionMenu();
+  if (!msg?.muted_collapsed || !msg._personalMuteOriginal) return;
+  const revealKey = personalMuteMessageKey(msg, chatKey);
+  if (revealKey) revealedPersonalMuteMessages.add(revealKey);
+  restoreMutedMessageOriginal(msg, { revealed: true });
+  renderActiveChat();
+});
+
+ctxChangeNameplate?.addEventListener('click', async () => {
+  closeContextMenu();
+  try {
+    const [{ openAvatarLibrary }, { prepareNameplateFile }, policy] = await Promise.all([
+      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-movable`),
+      import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
+      runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
+    ]);
+    await openAvatarLibrary({
+      userId: cfg.myUserId, base: APP_BASE, kind: 'nameplate', applyFile: applyNameplateFile,
+      applyAsset: id => applyLibraryAsset('nameplate', id),
+      prepareFile: file => prepareNameplateFile(file, policy.nameplatePolicy),
+      chooseFallback: () => nameplateFileInput?.click(),
+      postForm: form => {
+        form.append('_csrf', CSRF_TOKEN);
+        return postOutsideContentForm(runtimeRequestClient, '/api/avatar_library.php', form, { operation: 'upload-nameplate', endpointCategory: 'avatar' });
+      },
+    });
+  } catch (error) { showWarning(error.message || 'The nameplate picker could not be opened.'); }
+});
+
+ctxRemoveNameplate?.addEventListener('click', async () => {
+  closeContextMenu();
+  const me = participants.get(Number(cfg.myParticipantId));
+  if (!me) return;
+  const formData = new FormData();
+  formData.append('action', 'remove');
+  formData.append('session_id', cfg.sessionId);
+  formData.append('join_token', cfg.myJoinToken);
+  try {
+    const response = await runtimeRequestClient.postForm('/api/nameplate.php', formData, {
+      operation: 'remove-nameplate',
+      endpointCategory: 'avatar',
+    });
+    me.nameplate_path = response.nameplate_path || null;
+    me.nameplate_url = response.nameplate_url || null;
+    rerenderChatAppearance();
+  } catch (error) {
+    showWarning(error?.message || 'The nameplate image could not be removed.');
+  }
 });
 
 document.getElementById('ctx-avatar-size')?.addEventListener('click', () => {
@@ -7292,9 +9631,13 @@ document.getElementById('avatar-size-match')?.addEventListener('click', () => {
 ctxOrientation?.addEventListener('click', event => {
   event.stopPropagation();
   const opening = !ctxOrientationWrap?.classList.contains('open');
-  document.getElementById('ctx-tools-wrap')?.classList.remove('open');
-  ctxOrientationWrap?.classList.toggle('open', opening);
-  ctxOrientation.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  closeContextSubmenu(
+    document.getElementById('ctx-tools-wrap'),
+    document.getElementById('ctx-tools'),
+    document.getElementById('ctx-tools-submenu')
+  );
+  if (opening) openContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
+  else closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
   if (opening) {
     const selected = ctxOrientationSubmenu?.querySelector('[aria-checked="true"]');
     (selected || ctxOrientationSubmenu?.querySelector('button'))?.focus();
@@ -7323,8 +9666,10 @@ document.getElementById('aura-set')?.addEventListener('click', () => {
 bindModalCloseButtons(['aura-close', 'aura-cancel'], closeAuraModal);
 
 document.getElementById('ctx-unlink').addEventListener('click', () => {
+  const own = avatarRuntime?.relationships?.relationshipForParticipant(Number(cfg.myParticipantId));
+  const target = avatarRuntime?.relationships?.relationshipForParticipant(Number(ctxMenuParticipantId));
   closeContextMenu();
-  unlinkCurrentPartner();
+  if (own && target && own.id === target.id) unlinkCurrentPartner();
 });
 
 ctxInteract?.addEventListener('click', () => {
@@ -7332,6 +9677,12 @@ ctxInteract?.addEventListener('click', () => {
   const me = participants.get(Number(cfg.myParticipantId));
   closeContextMenu();
   if (!me || !target) return;
+  const targetRelationship = avatarRuntime?.relationships?.relationshipForParticipant(target.id);
+  const ownRelationship = avatarRuntime?.relationships?.relationshipForParticipant(me.id);
+  if (targetRelationship && !ownRelationship && !isUserBlocked(target.user_id)) {
+    void avatarRuntime?.relationshipManagement?.openForParticipant(target.id, 'avatar-join-request');
+    return;
+  }
   avatarRuntime?.coordinator?.requestLinkChoiceForInteraction(me, target);
   document.getElementById('link-choice-link')?.focus();
 });
@@ -7414,8 +9765,22 @@ async function setAvatarVisibilityFromMenu(scope) {
   }
 }
 
+async function setNameplateVisibilityFromMenu(scope) {
+  const person = participants.get(Number(ctxMenuParticipantId));
+  closeContextMenu();
+  if (!person || Number(person.id) === Number(cfg.myParticipantId)) return;
+  const current = nameplateVisibilityFor(person);
+  try {
+    await setNameplateVisibility(person, scope, scope === 'user' ? !current.user : !current.exact);
+  } catch (error) {
+    showWarning(error?.message || 'Nameplate visibility could not be changed.');
+  }
+}
+
 ctxAvatarVisibility?.addEventListener('click', () => setAvatarVisibilityFromMenu('avatar'));
 ctxAvatarUserVisibility?.addEventListener('click', () => setAvatarVisibilityFromMenu('user'));
+ctxNameplateVisibility?.addEventListener('click', () => setNameplateVisibilityFromMenu('nameplate'));
+ctxNameplateUserVisibility?.addEventListener('click', () => setNameplateVisibilityFromMenu('user'));
 ctxGestureSenderVisibility?.addEventListener('click', async () => {
   const person = participants.get(Number(ctxMenuParticipantId));
   closeContextMenu();
@@ -7430,9 +9795,13 @@ ctxGestureSenderVisibility?.addEventListener('click', async () => {
 
 document.getElementById('ctx-tools')?.addEventListener('click', e => {
   e.stopPropagation();
-  ctxOrientationWrap?.classList.remove('open');
-  ctxOrientation?.setAttribute('aria-expanded', 'false');
-  document.getElementById('ctx-tools-wrap')?.classList.toggle('open');
+  const toolsWrap = document.getElementById('ctx-tools-wrap');
+  const toolsTrigger = document.getElementById('ctx-tools');
+  const toolsSubmenu = document.getElementById('ctx-tools-submenu');
+  const opening = !toolsWrap?.classList.contains('open');
+  closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
+  if (opening) openContextSubmenu(toolsWrap, toolsTrigger, toolsSubmenu);
+  else closeContextSubmenu(toolsWrap, toolsTrigger, toolsSubmenu);
 });
 
 async function setBlockState(participant, blocked) {
@@ -7856,7 +10225,10 @@ const TRANSFER_TERMINAL_STATES = new Set(['completed', 'failed', 'declined', 'ca
 function refreshTransfersCount() {
   const active = [...(p2pTransferStatusDrawer?.children || [])]
     .filter(row => row.dataset.terminal !== 'true').length;
-  if (transfersCount) transfersCount.textContent = String(active);
+  if (transfersCount) {
+    transfersCount.textContent = active > 99 ? '99+' : String(active);
+    transfersCount.hidden = active <= 0;
+  }
   if (transfersButton) transfersButton.setAttribute('aria-label', `Transfers, ${active} active or resumable`);
 }
 
@@ -8444,6 +10816,43 @@ document.getElementById('ctx-unblock').addEventListener('click', () => {
   setBlockState(p, false).catch(err => showWarning(err.message || 'Could not unblock user.'));
 });
 
+async function applyLibraryAsset(kind, libraryId) {
+  if (!['avatar', 'nameplate'].includes(kind)) throw new Error('Unknown image library.');
+  const participantId = Number(cfg.myParticipantId);
+  if (!participants.get(participantId)) throw new Error('Your room identity is unavailable.');
+  const form = new FormData();
+  form.append('action', 'select');
+  form.append('library_id', libraryId);
+  form.append('session_id', cfg.sessionId);
+  form.append('join_token', cfg.myJoinToken);
+  form.append('_csrf', CSRF_TOKEN);
+  const data = await postOutsideContentForm(runtimeRequestClient, '/api/' + kind + '.php', form, {
+    operation: 'select-' + kind,
+    endpointCategory: 'avatar',
+  });
+  const me = participants.get(participantId);
+  if (!me) return;
+  if (kind === 'nameplate') {
+    me.nameplate_path = data.nameplate_path || null;
+    me.nameplate_url = data.nameplate_url || null;
+    rerenderChatAppearance();
+    return;
+  }
+  participants.update(participantId, {
+    avatar_path: data.avatar_path,
+    avatar_url: data.avatar_url,
+    avatar_identity: data.avatar_identity,
+    avatar_source_width_px: data.avatar_source_width_px,
+    avatar_source_height_px: data.avatar_source_height_px,
+    avatar_orientation: normalizeAvatarOrientation(data.avatar_orientation ?? me.avatar_orientation),
+    avatar_orientation_version: data.avatar_orientation_version ?? me.avatar_orientation_version,
+    avatar_version: Date.now(),
+    webcam_path: null,
+    webcam_enabled: false,
+  });
+  renderParticipant(participants.get(participantId));
+}
+
 async function applyAvatarFile(file) {
   if (!file) throw new Error('Choose an avatar image.');
   let preparedFile = file;
@@ -8473,7 +10882,7 @@ async function applyAvatarFile(file) {
       renderParticipant(me);
     }
     fd.append('avatar', preparedFile);
-    const data = await runtimeRequestClient.postForm('/api/avatar.php', fd, {
+    const data = await postOutsideContentForm(runtimeRequestClient, '/api/avatar.php', fd, {
       operation: 'upload-avatar',
       endpointCategory: 'avatar',
     });
@@ -8507,9 +10916,53 @@ avatarFileInput.addEventListener('change', async () => {
   try {
     await applyAvatarFile(file);
   } catch (err) {
-    alert(err.message);
+    if (err?.code !== 'OUTSIDE_CONTENT_CANCELLED') alert(err.message);
   } finally {
     avatarFileInput.value = '';
+  }
+});
+
+document.getElementById('ctx-mute')?.addEventListener('click', () => {
+  const participant = participants.get(Number(ctxMenuParticipantId));
+  const shouldMute = !activeMutedPolicyFor(participant?.user_id);
+  closeContextMenu();
+  setPersonalMuteState(participant?.user_id, shouldMute)
+    .catch(error => showWarning(error?.message || 'Mute setting could not be changed.'));
+});
+
+async function applyNameplateFile(file) {
+  const me = participants.get(Number(cfg.myParticipantId));
+  if (!me) throw new Error('Your room identity is unavailable.');
+  const [{ prepareNameplateFile }, policy] = await Promise.all([
+    import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
+    runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
+  ]);
+  const prepared = await prepareNameplateFile(file, policy.nameplatePolicy);
+  const formData = new FormData();
+  formData.append('action', 'upload');
+  formData.append('session_id', cfg.sessionId);
+  formData.append('join_token', cfg.myJoinToken);
+  formData.append('nameplate', prepared, prepared.name);
+  const response = await postOutsideContentForm(runtimeRequestClient, '/api/nameplate.php', formData, {
+    operation: 'upload-nameplate',
+    endpointCategory: 'avatar',
+  });
+  me.nameplate_path = response.nameplate_path || null;
+  me.nameplate_url = response.nameplate_url || null;
+  rerenderChatAppearance();
+}
+
+nameplateFileInput?.addEventListener('change', async () => {
+  const file = nameplateFileInput.files && nameplateFileInput.files[0];
+  if (!file) return;
+  try {
+    await applyNameplateFile(file);
+  } catch (error) {
+    if (error?.code !== 'OUTSIDE_CONTENT_CANCELLED') {
+      showWarning(error?.message || 'The nameplate image could not be changed.');
+    }
+  } finally {
+    nameplateFileInput.value = '';
   }
 });
 
@@ -8832,9 +11285,12 @@ async function disableLocalWebcam(reason = 'user-disable') {
       webcamOperation: 'disable',
     });
   await Promise.all([persistence, negotiation]);
+  syncLocalWebcamToggleButton();
   return Object.freeze({ status: 'completed', reason, generation: disableToken.generation });
 }
 
+sidebarWebcamToggle?.addEventListener('click', () => ctxToggleWebcam.click());
+syncLocalWebcamToggleButton();
 ctxToggleWebcam.addEventListener('click', async () => {
   closeContextMenu();
   if (webcamIntent || webcamStream) {
@@ -8863,6 +11319,7 @@ ctxToggleWebcam.addEventListener('click', async () => {
     if (!acquisition.stream) return;
     operationToken = acquisition.token;
     webcamStream = acquisition.stream;
+    syncLocalWebcamToggleButton();
     watchLocalWebcamStream(webcamStream, operationToken);
     recordVoiceLifecycleDiagnostic({
       event: 'local-webcam-getUserMedia-success',
@@ -8908,6 +11365,7 @@ ctxToggleWebcam.addEventListener('click', async () => {
       webcamOperation: 'enable',
     });
     restartVoicePoll(0);
+    syncLocalWebcamToggleButton();
   } catch (err) {
     const failedToken = err?.webcamOperationToken || operationToken;
     if (failedToken && failedToken.generation !== webcamOperationGeneration) {
@@ -8931,6 +11389,7 @@ ctxToggleWebcam.addEventListener('click', async () => {
     webcamOperationGeneration += 1;
     applyWebcamState(cfg.myParticipantId, false, null, 'local-webcam-enable-failed');
     showWarning(err.message || 'Could not enable webcam.');
+    syncLocalWebcamToggleButton();
   }
 });
 
@@ -8975,13 +11434,44 @@ function applyVerticalDividerDrag(clientX) {
 
 document.getElementById('horizontal-divider')?.addEventListener('pointerdown', e => {
   e.preventDefault();
-  const onMove = ev => applyDividerDrag(ev.clientY);
-  const onUp = () => {
+  const divider = e.currentTarget;
+  const pointerId = e.pointerId;
+  let finished = false;
+  divider.classList.add('dragging');
+  if (divider.setPointerCapture) {
+    try { divider.setPointerCapture(pointerId); } catch {}
+  }
+  const onMove = ev => {
+    if (typeof ev.buttons === 'number' && ev.buttons === 0) {
+      onUp(ev);
+      return;
+    }
+    applyDividerDrag(ev.clientY);
+  };
+  const onUp = ev => {
+    if (finished) return;
+    finished = true;
+    divider.classList.remove('dragging');
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+    document.removeEventListener('mouseup', onUp);
+    window.removeEventListener('blur', onUp);
+    divider.removeEventListener('lostpointercapture', onUp);
+    if (divider.releasePointerCapture) {
+      try {
+        if (!divider.hasPointerCapture || divider.hasPointerCapture(pointerId)) {
+          divider.releasePointerCapture(pointerId);
+        }
+      } catch {}
+    }
   };
   document.addEventListener('pointermove', onMove);
   document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onUp);
+  document.addEventListener('mouseup', onUp);
+  window.addEventListener('blur', onUp);
+  divider.addEventListener('lostpointercapture', onUp);
 });
 
 document.getElementById('vertical-divider')?.addEventListener('pointerdown', e => {
@@ -9050,8 +11540,9 @@ async function sendGameMessage(content) {
   return chatGameChat().sendMessage(content);
 }
 
-function stopGameChatPolling() {
+function stopGameChatPolling(reason = 'game-chat-stopped') {
   chatGameChat().reset();
+  gameChatRequestAbortController.abort(reason);
 }
 
 function setGameTyping(participantId, active) {
@@ -9059,6 +11550,8 @@ function setGameTyping(participantId, active) {
 }
 
 function startGameChatPolling() {
+  gameChatRequestAbortController.abort('game-chat-restarted');
+  gameChatRequestAbortController = new AbortController();
   chatGameChat().startPolling();
 }
 
@@ -9074,17 +11567,40 @@ document.getElementById('game-close').addEventListener('click', () => {
   closeGame();
 });
 
-document.getElementById('game-rematch')?.addEventListener('click', () => {
-  gameRuntime?.lifecycle?.sendStageControl('rematch');
+document.getElementById('game-return-chat')?.addEventListener('click', () => {
+  switchChat('room');
+  document.querySelector('.chat-tab[data-chat-tab="room"]')?.focus?.({ preventScroll: true });
 });
 
-document.getElementById('game-resign')?.addEventListener('click', () => {
-  gameRuntime?.lifecycle?.sendStageControl('resign');
+document.getElementById('game-rematch')?.addEventListener('click', async () => {
+  const notice = document.getElementById('game-session-notice');
+  try {
+    const result = await gameRuntime?.lifecycle?.runFrameworkAction('rematch');
+    if (notice) notice.textContent = result?.message || 'Rematch consent recorded.';
+  } catch (error) {
+    if (notice) notice.textContent = error?.message || 'The rematch could not be started.';
+  }
+});
+
+document.getElementById('game-resign')?.addEventListener('click', async () => {
+  const notice = document.getElementById('game-session-notice');
+  try {
+    await gameRuntime?.lifecycle?.runFrameworkAction('forfeit');
+    gameRuntime?.lifecycle?.sendStageControl('resign');
+    if (notice) notice.textContent = 'The game was forfeited.';
+  } catch (error) {
+    if (notice) notice.textContent = error?.message || 'The game could not be forfeited.';
+  }
 });
 
 window.addEventListener('message', e => {
-  if (e.origin !== window.location.origin) return;
-  if (e.data?.type === 'game_close') closeGame(e.data.lobby);
+  if (e.data?.type !== 'game_close') return;
+  const frameWindow = gameFrame?.contentWindow;
+  const activeLobby = String(gameRuntime?.lifecycle?.getActiveGame?.()?.lobby_code || '').trim();
+  const lobby = typeof e.data?.lobby === 'string' ? e.data.lobby.trim() : '';
+  if (e.origin !== window.location.origin || !frameWindow || e.source !== frameWindow
+      || !lobby || lobby !== activeLobby) return;
+  closeGame(lobby).catch(warnRuntimeRequest);
 });
 
 document.getElementById('edit-room-btn')?.addEventListener('click', () => {
@@ -9379,21 +11895,46 @@ document.getElementById('host-notice-understand')?.addEventListener('click', e =
   if (e.currentTarget.dataset.redirect === '1') window.location.href = e.currentTarget.dataset.redirectUrl || appUrl('/lobby.php');
 });
 
-document.querySelectorAll('[data-game]').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    closeGameStartMenu();
-    await gameRuntime?.lifecycle?.startGame(btn.dataset.game);
-  });
-});
-
 function memberProfileParticipant(userId) {
   return [...participants.values()].find(
     participant => Number(participant.user_id) === Number(userId)
   ) || null;
 }
 
+function memberProfilePublicProfileId(userId, explicitPublicProfileId = '') {
+  return String(
+    explicitPublicProfileId
+      || memberProfileParticipant(userId)?.public_profile_id
+      || ''
+  ).trim();
+}
+
+async function waitForMemberProfileIdentity(userId, options = {}) {
+  const requestVersion = Number(options.requestVersion || 0);
+  const timeoutMs = Math.max(
+    0,
+    Number(options.timeoutMs ?? MEMBER_PROFILE_IDENTITY_WAIT_TIMEOUT_MS)
+  );
+  let publicProfileId = memberProfilePublicProfileId(userId, options.publicProfileId);
+  if (publicProfileId) return publicProfileId;
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (requestVersion > 0 && requestVersion !== memberProfileRequestVersion) return '';
+    const remainingMs = Math.max(0, deadline - Date.now());
+    await new Promise(resolve => setTimeout(
+      resolve,
+      Math.min(MEMBER_PROFILE_IDENTITY_WAIT_INTERVAL_MS, remainingMs)
+    ));
+    publicProfileId = memberProfilePublicProfileId(userId);
+    if (publicProfileId) return publicProfileId;
+  }
+  return '';
+}
+
 function closeMemberProfile(options = {}) {
   if (!memberProfileModal?.classList.contains('open')) return;
+  memberProfileRequestVersion += 1;
   memberProfileModal.classList.remove('open');
   memberProfileUserId = null;
   memberProfileSnapshot = null;
@@ -9469,6 +12010,12 @@ async function runMemberProfilePolicyAction(actionId, participant) {
   } else if (actionId === 'avatar.user-visibility') {
     const policy = avatarVisibilityFor(participant);
     await avatarRuntime?.visibility?.setUserHidden(participant, !policy.user);
+  } else if (actionId === 'nameplate.current-visibility') {
+    const policy = nameplateVisibilityFor(participant);
+    await setNameplateVisibility(participant, 'nameplate', !policy.exact);
+  } else if (actionId === 'nameplate.user-visibility') {
+    const policy = nameplateVisibilityFor(participant);
+    await setNameplateVisibility(participant, 'user', !policy.user);
   } else if (actionId === 'gesture.sender-media-visibility') {
     const hidden = gesturePresentation?.isSenderHidden?.(participant.user_id) === true;
     await setGestureSenderMediaHidden(Number(participant.user_id), !hidden);
@@ -9498,9 +12045,10 @@ function renderMemberProfileActions(profile) {
     const blocked = blockedUserIds.has(Number(memberProfileUserId));
     if (!blocked) {
       memberProfileAction('Send DM', () => {
+        const targetUserId = Number(memberProfileUserId);
         closeMemberProfile();
         openDmWithUser({
-          id: Number(memberProfileUserId),
+          id: targetUserId,
           display_name: profile.effectiveDisplayName || profile.displayName || 'Member',
           avatar_url: profile.avatarUrl || '',
         });
@@ -9529,16 +12077,12 @@ function renderMemberProfileActions(profile) {
       target.searchParams.set('report_reference', `profile:${profile.publicProfileId || ''}`);
       globalThis.open(target.toString(), '_blank', 'noopener,noreferrer');
     });
-    memberProfileAction('Mute', async event => {
+    const muted = Boolean(activeMutedPolicyFor(memberProfileUserId));
+    memberProfileAction(muted ? 'Unmute' : 'Mute', async event => {
       event.currentTarget.disabled = true;
       try {
-        await apiPost('/api/moderation.php', {
-          action: 'mute',
-          target_user_id: Number(memberProfileUserId),
-          duration: 'until-unmute',
-          scopes: ['text-bubbles', 'gestures-audio', 'notices-unread', 'voice', 'avatar-webcam-placeholder'],
-        });
-        showWarning('User muted privately. Game actions, scores, and required system state remain visible.');
+        await setPersonalMuteState(memberProfileUserId, !muted);
+        renderMemberProfileActions(profile);
       } catch (error) {
         event.currentTarget.disabled = false;
         showWarning(error?.message || 'Mute setting could not be changed.');
@@ -9560,6 +12104,8 @@ function renderMemberProfileActions(profile) {
       [
         'avatar.current-visibility',
         'avatar.user-visibility',
+        'nameplate.current-visibility',
+        'nameplate.user-visibility',
         'gesture.sender-media-visibility',
         'webcam.presentation',
         'webcam.receive',
@@ -9594,7 +12140,11 @@ function renderMemberProfile(profile) {
     || 'Member';
   document.getElementById('member-profile-title').textContent = `${effectiveDisplayName}'s User Profile`;
   document.getElementById('member-profile-display-name').textContent = effectiveDisplayName;
-  document.getElementById('member-profile-username').textContent = 'Authenticated community member';
+  const profileIdentitySubtitle = document.getElementById('member-profile-username');
+  if (profileIdentitySubtitle) {
+    profileIdentitySubtitle.textContent = '';
+    profileIdentitySubtitle.hidden = true;
+  }
   const avatar = document.getElementById('member-profile-avatar');
   const avatarParticipant = {
     avatar_source_width_px: profile.avatarSourceWidthPx,
@@ -9676,29 +12226,67 @@ function renderMemberProfile(profile) {
   renderMemberProfileActions(profile);
 }
 
+function requestMemberProfile(publicProfileId) {
+  const profileId = String(publicProfileId || '').trim();
+  const existingRequest = memberProfileRequests.get(profileId);
+  if (existingRequest) return existingRequest;
+  const request = runtimeRequestClient.getJson(
+    `/api/member_profile.php?profile_id=${encodeURIComponent(profileId)}`,
+    { operation: 'member-profile', endpointCategory: 'account' }
+  ).finally(() => {
+    if (memberProfileRequests.get(profileId) === request) {
+      memberProfileRequests.delete(profileId);
+    }
+  });
+  memberProfileRequests.set(profileId, request);
+  return request;
+}
+
 async function openMemberProfile(userId, options = {}) {
-  if (!memberProfileModal || Number(userId) < 1) return;
-  const publicProfileId = String(
-    options.publicProfileId
-      || memberProfileParticipant(userId)?.public_profile_id
-      || ''
-  ).trim();
-  if (!publicProfileId) throw new Error('The member profile identity is unavailable.');
-  memberProfileUserId = Number(userId);
+  const normalizedUserId = Number(userId);
+  if (!memberProfileModal || normalizedUserId < 1) return;
+  const requestVersion = ++memberProfileRequestVersion;
+  memberProfileUserId = normalizedUserId;
   memberProfileReturnFocus = options.returnFocus || document.activeElement;
   memberProfileContent.hidden = true;
   memberProfileStatus.textContent = 'Loading profile...';
   memberProfileModal.classList.add('open');
   document.getElementById('member-profile-close')?.focus();
+  let publicProfileId = memberProfilePublicProfileId(userId, options.publicProfileId);
+  if (!publicProfileId) {
+    memberProfileStatus.textContent = 'Loading member identity...';
+    publicProfileId = await waitForMemberProfileIdentity(userId, { requestVersion });
+    if (requestVersion !== memberProfileRequestVersion || Number(userId) !== memberProfileUserId) return;
+    if (!publicProfileId) {
+      memberProfileStatus.textContent = 'This member is still loading. Please try User Profile again in a moment.';
+      return;
+    }
+  }
+  const cachedProfile = memberProfileCache.get(publicProfileId);
+  if (cachedProfile) {
+    renderMemberProfile(cachedProfile);
+    memberProfileStatus.textContent = 'Refreshing profile...';
+  } else {
+    const localParticipant = memberProfileParticipant(userId);
+    if (localParticipant) {
+      renderMemberProfile({
+        publicProfileId,
+        isSelf: Number(userId) === Number(cfg.myUserId),
+        effectiveDisplayName: localParticipant.display_name || 'Member',
+        avatarUrl: avatarUrl(localParticipant),
+        avatarMissing: !localParticipant.avatar_path,
+      });
+      memberProfileStatus.textContent = 'Loading full profile details...';
+    }
+  }
   try {
-    const data = await runtimeRequestClient.getJson(
-      `/api/member_profile.php?profile_id=${encodeURIComponent(publicProfileId)}`,
-      { operation: 'member-profile', endpointCategory: 'account' }
-    );
-    if (Number(userId) !== memberProfileUserId) return;
-    renderMemberProfile(data.profile || {});
+    const data = await requestMemberProfile(publicProfileId);
+    if (requestVersion !== memberProfileRequestVersion || Number(userId) !== memberProfileUserId) return;
+    const profile = data.profile || {};
+    memberProfileCache.set(publicProfileId, profile);
+    renderMemberProfile(profile);
   } catch (error) {
-    if (Number(userId) !== memberProfileUserId) return;
+    if (requestVersion !== memberProfileRequestVersion || Number(userId) !== memberProfileUserId) return;
     memberProfileStatus.textContent = error?.message || 'User Profile could not be loaded.';
   }
 }
@@ -9743,7 +12331,11 @@ async function loadFriends() {
       endpointCategory: 'friends',
     });
     if (document.getElementById('friend-search').value !== q) return;
+    const renderedFriendIds = new Set();
     (data.friends || []).forEach(f => {
+      const friendId = Number(f.id);
+      if (!Number.isFinite(friendId) || renderedFriendIds.has(friendId)) return;
+      renderedFriendIds.add(friendId);
       const knownParticipant = [...participants.values()].find(p => Number(p.user_id) === Number(f.id));
       const locateSubject = knownParticipant || f;
       const locateAvatar = knownParticipant ? avatarUrl(knownParticipant) : mediaUrl(f.avatar_url);
@@ -9822,8 +12414,8 @@ async function pollAppVersion() {
     latestAppVersion = version;
     if (appVersionEl) {
       appVersionEl.textContent = attribution
-        ? `${version} \u00B7 ${attribution}`
-        : version;
+        ? `${String(data.displayVersion || version)} \u00B7 ${attribution}`
+        : String(data.displayVersion || version);
     }
     const cachedVersion = getSeenAppVersion();
     if (!cachedVersion) {
@@ -10190,10 +12782,22 @@ function renderVoiceList(list, state = voiceRuntime?.media?.getState() || {}) {
       person.avatar_path = null;
       person.p2p_avatar_object_identity = known.p2p_avatar_object_identity;
     }
+    if (known?.p2p_nameplate_object_identity
+        && String(known.p2p_nameplate_object_identity) === String(v?.p2p_nameplate?.identity || '')) {
+      person.nameplate_url = known.nameplate_url;
+      person.nameplate_path = null;
+      person.p2p_nameplate_object_identity = known.p2p_nameplate_object_identity;
+    }
     if (known && v?.p2p_avatar) {
       participants.update(Number(v.id), {
         p2p_avatar: v.p2p_avatar,
         avatar_delivery: v.avatar_delivery,
+      });
+    }
+    if (known && v?.p2p_nameplate) {
+      participants.update(Number(v.id), {
+        p2p_nameplate: v.p2p_nameplate,
+        nameplate_delivery: v.nameplate_delivery,
       });
     }
     const own = Number(person.id) === Number(cfg.myParticipantId);
@@ -10209,7 +12813,8 @@ function renderVoiceList(list, state = voiceRuntime?.media?.getState() || {}) {
          <button class="voice-control${deafened ? ' active' : ''}" data-voice-deafen type="button" title="${deafened ? 'Undeafen' : 'Deafen'}" aria-label="${deafened ? 'Undeafen' : 'Deafen'}">${voiceControlIcon('headphones')}</button>`
       : `${muted ? `<span class="voice-status-icon active" title="Mic muted">${voiceControlIcon('mic')}</span>` : ''}
          ${deafened ? `<span class="voice-status-icon active" title="Deafened">${voiceControlIcon('headphones')}</span>` : ''}`;
-    row.innerHTML = `<span class="user-avatar-wrap">${avatarPresentationHtml(person, { own, displayName: displayNameFor(person), title: false })}<span class="voice-speaking-dot${speaking ? ' speaking' : ''}"></span></span><div><strong class="person-name-line"><span>${esc(displayNameFor(person))}</span></strong><div class="minor">${own ? 'You' : statusText}</div></div><div class="voice-card-actions">${controls}</div>`;
+    row.innerHTML = `<span class="user-avatar-wrap">${avatarPresentationHtml(person, { own, displayName: displayNameFor(person), title: false })}<span class="voice-speaking-dot${speaking ? ' speaking' : ''}"></span></span><div><strong class="person-name-line person-nameplate"><span>${esc(displayNameFor(person))}</span>${participantRoleBadgeHtml(person)}</strong><div class="minor">${own ? 'You' : statusText}</div></div><div class="voice-card-actions">${controls}</div>`;
+    applyIdentityNameplate(row.querySelector('.person-nameplate'), person);
     row.querySelector('[data-voice-mute]')?.addEventListener('click', () => setVoiceMuted(!mutedSelf));
     row.querySelector('[data-voice-deafen]')?.addEventListener('click', () => setVoiceDeafened(!deafenedSelf));
     voiceListEl.appendChild(row);
@@ -10228,14 +12833,34 @@ async function bootRoom() {
     roomConfig.avatarVisibilityPreferences || {},
     'room-bootstrap'
   );
+  applyNameplateVisibilityProjection(roomConfig.nameplateVisibilityPreferences || {});
   cfg = roomConfig;
-  avatarRuntime?.p2pAvatar?.applyPolicy(cfg.p2pAvatarPolicy || {});
-  if (cfg.p2pAvatarPolicy?.effectiveEnabled === true || cfg.p2pTransferPolicy?.effectiveEnabled === true) {
-    voiceRuntime?.media?.startPolling(0);
+  // Account-scoped audio preferences require the authenticated room config.
+  // Optional audio must never prevent participants or room transport starting.
+  try {
+    configureChatNotifications();
+  } catch (error) {
+    chatRuntime?.notifications?.destroy();
+    warnRuntimeRequest(error);
   }
-  p2pTransferService?.start();
+  if (cfg.liveWebsiteRoom) {
+    const { LiveWebsiteRoomRuntime } = await import(appUrl('/assets/js/runtime/live-website-room/live-website-room-runtime.js?v=20260913-youtube-sidebar'));
+    liveWebsiteRoomRuntime = new LiveWebsiteRoomRuntime();
+    liveWebsiteRoomRuntime.start({
+      projection: cfg.liveWebsiteRoom,
+      participant: { session_id: cfg.sessionId, join_token: cfg.myJoinToken },
+      onMusicPlaylist(playlist) {
+        if (JSON.stringify(cfg.musicPlaylist || []) === JSON.stringify(playlist)) return;
+        cfg.musicPlaylist = playlist;
+        importedRoomRuntime?.music?.renderPlayer(playlist);
+      },
+      appUrl,
+      csrfToken: document.body.dataset.csrf || '',
+      registerPollingJob: job => pollingRuntime.registerJob(job),
+    });
+  }
+  avatarRuntime?.p2pAvatar?.applyPolicy(cfg.p2pAvatarPolicy || {});
   renderPrivateVoiceSnapshot({ policy: cfg.voiceWebcamPolicy });
-  voiceRuntime?.privateVoice?.startPolling(0);
   voiceRuntime?.transmissionModes?.render?.();
   applyGestureCapabilityProjection(cfg.gestureCapabilities || {}, 'room-bootstrap');
   gesturePresentation?.applyServerProjection(
@@ -10261,7 +12886,7 @@ async function bootRoom() {
   });
   restoreSessionLock();
   (cfg.blockedUserIds || []).forEach(id => blockedUserIds.add(Number(id)));
-  (cfg.mutedUsers || []).forEach(policy => mutedUserPolicies.set(Number(policy.muted_user_id), policy));
+  replacePersonalMuteProjection(cfg.mutedUsers || []);
   avatarRuntime?.relationships?.seedPersistedRelationships(cfg.relationships || []);
   await avatarRuntime?.relationshipManagement?.refresh({ render: false });
   chatPrivateChats().syncRelationshipChat(
@@ -10297,7 +12922,12 @@ async function bootRoom() {
   }
   updateComposerState();
   updateVoiceToggleButton(); 
-  checkLatency();
+  await gameRuntime?.lifecycle?.loadGames({ includeCatalog: true });
+  if (cfg.p2pAvatarPolicy?.effectiveEnabled === true || cfg.p2pTransferPolicy?.effectiveEnabled === true) {
+    voiceRuntime?.media?.startPolling(0);
+  }
+  p2pTransferService?.start();
+  voiceRuntime?.privateVoice?.startPolling(0);
   poll();
   pollVoice();
   pollAppVersion();
@@ -10305,6 +12935,7 @@ async function bootRoom() {
     id: 'latency-monitor',
     run: checkLatency,
     interval: 5000,
+    initialDelay: 10000,
   });
   pollingRuntime.registerJob({
     id: 'app-version-poll',
@@ -10322,7 +12953,6 @@ async function bootRoom() {
     run: refreshPresence,
     interval: 5000,
   });
-  gameRuntime?.lifecycle?.loadGames();
 }
 
 function updateRoomLayout() {
@@ -10368,3 +12998,7 @@ bootRoom().catch(err => {
   console.error(err);
   messagesEl.innerHTML = `<div class="error">${esc(err.message || 'Room failed to load.')}</div>`;
 });
+async function postOutsideContentForm(...args) {
+  const { postOutsideContentForm: uploadWithConsent } = await import('./core/outside-content-upload.js?v=20260913-consent-r2');
+  return uploadWithConsent(...args);
+}

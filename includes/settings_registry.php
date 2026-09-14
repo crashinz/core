@@ -1,10 +1,16 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/nameplate_policy.php';
 
 const SETTINGS_REGISTRY_REVISION_SETTING = 'settings_registry_revision';
 
 function settings_registry_setting_defaults(): array {
-    return [SETTINGS_REGISTRY_REVISION_SETTING => '1'];
+    $defaults = [SETTINGS_REGISTRY_REVISION_SETTING => '1', IMPORTANT_MESSAGE_MODERATOR_PERMISSION_SETTING => '1', IMPORTANT_MESSAGE_GUIDE_PERMISSION_SETTING => '1'];
+    foreach (settings_registry_definitions() as $definition) {
+        if (empty($definition['limitEnforcementControl'])) continue;
+        $defaults[(string)$definition['settingKey']] = !empty($definition['defaultValue']) ? '1' : '0';
+    }
+    return $defaults;
 }
 
 function settings_registry_categories(): array {
@@ -78,15 +84,72 @@ function settings_registry_entry(array $entry): array {
         'resetLabel' => 'Reset',
         'unit' => '',
         'limitGroup' => '',
+        'limitSection' => '',
+        'recommendedValue' => null,
+        'riskWarning' => '',
+        'enforcementSettingId' => null,
+        'limitEnforcementControl' => false,
+        'limitControlFor' => null,
+        'featureSettingId' => null,
     ], $entry);
 }
 
-function settings_registry_definitions(): array {
-    static $definitions = null;
-    if ($definitions !== null) return $definitions;
+function settings_registry_is_limit_definition(array $definition): bool {
+    if (($definition['type'] ?? '') !== 'number') return false;
+    if (trim((string)($definition['limitGroup'] ?? '')) !== '') return true;
+    $id = (string)($definition['id'] ?? '');
+    return preg_match('/(?:limit|maximum|max_|_max|rate|per_second|history|timeout|attempt|lockout|window|capacity|width|height|size|retention|storage|delivery|_daily_|_percent|profile|min_age)/i', $id) === 1;
+}
+
+function settings_registry_limit_section(array $definition): string {
+    $id = (string)($definition['id'] ?? '');
+    if (preg_match('/^(?:auth_|flood_)/', $id)) return 'Recommended Safeguards';
+    if (preg_match('/^(?:capacity_|server_media_)|(?:upload|max_size|max_width|max_height|display_max|retention|storage|delivery|slow_request)/', $id)) return 'Operational Controls';
+    if (preg_match('/^(?:private_voice|p2p_|diagnostic_|age_gate)/', $id) || !empty($definition['dependencies'])) return 'Feature-Specific Limits';
+    return 'Community Preferences';
+}
+
+function settings_registry_limit_risk_warning(array $definition): string {
+    return match (settings_registry_limit_section($definition)) {
+        'Recommended Safeguards' => 'Disabling this safeguard removes a recommended abuse or authentication boundary and can increase installation risk.',
+        'Operational Controls' => 'Disabling this control removes CoreChat enforcement for this resource boundary and can increase storage, memory, or service pressure.',
+        'Feature-Specific Limits' => 'Disabling this limit removes CoreChat enforcement while the related feature is active.',
+        default => 'Disabling this limit removes CoreChat enforcement; the saved numeric value is preserved for later use.',
+    };
+}
+
+function settings_registry_definitions(bool $includeInstalledGames = true): array {
+    static $definitionSets = [];
+    $cacheKey = $includeInstalledGames ? 'complete' : 'without-installed-games';
+    if (isset($definitionSets[$cacheKey])) return $definitionSets[$cacheKey];
 
     $definitions = array_map('settings_registry_entry', private_site_branding_setting_definitions());
     $definitions = array_merge($definitions, [
+        settings_registry_entry([
+            'id' => LIVE_WEBSITE_ROOMS_SETTING,
+            'settingKey' => LIVE_WEBSITE_ROOMS_SETTING,
+            'owner' => 'live_website_rooms',
+            'categoryId' => 'rooms-games',
+            'subsectionId' => 'room-creation',
+            'subsectionLabel' => 'Room Creation',
+            'subsectionOrder' => 1,
+            'label' => 'Allow Live Website Rooms',
+            'description' => 'Allow Trusted accounts with the separate capability to create temporary rooms that directly embed safe HTTPS websites.',
+            'helpText' => 'Disabling blocks new creation. If live rooms are active, review the impact and confirm closure; ordinary and imported rooms are never closed.',
+            'aliases' => ['live website rooms', 'temporary website rooms', 'direct website rooms'],
+            'type' => 'boolean',
+            'defaultValue' => true,
+            'order' => 1,
+            'controlClass' => 'configurable-required',
+            'optional' => true,
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'all-optional', 'preset'],
+            'originalRelevant' => false,
+            'originalValueAvailable' => false,
+            'staleWriteOwner' => SETTINGS_REGISTRY_REVISION_SETTING,
+            'toolLogBehavior' => 'bounded-live-website-room-transition',
+        ]),
         settings_registry_entry([
             'id' => MODERATION_TRUST_MASTER_SETTING_ID,
             'settingKey' => MODERATION_TRUST_MASTER_SETTING,
@@ -204,8 +267,8 @@ function settings_registry_definitions(): array {
             'subsectionLabel' => 'Moderation and Trust',
             'subsectionOrder' => 1,
             'label' => 'Outside-Content Confirmations',
-            'description' => 'Choose confirmation for every upload/import, public sharing only, reminders, or Disabled.',
-            'helpText' => 'Terms, trust, capabilities, validation, security, reporting, and moderation remain enforced in every mode.',
+            'description' => 'Choose which outside-content actions require the one-time account approval: uploads/imports, public sharing only, reminders, or Disabled.',
+            'helpText' => 'A recorded approval is remembered for the account across future uploads and imports, devices, and sign-ins. Existing mode values select when approval is first required, not repeated prompts. Terms, trust, capabilities, validation, security, reporting, and moderation remain enforced.',
             'aliases' => ['upload confirmation', 'import permission', 'outside content reminder'],
             'type' => 'select',
             'defaultValue' => 'disabled',
@@ -355,6 +418,54 @@ function settings_registry_definitions(): array {
         ]),
     ]);
 
+    $importantMessagePermissions = [
+        [
+            IMPORTANT_MESSAGE_MODERATOR_PERMISSION_SETTING,
+            'Allow Moderators to send Important messages',
+            'Permit Moderators to mark Room Chat and Community Chat text as Important.',
+            'Installation Owner and Administrator authority is always retained. This setting grants only Important-message authority and does not grant other moderation tools.',
+            ['important moderator messages', 'moderator announcement permission'],
+        ],
+        [
+            IMPORTANT_MESSAGE_GUIDE_PERMISSION_SETTING,
+            'Allow Guides to send Important messages',
+            'Permit Guides to mark Room Chat and Community Chat text as Important.',
+            'Installation Owner and Administrator authority is always retained. This setting grants only Important-message authority and does not grant other moderation tools.',
+            ['important guide messages', 'guide announcement permission'],
+        ],
+        [
+            IMPORTANT_MESSAGE_ROOM_OWNER_PERMISSION_SETTING,
+            'Allow Room Owners to send Important room messages',
+            'Permit a Room Owner to mark text as Important in the room they own.',
+            'This permission is limited to that owner\'s Room Chat. It does not grant Important messages in Community Chat or any other moderation tools.',
+            ['important room owner messages', 'room owner announcement permission'],
+        ],
+    ];
+    $importantMessagePermissionOrder = 10;
+    foreach ($importantMessagePermissions as [$id, $label, $description, $helpText, $aliases]) {
+        $definitions[] = settings_registry_entry([
+            'id' => $id,
+            'settingKey' => $id,
+            'categoryId' => 'moderation-privacy-security',
+            'subsectionId' => 'role-permissions',
+            'subsectionLabel' => 'Role Permissions',
+            'subsectionOrder' => 3,
+            'label' => $label,
+            'description' => $description,
+            'helpText' => $helpText,
+            'aliases' => $aliases,
+            'type' => 'boolean',
+            'defaultValue' => false,
+            'order' => $importantMessagePermissionOrder,
+            'controlClass' => 'optional',
+            'optional' => true,
+            'setupVisible' => false,
+            'adminVisible' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category', 'all-optional', 'preset'],
+        ]);
+        $importantMessagePermissionOrder += 10;
+    }
+
     $profileLimitOrder = 10;
     foreach (member_profiles_limit_definitions() as $settingId => $limit) {
         $fieldLabel = (string)$limit['label'];
@@ -389,7 +500,7 @@ function settings_registry_definitions(): array {
         $profileLimitOrder += 10;
     }
 
-    $roleLabels = ['admin' => 'Administrator', 'developer' => 'Developer', 'guide' => 'Guide', 'owner' => 'Room Owner', 'user' => 'Standard User'];
+    $roleLabels = ['admin' => 'Administrator', 'developer' => 'Developer', 'guide' => 'Guide', 'moderator' => 'Moderator', 'owner' => 'CoreChat Owner', 'user' => 'Standard User'];
     $roleDefaults = role_color_default_palette();
     $roleOrder = 20;
     foreach ($roleLabels as $role => $label) {
@@ -1225,13 +1336,233 @@ function settings_registry_definitions(): array {
     ]);
     $definitions = array_merge($definitions, $capacityEntries);
 
+    $gameOrder = 10;
+    foreach ($includeInstalledGames ? multiplayer_game_registry() : [] as $gameKey => $game) {
+        $extensionId = trim((string)($game['extensionId'] ?? ''));
+        $enabledSettingId = $extensionId !== ''
+            ? 'extension.' . $extensionId . '.enabled'
+            : multiplayer_game_setting_key($gameKey);
+        $enabledSettingKey = $extensionId !== ''
+            ? 'first_party_extension.' . $extensionId . '.enabled'
+            : multiplayer_game_setting_key($gameKey);
+        $definitions[] = settings_registry_entry([
+            'id' => $enabledSettingId,
+            'settingKey' => $enabledSettingKey,
+            'owner' => $extensionId !== '' ? 'first_party_extensions' : 'multiplayer_game_framework',
+            'extensionId' => $extensionId !== '' ? $extensionId : null,
+            'categoryId' => 'rooms-games',
+            'subsectionId' => 'installed-games',
+            'subsectionLabel' => 'Installed Games',
+            'subsectionOrder' => 5,
+            'label' => 'Enable ' . (string)$game['name'],
+            'description' => 'Make this installed game available from the room Games launcher.',
+            'helpText' => !empty($game['compatibility'])
+                ? 'This existing game remains available through the shared game launcher while its later extension migration is pending.'
+                : 'The game remains independently installed; disabling it preserves its saved settings and records.',
+            'aliases' => [(string)$game['name'], 'game launcher', (string)$game['profile']],
+            'type' => 'boolean',
+            'defaultValue' => true,
+            'order' => $gameOrder,
+            'controlClass' => 'installed-feature',
+            'optional' => true,
+            'safeToReset' => true,
+            'bulkOperations' => ['setting', 'subsection', 'category'],
+            'setupVisible' => true,
+            'adminVisible' => true,
+            'staleWriteOwner' => SETTINGS_REGISTRY_REVISION_SETTING,
+            'toolLogBehavior' => 'bounded-game-availability-update',
+            'resetLabel' => 'Restore Available',
+            'installedFeature' => $extensionId !== '' ? [
+                'manageLabel' => 'Manage ' . (string)$game['name'],
+                'manageView' => 'rooms-games',
+                'order' => 100 + $gameOrder,
+                'useEffectiveName' => true,
+            ] : null,
+            'dynamicGameNameRole' => $extensionId !== '' ? 'availability' : null,
+        ]);
+        $displayNameSettingKey = trim((string)($game['displayNameSettingKey'] ?? ''));
+        if ($displayNameSettingKey !== '') {
+            $definitions[] = settings_registry_entry([
+                'id' => $displayNameSettingKey,
+                'settingKey' => $displayNameSettingKey,
+                'owner' => 'multiplayer_game_framework',
+                'extensionId' => $extensionId !== '' ? $extensionId : null,
+                'categoryId' => 'rooms-games',
+                'subsectionId' => 'installed-games',
+                'subsectionLabel' => 'Installed Games',
+                'subsectionOrder' => 5,
+                'label' => (string)$game['name'] . ' display name',
+                'description' => 'Choose the name members see for this installed game.',
+                'helpText' => 'Renaming changes presentation only. Existing games, saves, results, records, links, authorization, and audit identity remain attached to the same installed game.',
+                'aliases' => [(string)$game['name'], 'game name', 'launcher name'],
+                'type' => 'string',
+                'defaultValue' => (string)$game['name'],
+                'maximum' => 64,
+                'requiredNonBlank' => true,
+                'order' => $gameOrder + 1,
+                'controlClass' => 'configurable-required',
+                'optional' => false,
+                'safeToReset' => true,
+                'bulkOperations' => ['setting'],
+                'setupVisible' => true,
+                'adminVisible' => true,
+                'authorization' => 'installation-owner-and-recent-authentication',
+                'staleWriteOwner' => SETTINGS_REGISTRY_REVISION_SETTING,
+                'toolLogBehavior' => 'owner-only-game-display-name-update',
+                'resetLabel' => 'Restore Default Name',
+                'dynamicGameNameRole' => 'display-name',
+            ]);
+        }
+        $presentationSettingKey = trim((string)($game['presentationPackSettingKey'] ?? ''));
+        if (($game['presentationSelectionOwner'] ?? 'viewer') === 'installation-owner'
+            && $presentationSettingKey !== '') {
+            $packLabels = [];
+            foreach ((array)($game['presentationPacks'] ?? []) as $pack) {
+                $packLabels[(string)$pack['id']] = (string)$pack['label'];
+            }
+            $definitions[] = settings_registry_entry([
+                'id' => $presentationSettingKey,
+                'settingKey' => $presentationSettingKey,
+                'owner' => 'multiplayer_game_framework',
+                'extensionId' => $extensionId !== '' ? $extensionId : null,
+                'categoryId' => 'rooms-games',
+                'subsectionId' => 'installed-games',
+                'subsectionLabel' => 'Installed Games',
+                'subsectionOrder' => 5,
+                'label' => (string)$game['name'] . ' appearance',
+                'description' => 'Choose the appearance members see for this installed game.',
+                'helpText' => 'Classic is used only when every required installation-private media slot is valid. Built-in is the complete automatic fallback. Appearance never changes games, saves, results, or records.',
+                'aliases' => [(string)$game['name'], 'classic appearance', 'built-in appearance', 'game theme'],
+                'type' => 'select',
+                'defaultValue' => (string)($game['defaultPresentationPack'] ?? array_key_first($packLabels)),
+                'allowedValues' => array_keys($packLabels),
+                'allowedValueLabels' => $packLabels,
+                'order' => $gameOrder + 2,
+                'controlClass' => 'configurable-required',
+                'optional' => false,
+                'safeToReset' => true,
+                'bulkOperations' => ['setting'],
+                'setupVisible' => true,
+                'adminVisible' => true,
+                'authorization' => 'installation-owner-and-recent-authentication',
+                'staleWriteOwner' => SETTINGS_REGISTRY_REVISION_SETTING,
+                'toolLogBehavior' => 'owner-only-game-appearance-update',
+                'resetLabel' => 'Restore Classic Preference',
+            ]);
+        }
+        $gameOrder += 10;
+    }
+
+    $definitions = array_merge(
+        $definitions,
+        array_map('settings_registry_entry', flood_protection_settings_registry_definitions())
+    );
+    $definitions[] = settings_registry_entry([
+        'id' => LIMIT_EVENT_RETENTION_SETTING,
+        'settingKey' => LIMIT_EVENT_RETENTION_SETTING,
+        'categoryId' => 'errors-diagnostics',
+        'subsectionId' => 'limit-events',
+        'subsectionLabel' => 'Limit Events',
+        'subsectionOrder' => 30,
+        'label' => 'Limit Event Retention',
+        'description' => 'Days that privacy-safe Limit Events remain available before automatic cleanup.',
+        'helpText' => 'Disabling enforcement preserves events until an administrator deletes them.',
+        'aliases' => ['limit log retention', 'limit events'],
+        'type' => 'number',
+        'defaultValue' => 90,
+        'minimum' => 1,
+        'maximum' => 3650,
+        'step' => 1,
+        'order' => 30,
+        'unit' => 'days',
+        'limitGroup' => 'Diagnostics',
+        'setupVisible' => true,
+        'adminVisible' => true,
+    ]);
+
+    $limitControls = [];
+    foreach ($definitions as &$definition) {
+        if (!settings_registry_is_limit_definition($definition)) continue;
+        $enforcementId = 'limit_enforce__' . (string)$definition['id'];
+        $definition['enforcementSettingId'] = $enforcementId;
+        $definition['limitSection'] = settings_registry_limit_section($definition);
+        $definition['recommendedValue'] = $definition['defaultValue'];
+        $definition['riskWarning'] = settings_registry_limit_risk_warning($definition);
+        $definition['featureSettingId'] = (string)($definition['dependencies'][0] ?? '');
+        $limitControls[] = settings_registry_entry([
+            'id' => $enforcementId,
+            'settingKey' => $enforcementId,
+            'categoryId' => (string)$definition['categoryId'],
+            'subsectionId' => (string)$definition['subsectionId'],
+            'subsectionLabel' => (string)$definition['subsectionLabel'],
+            'subsectionOrder' => (int)$definition['subsectionOrder'],
+            'label' => 'Enforce ' . (string)$definition['label'],
+            'description' => 'Controls whether CoreChat enforces this numeric limit without changing its saved value.',
+            'helpText' => settings_registry_limit_risk_warning($definition),
+            'aliases' => [(string)$definition['id'], 'enforce limit'],
+            'type' => 'boolean',
+            'defaultValue' => true,
+            'order' => (int)$definition['order'],
+            'controlClass' => 'configurable-optional',
+            'optional' => true,
+            'safeToReset' => true,
+            'bulkOperations' => ['setting'],
+            'setupVisible' => !empty($definition['setupVisible']),
+            'adminVisible' => !empty($definition['adminVisible']),
+            'authorization' => (string)$definition['authorization'],
+            'limitEnforcementControl' => true,
+            'limitControlFor' => (string)$definition['id'],
+            'limitSection' => (string)$definition['limitSection'],
+        ]);
+    }
+    unset($definition);
+    $definitions = array_merge($definitions, $limitControls);
+
+    return $definitionSets[$cacheKey] = $definitions;
+}
+
+/** Canonical numeric definitions without loading installed-game presentation assets. */
+function settings_registry_limit_definition_map(): array {
+    static $map = null;
+    if ($map !== null) return $map;
+    $map = [];
+    foreach (settings_registry_definitions(false) as $definition) {
+        if (settings_registry_is_limit_definition($definition)) $map[(string)$definition['id']] = $definition;
+    }
+    return $map;
+}
+
+function settings_registry_runtime_definitions(): array {
+    // Extend live settings without rewriting the historical migration's definition source.
+    $definitions = array_merge(settings_registry_definitions(), array_map('settings_registry_entry', nameplate_settings_definitions()));
+    $definitions = array_merge($definitions, array_map('settings_registry_entry', game_recording_settings()));
+    $currentDefaults = optional_core_voice_webcam_runtime_setting_defaults() + [IMPORTANT_MESSAGE_MODERATOR_PERMISSION_SETTING => '1', IMPORTANT_MESSAGE_GUIDE_PERMISSION_SETTING => '1'];
+    foreach ($definitions as &$definition) {
+        $key = (string)$definition['settingKey'];
+        if (!array_key_exists($key, $currentDefaults)) continue;
+        $definition['defaultValue'] = $currentDefaults[$key] === '1';
+        $definition['helpText'] = str_replace('Disabled by default.', 'Enabled by default.', $definition['helpText']);
+    }
+    unset($definition);
     return $definitions;
 }
 
 function settings_registry_definition_map(): array {
     $map = [];
-    foreach (settings_registry_definitions() as $definition) $map[(string)$definition['id']] = $definition;
+    foreach (settings_registry_runtime_definitions() as $definition) $map[(string)$definition['id']] = $definition;
     return $map;
+}
+
+function corechat_limit_is_enforced(PDO $pdo, string $settingId): bool {
+    $settingId = trim($settingId);
+    if ($settingId === '' || !preg_match('/^[a-z0-9_]+$/', $settingId)) return true;
+    return app_setting($pdo, 'limit_enforce__' . $settingId, '1') === '1';
+}
+
+function corechat_limit_value(PDO $pdo, string $settingId, int|float $default): int|float|null {
+    if (!corechat_limit_is_enforced($pdo, $settingId)) return null;
+    $raw = app_setting($pdo, $settingId, (string)$default);
+    return is_float($default) ? (float)$raw : (int)$raw;
 }
 
 function settings_registry_revision(PDO $pdo): int {
@@ -1240,6 +1571,14 @@ function settings_registry_revision(PDO $pdo): int {
 
 function settings_registry_current_value(PDO $pdo, array $definition, array $context): mixed {
     $id = (string)$definition['id'];
+    // The editor owns saved configuration, not the effective runtime ceiling.
+    // Otherwise disabling a geometry limit replaces its draft with the hard
+    // ceiling and a later unrelated Save can overwrite the preserved number.
+    if (settings_registry_is_limit_definition($definition)) {
+        $stored = app_setting($pdo, (string)$definition['settingKey'], (string)$definition['defaultValue']);
+        return is_float($definition['defaultValue']) || (float)($definition['step'] ?? 1) < 1
+            ? (float)$stored : (int)$stored;
+    }
     if ($definition['owner'] === 'operational_capacity_policy') {
         if ($id === OPERATIONAL_CAPACITY_PROFILE_SETTING) return (string)$context['operationalCapacity']['selectedProfile'];
         return (int)$context['operationalCapacity']['values'][$id];
@@ -1275,7 +1614,7 @@ function settings_registry_current_value(PDO $pdo, array $definition, array $con
     }
     if ($id === 'role_colors_mode') return (string)$context['roleColors']['mode'];
     if (str_starts_with($id, 'role_color_')) {
-        if (!preg_match('/^role_color_(admin|developer|guide|owner|user)_(bg|text)$/', $id, $match)) return '';
+        if (!preg_match('/^role_color_(admin|developer|guide|moderator|owner|user)_(bg|text)$/', $id, $match)) return '';
         return (string)$context['roleColors']['palette'][$match[1]][$match[2] === 'bg' ? 'background' : 'text'];
     }
     $raw = app_setting($pdo, (string)$definition['settingKey'], (string)$definition['defaultValue']);
@@ -1311,12 +1650,17 @@ function settings_registry_installed_feature_projection(array $entries, array $s
         if ($extensionId === '' || !is_array($status)) continue;
         $effectiveEnabled = (string)($status['state'] ?? '') === 'enabled'
             && !empty($entry['effectiveValue']);
+        $effectiveName = !empty($presentation['useEffectiveName'])
+            ? (string)($status['name'] ?? $entry['label'] ?? $extensionId)
+            : (string)($presentation['name'] ?? $entry['label'] ?? $status['name'] ?? $extensionId);
         $features[] = [
             'id' => $extensionId,
-            'name' => (string)($entry['label'] ?? $status['name'] ?? $extensionId),
+            'name' => $effectiveName,
             'effectiveEnabled' => $effectiveEnabled,
             'status' => $effectiveEnabled ? 'Enabled' : 'Disabled',
-            'manageLabel' => (string)($presentation['manageLabel'] ?? 'Manage'),
+            'manageLabel' => !empty($presentation['useEffectiveName'])
+                ? 'Manage ' . $effectiveName
+                : (string)($presentation['manageLabel'] ?? 'Manage'),
             'manageView' => (string)($presentation['manageView'] ?? $entry['categoryId'] ?? ''),
             'manageSettingId' => (string)$entry['id'],
             'order' => (int)($presentation['order'] ?? 100),
@@ -1389,7 +1733,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         ],
     ];
     $entries = [];
-    foreach (settings_registry_definitions() as $definition) {
+    foreach (settings_registry_runtime_definitions() as $definition) {
         $current = settings_registry_current_value($pdo, $definition, $context);
         $visible = $surface === 'setup' ? !empty($definition['setupVisible']) : !empty($definition['adminVisible']);
         $entry = $definition;
@@ -1424,13 +1768,43 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
     }
     $currentValues = [];
     foreach ($entries as $entry) $currentValues[(string)$entry['id']] = $entry['currentValue'];
+    $effectiveExtensionGameNames = [];
+    foreach ($entries as $entry) {
+        if (($entry['dynamicGameNameRole'] ?? null) !== 'display-name') continue;
+        $extensionId = trim((string)($entry['extensionId'] ?? ''));
+        $candidate = trim((string)($entry['currentValue'] ?? ''));
+        if ($extensionId !== '' && $candidate !== '' && strlen($candidate) <= 64
+            && !preg_match('/[\x00-\x1F\x7F]/', $candidate)) {
+            $effectiveExtensionGameNames[$extensionId] = $candidate;
+        }
+    }
     foreach ($entries as &$entry) {
+        $extensionId = trim((string)($entry['extensionId'] ?? ''));
+        $effectiveGameName = $effectiveExtensionGameNames[$extensionId] ?? '';
+        if ($effectiveGameName !== '') {
+            if (($entry['dynamicGameNameRole'] ?? null) === 'availability') {
+                $entry['label'] = 'Enable ' . $effectiveGameName;
+                $entry['aliases'][] = $effectiveGameName;
+            } elseif (($entry['dynamicGameNameRole'] ?? null) === 'display-name') {
+                $entry['label'] = $effectiveGameName . ' display name';
+                $entry['aliases'][] = $effectiveGameName;
+            }
+        }
+        unset($entry['dynamicGameNameRole']);
         $unmet = array_values(array_filter(
             (array)$entry['dependencies'],
             static fn(string $dependency): bool => array_key_exists($dependency, $currentValues)
                 && $currentValues[$dependency] === false
         ));
         $entry['unmetDependencies'] = $unmet;
+        if (settings_registry_is_limit_definition($entry)) {
+            $enforcementId = (string)$entry['enforcementSettingId'];
+            $entry['limitEnforced'] = ($currentValues[$enforcementId] ?? true) !== false;
+            $entry['limitState'] = $unmet
+                ? 'Inactive - feature disabled'
+                : ($entry['limitEnforced'] ? 'Enabled' : 'Disabled');
+            $entry['noCoreEnforcedLimit'] = !$entry['limitEnforced'];
+        }
         $effective = $entry['currentValue'];
         $inheritanceSource = (string)($entry['inheritanceSource'] ?? '');
         if ($inheritanceSource !== '' && trim((string)$effective) === '') {
@@ -1507,6 +1881,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
             'originalEvidence' => 'Source comparison against upstream/main at 1b1b9b750c2b508a75e0fb88c8cb57c3bd349e25.',
             'adminAccessPathPolicy' => 'Both intentional Admin access paths are preserved. Original-author mode does not hide or disable the later in-room entry point without a separate owner decision.',
         ],
+        'limitEvents' => function_exists('limit_event_snapshot') ? limit_event_snapshot($pdo) : ['items' => [], 'total' => 0, 'page' => 1, 'pageSize' => 25],
         'presentationAuthority' => [
             'registryOwner' => 'chatspace.settings-registry',
             'canonicalAdminMenu' => 'lobby-admin-modal',
@@ -1527,10 +1902,66 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
         'serverMediaPolicy' => server_media_policy($pdo),
         'fileTransferProvenance' => p2p_transfer_provenance($pdo, $surface === 'admin'),
         'firstPartyExtensions' => $firstPartyExtensionStatuses,
+        'fiveDiceMediaPack' => (static function () use ($pdo, $surface): array {
+            $owner = moderation_identity_owner($pdo);
+            $viewerId = (int)($_SESSION['user_id'] ?? 0);
+            $canManage = $surface === 'admin'
+                && $viewerId > 0
+                && moderation_identity_is_owner($pdo, $viewerId);
+            $status = five_dice_media_pack_status($pdo);
+            if (!$canManage) {
+                unset($status['acceptedOriginalNames'], $status['acceptedPreparedNames'], $status['acceptedFilenameSlots']);
+                foreach (['installed', 'missing', 'invalid'] as $collection) {
+                    if (!is_array($status[$collection] ?? null)) continue;
+                    foreach ($status[$collection] as &$item) unset($item['installName']);
+                    unset($item);
+                }
+            }
+            return $status + [
+                'displayName' => multiplayer_game_effective_display_name(
+                    $pdo,
+                    multiplayer_game_registry()[FIVE_DICE_GAME_KEY]
+                ),
+                'presentation' => five_dice_presentation_status($pdo),
+                'surface' => $surface,
+                'installationOwnerExists' => $owner !== null,
+                'canManage' => $canManage,
+                'actionPath' => $canManage ? '/api/five_dice_media_pack_admin.php' : null,
+            ];
+        })(),
+        'gameMediaPacks' => (static function () use ($pdo, $surface): array {
+            $owner = moderation_identity_owner($pdo);
+            $viewerId = (int)($_SESSION['user_id'] ?? 0);
+            $canManage = $surface === 'admin' && $viewerId > 0 && moderation_identity_is_owner($pdo, $viewerId);
+            $packs = [];
+            foreach (OCX_GAME_MEDIA_PACK_EXTENSION_IDS as $extensionId) {
+                $identity = ocx_game_extension_identity($extensionId);
+                $definition = multiplayer_game_registry()[$identity['key']];
+                $status = ocx_game_media_pack_status($pdo, $extensionId);
+                if ($canManage) $status['acceptedFilenameSlots'] = ocx_game_media_pack_name_map($extensionId);
+                unset($status['acceptedOriginalNames']);
+                foreach (['installed', 'missing', 'invalid'] as $collection) {
+                    if (!is_array($status[$collection] ?? null)) continue;
+                    foreach ($status[$collection] as &$item) if (!$canManage) unset($item['installName']);
+                    unset($item);
+                }
+                $packs[] = $status + [
+                    'displayName' => multiplayer_game_effective_display_name($pdo, $definition),
+                    'presentation' => multiplayer_game_presentation_projection($pdo, $definition, $viewerId),
+                    'surface' => $surface,
+                    'installationOwnerExists' => $owner !== null,
+                    'canManage' => $canManage,
+                    'actionPath' => $canManage ? '/api/game_media_pack_admin.php' : null,
+                    'setupGuidance' => $owner === null ? 'Classic artwork and sound installation becomes available after the Installation Owner account is finalized.' : null,
+                ];
+            }
+            return $packs;
+        })(),
         'databaseCompatibilityPolicy' => database_compatibility_policy_public_status(),
         'moderationTrustPolicy' => $context['moderationTrust'],
         'operationalCapacity' => $context['operationalCapacity'],
         'runtimeDiagnosticPolicy' => $context['runtimeDiagnosticPolicy'],
+        'floodProtection' => flood_protection_catalog_projection($pdo),
         'networkModerationPolicy' => $context['networkModeration'] + [
             'automaticBanning' => false,
             'addressEntryOrDisplay' => false,
@@ -1565,12 +1996,19 @@ function settings_registry_validate_value(
     }
     if ($type === 'number') {
         if (!is_numeric($value)) return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' must be a number.', 'http_status' => 400];
-        $numeric = str_contains((string)$value, '.') || is_float($definition['defaultValue']) ? (float)$value : (int)$value;
+        $number = (float)$value;
+        if (!is_finite($number)) return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' must be a finite number.', 'http_status' => 400];
+        $numeric = floor($number) === $number && abs($number) < PHP_INT_MAX ? (int)$number : $number;
         if (($definition['minimum'] !== null && $numeric < $definition['minimum']) || ($definition['maximum'] !== null && $numeric > $definition['maximum'])) {
             return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' must be from ' . $definition['minimum'] . ' to ' . $definition['maximum'] . '.', 'http_status' => 400];
         }
         if ((float)($definition['step'] ?? 1) >= 1 && (float)$numeric !== (float)(int)$numeric) {
             return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' must be a whole number.', 'http_status' => 400];
+        }
+        $step = (float)($definition['step'] ?? 1);
+        if (settings_registry_is_limit_definition($definition) && $step > 0 && $step < 1) {
+            $steps = ((float)$numeric - (float)($definition['minimum'] ?? 0)) / $step;
+            if (abs($steps - round($steps)) > 0.00000001) return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' must use increments of ' . $step . '.', 'http_status' => 400];
         }
         return ['ok' => true, 'value' => $numeric];
     }
@@ -1580,6 +2018,9 @@ function settings_registry_validate_value(
         return ['ok' => true, 'value' => $value];
     }
     $value = trim((string)$value);
+    if (preg_match('/[\x00-\x1F\x7F]/u', $value)) {
+        return ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' contains unsupported control characters.', 'http_status' => 400];
+    }
     if (!empty($definition['requiredNonBlank']) && $value === '') {
         return ['ok' => false, 'code' => 'SETTING_VALUE_REQUIRED', 'error' => $definition['label'] . ' cannot be blank.', 'http_status' => 400];
     }
@@ -1626,15 +2067,22 @@ function settings_registry_update(
     $broad = in_array($operation, ['reset_subsection', 'reset_category', 'reset_all_optional', 'apply_preset'], true);
     if ($broad && empty($request['confirmed'])) return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_CONFIRMATION_REQUIRED', 'error' => 'Review and confirm this broad settings operation.', 'http_status' => 409];
 
-    $ownsTransaction = !$pdo->inTransaction();
+    if (!$pdo->inTransaction() && db_uses_mysql_syntax($pdo)) {
+        $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    }
+    $settingsTransaction = database_transaction_begin($pdo, false);
+    $ownsTransaction = !empty($settingsTransaction['owned']);
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) {
-                $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-                $pdo->beginTransaction();
-            } else {
-                $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-            }
+        if ($ownsTransaction && db_driver($pdo) === 'sqlite') {
+            // PDO 8.2 does not report raw BEGIN IMMEDIATE transactions through
+            // inTransaction(), which lets nested policy owners try to begin a
+            // second transaction. Keep PDO transaction visibility and acquire
+            // the same early SQLite writer reservation with a semantic no-op
+            // against the registry revision row before reading the snapshot.
+            $writerLock = $pdo->prepare(
+                'UPDATE app_settings SET value = value WHERE setting_key = ?'
+            );
+            $writerLock->execute([SETTINGS_REGISTRY_REVISION_SETTING]);
         }
         $lockSql = 'SELECT value FROM app_settings WHERE setting_key = ? LIMIT 1';
         if (db_uses_mysql_syntax($pdo)) $lockSql .= ' FOR UPDATE';
@@ -1647,19 +2095,24 @@ function settings_registry_update(
         foreach ($snapshot['entries'] as $entry) $entryMap[$entry['id']] = $entry;
         $ids = settings_registry_target_ids($request, $snapshot);
         if (!$ids || array_diff($ids, array_keys($definitionMap))) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
             return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_OPERATION_INVALID', 'error' => 'Choose a registered settings operation.', 'http_status' => 400];
         }
 
         foreach ($ids as $id) {
             $visible = $source === 'setup' ? !empty($definitionMap[$id]['setupVisible']) : !empty($definitionMap[$id]['adminVisible']);
             if (!$visible) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return ['ok' => false, 'code' => 'SETTING_SURFACE_FORBIDDEN', 'error' => 'That setting is not available on this settings surface.', 'http_status' => 403];
             }
             if ($operation === 'reset_setting' && empty($definitionMap[$id]['safeToReset'])) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return ['ok' => false, 'code' => 'SETTING_RESET_FORBIDDEN', 'error' => 'That setting cannot be reset through this operation.', 'http_status' => 400];
+            }
+            if (($definitionMap[$id]['authorization'] ?? '') === 'installation-owner-and-recent-authentication'
+                && !moderation_identity_is_owner($pdo, $actorUserId)) {
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
+                return ['ok' => false, 'code' => 'INSTALLATION_OWNER_REQUIRED', 'error' => 'Installation Owner authorization is required.', 'http_status' => 403];
             }
         }
 
@@ -1669,7 +2122,7 @@ function settings_registry_update(
             $definition = $definitionMap[$id];
             if ($operation === 'set' || $operation === 'set_many') {
                 if (!array_key_exists($id, $provided)) {
-                    if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                    if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                     return ['ok' => false, 'code' => 'SETTING_VALUE_REQUIRED', 'error' => 'A value is required for ' . $definition['label'] . '.', 'http_status' => 400];
                 }
                 $candidate = $provided[$id];
@@ -1680,7 +2133,7 @@ function settings_registry_update(
             }
             $validation = settings_registry_validate_value($definition, $candidate, $source, $context);
             if (empty($validation['ok'])) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return $validation;
             }
             $target[$id] = $validation['value'];
@@ -1691,7 +2144,7 @@ function settings_registry_update(
                     (string)$target[MODERATION_IDENTITY_SETUP_PRESET_SETTING]
                 );
             } catch (ModerationIdentityPolicyException $presetError) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => $presetError->errorCode,
@@ -1707,7 +2160,7 @@ function settings_registry_update(
                     $context
                 );
                 if (empty($presetValidation['ok'])) {
-                    if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                    if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                     return $presetValidation;
                 }
                 $target[$presetId] = $presetValidation['value'];
@@ -1726,7 +2179,7 @@ function settings_registry_update(
             $high = $threshold(SERVER_MEDIA_WARNING_HIGH_PERCENT);
             $hard = $threshold(SERVER_MEDIA_HARD_STOP_PERCENT);
             if (!($low < $high && $high < $hard)) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'SERVER_MEDIA_THRESHOLDS_INVALID',
@@ -1751,8 +2204,36 @@ function settings_registry_update(
             }
         }
         if ($actualRevision !== (int)$parsedRevision && $changedIds) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
             return ['ok' => false, 'code' => 'SETTINGS_REGISTRY_STALE', 'error' => 'Settings changed. Refresh and try again.', 'revision' => $actualRevision, 'http_status' => 409];
+        }
+        if (in_array(FLOOD_AUTHENTICATION_ENABLED_SETTING, $changedIds, true)
+            && empty($target[FLOOD_AUTHENTICATION_ENABLED_SETTING])
+            && empty($request['authentication_protection_disable_confirmed'])) {
+            if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
+            return [
+                'ok' => false,
+                'code' => 'AUTHENTICATION_PROTECTION_DISABLE_CONFIRMATION_REQUIRED',
+                'error' => 'Authentication Protection is not changed without the fresh inline confirmation.',
+                'http_status' => 409,
+            ];
+        }
+        $liveWebsiteRoomsChanged = array_values(array_filter(
+            $changedIds,
+            static fn(string $id): bool => $id === LIVE_WEBSITE_ROOMS_SETTING
+        ));
+        if ($liveWebsiteRoomsChanged && empty($target[LIVE_WEBSITE_ROOMS_SETTING])) {
+            $liveWebsiteRoomImpact = live_website_rooms_active_count($pdo);
+            if ($liveWebsiteRoomImpact > 0 && empty($request['live_website_rooms_impact_confirmed'])) {
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
+                return [
+                    'ok' => false,
+                    'code' => 'LIVE_WEBSITE_ROOMS_IMPACT_CONFIRMATION_REQUIRED',
+                    'error' => 'Disabling Live Website Rooms will close active temporary live rooms. Review and confirm the impact.',
+                    'liveWebsiteRoomsImpact' => ['activeRoomCount' => $liveWebsiteRoomImpact, 'ordinaryRoomsAffected' => 0, 'importedRoomsAffected' => 0],
+                    'http_status' => 409,
+                ];
+            }
         }
         $networkModerationChanged = array_values(array_filter(
             $changedIds,
@@ -1773,7 +2254,7 @@ function settings_registry_update(
                 && (int)$impact['recordsAboveProposedLimit'] > 0
         ));
         if ($profileLimitConfirmationRequired && empty($request['profile_limits_confirmed'])) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
             return [
                 'ok' => false,
                 'code' => 'PROFILE_LIMIT_CONFIRMATION_REQUIRED',
@@ -1796,7 +2277,7 @@ function settings_registry_update(
                 && !$policyTarget
                 && !$policyRestoreDefault
                 && empty($request['database_compatibility_confirmed'])) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'DATABASE_COMPATIBILITY_DISABLE_CONFIRMATION_REQUIRED',
@@ -1815,7 +2296,7 @@ function settings_registry_update(
                     FILTER_VALIDATE_INT
                 );
             if ($policyExpectedRevision === false || (int)$policyExpectedRevision < 0) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'DATABASE_COMPATIBILITY_POLICY_REVISION_REQUIRED',
@@ -1838,7 +2319,7 @@ function settings_registry_update(
                 && !$policyTarget
                 && $activeCount > 0
                 && empty($request['moderation_trust_impact_confirmed'])) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'MODERATION_TRUST_DISABLE_IMPACT_CONFIRMATION_REQUIRED',
@@ -1854,7 +2335,7 @@ function settings_registry_update(
                     FILTER_VALIDATE_INT
                 );
             if ($policyExpectedRevision === false || (int)$policyExpectedRevision < 1) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'MODERATION_TRUST_POLICY_REVISION_REQUIRED',
@@ -1875,7 +2356,7 @@ function settings_registry_update(
                 ? (int)($entryMap[$operationalCapacityChanged[0]]['ownerRevision'] ?? 0)
                 : filter_var($request['expected_operational_capacity_revision'] ?? null, FILTER_VALIDATE_INT);
             if ($operationalCapacityExpectedRevision === false || (int)$operationalCapacityExpectedRevision < 1) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'CAPACITY_REVISION_REQUIRED',
@@ -1895,7 +2376,7 @@ function settings_registry_update(
                 ? (int)($entryMap[$runtimeDiagnosticChanged[0]]['ownerRevision'] ?? 0)
                 : filter_var($request['expected_runtime_diagnostic_revision'] ?? null, FILTER_VALIDATE_INT);
             if ($runtimeDiagnosticExpectedRevision === false || (int)$runtimeDiagnosticExpectedRevision < 1) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'DIAGNOSTIC_REVISION_REQUIRED',
@@ -1905,7 +2386,7 @@ function settings_registry_update(
             }
         }
         if (!$changedIds) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+            if ($ownsTransaction) database_transaction_commit($pdo, $settingsTransaction);
             return ['ok' => true, 'idempotent' => true, 'revision' => $actualRevision, 'changedSettingCount' => 0, 'stoppedActiveCapabilityCount' => 0, 'registry' => settings_registry_snapshot($pdo, $source === 'setup' ? 'setup' : 'admin')];
         }
 
@@ -1920,7 +2401,7 @@ function settings_registry_update(
             if (!isset($target[$settingId])) continue;
             $mode = (string)$target[$settingId];
             if (empty($availableModes[$mode])) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'DELIVERY_MODE_IMPLEMENTATION_UNAVAILABLE',
@@ -1932,7 +2413,7 @@ function settings_registry_update(
         if (isset($target[MODERATION_SAFETY_AVATAR_DELIVERY_SETTING])
             && (string)$target[MODERATION_SAFETY_AVATAR_DELIVERY_SETTING] === 'p2p-plus-built-in-generated'
             && empty($effective[P2P_AVATAR_ENABLED_SETTING])) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
             return [
                 'ok' => false,
                 'code' => 'P2P_AVATAR_CAPABILITY_REQUIRED',
@@ -1943,7 +2424,7 @@ function settings_registry_update(
         if (!empty($effective['diagnostic_screenshots_enabled'])) {
             $days = (int)$effective['diagnostic_screenshot_retention_days'];
             if ($days < 1 || $days > 365) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => 'DIAGNOSTIC_SCREENSHOT_RETENTION_REVIEW_REQUIRED',
@@ -1960,14 +2441,14 @@ function settings_registry_update(
         }
         $p2pTransportValidation = p2p_transport_validate_settings($pdo, $p2pTransportValues);
         if (empty($p2pTransportValidation['ok'])) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
             return $p2pTransportValidation;
         }
         $roleInput = [];
         foreach (role_color_setting_defaults() as $key => $default) $roleInput[$key] = $effective[$key] ?? $default;
         $roleValidation = role_color_validate_settings($roleInput);
         if (empty($roleValidation['ok'])) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
             return $roleValidation;
         }
         if ($databaseCompatibilityChanged) {
@@ -1984,7 +2465,7 @@ function settings_registry_update(
                     $source === 'setup' ? 'setup-settings-registry' : 'admin-settings-registry'
                 );
             } catch (CoreMigrationException $policyError) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => $policyError->errorCode,
@@ -1997,6 +2478,14 @@ function settings_registry_update(
 
         $stopped = 0;
         $changedMap = array_fill_keys($changedIds, true);
+        if ($liveWebsiteRoomsChanged) {
+            $liveWebsiteRoomResult = live_website_rooms_apply_setting_locked(
+                $pdo,
+                !empty($target[LIVE_WEBSITE_ROOMS_SETTING]),
+                !empty($request['live_website_rooms_impact_confirmed'])
+            );
+            $stopped += (int)$liveWebsiteRoomResult['stoppedRoomCount'];
+        }
         if ($networkModerationChanged) {
             try {
                 network_moderation_set_enabled_locked(
@@ -2006,7 +2495,7 @@ function settings_registry_update(
                     !empty($request['network_manual_bans_disable_confirmed'])
                 );
             } catch (NetworkPrivacyException $networkError) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => $networkError->errorCode,
@@ -2044,7 +2533,7 @@ function settings_registry_update(
                 );
                 $stopped += (int)($moderationTrustResult['stoppedStateCount'] ?? 0);
             } catch (ModerationTrustPolicyException $policyError) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => $policyError->errorCode,
@@ -2064,7 +2553,7 @@ function settings_registry_update(
                     (int)$operationalCapacityExpectedRevision
                 );
             } catch (OperationalCapacityException $capacityError) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => $capacityError->errorCode,
@@ -2082,7 +2571,7 @@ function settings_registry_update(
                     (int)$runtimeDiagnosticExpectedRevision
                 );
             } catch (RuntimeDiagnosticPolicyException $diagnosticError) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 return [
                     'ok' => false,
                     'code' => $diagnosticError->errorCode,
@@ -2106,7 +2595,7 @@ function settings_registry_update(
             $capacityConfirmed = $source === 'setup' || !empty($request['capacity_confirmed']);
             $capacityResult = avatar_relationship_capacity_update($pdo, $target['avatar_relationship_max_regular_links'], $capacity['revision'], $capacityConfirmed, $actorUserId, 'settings-registry');
             if (empty($capacityResult['ok'])) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
                 if (is_array($databaseCompatibilityTransaction)) {
                     database_compatibility_policy_rollback_update($databaseCompatibilityTransaction);
                     $databaseCompatibilityTransaction = null;
@@ -2164,6 +2653,7 @@ function settings_registry_update(
             $moderationTrustChanged,
             $operationalCapacityChanged,
             $runtimeDiagnosticChanged,
+            $liveWebsiteRoomsChanged,
             $networkModerationChanged,
             array_keys(role_color_setting_defaults()),
             array_map(static fn(array $capability): string => (string)$capability['id'], gesture_capability_registry()),
@@ -2246,7 +2736,7 @@ function settings_registry_update(
         if ($databaseBackedChangedIds) {
             log_tool($pdo, $actorUserId > 0 ? $actorUserId : null, $source === 'setup' ? 'setup_settings_registry_update' : 'admin_settings_registry_update', null, null, $detail);
         }
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        if ($ownsTransaction) database_transaction_commit($pdo, $settingsTransaction);
         if ($ownsTransaction && is_array($databaseCompatibilityTransaction)) {
             database_compatibility_policy_commit_update($databaseCompatibilityTransaction);
             $databaseCompatibilityTransaction = null;
@@ -2266,7 +2756,7 @@ function settings_registry_update(
         }
         return $response;
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        if ($ownsTransaction) database_transaction_rollback($pdo, $settingsTransaction);
         if (is_array($databaseCompatibilityTransaction)) {
             database_compatibility_policy_rollback_update($databaseCompatibilityTransaction);
         }

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/api_exception_handler.php';
 api_install_exception_handler('heartbeat', 'HEARTBEAT_FAILED', 'Room presence is temporarily unavailable.');
+define('CHATSPACE_SQLITE_POLL_REQUEST', ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET');
 require_once __DIR__ . '/../includes/base.php';
 
 header('Cache-Control: no-cache, no-store, must-revalidate');
@@ -13,8 +14,17 @@ $participant = auth_participant($pdo, $sessionId, $_GET['join_token'] ?? '');
 session_write_close();
 
 $mode = (string)($_GET['mode'] ?? 'all');
+$presenceWriteDeferred = false;
 if ($mode === 'presence' || $mode === 'all') {
-    touch_participant_presence($pdo, $participant);
+    try {
+        touch_participant_presence($pdo, $participant);
+    } catch (Throwable $error) {
+        if (!db_is_transient_lock_error($error)) throw $error;
+        // One coalesced timestamp refresh may be deferred under brief SQLite
+        // contention. The next heartbeat retries it; current presence remains
+        // readable instead of turning routine contention into an HTTP 500.
+        $presenceWriteDeferred = true;
+    }
     runtime_maintenance_for_session($pdo, $sessionId);
 }
 
@@ -33,6 +43,7 @@ $response = [
     'ok' => true,
     'server_time' => gmdate('c'),
 ];
+if ($presenceWriteDeferred) $response['presence_write_deferred'] = true;
 
 if ($mode === 'presence' || $mode === 'all') {
     $response['participants'] = heartbeat_presence($pdo, $sessionId);

@@ -549,7 +549,7 @@ function moderation_identity_schema_valid(PDO $pdo): bool
     }
     if ((int)$pdo->query('SELECT COUNT(*) FROM policy_documents')->fetchColumn() !== 2) return false;
     $unavailable = (int)$pdo->query('SELECT COUNT(*) FROM moderation_capability_catalog WHERE available = 0')->fetchColumn();
-    if (!in_array($unavailable, [1, 2], true)) return false;
+    if (!in_array($unavailable, [0, 1, 2], true)) return false;
     $direct = $pdo->prepare('SELECT available,implementation_owner FROM moderation_capability_catalog WHERE capability_id=? LIMIT 1');
     $direct->execute(['send-direct-p2p-files']);
     $directRow = $direct->fetch();
@@ -692,12 +692,9 @@ function moderation_identity_transfer_owner(
             422
         );
     }
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = [];
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) $pdo->beginTransaction();
-            else $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        }
+        $transaction = database_transaction_begin($pdo, true);
         $update = $pdo->prepare(
             'UPDATE installation_identity
              SET owner_user_id=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP
@@ -732,9 +729,9 @@ function moderation_identity_transfer_owner(
             null,
             'request:' . $requestId . '; revision:' . $newRevision
         );
-        if ($ownsTransaction) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        moderation_identity_rollback_after_error($pdo, $transaction, $error);
         throw $error;
     }
     return [
@@ -742,6 +739,21 @@ function moderation_identity_transfer_owner(
         'idempotentReplay' => false,
         'requestId' => $requestId,
     ];
+}
+
+function moderation_identity_policy_acceptance_storage_ready(PDO $pdo): bool
+{
+    try {
+        return database_migration_has_columns($pdo, 'policy_acceptances', [
+            'user_id',
+            'terms_version',
+            'rules_version',
+            'accepted_at',
+            'reason',
+        ]);
+    } catch (Throwable) {
+        return false;
+    }
 }
 
 function moderation_identity_record_acceptance(PDO $pdo, int $userId, string $reason): void
@@ -762,7 +774,7 @@ function moderation_identity_record_acceptance(PDO $pdo, int $userId, string $re
 
 function moderation_identity_policy_acceptance_current(PDO $pdo, int $userId): bool
 {
-    if (!database_migration_table_exists($pdo, 'policy_acceptances')) return false;
+    if (!moderation_identity_policy_acceptance_storage_ready($pdo)) return false;
     $statement = $pdo->prepare(
         'SELECT 1 FROM policy_acceptances WHERE user_id=? AND terms_version=? AND rules_version=? LIMIT 1'
     );
@@ -808,7 +820,10 @@ function moderation_identity_initialize_user(PDO $pdo, int $userId, string $sour
         && database_migration_table_exists($pdo, 'user_staff_capability_grants')) {
         moderation_safety_project_default_staff_grants($pdo, $userId);
     }
-    if ($installationOwner) moderation_identity_ensure_owner($pdo, $userId, $userId, 'setup-first-administrator');
+    if ($installationOwner) {
+        moderation_identity_ensure_owner($pdo, $userId, $userId, 'setup-first-administrator');
+        live_website_rooms_install_capability_catalog($pdo);
+    }
     return moderation_identity_account_authorization($pdo, $userId);
 }
 
@@ -831,24 +846,29 @@ function moderation_identity_account_authorization(PDO $pdo, int $userId): array
     $grants->execute([$userId]);
     $master = moderation_trust_policy($pdo);
     $trust = (string)($row['trust_state'] ?: 'pending-approval');
+    $isInstallationOwner = moderation_identity_is_owner($pdo, $userId);
     $capabilities = [];
     foreach ($grants->fetchAll() as $grant) {
-        $effective = !empty($master['effectiveEnabled']) && $trust === 'trusted'
-            && !empty($grant['available']) && !empty($grant['stored_enabled']);
+        $available = !empty($grant['available']);
+        $effective = $available && (
+            $isInstallationOwner
+            || (!empty($master['effectiveEnabled']) && $trust === 'trusted' && !empty($grant['stored_enabled']))
+        );
         $capabilities[] = [
             'id' => (string)$grant['capability_id'], 'label' => (string)$grant['label'],
-            'available' => (bool)$grant['available'], 'storedEnabled' => (bool)$grant['stored_enabled'],
+            'available' => $available, 'storedEnabled' => (bool)$grant['stored_enabled'],
             'effectiveEnabled' => $effective, 'revision' => (int)$grant['grant_revision'],
+            'ownerOverride' => $isInstallationOwner && $available,
             'implementationOwner' => (string)$grant['implementation_owner'],
             'denialCode' => $effective ? null : (
-                empty($grant['available']) ? 'CAPABILITY_IMPLEMENTATION_UNAVAILABLE'
+                !$available ? 'CAPABILITY_IMPLEMENTATION_UNAVAILABLE'
                     : ($trust !== 'trusted' ? 'ACCOUNT_TRUST_REQUIRED' : 'CAPABILITY_NOT_GRANTED')
             ),
         ];
     }
     return [
         'userId' => (int)$row['id'], 'role' => (string)$row['role'],
-        'isInstallationOwner' => moderation_identity_is_owner($pdo, $userId),
+        'isInstallationOwner' => $isInstallationOwner,
         'trustState' => $trust, 'trustRevision' => (int)($row['revision'] ?: 1),
         'restrictionExpiresAt' => $row['restriction_expires_at'],
         'publicReason' => $row['public_reason'],
@@ -887,6 +907,25 @@ function moderation_identity_validate_invitation(PDO $pdo, string $token, string
         throw new ModerationIdentityPolicyException('The invitation is invalid or expired.', 'INVITATION_INVALID', 409);
     }
     return $invitation;
+}
+
+function moderation_identity_rollback_after_error(PDO $pdo, array &$transaction, Throwable $error): void
+{
+    $owned = !empty($transaction['owned']) && !empty($transaction['active']);
+    try {
+        database_transaction_rollback($pdo, $transaction);
+    } catch (Throwable) {
+        // The caller must retain its original exception. A failed rollback is
+        // not permission to write a receipt into an uncertain transaction.
+        throw $error;
+    }
+    if (!$owned) return;
+    try {
+        member_profiles_record_limit_rejection_after_rollback($pdo, $error);
+    } catch (Throwable) {
+        // Optional telemetry must never replace the original policy/DB error.
+        error_log('CoreChat could not record a moderation profile-limit receipt after rollback.');
+    }
 }
 
 function moderation_identity_register_account(PDO $pdo, array $input, string $source, int $actorUserId = 0): array

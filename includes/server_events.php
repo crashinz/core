@@ -10,11 +10,15 @@ declare(strict_types=1);
  */
 
 function emit_event(PDO $pdo, int $sessionId, string $type, array $payload): void {
-    $stmt = $pdo->prepare('INSERT INTO events (session_id, type, payload) VALUES (?,?,?)');
-    $stmt->execute([$sessionId, $type, json_encode($payload, JSON_UNESCAPED_SLASHES)]);
+    db_with_sqlite_lock_retry($pdo, static function () use ($pdo, $sessionId, $type, $payload): void {
+        $stmt = $pdo->prepare('INSERT INTO events (session_id, type, payload) VALUES (?,?,?)');
+        $stmt->execute([$sessionId, $type, json_encode($payload, JSON_UNESCAPED_SLASHES)]);
+    }, 'room-event-write');
 }
 
 function emit_community_event(PDO $pdo, string $scope, ?int $sessionId, ?string $linkKey, string $type, array $payload): void {
-    $stmt = $pdo->prepare('INSERT INTO community_events (scope, session_id, link_key, type, payload) VALUES (?,?,?,?,?)');
-    $stmt->execute([$scope, $sessionId, $linkKey, $type, json_encode($payload, JSON_UNESCAPED_SLASHES)]);
+    db_with_sqlite_lock_retry($pdo, static function () use ($pdo, $scope, $sessionId, $linkKey, $type, $payload): void {
+        $stmt = $pdo->prepare('INSERT INTO community_events (scope, session_id, link_key, type, payload) VALUES (?,?,?,?,?)');
+        $stmt->execute([$scope, $sessionId, $linkKey, $type, json_encode($payload, JSON_UNESCAPED_SLASHES)]);
+    }, 'community-event-write');
 }

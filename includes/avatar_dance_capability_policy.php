@@ -350,31 +350,26 @@ function avatar_dance_capability_update(
             'http_status' => 400,
         ];
     }
-    $ownsTransaction = !$pdo->inTransaction();
+    $transaction = ['owned' => false, 'active' => false];
     $changed = false;
     $shutdown = ['stoppedStateCount' => 0, 'affectedRelationshipCount' => 0, 'sessionIds' => []];
     try {
-        if ($ownsTransaction) {
-            if (db_uses_mysql_syntax($pdo)) {
-                // Reconciliation locks rows explicitly; current reads let a concurrent
-                // lifecycle commit be re-evaluated instead of invalidating the scan.
-                $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-                $pdo->beginTransaction();
-            } else {
-                $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-            }
+        if (!$pdo->inTransaction() && db_uses_mysql_syntax($pdo)) {
+            // Preserve the existing isolation policy only for an owned transaction.
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         }
+        $transaction = database_transaction_begin($pdo, true);
         $before = avatar_dance_capability_lock($pdo);
         $target = avatar_dance_capability_target_values($before, $request);
         if (empty($target['ok'])) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             return $target;
         }
         $currentValues = avatar_dance_capability_normalize_values($before['enabled'] ?? []);
         $nextValues = avatar_dance_capability_normalize_values($target['values']);
         $changed = $currentValues !== $nextValues;
         if (!$changed && (int)$revision !== (int)$before['revision']) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+            database_transaction_commit($pdo, $transaction);
             return [
                 'ok' => true,
                 'idempotent' => true,
@@ -384,7 +379,7 @@ function avatar_dance_capability_update(
             ];
         }
         if ((int)$revision !== (int)$before['revision']) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            database_transaction_rollback($pdo, $transaction);
             return [
                 'ok' => false,
                 'code' => 'DANCE_CAPABILITY_STALE',
@@ -421,9 +416,9 @@ function avatar_dance_capability_update(
                     . '; stopped ' . (int)$shutdown['stoppedStateCount'] . ' active state(s).'
             );
         }
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->commit();
+        database_transaction_commit($pdo, $transaction);
     } catch (Throwable $error) {
-        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
 

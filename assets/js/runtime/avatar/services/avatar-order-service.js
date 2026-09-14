@@ -80,6 +80,10 @@ export class AvatarOrderService {
      */
     #orderCount = 0;
 
+    #frontParticipantId = null;
+    #frontLayers = new Set();
+    #frontStage = null;
+
     //--------------------------------------------------
     // Constructor
     //--------------------------------------------------
@@ -115,6 +119,8 @@ export class AvatarOrderService {
     destroy() {
 
         this.#orderCount = 0;
+        this.#clearFrontLayers();
+        this.#frontParticipantId = null;
 
     }
 
@@ -270,6 +276,36 @@ export class AvatarOrderService {
 
         ].filter(Boolean);
 
+    }
+
+    // Local presentation only: never changes positions or relationship order.
+    bringParticipantToFront(participant) {
+        if (!(Number(participant?.id) > 0) || !participant.avatarEl) return;
+        this.#frontParticipantId = Number(participant.id);
+        this.syncFrontParticipant(participant);
+    }
+
+    syncFrontParticipant(participant) {
+        if (Number(participant?.id) !== this.#frontParticipantId) return;
+        this.#clearFrontLayers();
+        const layers = [participant.avatarEl, participant.webcamVideoEl,
+            participant.auraEl, participant.labelEl].filter(Boolean);
+        for (const layer of layers) {
+            layer.classList.add("avatar-front-person");
+            this.#frontLayers.add(layer);
+        }
+        const stage = participant.avatarEl?.parentElement;
+        if (stage?.matches(".avatar-viewport-layer, .relationship-canvas")) {
+            stage.classList.add("avatar-front-layer");
+            this.#frontStage = stage;
+        }
+    }
+
+    #clearFrontLayers() {
+        for (const layer of this.#frontLayers) layer.classList.remove("avatar-front-person");
+        this.#frontLayers.clear();
+        this.#frontStage?.classList.remove("avatar-front-layer");
+        this.#frontStage = null;
     }
 
     /**

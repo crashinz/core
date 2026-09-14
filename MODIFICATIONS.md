@@ -10,11 +10,184 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 - Shared game recordings and verified Spades bots
+
+- Added automatic protected game recordings through the Multiplayer Game Framework
+  for Spades, Hearts, Checkers, Chess, Backgammon, Acey Deucy, Battleship, Chinese
+  Checkers and UNO, including player names/IDs, accepted moves, scores and results.
+- Added compressed split files, bounded recoverable queue/storage, truthful partial
+  status, and administrator controls, closed-game export and confirmed deletion.
+  Chat messages, IP addresses and authentication data are excluded.
+- Integrated the verified Normal Spades endgame Nil helper and Expert's approved
+  1000 ms decision / 3000 ms automatic-chain allowance, retaining tested Nil
+  protection and other existing bot improvements. No automatic learning is enabled.
+- Added the forward recording migration; existing installation data and earlier
+  migration signatures are preserved. No hosting deployment is part of this change.
+
+
+## 2026-09-12 - Spades bot decision quality
+
+- Normal evaluates the next trick when choosing cover for its partner's live Nil.
+- Both difficulties compare Nil risk and score value with an ordinary bid, using
+  visible partner support and the accepted exchange rules.
+- Expert retains its established card-play search after further endgame
+  experiments failed to demonstrate a full-game improvement.
+- Opponents' unpublished bidding hints are excluded from bot observations.
+- Expanded private decision diagnostics and replay verification; retain the
+  existing exchange strategy after further scoring experiments were inconclusive.
+
+## 2026-09-12 - Spades bot Nil partnership play
+
+- Normal and Expert now offer safer cards to a Nil partner and return dangerous
+  cards when they are the Nil bidder, including exchanges involving virtual seats.
+- Both difficulties proactively cover a partner's live Nil, even after meeting
+  their own contract, and distinguish partner protection from opposing Nil play.
+- Improved safe Nil shedding, trump conservation and suitable-hand Nil bidding
+  while retaining separate Normal and Expert policies and existing search budgets.
+
+## 2026-09-12 - Framework arcade games
+
+- Added Tetris Versus to the shared game framework with independent boards,
+  server-owned seven-bag pieces, simultaneous play, and authoritative results.
+- Added single-player Space Invasion with server-checked movement, shots,
+  collisions, and Practice run history.
+- Added shared pause, save, reconnect, and exit support, game sizing from 50%
+  to 150%, optional height fitting, and Tetris level-speed help.
+- Preserved existing legacy arcade sessions and their original assets.
+
+## 2026-09-12 - Spades settlement timing and score readability
+
+- Corrected completed-trick timing so a difference between the web server and
+  the player's computer clock cannot turn the intended one-to-two-second card
+  display into a minute-long wait.
+- Gave both teams' top score values a protected line box and clear tabular
+  numerals so totals, last-hand scores, and bag counts remain fully readable.
+
+## 2026-09-12 - Voice-session cleanup and diagnostics reconciliation
+
+- Stopped room voice polling after the server reports that its session no
+  longer exists, preventing a departed or reloaded room from repeatedly
+  requesting a stale voice session.
+- Made room exit and document teardown fully stop the active voice runtime.
+- Reconciled older game catalog, media signaling, direct transfer, room
+  mutation, heartbeat, and room-poll diagnostics against their current guarded
+  request paths.
+
+## 2026-09-12 - Live Website room and connection-status corrections
+
+- Corrected temporary Live Website rooms so they expire after five minutes
+  without active participants, including rooms that were already empty before
+  cleanup ran.
+- Made a selected game replace the Live Website surface instead of remaining
+  hidden behind it, and restored the website and room avatars after leaving the
+  game.
+- Removed the competing room scrollbar from Live Website presentation so the
+  embedded page owns scrolling while no game is selected.
+- Preserved a player's game-board scroll position while a Live Website room
+  refreshes, so tall games no longer jump back to the top every two seconds.
+- Corrected the room divider so dragging across an embedded page can enlarge
+  Game Chat again after it has been made shorter.
+- Changed the displayed connection check to a lightweight static probe so it
+  reports connection and web-server delay without adding database work to every
+  sample.
+- Removed redundant account-authentication wording from member profiles and
+  simplified this history to public, user-facing change information.
+- Placed the primary Join Voice and Start Camera controls side by side in the
+  room sidebar so both actions use the available width consistently.
+- Corrected Make Live Website Room Official so the permanent successor keeps
+  the same live page instead of opening as an empty room. The database updater
+  also repairs successors created by the earlier behavior.
+
+## 2026-08-31 - Built-in game sound mappings
+
+- Replaced Built-in Chess's generic movement and capture base cues with the
+  CC0 Piece Slide and Piece Capture recordings while preserving
+  the existing visual-motion and Check/Checkmate sequences.
+- Replaced Chinese Checkers's capture-like jump and chained-success mappings
+  with its approved step cue and one approved non-capturing jump cue per
+  authoritative route segment.
+- Replaced UNO's borrowed Hearts celebration for a declaration with the
+  approved plain “UNO!” voice cue and routed it through the viewer Voice option.
+- Replaced Built-in Spades's globally positive Nil-failure cue with the approved
+  viewer-relative team voice lines and neutral spectator line.
+
+## First-Party Nested Four
+
+CoreChat now includes an independently authored two-player Nested Four game.
+
+<details>
+<summary>More about this addition</summary>
+
+- Adds a server-authoritative four-by-four strategy game with three nested
+  S/M/L/XL reserve stacks per player, committed selection, size covering,
+  visible four-in-a-row wins, repetition draws, and resignation.
+- Keeps covered board pieces and hidden reserve contents out of the client
+  projection so remembering them remains part of play.
+- Adds an original walnut, teal, and brass board with coral and ocean-blue
+  labeled pieces, real member avatars, legal-move cues, responsive 100%-200%
+  sizing, and existing local CC0 effects.
+- Uses the official public rulebook only as a structural reference and copies
+  no product artwork, logo, name, rulebook wording, trade dress, or audio.
+- Requires no database migration and does not change Tetris Versus, Space
+  Invasion, or any existing game's rules.
+
+</details>
+
+## 2026-08-31 - Embedded game controls and Five Dice header cleanup
+
+- Kept shared Pause beside Room Chat and moved SFX, GFX, and Music into their
+  own shared row, with conditional pause/reconnect and terminal/replay rows.
+- Preserved Blackjack `Start next round` and UNO `Start next hand` as required
+  controls on their game boards.
+- Removed the redundant visible Five Dice `Built-in appearance` badge while
+  preserving appearance selection through Game Options.
+
+## 2026-08-30 - Optional Acey Deucy European rules and point-result audio
+
+- Kept `Current Acey Deucy — Default` as the existing default behavior.
+- Added a separate `European Double-Double — Authentic` shared option with complementary doubles, full 1–2/chosen-double sequencing, blocked-sequence loss of the bonus roll, exact-only bearing off, and one-point scoring.
+- Connected real Built-in Gammon and Backgammon bear-off classifications to their distinct spoken result cues shortly after the ordinary win cue.
+- Added focused server and browser fixtures plus durable verification without changing Classic/OCX paths or adding a database migration.
+
+## 2026-08-30 - Mute, point stacks, no-timer labels, and Sculpted point checkers
+
+- Added participant-menu Mute/Unmute synchronized with User Profile and Account Safety, immediate protected placeholders, live timed expiry, and per-message Reveal.
+- Removed successful Mute/Unmute warning popups while retaining error warnings.
+- Capped large Built-in Backgammon and Acey Deucy stacks inside each point lane and preserved count badges, selected checkers, legal markers, bar, home, and reserve zones.
+- Added transparent high-resolution `Sculpted checkers` as the default viewer-local style and retained `CSS-rendered checkers` as the fallback option.
+- Kept Chess/Checkers move counts and omitted timer wording only when no clock/inactivity timer exists.
+- Focused automated and authenticated in-app Browser verification passed; the updated presentation remains available across supported layouts.
+
+## 2026-08-30 - Built-in point hit, Chess event audio, and Sculpted Chess pieces
+
+- Added project-owned Backgammon/Acey Deucy bar-hit audio and authoritative Chess Check/Checkmate cues.
+- Added high-resolution transparent ivory/navy Sculpted Chess pieces as the default viewer-local Built-in style while preserving Unicode, Original OCX, and CoreChat alternatives.
+- Kept every piece inside its square, scaled pawns below major pieces, preserved the existing king-fall Checkmate animation, and prevented a blank/reverted frame while a moved piece awaits slow server confirmation.
+- Preserved server gameplay, rules, randomness, databases, and existing release boundaries.
+
+## First-Party Canvas
+
+CoreChat now includes an optional repository-owned Canvas extension for one
+community Canvas and one Canvas per room.
+
+<details>
+<summary>More about this addition</summary>
+
+- Adds room-preserving community and room Canvas overlays without replacing
+  chat, voice, games, membership, or room navigation.
+- Supports structured text, rules, checklists, links, and safe media
+  references without accepting stored raw HTML.
+- Adds stable section comments, per-user view/comment/edit/manage/publish
+  permissions, explicit draft saves and publishing, stale-write rejection,
+  idempotent commands, and bounded revision history.
+- Keeps authentication, identity, moderation, Tool Logging, extension
+  lifecycle, database backup, migration, and recovery under Core ownership.
+
+</details>
+
 This plain-language history groups related work into meaningful milestones.
-It is based on the complete reachable Git history, milestone records,
-engineering reports, source contracts, and the current implementation. Small
-follow-up fixes and certification-only commits are included with the feature
-or safety change they support.
+It is based on the public release history and current implementation. Small
+follow-up fixes are included with the feature or safety change they support.
 
 ## Original ChatSpace Community Edition baseline
 
@@ -31,7 +204,67 @@ to **exe**.
 - Later entries below describe changes made to the modified distribution; they
   do not reassign authorship of the original release.
 
-Technical reference: Original release, 2026-05-18, commit `2e7b10f`.
+</details>
+
+## Reusable multiplayer-game framework
+
+CoreChat now provides one shared, server-authoritative foundation for future
+first-party one-player and multiplayer game extensions while preserving the
+existing game launch experience.
+
+<details>
+<summary>More about this change</summary>
+
+- Adds registry-backed game definitions, authenticated player and spectator
+  sessions, pregame acceptance, versioned state, reconnect and lifecycle
+  handling, and fail-closed stale, duplicate, and conflicting action checks.
+- Separates Practice randomness from server-recorded play and keeps immutable
+  result and record ownership with the shared framework rather than individual
+  presentation code.
+- Integrates protected game chat with the established Message Protection,
+  moderation, retention, account-deletion, and cleanup owners.
+- Adds viewer-local presentation-pack and responsive game-shell contracts that
+  cannot alter rules, moves, timers, randomness, scoring, results, records, or
+  another participant's view.
+- Automatically fits a visible game beside usable room chat when space permits,
+  restores the ordinary room layout whenever the game surface is hidden, and
+  uses a room-preserving responsive fallback on narrow displays.
+- Keeps Space Invasion and Tetris Versus unchanged as playable compatibility
+  surfaces under the current compatibility decision. Their planned
+  extension migrations are deferred unless a later compatibility decision changes
+  that disposition. Chess, Checkers, and Backgammon now use their first-party
+  extensions; superseded browser implementations remain repository evidence
+  and are excluded from deployable release output.
+
+### Older arcade-game compatibility
+
+- Preserves Tetris Versus and Space Invasion byte-for-byte in their existing
+  routes and keeps their authenticated compatibility API in deployable output.
+- Binds compatibility requests to the registered compatibility game and exact
+  same-origin game entry, preventing superseded or cross-game mutation paths.
+- Retains superseded Chess, Checkers, and Backgammon source as repository
+  evidence while excluding those old pages from deployable release output.
+- Records authorized inclusion under the existing project license and
+  project-level credits without inventing a narrower file-level attribution.
+
+</details>
+
+## Classic multiplayer games
+
+
+<details>
+<summary>More about this addition</summary>
+
+- Adds Backgammon as a separate first-party extension and expands the shared
+  server-authoritative game lifecycle used by Checkers, Chess, Acey Deucy,
+  Battleship, Spades, and Five Dice.
+- Adds source-backed Classic presentation behavior, viewer-local game options,
+  accessible legal-move cues, compact Score & Records and player status
+  surfaces, and responsive game controls while keeping private reference media
+  outside the tracked distribution.
+- Adds server-owned Chess and Checkers clocks and move counts, game-specific
+  Ranked/Recorded inactivity protection, all-game pause/resume and cumulative
+  reconnect adjudication, and visible player countdowns above every board.
 
 </details>
 
@@ -62,9 +295,6 @@ viewer-private sender-media hiding, and one shared P2P connection policy.
 - Adds registry-derived P2P Avatar and P2P Gesture Local Match status and
   navigation without duplicate setting controls.
 
-Technical reference: Build 000055 Gesture Distribution And Hidden-Media
-Privacy, 2026-08-01.
-
 </details>
 
 ## Early room, chat, media, and administration improvements
@@ -86,8 +316,6 @@ and everyday media behavior.
 - Added CSRF protection, authentication rate limits, safer sessions, duplicate
   message protection, and web-server hardening.
 
-Technical reference: 2026-05-20 through 2026-05-31, commits `bd85b0f`–`308d608`.
-
 </details>
 
 ## GIF providers, imported rooms, and avatar interaction foundations
@@ -104,8 +332,6 @@ stricter.
   support, and improved imported-room visual fidelity.
 - Added horizontal imported avatar pairs and the first lap-link interaction
   mode.
-
-Technical reference: 2026-06-15 through 2026-06-21, commits `95d2b46`–`1b1b9b7`.
 
 </details>
 
@@ -127,9 +353,6 @@ certification.
   compatibility synchronization, backfill, repair, diagnostics, and
   SQLite/MariaDB parity.
 
-Technical reference: Builds 000022–000040, 2026-07-03 through 2026-07-12,
-commits `04e9ee9`–`db6b1b2`.
-
 </details>
 
 ## Avatar groups, lap seating, formations, and dances
@@ -149,12 +372,9 @@ formations, orientation, sizing, and synchronized dances.
 - Added synchronized dance formations and later installation controls that
   stop active optional dances safely without disturbing relationship state.
 
-Technical reference: Build 000044 Parts 1–9B and Dance Capability Controls,
-2026-07-13 through 2026-07-20, commits `b6ae4a4`–`520b0dd`.
-
 </details>
 
-## Room stability, visibility, media preferences, and certification
+## Room stability, visibility, and media preferences
 
 Room polling and media presentation became more resilient, while each viewer
 gained private avatar and webcam visibility controls.
@@ -170,9 +390,6 @@ gained private avatar and webcam visibility controls.
   viewport size an admission rule.
 - Added isolated, risk-prioritized browser certification and stronger cleanup,
   ownership, memory-safety, and continuation safeguards.
-
-Technical reference: 2026-07-18 through 2026-07-20, commits `cddac84`–`7b4962b`
-and `e35538d`–`7f6a6ad`.
 
 </details>
 
@@ -194,9 +411,6 @@ and cross-tab synchronization.
 - Kept SQLite/MariaDB parity, atomic broad changes, stale-write rejection,
   Tool Logs, and safe optional-capability shutdown.
 
-Technical reference: Setup/Admin Settings Organization, 2026-07-22, commit
-`d1c23b0`.
-
 </details>
 
 ## Gesture catalog presentation and preferences
@@ -212,8 +426,6 @@ and protected administration foundations.
 - Added private per-account presentation preferences and server-owned catalog
   searches and pages.
 - Added accessible gesture action menus and a bounded read-only Admin catalog.
-
-Technical reference: Gesture Checkpoint Part 3, 2026-07-22, commit `8dc496e`.
 
 </details>
 
@@ -232,8 +444,6 @@ animation, audio, provenance, and authorized Admin inspection.
   Catie attribution, and legacy AGST compatibility.
 - Preserved existing per-gesture editing shortcuts and kept package transfer
   between users out of scope.
-
-Technical reference: Gesture Checkpoint Part 4, 2026-07-23, commit `5cd17c8`.
 
 </details>
 
@@ -254,8 +464,6 @@ audio delivery.
 - Added the Personal Gestures management entry while preserving the direct
   `Edit Gesture` shortcut and one shared editor-launch path.
 
-Technical reference: Gesture Checkpoint Part 5, 2026-07-23, commit `7246dc3`.
-
 </details>
 
 ## Versioned database migrations and data lifecycle
@@ -274,8 +482,6 @@ controls for SQLite and MariaDB.
   snapshots without treating user-facing import/export as migration backup.
 - Preserved application data, stable IDs, revisions, gesture provenance,
   history, settings, and internal relationships.
-
-Technical reference: Build 000048 Part 1, 2026-07-23, commit `befc3c1`.
 
 </details>
 
@@ -296,11 +502,8 @@ application release.
 - Fails closed with exact manual recovery guidance when safe automatic recovery
   cannot be proven.
 - Adds public modification notices and a separately owned room-version
-  attribution while deferring editable private-branding controls to Build
-  000050.
-
-Technical reference: Build 000048 Part 2, 2026-07-24, based on `befc3c1`;
-published commit `5e55cd4`.
+  attribution while keeping editable private-branding controls in their
+  dedicated administration workflow.
 
 </details>
 
@@ -330,36 +533,6 @@ remain separate.
 - Preserved existing member actions, avatar privacy, moderation boundaries,
   original attribution, and SQLite/MariaDB compatibility.
 
-Technical reference: Build 000048 Part 3, 2026-07-25, published commit
-`247e2e4`.
-
-</details>
-
-## Completed-build and roadmap governance audit
-
-The post-Build 000048 retrospective reconciled completed requirements,
-verification, publication, and manual-acceptance status without changing
-production behavior.
-
-<details>
-<summary>More about this audit</summary>
-
-- Made authoritative completion or explicit owner cancellation the only ways
-  approved pending scope may leave the roadmap.
-- Assigned every approved pending item an exact numbered Build or precisely
-  anchored checkpoint without displacing Builds 000049-000064.
-- Preserved detailed future extension/branding, voice, webcam, media-quality,
-  Flood Protection, P2P, game, accessibility, and final-certification scope.
-- Inventoried retained verification evidence with bounded streaming readers,
-  then executed a separate owner-approved exact-path cleanup of six inactive,
-  incomplete, unreferenced runs.
-- Removed only 246 disposable evidence files totaling 25,314,667 bytes,
-  preserved every other run unchanged, and retained the focused Part 3
-  settings-confirm rerun as historical defect-follow-up evidence.
-
-Technical reference: Post-Build 000048 Retrospective, 2026-07-25; see the
-corresponding Git history and Engineering Report.
-
 </details>
 
 ## Focused server ownership
@@ -379,9 +552,6 @@ public behavior and compatibility remain unchanged.
 - Kept migration and recovery, session security, secure remote fetching,
   relationship lifecycles, diagnostics, client policy, media/WebRTC, and the
   future extension framework with their existing owners.
-
-Technical reference: Build 000049, 2026-07-25; published commit recorded in
-the Build 000049 Engineering Report.
 
 </details>
 
@@ -409,9 +579,6 @@ extensions, with Private Site Branding as the sole initial pilot.
   canonical history, transport, concurrency, and every deferred candidate in
   core or at its approved future checkpoint.
 
-Technical reference: Build 000050, 2026-07-25; final local verification and
-commit disposition are recorded in the Build 000050 Engineering Report.
-
 </details>
 
 ## Upgrade release and recovery hardening
@@ -425,7 +592,7 @@ update prerequisites, and source-proven upgrade recognition.
 - Made the release manifest a deterministic derivative of the exact deployable
   file inventory and current runtime schema authority.
 - Added exact, source-proven predecessor identities for the initial ChatSpace
-  CE release, the portable source baseline, Build 000047, and Gesture Part 5.
+  CE release, the portable source baseline, an earlier hardened release, and Gesture Part 5.
   Missing, extra, partial, mixed, inconsistent, newer, or integrity-invalid
   layouts still fail closed.
 - Preserved ordered migrations, verified private SQLite and MariaDB backups,
@@ -435,8 +602,6 @@ update prerequisites, and source-proven upgrade recognition.
   prerequisite explanations to unavailable update controls.
 - Included the public README, authors, installation, license, modification,
   and version documents in the deterministic release inventory.
-
-Technical reference: Post-Build 000050 Part 1, 2026-07-26.
 
 </details>
 
@@ -467,9 +632,6 @@ when application-release and database compatibility have not been proven.
   gesture behavior, SQLite/MariaDB portability, and all deferred game,
   voice-quality, and later-build scope unchanged.
 
-Technical reference: Post-Build 000050 Part 2, 2026-07-26; final private commit
-and verification are recorded in the corresponding Engineering Report.
-
 </details>
 
 ## Fresh SQLite installation completeness and recoverable Setup
@@ -494,9 +656,6 @@ SQLite seed required by the publicly presented SQLite Setup path.
 - Kept MariaDB Setup, existing-install upgrades and recovery, configuration
   isolation, and the Disabled Optional-Core runtime compatibility default
   unchanged.
-
-Technical reference: Post-Public-Release Fresh SQLite Installation
-Completeness, 2026-07-26.
 
 </details>
 
@@ -525,9 +684,6 @@ preflight, migration, activation, and recovery owners.
 - Uses one matched transaction owner for SQLite immediate transactions and
   PDO transactions, certified on PHP 8.2.32 and PHP 8.4.23 without changing
   MariaDB transaction semantics.
-
-Technical reference: Post-Public-Release Setup Backup Import Compatibility and
-Transactional Recovery, 2026-07-27.
 
 </details>
 
@@ -559,9 +715,7 @@ message protection, and bounded retention controls.
   and room/Installation Owner safeguards.
 - Retired the unsafe direct Admin user-deletion action. Download Personal Data,
   voluntary deactivation, grace/cancellation, and irreversible Delete Account
-  remain reserved exclusively for Build 000053.
-
-Technical reference: Build 000051, 2026-07-27.
+  remain available only through the dedicated account-deletion workflow.
 
 </details>
 
@@ -593,9 +747,6 @@ profile identity.
 - Establishes condition-based bounded recovery and populated visual
   certification while preserving SQLite/MariaDB, security, configuration,
   accessibility, private-completion, and public-release boundaries.
-
-Technical reference: Post-Build 000051 consolidated checkpoint, 2026-07-28;
-final private commit and verification are recorded in its Engineering Report.
 
 </details>
 
@@ -631,8 +782,6 @@ projection without weakening mandatory security or changing trust policy.
 - Preserves Polling as the default and permanent fallback. Unknown or
   unproven SSE/WSS capability remains unsupported.
 
-Technical reference: Build 000052 Part 1, 2026-07-28.
-
 </details>
 
 ## Capability-safe room event transports
@@ -663,8 +812,6 @@ as the mandatory default and permanent fallback.
 - Revalidates room access on every bounded server wait iteration and returns
   truthfully to Polling if an optional adapter fails, without changing active
   room state or describing transport encryption as end-to-end encryption.
-
-Technical reference: Build 000052 Part 2, 2026-07-28.
 
 </details>
 
@@ -697,15 +844,12 @@ uses a compact, human-readable Setup and Admin settings presentation.
   branding, Limits, and Gesture presentation, while preserving the exact
   **ChatSpace Community Edition** default branding and required attribution.
 - Preserves SQLite and MariaDB behavior, migration and recovery compatibility,
-  private configuration, security boundaries, and the exclusion of
-  Build 000053 account deletion work.
-
-Technical reference: Post-Build 000052 hosted runtime-issue reconciliation and
-evidence lifecycle, 2026-07-29.
+  private configuration, security boundaries, and separation from the
+  irreversible account-deletion workflow.
 
 </details>
 
-## Admin focus, opaque-network moderation, and stronger visual verification
+## Admin focus, opaque-network moderation, and stronger visual safeguards
 
 CoreChat now uses one intentional Admin heading-focus treatment, never reveals
 or reversibly stores a network address, and gives the Installation Owner a
@@ -746,9 +890,6 @@ privacy-bounded, source-backed Manual Network Ban workflow.
   grouping, clipping, overlap, horizontal overflow, sticky actions, dirty/error
   states, and browser/default focus artifacts.
 
-Technical reference: Post-Build 000052 Admin Focus, Opaque Network Moderation,
-Visual Verification, and Public Release Reconciliation, 2026-07-30.
-
 </details>
 
 ## Clearer Settings order, community defaults, and operational labels
@@ -773,9 +914,6 @@ administrative labels without changing saved upgrades or runtime limits.
 - Renames diagnostic screenshot retention and three capacity warning
   thresholds in plain language without changing their identifiers, values,
   validation, calculations, or runtime behavior.
-
-Technical reference: Post-Build 000052 Settings Terminology Clarification
-Before Public Release, 2026-07-31.
 
 </details>
 
@@ -808,9 +946,6 @@ established room-wide voice and webcam experience.
 - Clarifies that initial policy acceptance applies to the first administrator
   account while preserving both required policy controls and records.
 
-Technical reference: Post-Build 000052 Mandatory Optional-Core Voice and
-Webcam Program, 2026-07-31.
-
 </details>
 
 ## Safe irreversible account deletion
@@ -838,8 +973,6 @@ ownership safeguards.
 - Replaces technical Message Protection prompts with one accessible dialog,
   clear protection names, a private-note fingerprint, one E2EE confirmation,
   and content-free participant notices.
-
-Technical reference: Build 000053 Delete Account, 2026-07-31.
 
 </details>
 
@@ -874,6 +1007,135 @@ server-stored and built-in avatar choices.
 - Leaves ordinary room voice/webcam behavior and the default server-stored
   avatar path unchanged.
 
-Technical reference: Build 000054 P2P Avatar Capability, 2026-08-01.
+</details>
+
+## 2026-08-25 - Crisp enlarged Backgammon dice
+
+- Preserved installation-private Original OCX dice at the native 100% board size.
+- Added project-owned exact-size Backgammon dice sprite sheets for 125%, 150%, 175%, and 200% viewer-local board sizes.
+- Updated the Backgammon renderer to select the matching 25px, 30px, 35px, or 40px sprite without browser resampling when sufficient layout space is available.
+- Five Dice and all other game artwork remain unchanged by this correction.
+
+## 2026-08-25 - Crisp enlarged Five Dice artwork
+
+- Preserved installation-private Five Dice normal and held dice at the native 100% Classic board size.
+- Added project-owned exact-size normal and orange-glowing held dice sprite sheets for 125%, 150%, 175%, and 200% viewer-local board sizes.
+- Enlarged Classic appearance now selects 70px, 84px, 98px, or 112px artwork without browser resampling when sufficient layout space is available.
+- No game rules, scoring, randomness, multiplayer state, or database structure changed.
+
+## 2026-08-25 - Crisp enlarged Acey Deucy dice
+
+- Preserved Acey Deucy's installation-private Original OCX dice at the native 100% board size.
+- Added Acey-specific project-owned exact-size green-edged dice sprite sheets for 125%, 150%, 175%, and 200% viewer-local board sizes.
+- Updated the point-game renderer to select Acey Deucy's 25px, 30px, 35px, or 40px artwork independently from Backgammon.
+- No game rules, turn authority, randomness, multiplayer state, or database structure changed.
+
+## 2026-08-30 - Built-in point-lane and classified audio correction
+
+- Moved Backgammon/Acey Deucy point numbers into the frame gutters and expanded responsive normally spaced checker lanes to seven before capped overlap.
+- Added distinct built-in Acey Deucy boot-stomp, blocked-wall, and true hit-to-bar spoken `Booted!` sounds.
+- Added distinct spoken `Gammon!` and `Backgammon!` cues driven by existing authoritative terminal classification.
+- Preserved Classic/OCX media, existing server gameplay and scoring, and the separate Backgammon hit cue.
+## 2026-08-25 - Public Blackjack sound-effects package
+
+- Added a 16-file CC0-only public Blackjack sound-effects mix for cards, chips,
+  player actions, outcomes, and round transitions.
+- Bound gameplay playback to increasing authoritative session-state versions so
+  refresh and repeated rendering do not replay consumed cues.
+- Preserved viewer-local Sound FX and master-volume controls and artwork-mode
+  independence.
+- Added public per-file provenance and private acquisition hashes.
+- Added no music, speech, gameplay-rule change, database migration, runtime
+  network dependency, Tetris Versus change, or Space Invasion change.
+## 2026-08-25 - First-Party Hearts
+
+- Added an authoritative Hearts game for exactly two or four humans, with no
+  bots.
+- Added the source-backed 28-card two-player ruleset and standard four-player
+  Hearts as separate modes.
+- Added private hand/pass/widow/captured-card projections, deterministic deals,
+  passing, legal play, scoring, moon handling, responsive UI, actual avatars,
+  and CC0 card-game cues.
+- Reused public card-presentation infrastructure without copying private Spades
+  OCX media or public-reference artwork.
+- Added no database migration or unrelated game work.
+
+## 2026-08-25 - First-Party Hearts corrections
+
+- Corrected the responsive viewer hand so every card rank and suit remains readable.
+- Separated opponent card backs from score, trick, and hand-point text.
+- Centered left and right opponent seats on the same table centerline.
+- Added project-original CC0 Hearts event cues for Hearts broken, Queen of Spades, point tricks, zero-point tricks, shoot-the-moon, win, and loss.
+- Preserved generic CC0 card handling for deal, ordinary play, pass, and shuffle.
+- No bots, database migration, Tetris Versus change, or Space Invasion change was introduced.
+
+## 2026-08-25 - Hearts and Blackjack full-avatar frames r4
+
+- Replaced circular cover-cropping on Hearts and Blackjack table avatars with 44 px rounded-rectangle contain frames.
+- Square, portrait, and landscape source images retain their full composition without stretching.
+- No game rules, database schema, bots, Tetris Versus, or Space Invasion behavior changed.
+
+<details>
+<summary>First-Party UNO (August 26, 2026)</summary>
+
+- Added a repository-owned two-to-ten-player first-party UNO extension with server-authoritative hidden cards, legal actions, standard action-card behavior, Wild Draw Four challenges, UNO declaration/catch, scoring, and results.
+- Added a responsive original CoreChat table with real member avatars, accessible controls, public CC0 four-color card art, and public CC0 card-game audio.
+- Added explicit CC0 provenance and an off-board Mattel trademark/non-affiliation notice while excluding official logos and branded trade dress.
+- No database migration was required. Tetris Versus and Space Invasion were not changed.
 
 </details>
+
+## 2026-09-12 - Bounded Spades Expert bot response time
+
+- Added one shared 750 ms computation budget for each synchronous Practice bot chain and a 220 ms search slice for each Expert bot decision.
+- Preserved authoritative legal-card enforcement and made incomplete Expert searches fall back to the existing deterministic legal tactical heuristic.
+- Added focused source and runtime latency contracts so a minute-long bot turn cannot pass the targeted Spades audit again.
+- Restored the existing authoritative per-trick card and winner records to the visible Round History panel.
+- Refit only the compact top Spades seat between the score rail and played-card area so the partner avatar is not clipped or moved into play space.
+
+## 2026-09-12 - Explicit Nil exchange options
+
+- Renamed the existing option to Blind Nil two-card exchange so its trigger is clear before players accept the rules.
+- Added a separate Regular Nil one-card exchange option that is disabled by default and requires one private card in each direction when enabled.
+- Made Blind Nil take priority so regular and Blind Nil exchanges cannot stack in the same partnership hand.
+- Generalized authoritative reducer validation, private projection, Practice bots, and the shared exchange dialog to use the required one-card or two-card count.
+- Preserved old saved games by treating pre-existing exchange records as Blind Nil two-card exchanges.
+
+## 2026-09-12 - Spades subdirectory presentation assets
+
+- Replaced domain-root Spades artwork references with installation-relative paths so the table room, spade emblem, and Practice bot fallbacks load when CoreChat is hosted under `/core` or another subdirectory.
+- Refreshed the Spades presentation cache identities and added a source contract that rejects future domain-root asset regressions.
+- No game rules, database schema, or non-Spades artwork changed.
+
+## 2026-09-12 - Spades current-hand history and reliable trick continuation
+
+- Limited Round History to completed tricks from the active hand and placed its entries in an internal scrolling region.
+- Kept the dialog within the visible game viewport so long trick lists no longer lengthen the surrounding website page.
+- Allowed one connected seated human to submit the non-choice settlement transition after its authoritative dwell deadline, including when a Practice bot won the trick.
+- Preserved spectator rejection, the 1.04-second ordinary dwell, the 2-second Nil-set dwell, and the winning player as the next trick leader.
+
+## 2026-09-12 - Subdirectory-safe remaining game assets
+
+- Replaced the remaining domain-root game asset URLs in Puppy Panic, Nested Four, Chinese Checkers, and shared Classic cue metadata with installation-relative paths.
+- Preserved existing artwork and audio ownership; only URL resolution changed.
+
+## 2026-09-12 - Stable optional viewport-height fitting
+
+- Made shared height-fit style writes idempotent instead of removing and reapplying zoom during every resize observation.
+- Preserved each viewer's saved option, board-size multiplier, readability floor, and page-scrolling fallback.
+
+## 2026-09-12 Spades score metric glyph bounds
+
+- Expanded the top score metric line box and released glyph clipping so Total, Last Hand, and Bags render completely and symmetrically for both teams under fitted and fractional board sizes.
+
+## 2026-09-12 - Spades optional rules and card-play reliability
+
+- Added an optional minimum team bid with None, 2, 3, 4, and 5 choices; None remains the default.
+- Added an optional Joker-Joker-Ace deck with distinct Big and Little Joker cards, ordered above the Ace of Spades, while removing the 2 of Clubs and 2 of Hearts to retain 52 cards.
+- Added optional 10 for 200 scoring with a matching -200 failed-contract penalty and an additive Boston bonus for taking all 13 tricks.
+- Added selectable bag-penalty rules while preserving the existing ten-bag penalty as the default.
+- Added the optional legacy back-door ending, disabled by default, with strict below-threshold qualification and draw handling for tied qualifying teams.
+- Preserved the separate optional Regular Nil one-card and Blind Nil two-card exchanges, with Blind Nil taking priority when both could apply.
+- Corrected rapid double-click card play so selecting a card no longer replaces its element before the second click can submit the play.
+- Replaced the cartoon-style Joker figures with a crowned gold heraldic spade and a smaller silver-teal harlequin-spade seal; both titles remain isolated from decorative lines.
+- Added no database migration and left every new gameplay variation disabled unless a game creator selects it.
