@@ -10,6 +10,16 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — UNO Easy and Normal choices
+
+Updated UNO bot choices to Easy and Normal, with None remaining the default. Older Expert lobby settings and rematches use Normal; existing in-progress and saved Expert matches remain compatible through completion. Bot games remain Practice only. Testing is WIP.
+
+
+## 2026-09-14 — UNO Practice bots
+
+Added Easy, Normal and Expert UNO bots for two through ten total players. Hosts can add bots to empty seats after people join, with None as the default and existing seat choices preserved. Adding a bot switches the game to Practice Mode; bot games never affect rankings. Bots use their own cards and public information, handle special cards and UNO declarations, and continue between hands. Added paced turns, Retry, automatic decision recordings and saved-game support. Corrected bot-winner scoring after a final Draw Four and allowed UNO declarations for a playable drawn card. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+
+
 ## 2026-09-14 — Backgammon narrow-screen bar entry
 
 Fixed the built-in Backgammon dice panel covering the bar and intercepting checker clicks on narrow screens. The panel now fits its board area, and only the enabled Roll button captures clicks. Verified actual bar entry, bot pacing, failed-download Retry, pause/resume, focus and recording replay locally. Testing is WIP.

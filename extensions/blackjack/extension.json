@@ -87,7 +87,7 @@
     "algorithm": "sha256",
     "files": {
       "includes/blackjack_extension.php": "face6ac0344e445db6f22f8bf2bb9aa364270a51fa105eeaebde7d501f757935",
-      "games/blackjack-first-party/index.html": "c45648a02b42016ae0c0167c6f96e21acd36d81c73e2e3402f9a37643a92085c",
+      "games/blackjack-first-party/index.html": "8f296811a7f77ec6bd0445ee25dd25136476db862a027e28f037b1c5453e8958",
       "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
       "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
       "assets/images/blackjack-first-party-icon.svg": "e1f365609bb10c7da4d97117245d80975eb90aeda65c57ace75a0446ab1688a1",
@@ -108,7 +108,7 @@
       "assets/audio/blackjack/turn-stand.mp3": "05c4db985a439758c1c025cde7857a3f6d6174606e7684a841d1fef7e9963da6",
       "assets/audio/blackjack/ui-button.mp3": "11658397b40f67789d43ac8cb71c0635adeb44008a1eccff92f7a9172871d1f4",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "5f825562c84ea534510c5bbe98a028294993a417475ebae5eeeec044fb25fd78",
+      "games/ocx-extension-game.js": "cac3e01892f456728413d8d80e32df138a4d10aaba87f37986dcdf11b5a33b69",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

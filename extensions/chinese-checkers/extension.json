@@ -95,7 +95,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "games/chinese-checkers-first-party/index.html": "09a015a83cf97cc070ddd4fcfe58c7722b31e570ba2caafde11f3ba1bb8cba0d",
+      "games/chinese-checkers-first-party/index.html": "559f96d70cab21fb2f8f29fa80da619a4adfd235fb6ec380aa29c2173e5562fd",
       "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
       "games/chinese-checkers-first-party/style.css": "8e4b90c5eb4e184a2c754107fcdc2a22f80b22e4617af2dc3c6b7cf284752a3c",
       "games/chinese-checkers-first-party/player-placement.css": "58ba4cf655aef4f7011577b567ad60ccfd329fb212fbc46f46172d16444bf4a5",
@@ -105,7 +105,7 @@
       "assets/audio/built-in-games/chinese-checkers-jump.wav": "ba3985f47d6e172ce2e6332130ae1eeffb6ef9985e5a8af7c29a46f7918fc751",
       "assets/images/chinese-checkers-first-party-icon.svg": "865cebf36e346ce615369f19fa256a0566afb46b854d1abb09413cb9b1f80599",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "5f825562c84ea534510c5bbe98a028294993a417475ebae5eeeec044fb25fd78",
+      "games/ocx-extension-game.js": "cac3e01892f456728413d8d80e32df138a4d10aaba87f37986dcdf11b5a33b69",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/chinese_checkers_extension.php": "ac768166ca65362c9355e37234fe76581d10340f992ad4c59d3630806ce853fa"
     }

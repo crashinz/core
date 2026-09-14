@@ -2163,6 +2163,7 @@ function multiplayer_game_shared_progress_completed(
             && (int)($after['moveNumber'] ?? 0) > (int)($before['moveNumber'] ?? 0);
     }
     if ($extensionId === 'uno') {
+        if ($action === 'bot-step') return (int)($after['playSequence'] ?? 0) > (int)($before['playSequence'] ?? 0) || ($before['phase'] ?? '') !== ($after['phase'] ?? '');
         if ($action === 'call-uno') {
             // Repeating an already-recorded declaration increments its receipt
             // sequence, but must not let the caller renew the turn indefinitely.

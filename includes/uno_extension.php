@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/uno_bot_support.php';
 
 const UNO_EXTENSION_ID = 'uno';
 const UNO_STATE_SCHEMA_VERSION = 1;
@@ -9,7 +10,7 @@ const UNO_STATE_SCHEMA_VERSION = 1;
 function uno_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['playerCount', 'completed', 'currentColor', 'dealerIndex', 'dealerUserId', 'direction', 'discardPile', 'drawPile', 'drawnCardId', 'handNumber', 'hands', 'history', 'lastAction', 'lastRoundResult', 'pendingChallenge', 'phase', 'playSequence', 'reshuffleCount', 'reshuffleSeed', 'resignedUserId', 'roundNumber', 'schemaVersion', 'scores', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'targetScore', 'terminalReason', 'turnIndex', 'turnOrder', 'unoCatchUserId', 'unoDeclared', 'winnerUserId'],
+        'stateKeys' => ['bots', 'playerCount', 'completed', 'currentColor', 'dealerIndex', 'dealerUserId', 'direction', 'discardPile', 'drawPile', 'drawnCardId', 'handNumber', 'hands', 'history', 'lastAction', 'lastRoundResult', 'pendingChallenge', 'phase', 'playSequence', 'reshuffleCount', 'reshuffleSeed', 'resignedUserId', 'roundNumber', 'schemaVersion', 'scores', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'targetScore', 'terminalReason', 'turnIndex', 'turnOrder', 'unoCatchUserId', 'unoDeclared', 'winnerUserId'],
         'payloadKeys' => ['card', 'color']];
 }
 
@@ -24,7 +25,8 @@ function uno_extension_adapter(): array
         'settingsProjection' => 'uno_settings_projection',
         'rulesProjection' => 'uno_rules_projection',
         'projectState' => 'uno_project_state',
-        'randomnessPurposes' => ['deal' => 'uno-deal'],
+        'projectVirtualMembers' => 'uno_project_virtual_members',
+        'randomnessPurposes' => ['deal' => 'uno-deal', 'bot-deal' => 'uno-deal'],
         'deriveRandomness' => 'uno_derive_randomness',
         'presentationStatus' => 'uno_presentation_status',
         'openingProcedure' => 'server-shuffled-seven-card-clockwise-deal',
@@ -52,10 +54,17 @@ function uno_presentation_status(PDO $pdo, ?string $requestedPack = null): array
 
 function uno_validate_settings(array $settings, string $mode, array $definition = []): array
 {
-    if ($settings !== []) {
-        throw new MultiplayerGameException('UNO does not have configurable match rules.', 'UNO_SETTINGS_INVALID', 422);
+    $allowed = [];
+    for ($seat = 1; $seat <= 10; $seat++) $allowed[] = 'botSeat'.$seat.'Difficulty';
+    if (array_diff(array_keys($settings), $allowed)) throw new MultiplayerGameException('UNO does not have configurable match rules.', 'UNO_SETTINGS_INVALID', 422);
+    $out = [];
+    foreach ($allowed as $key) {
+        $value = $settings[$key] ?? 'none';
+        if (!is_string($value) || !in_array($value, ['none','easy','normal','expert'], true)) throw new MultiplayerGameException('Choose a listed UNO bot difficulty.', 'UNO_SETTINGS_INVALID', 422);
+        if ($mode !== 'practice' && $value !== 'none') throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
+        if ($mode === 'practice') $out[$key] = $value;
     }
-    return [];
+    return uno_bot_lobby_settings($out);
 }
 
 function uno_settings_projection(array $settings, string $mode, array $definition = []): array
@@ -63,7 +72,7 @@ function uno_settings_projection(array $settings, string $mode, array $definitio
     uno_validate_settings($settings, $mode, $definition);
     return [
         'label' => 'Game Options',
-        'description' => 'Standard 108-card play for two through ten human players. The first player to 500 points wins.',
+        'description' => 'Standard 108-card play for two through ten players. Add optional Practice bots to empty seats in the waiting lobby. The first player to 500 points wins.',
         'classificationLabel' => 'Accepted UNO options',
         'controls' => [],
     ];
@@ -76,7 +85,7 @@ function uno_rules_projection(array $settings, string $mode, array $definition =
         'label' => 'UNO rules',
         'description' => 'Match the discard by color, number, or symbol and be the first player to empty your hand.',
         'sections' => [
-            ['label' => 'Players and deck', 'text' => 'Two through ten authenticated human players use one standard 108-card four-color deck. Each hand begins with seven cards per player and one face-up discard. No bots or card stacking house rules are included.'],
+            ['label' => 'Players and deck', 'text' => 'Two through ten players use one standard 108-card four-color deck. Each hand begins with seven cards per player and one face-up discard. Practice can include Easy or Normal bots with at least one human. Bot games never affect ranked records. Draw penalties do not stack.'],
             ['label' => 'Your turn', 'text' => 'Play one card matching the current color, number, or action symbol, or play a Wild. You may choose to draw even when a card in your hand is playable. After drawing, only that drawn card may be played; otherwise keep it and end the turn.'],
             ['label' => 'Special-card guide', 'text' => 'These are the non-number cards used in this game.', 'items' => [
                 ['card' => 'R:S:1', 'label' => 'Skip', 'text' => 'The next player loses that turn.'],
@@ -125,14 +134,18 @@ function uno_derive_randomness(string $canonicalReveal, string $actionType, arra
 function uno_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) < 2 || count($players) > 10 || min($players) < 1) {
+    if (count($players) < 1 || count($players) > 10 || min($players) < 1) {
         throw new MultiplayerGameException('UNO requires two through ten authenticated players.', 'UNO_PLAYER_SET_INVALID', 422);
     }
-    uno_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    $mode = (string)($context['mode'] ?? 'practice');
+    $settings = uno_validate_settings((array)($context['settings'] ?? []), $mode);
+    [$players, $bots] = uno_bot_fill_seats($players, $settings, $mode, (array)($context['humanSeats'] ?? []));
+    if (count($players) < 2 || count($players) > 10) throw new MultiplayerGameException('UNO needs two through ten people or Practice bots.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
     $dealerIndex = 0;
     return [
         'schemaVersion' => UNO_STATE_SCHEMA_VERSION,
         'playerCount' => count($players),
+        'bots' => $bots,
         'turnOrder' => $players,
         'turnIndex' => 1 % count($players),
         'dealerIndex' => $dealerIndex,
@@ -346,7 +359,7 @@ function uno_project_state(array $state, int $viewerUserId, array $context): arr
 {
     $turnOrder = array_values(array_unique(array_filter(
         array_map('intval', (array)($state['turnOrder'] ?? [])),
-        static fn(int $userId): bool => $userId > 0
+        static fn(int $userId): bool => $userId > 0 || isset($state['bots'][(string)$userId])
     )));
     if ($turnOrder === []) {
         $turnOrder = array_values(array_unique(array_filter(array_map(
@@ -405,6 +418,7 @@ function uno_project_state(array $state, int $viewerUserId, array $context): arr
             if (count((array)$state['hands'][(string)$viewerUserId]) === 2 && $projection['legalCards'] !== []) $projection['legalActions'][] = 'call-uno';
         }
         if ($phase === 'drawn') {
+            if (count((array)$state['hands'][(string)$viewerUserId]) === 2 && $projection['legalCards'] !== []) $projection['legalActions'][] = 'call-uno';
             $projection['legalActions'][] = 'pass';
             if ($projection['legalCards'] !== []) $projection['legalActions'][] = 'play';
         }
@@ -414,7 +428,7 @@ function uno_project_state(array $state, int $viewerUserId, array $context): arr
         }
         if ($phase === 'round-complete') $projection['legalActions'][] = 'next-hand';
     }
-    if ((int)($state['unoCatchUserId'] ?? 0) > 0 && (int)$state['unoCatchUserId'] !== $viewerUserId && empty($state['completed'])) {
+    if ((int)($state['unoCatchUserId'] ?? 0) !== 0 && (int)$state['unoCatchUserId'] !== $viewerUserId && empty($state['completed'])) {
         $projection['legalActions'][] = 'catch-uno';
     }
     foreach ((array)$projection['hands'] as $userId => $hand) {
@@ -430,6 +444,8 @@ function uno_project_state(array $state, int $viewerUserId, array $context): arr
         'offenderUserId' => (int)$state['pendingChallenge']['offenderUserId'],
         'targetUserId' => (int)$state['pendingChallenge']['targetUserId'],
     ] : null;
+    $projection['drawnCardId'] = uno_turn_user($state) === $viewerUserId ? $state['drawnCardId'] : null;
+    $projection['botTask'] = uno_bot_task($state, $viewerUserId, $context);
     unset($projection['reshuffleSeed']);
     return $projection;
 }
@@ -439,7 +455,7 @@ function uno_action_result(array $state): array
     return ['state' => $state, 'turnUserId' => uno_turn_user($state)];
 }
 
-function uno_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function uno_apply_action_core(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== UNO_STATE_SCHEMA_VERSION || !empty($state['completed'])) {
         throw new MultiplayerGameException('The UNO state is unavailable.', 'UNO_STATE_INVALID', 409);
@@ -455,7 +471,7 @@ function uno_apply_action(array $state, int $actorUserId, string $action, array 
     }
     if ($action === 'catch-uno') {
         $target = (int)($state['unoCatchUserId'] ?? 0);
-        if ($target < 1 || $target === $actorUserId) throw new MultiplayerGameException('There is no UNO omission to catch.', 'UNO_CATCH_INVALID', 409);
+        if ($target === 0 || $target === $actorUserId) throw new MultiplayerGameException('There is no UNO omission to catch.', 'UNO_CATCH_INVALID', 409);
         uno_draw_cards($state, $target, 2);
         $state['unoCatchUserId'] = null;
         $state['playSequence'] = (int)$state['playSequence'] + 1;
@@ -489,7 +505,7 @@ function uno_apply_action(array $state, int $actorUserId, string $action, array 
         return uno_action_result($state);
     }
     if ($action === 'call-uno') {
-        if ((string)$state['phase'] !== 'playing') throw new MultiplayerGameException('UNO cannot be called now.', 'UNO_DECLARE_INVALID', 409);
+        if (!in_array((string)$state['phase'], ['playing','drawn'], true)) throw new MultiplayerGameException('UNO cannot be called now.', 'UNO_DECLARE_INVALID', 409);
         ocx_game_assert_turn($state, $actorUserId);
         if (count((array)$state['hands'][(string)$actorUserId]) !== 2 || uno_legal_cards($state, $actorUserId) === []) throw new MultiplayerGameException('Call UNO when exactly two cards remain and one can be played.', 'UNO_DECLARE_INVALID', 422);
         $state['unoDeclared'][(string)$actorUserId] = true;
@@ -518,7 +534,7 @@ function uno_apply_action(array $state, int $actorUserId, string $action, array 
         $state['playSequence'] = (int)$state['playSequence'] + 1;
         $state['lastAction'] = ['sequence' => $state['playSequence'], 'type' => $action, 'userId' => $actorUserId, 'targetUserId' => $drawTarget, 'drawCount' => $drawCount, 'successful' => $successful];
         $roundWinner = (int)($challenge['roundWinnerUserId'] ?? 0);
-        if ($roundWinner > 0) {
+        if ($roundWinner !== 0) {
             $result = uno_complete_round($state, $roundWinner);
             if ($result !== null) return ['state' => $state, 'turnUserId' => null, 'terminal' => true, 'result' => $result];
             return ['state' => $state, 'turnUserId' => $roundWinner];
@@ -527,7 +543,7 @@ function uno_apply_action(array $state, int $actorUserId, string $action, array 
     }
     if (!in_array($action, ['draw', 'pass', 'play'], true)) throw new MultiplayerGameException('This UNO action is not supported.', 'UNO_ACTION_INVALID', 422);
     ocx_game_assert_turn($state, $actorUserId);
-    if ((int)($state['unoCatchUserId'] ?? 0) > 0) $state['unoCatchUserId'] = null;
+    if ((int)($state['unoCatchUserId'] ?? 0) !== 0) $state['unoCatchUserId'] = null;
     if ($action === 'draw') {
         if ((string)$state['phase'] !== 'playing') throw new MultiplayerGameException('A card cannot be drawn now.', 'UNO_DRAW_INVALID', 409);
         $state['unoDeclared'][(string)$actorUserId] = false;
