@@ -44,9 +44,7 @@
  * Defines the Chat Message Renderer.
  */
 
-//
-// No imports required.
-//
+import { installCustomEmojiViewer } from "../../../core/custom-emoji-viewer.js";
 
 export const CHAT_DISPLAY_STORAGE_KEY = "chatspace.chatDisplayMode";
 
@@ -113,6 +111,8 @@ export class ChatMessageRenderer {
      */
     #runtime;
 
+    #emojiViewerCleanup = null;
+
     /**
      * Rendering context supplied by the room composition root.
      *
@@ -158,13 +158,18 @@ export class ChatMessageRenderer {
      * Participates in the runtime lifecycle.
      */
     initialize() {
-
+        if (!this.#emojiViewerCleanup && typeof document !== "undefined") {
+            this.#emojiViewerCleanup = installCustomEmojiViewer(document);
+        }
     }
 
     /**
      * Releases renderer-owned presentation references.
      */
     destroy() {
+
+        this.#emojiViewerCleanup?.();
+        this.#emojiViewerCleanup = null;
 
         this.#context = null;
 
@@ -774,7 +779,7 @@ export class ChatMessageRenderer {
                     .replace(/\[emoji:([a-f0-9]{32})(?::([a-z0-9_-]{1,32}))?\]/g, (token, id, name) => {
                         const source = context.esc(context.mediaUrl(`/api/custom_emojis.php?action=image&id=${id}`));
                         const label = context.esc(`:${name || 'custom-emoji'}:`);
-                        return `<img class="chat-custom-emoji" src="${source}" alt="${label}" title="${label}" width="32" height="32" loading="lazy" decoding="async">`;
+                        return `<img class="chat-custom-emoji" role="button" tabindex="0" aria-haspopup="dialog" aria-label="View full-size ${label}" src="${source}" alt="${label}" title="${label}" width="32" height="32" loading="lazy" decoding="async">`;
                     });
             }
 

@@ -668,7 +668,7 @@ async function initializeAvatarRuntime() {
 
   const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }, ServerClock] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
-    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260914-custom-emojis')),
+    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260914-emoji-view')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
     import(appUrl('/assets/js/runtime/game/game-runtime.js?v=084fa623d9fa')),

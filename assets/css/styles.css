@@ -9143,3 +9143,14 @@ body.hide-identity-nameplates .identity-nameplate-artwork { display: none; }
 /* Private voice uses the chat theme and the same half-row button sizing. */
 .private-voice-panel { background: var(--panel2); color: var(--text); border-color: var(--line); }
 #private-voice-open { width: calc((100% - 8px) / 2); min-width: 0; box-sizing: border-box; margin-top: 8px; }
+
+/* Custom emoji artwork must not inherit the square avatar crop. */
+.message img.chat-custom-emoji { object-fit: contain; }
+.chat-custom-emoji { cursor: zoom-in; }
+.chat-custom-emoji:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.custom-emoji-viewer { position: fixed; inset: 0; box-sizing: border-box; width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: 24px; border: 0; background: rgba(8, 10, 18, .94); color: var(--text, #fff); cursor: zoom-out; }
+.custom-emoji-viewer[open] { display: grid; place-items: center; }
+.custom-emoji-viewer::backdrop { background: transparent; }
+.custom-emoji-viewer-content { display: grid; justify-items: center; gap: 12px; max-width: 100%; }
+.custom-emoji-viewer-image { display: block; width: auto; height: auto; max-width: calc(100vw - 48px); max-height: calc(100vh - 150px); max-height: calc(100dvh - 150px); object-fit: contain; }
+.custom-emoji-viewer-hint { margin: 0; font-size: 14px; text-align: center; }

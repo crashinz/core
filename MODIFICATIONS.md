@@ -10,6 +10,11 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Complete custom emoji display and preview
+
+Added uncropped custom emoji display and an original-size animated preview, with click-anywhere dismissal and keyboard controls. Testing is WIP.
+
+
 ## 2026-09-14 — Private room passwords and room controls
 
 Added optional passwords when creating regular, imported URL and Live Website rooms, with private-room entry prompts and PRIVATE ROOM overlays in the room list. Added owner/admin deletion controls for Live Website rooms and a single-line optional room-name label. Testing is WIP.
