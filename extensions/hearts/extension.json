@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "id": "hearts",
   "name": "Hearts",
-  "version": "1.0.20",
+  "version": "1.0.22",
   "repositoryOwned": true,
   "trustedFirstParty": true,
   "compatibility": {
@@ -42,7 +42,7 @@
     "icon": "hearts-first-party-icon.svg",
     "profile": "versus",
     "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 4,
     "allowedPlayerCounts": [
@@ -55,7 +55,7 @@
       "Player 3",
       "Player 4"
     ],
-    "adaptationVersion": "1.0.8",
+    "adaptationVersion": "1.0.9",
     "presentationSelectionOwner": "viewer",
     "presentationPackSettingKey": "multiplayer_game_appearance_g_b63c0a02",
     "defaultPresentationPack": "built-in",
@@ -90,7 +90,7 @@
     "algorithm": "sha256",
     "files": {
       "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
-      "includes/hearts_extension.php": "af1ec0cc723bafde888dc04230ccb507dd2ac494dbcac467e1e5bde19daabd3d",
+      "includes/hearts_extension.php": "ab175b11b3a805b7fbf1488ad4e76c4c702ab09a928e3ceed3b0a177a03676e5",
       "assets/images/hearts-first-party-icon.svg": "ca9c61d31a59edb107a4400041cc94412d8901e23635158caee8c05a4449385f",
       "assets/audio/card-games/hearts-broken.mp3": "11658397b40f67789d43ac8cb71c0635adeb44008a1eccff92f7a9172871d1f4",
       "assets/audio/card-games/hearts-deal-1.mp3": "5bc7b9144b29688fc1cb8c66334c70eb2e34a165e6c59157cbe6cc2e410cc30a",
@@ -111,9 +111,11 @@
       "assets/audio/card-games/hearts-win.wav": "46bc3bcbaf0a1c55849500841af3ccbfb2adc589edf2658b288bdf9cfb3513f6",
       "assets/audio/card-games/hearts-loss.wav": "e4b64f24310e11200e434ba5d50179b6a654506a0914c922e4bef2373fce8637",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "cac3e01892f456728413d8d80e32df138a4d10aaba87f37986dcdf11b5a33b69",
-      "games/hearts-first-party/index.html": "f301c84484036e706efe7eb47fac75342e547938ce47ffdc9762b911fa9dbe87",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
+      "games/ocx-extension-game.js": "f9210a9e90f058d1e220c4a47c2698d762ecb100e2b9bae96780982328baa0ea",
+      "games/hearts-first-party/index.html": "b2bd4998221beeba4d1d179556a9b283181c91bfb83f409357bcad6a241b269e",
+      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
+      "includes/hearts_bot_support.php": "080168c983c706fd686754373517c6575aa1e3488f3c4ba05482a9421aae47aa",
+      "includes/hearts_expert_support.php": "180b64a4efcb150d69a086455cb3d740e82c9c2cf3f96531b9447fe8f276ddbc"
     }
   }
 }

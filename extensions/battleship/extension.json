@@ -123,8 +123,8 @@
       "assets/audio/built-in-games/ship-water-miss.wav": "b50f1e210b80ccc232d2b67c01cd4f4ecb63fd641dbabf2bd733a12f4a3f1d69",
       "assets/audio/built-in-games/ship-sinking-sequence.wav": "9dc83503785a5cf3d06ca28c2b57bc7627c0bd9a340c37b832dcacbb0014bd19",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "cac3e01892f456728413d8d80e32df138a4d10aaba87f37986dcdf11b5a33b69",
-      "games/battleship-first-party/index.html": "87c44d6306b0c602a09c32b7651e4d5eba6ed10373f6f3f2c8db16f49f9f3733",
+      "games/ocx-extension-game.js": "f9210a9e90f058d1e220c4a47c2698d762ecb100e2b9bae96780982328baa0ea",
+      "games/battleship-first-party/index.html": "bca328c6556a92fed43aa206eeb238abf939e755f12e39099d4ef3287298ae86",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/battleship_bot_support.php": "ced0e98f1db62f3f95e72dd3cbb066cb40c1f6287134e5c5b8805d565c025a4f"
     }

@@ -10,6 +10,16 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Hearts Expert Practice bot
+
+Added an Expert Hearts bot alongside Easy and Normal for two-player and four-player Practice games. Expert compares a small set of plays and passes against possible unseen hands using public card information, current scores and the existing Shoot the Moon rules. Added a short computation limit, Normal fallback and automatic search decision traces. Existing bot seating, late additions, human priority, explicit Start and unranked recording/lifecycle behavior are preserved. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+
+
+## 2026-09-14 — Hearts Practice bots
+
+Added Easy and Normal Hearts bots for two-player and four-player games, including the existing Shoot the Moon option. Hosts can add bots to empty seats after people join, with None as the default, human seat priority and explicit Start. Adding a bot switches the game to Practice Mode; bot games never affect rankings. Normal considers passing, public played cards, safe high-card disposal and moon prevention. Added paced turns, Retry, automatic decision recordings and saved-game support through the shared game framework. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+
+
 ## 2026-09-14 — Complete custom emoji display and preview
 
 Added uncropped custom emoji display and an original-size animated preview, with click-anywhere dismissal and keyboard controls. Testing is WIP.

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/hearts_bot_support.php';
 
 const HEARTS_EXTENSION_ID = 'hearts';
 const HEARTS_STATE_SCHEMA_VERSION = 1;
@@ -9,7 +10,7 @@ const HEARTS_STATE_SCHEMA_VERSION = 1;
 function hearts_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['ruleset', 'captured', 'completed', 'currentTrick', 'handNumber', 'hands', 'heartsBroken', 'history', 'lastCompletedTrick', 'lastHandResult', 'passCount', 'passDirection', 'pendingPasses', 'phase', 'playSequence', 'playerCount', 'resignedUserId', 'roundNumber', 'schemaVersion', 'scores', 'settings', 'settlement', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'trickNumber', 'tricksWon', 'turnIndex', 'turnOrder', 'widow', 'widowCount', 'winnerUserId'],
+        'stateKeys' => ['bots', 'botPublicPlays', 'ruleset', 'captured', 'completed', 'currentTrick', 'handNumber', 'hands', 'heartsBroken', 'history', 'lastCompletedTrick', 'lastHandResult', 'passCount', 'passDirection', 'pendingPasses', 'phase', 'playSequence', 'playerCount', 'resignedUserId', 'roundNumber', 'schemaVersion', 'scores', 'settings', 'settlement', 'starterIndex', 'starterReason', 'starterUserId', 'terminalReason', 'trickNumber', 'tricksWon', 'turnIndex', 'turnOrder', 'widow', 'widowCount', 'winnerUserId'],
         'payloadKeys' => ['card', 'cards']];
 }
 
@@ -24,7 +25,8 @@ function hearts_extension_adapter(): array
         'settingsProjection' => 'hearts_settings_projection',
         'rulesProjection' => 'hearts_rules_projection',
         'projectState' => 'hearts_project_state',
-        'randomnessPurposes' => ['deal' => 'hearts-deal'],
+        'projectVirtualMembers' => 'hearts_project_virtual_members',
+        'randomnessPurposes' => ['deal' => 'hearts-deal', 'bot-deal' => 'hearts-deal'],
         'deriveRandomness' => 'hearts_derive_randomness',
         'presentationStatus' => 'hearts_presentation_status',
         'openingProcedure' => 'two-or-four-player-source-backed-hearts',
@@ -52,14 +54,23 @@ function hearts_presentation_status(PDO $pdo, ?string $requestedPack = null): ar
 
 function hearts_validate_settings(array $settings, string $mode, array $definition = []): array
 {
-    if (array_diff(array_keys($settings), ['shootTheMoon'])) {
+    $allowed = ['shootTheMoon'];
+    for ($seat = 1; $seat <= 4; $seat++) $allowed[] = 'botSeat'.$seat.'Difficulty';
+    if (array_diff(array_keys($settings), $allowed)) {
         throw new MultiplayerGameException('A Hearts setting is not supported.', 'HEARTS_SETTINGS_INVALID', 422);
     }
     $moon = $settings['shootTheMoon'] ?? true;
     if (!is_bool($moon) && !in_array($moon, [0, 1, '0', '1'], true)) {
         throw new MultiplayerGameException('Choose whether shooting the moon is enabled.', 'HEARTS_SETTINGS_INVALID', 422);
     }
-    return ['shootTheMoon' => filter_var($moon, FILTER_VALIDATE_BOOLEAN)];
+    $out = ['shootTheMoon' => filter_var($moon, FILTER_VALIDATE_BOOLEAN)];
+    for ($seat = 1; $seat <= 4; $seat++) {
+        $key = 'botSeat'.$seat.'Difficulty'; $value = $settings[$key] ?? 'none';
+        if (!is_string($value) || !in_array($value, ['none','easy','normal','expert'], true)) throw new MultiplayerGameException('Choose a listed Hearts bot difficulty.', 'HEARTS_SETTINGS_INVALID', 422);
+        if ($mode !== 'practice' && $value !== 'none') throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
+        if ($mode === 'practice') $out[$key] = $value;
+    }
+    return $out;
 }
 
 function hearts_settings_projection(array $settings, string $mode, array $definition = []): array
@@ -85,7 +96,7 @@ function hearts_rules_projection(array $settings, string $mode, array $definitio
     hearts_validate_settings($settings, $mode, $definition);
     return [
         'label' => 'Hearts rules',
-        'description' => 'Avoid penalty cards, follow suit, and finish with the lowest score.',
+        'description' => 'Avoid penalty cards, follow suit, and finish with the lowest score. Add optional Easy, Normal or Expert bots to empty lobby seats for Practice only.',
         'sections' => [
             ['label' => 'Four-player standard Hearts', 'text' => 'Use all 52 cards. Pass three cards left, right, across, then hold. The 2 of Clubs opens. Hearts are one point each, the Queen of Spades is 13, a moon is 26, and the game target is 100.'],
             ['label' => 'Two-player 28-card Hearts', 'text' => 'Remove every 3, 5, 7, 9, Jack, and King. Deal 13 cards to each player and two cards face down to the widow. Alternate passing one card and holding. The Queen of Spades is 7, each remaining heart is 1, a valid moon is 14, and the game target is 50.'],
@@ -112,14 +123,18 @@ function hearts_derive_randomness(string $canonicalReveal, string $actionType, a
 function hearts_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (!in_array(count($players), [2, 4], true) || min($players) < 1) {
+    if (count($players) < 1 || count($players) > 4 || min($players) < 1) {
         throw new MultiplayerGameException('Hearts requires exactly two or four authenticated players.', 'HEARTS_PLAYER_SET_INVALID', 422);
     }
     $settings = hearts_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    [$players, $bots] = hearts_bot_fill_seats($players, $settings, (string)($context['mode'] ?? 'practice'), (array)($context['humanSeats'] ?? []));
+    if (!in_array(count($players), [2,4], true)) throw new MultiplayerGameException('Hearts needs exactly two or four people or Practice bots.', 'MULTIPLAYER_GAME_MINIMUM_PLAYERS', 409);
     $playerCount = count($players);
     $settings['targetScore'] = $playerCount === 2 ? 50 : 100;
     return [
         'schemaVersion' => HEARTS_STATE_SCHEMA_VERSION,
+        'bots' => $bots,
+        'botPublicPlays' => [],
         'ruleset' => $playerCount === 2 ? 'two-player-28-card' : 'standard-four-player',
         'playerCount' => $playerCount,
         'turnOrder' => $players,
@@ -188,7 +203,7 @@ function hearts_lowest_club_owner(array $state): int
             }
         }
     }
-    if ($owner < 1) throw new MultiplayerGameException('The opening Club is unavailable.', 'HEARTS_OPENING_CARD_INVALID', 409);
+    if ($owner === 0) throw new MultiplayerGameException('The opening Club is unavailable.', 'HEARTS_OPENING_CARD_INVALID', 409);
     return $owner;
 }
 
@@ -233,6 +248,7 @@ function hearts_begin_hand(array &$state, array $randomDeck): void
     $state['handNumber'] = (int)$state['handNumber'] + 1;
     $state['roundNumber'] = (int)$state['handNumber'];
     $state['widowCount'] = count($state['widow']);
+    $state['botPublicPlays'] = [];
     $state['pendingPasses'] = [];
     $state['currentTrick'] = [];
     $state['lastCompletedTrick'] = null;
@@ -287,6 +303,7 @@ function hearts_legal_cards(array $state, int $actorUserId): array
 function hearts_project_state(array $state, int $viewerUserId, array $context): array
 {
     $projection = $state;
+    $projection['botTask'] = hearts_bot_task($state, $viewerUserId, $context);
     $projection['legalCards'] = hearts_legal_cards($state, $viewerUserId);
     foreach ((array)($projection['hands'] ?? []) as $userId => $hand) {
         if ((int)$userId === $viewerUserId) continue;
@@ -375,7 +392,7 @@ function hearts_terminal(array &$state): ?array
     return ['state' => $state, 'turnUserId' => null, 'terminal' => true, 'result' => ocx_game_result_from_scores($resultScores)];
 }
 
-function hearts_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function hearts_apply_action_core(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== HEARTS_STATE_SCHEMA_VERSION || !empty($state['completed'])) {
         throw new MultiplayerGameException('The Hearts state is unavailable.', 'HEARTS_STATE_INVALID', 409);
@@ -428,6 +445,7 @@ function hearts_apply_action(array $state, int $actorUserId, string $action, arr
     $leadSuit = $state['currentTrick'] === [] ? null : hearts_card_parts((string)$state['currentTrick'][0]['card'])['suit'];
     $state['hands'][(string)$actorUserId] = array_values(array_diff($state['hands'][(string)$actorUserId], [$card]));
     $state['currentTrick'][] = ['userId' => $actorUserId, 'card' => $card];
+    $state['botPublicPlays'][] = ['userId' => $actorUserId, 'card' => $card];
     $state['playSequence'] = (int)$state['playSequence'] + 1;
     if (hearts_card_parts($card)['suit'] === 'H' && $leadSuit !== 'H') $state['heartsBroken'] = true;
     if (count($state['currentTrick']) < count($state['turnOrder'])) {

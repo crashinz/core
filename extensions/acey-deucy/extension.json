@@ -90,7 +90,7 @@
     "algorithm": "sha256",
     "files": {
       "includes/acey_deucy_extension.php": "bf773ea1d8643796ad74b286e4392e7e549eee7c9130e14c44ae1d21c85afd77",
-      "games/acey-deucy-first-party/index.html": "0a645f270c7717bda3f7ada55dab277560bb2b833bb065fc62f815557637a374",
+      "games/acey-deucy-first-party/index.html": "71095f6851b516911d540dd33950502a926beba0a51135db3c6b3aca74e1dc7d",
       "games/acey-deucy-first-party/acey-deucy.css": "6e7ca5f754f6947eaa85c07ac5a229c89042c5783e494789527ccf0abde0da35",
       "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
       "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
@@ -117,7 +117,7 @@
       "assets/audio/built-in-games/backgammon-gammon.wav": "0dc9ea88f55d61dd6c17c333469bfb77bd1a91355416bdb86281e3ca445a7f31",
       "assets/audio/built-in-games/backgammon-backgammon.wav": "8f043a7916501544730cb482c53e9134e1f53dfbfe52018216fa3c3a0b315d50",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "cac3e01892f456728413d8d80e32df138a4d10aaba87f37986dcdf11b5a33b69",
+      "games/ocx-extension-game.js": "f9210a9e90f058d1e220c4a47c2698d762ecb100e2b9bae96780982328baa0ea",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

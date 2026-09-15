@@ -1,5 +1,5 @@
 /** Only opaque task identities cross the browser boundary; strategy runs on the server. */
-export function createUnoBotController({ snapshot, submit, showStatus, schedule = setTimeout, cancel = clearTimeout }) {
+export function createCardBotController({ gameName = "UNO", snapshot, submit, showStatus, schedule = setTimeout, cancel = clearTimeout }) {
   let job = null, failedKey = "";
   function stop() { if (job) { cancel(job.timer); job = null; } }
   function sync() {
@@ -23,9 +23,11 @@ export function createUnoBotController({ snapshot, submit, showStatus, schedule 
       } catch {
         if (job !== active) return;
         stop(); failedKey = active.key;
-        showStatus("The UNO bot action could not be saved. Retry when the connection is available.", () => { failedKey = ""; sync(); });
+        showStatus(`The ${gameName} bot action could not be saved. Retry when the connection is available.`, () => { failedKey = ""; sync(); });
       }
     }, Math.max(300, Math.min(2500, Number(current.task.delayMs) || 700)));
   }
   return { sync, stop };
 }
+
+export const createUnoBotController = createCardBotController;

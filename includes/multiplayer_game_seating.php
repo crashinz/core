@@ -10,7 +10,7 @@ function multiplayer_game_has_seat_choices(array $definition): bool
 function multiplayer_game_bot_slots(array $definition): array
 {
     return match ((string)($definition['extensionId'] ?? '')) {
-        'spades' => [1, 2, 3, 4],
+        'spades', 'hearts' => [1, 2, 3, 4],
         'uno' => range(1, 10),
         'battleship', 'chess', 'checkers', 'backgammon-first-party' => [2],
         default => [],
@@ -19,6 +19,10 @@ function multiplayer_game_bot_slots(array $definition): array
 
 function multiplayer_game_bot_choices(array $definition): array
 {
+    if (($definition['extensionId'] ?? '') === 'hearts') {
+        require_once __DIR__ . '/hearts_bot_support.php';
+        return hearts_bot_choices();
+    }
     if (($definition['extensionId'] ?? '') === 'uno') {
         require_once __DIR__ . '/uno_bot_support.php';
         return uno_bot_choices();
@@ -72,11 +76,11 @@ function multiplayer_game_bot_lobby_projection(array $definition, array $session
             'difficulty' => $difficulty, 'editable' => $isHost && !$occupied];
     }
     return ['choices' => multiplayer_game_bot_choices($definition),
-        'strengthNote' => match ($definition['extensionId'] ?? '') { 'uno' => 'Easy uses simple legal play; Normal manages colors and action cards. Practice only.', 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), 'backgammon-first-party' => backgammon_bot_strength_note(), default => '' },
+        'strengthNote' => match ($definition['extensionId'] ?? '') { 'hearts' => 'Easy uses simple legal play; Normal considers passing, played cards and shooting the moon; Expert adds a short lookahead. Practice only.', 'uno' => 'Easy uses simple legal play; Normal manages colors and action cards. Practice only.', 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), 'backgammon-first-party' => backgammon_bot_strength_note(), default => '' },
         'options' => $options, 'isHost' => $isHost, 'mode' => $session['mode'],
         'settingsSha256' => $session['settings_sha256'], 'playerSetSha256' => $playerSetSha,
         'showStart' => $isHost && !multiplayer_game_has_seat_choices($definition),
-        'canStart' => $isHost && (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : $readyCount === (int)$definition['maxPlayers']) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
+        'canStart' => $isHost && (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : (($definition['extensionId'] ?? '') === 'hearts' ? in_array($readyCount, [2,4], true) : $readyCount === (int)$definition['maxPlayers'])) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
 }
 
 /** Update one empty slot atomically with mode/acceptance; never start or displace a person. */
@@ -132,7 +136,7 @@ function multiplayer_game_seating_projection(array $definition, array $session, 
     }
     $spades = ($definition['extensionId'] ?? '') === 'spades';
     $uno = ($definition['extensionId'] ?? '') === 'uno';
-    $twoHearts = !$spades && !$uno && count($bySeat) === 2;
+    $twoHearts = false;
     $capacity = $uno ? min(10, (int)$definition['maxPlayers']) : 4;
     $options = [];
     $settings = json_decode((string)$session['settings_json'], true) ?: [];
@@ -140,14 +144,17 @@ function multiplayer_game_seating_projection(array $definition, array $session, 
         require_once __DIR__ . '/uno_bot_support.php';
         $settings = uno_bot_lobby_settings($settings);
     }
+    $plannedCount = count($bySeat);
+    if ($session['mode'] === 'practice') for ($seat = 1; $seat <= $capacity; $seat++) if (!isset($bySeat[$seat]) && ($settings['botSeat'.$seat.'Difficulty'] ?? 'none') !== 'none') $plannedCount++;
+    $twoHearts = !$spades && !$uno && $plannedCount === 2;
     $nameAt = static function(int $seat) use ($bySeat, $spades, $uno, $session, $settings): string {
         if (isset($bySeat[$seat])) return (string)$bySeat[$seat]['displayName'];
         $level = $settings['botSeat' . $seat . 'Difficulty'] ?? 'none';
-        if (($spades || $uno) && $session['mode'] === 'practice' && $level !== 'none') return ucfirst($level) . ' Bot ' . $seat;
+        if ($session['mode'] === 'practice' && $level !== 'none') return ucfirst($level) . ' Bot ' . $seat;
         return 'Empty seat';
     };
     for ($seat = 1; $seat <= $capacity; $seat++) {
-        if ($twoHearts && !isset($bySeat[$seat])) continue;
+        if ($twoHearts && !isset($bySeat[$seat]) && $nameAt($seat) === 'Empty seat') continue;
         $opposite = (($seat + 1) % 4) + 1;
         // Preview the arrangement after the requested move/swap, not before it.
         $oppositeName = $nameAt($opposite);
@@ -158,7 +165,7 @@ function multiplayer_game_seating_projection(array $definition, array $session, 
         $occupant = $bySeat[$seat] ?? null;
         $relationship = ($spades ? 'Your partner: ' : 'Opposite you: ') . $oppositeName;
         if ($twoHearts) {
-            foreach ($bySeat as $member) if ((int)$member['userId'] !== $viewer) $relationship = 'Your opponent: ' . $member['displayName'];
+            for ($other = 1; $other <= $capacity; $other++) if ($other !== $mySeat && $nameAt($other) !== 'Empty seat') $relationship = 'Your opponent: ' . $nameAt($other);
         } elseif ($uno) {
             $afterMove = $bySeat;
             if ($mySeat !== null && $seat !== $mySeat) {
@@ -198,10 +205,10 @@ function multiplayer_game_seating_projection(array $definition, array $session, 
         $allAccepted = $allAccepted && !empty($member['accepted']);
     }
     $readySeats = count($bySeat);
-    if (($spades || $uno) && $practice) for ($seat = 1; $seat <= $capacity; $seat++) {
+    if ($practice) for ($seat = 1; $seat <= $capacity; $seat++) {
         if (!isset($bySeat[$seat]) && ($settings['botSeat' . $seat . 'Difficulty'] ?? 'none') !== 'none') $readySeats++;
     }
-    $readyCount = $spades ? $readySeats === 4 : ($uno ? $readySeats >= 2 && $readySeats <= $capacity : in_array(count($bySeat), [2, 4], true));
+    $readyCount = $spades ? $readySeats === 4 : ($uno ? $readySeats >= 2 && $readySeats <= $capacity : in_array($readySeats, [2, 4], true));
     return ['canChoose' => $session['status'] === 'lobby' && $mySeat !== null,
         'gameSessionId' => (string)$session['public_id'],
         'currentSeat' => $mySeat, 'options' => $options, 'requests' => $requests,
@@ -210,7 +217,7 @@ function multiplayer_game_seating_projection(array $definition, array $session, 
         'isHost' => $isHost, 'mode' => $session['mode'], 'settingsSha256' => $session['settings_sha256'],
         'canAccept' => $mySeat !== null && ($isHost || !$practice) && empty($viewerMember['accepted']),
         'canStart' => $isHost && $readyCount && $pending === [] && ($practice ? $hostAccepted : $allAccepted),
-        'startStatus' => !$readyCount ? ($spades ? 'Waiting for four players or accepted Practice bot seats.' : ($uno ? 'UNO can start with two through ten players.' : 'Hearts can start with exactly two or four players.'))
+        'startStatus' => !$readyCount ? ($spades ? 'Waiting for four players or accepted Practice bot seats.' : ($uno ? 'UNO can start with two through ten players.' : 'Hearts can start with exactly two or four people or Practice bots.'))
             : ($pending !== [] ? 'Resolve pending seat swaps before starting.' : (!($practice ? $hostAccepted : $allAccepted) ? 'Waiting for acceptance of the current seating and options.' : 'Ready for the host to start.')),
         'description' => $spades ? 'Seats 1 and 3 are partners; seats 2 and 4 are partners. Occupied seats require an approved swap.'
             : ($uno ? 'UNO is individual play. Seats run clockwise; Reverse changes the direction of play. Choose an open seat or request a swap.' : ($twoHearts ? 'Two-player Hearts: you sit opposite your opponent. Both players score individually.' : 'Hearts scores each player individually. Seats 1 and 3 sit opposite, as do 2 and 4. Choose an open seat or request a swap.'))];

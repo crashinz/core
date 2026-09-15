@@ -1,4 +1,4 @@
-import { createUnoBotController } from "./uno-bot-controller.js?v=76c89c69bfdd";
+import { createCardBotController } from "./uno-bot-controller.js?v=d1c32d65552f";
 import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=65d896c667ff";
 import { createCheckersBotController } from "./checkers-bot-controller.js?v=729241a2b45b";
 import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
@@ -2275,7 +2275,7 @@ function classifyClassicMotion(previous, current) {
   const before = previous.state || {};
   const after = current.state || {};
   const base = { gameId: context.extensionId, version: Number(current.stateVersion), before, after, startedAt: performance.now() };
-  if (!before.completed && after.completed && (Number(after.winnerUserId || 0) > 0 || (["backgammon-first-party", "uno"].includes(context.extensionId) && Number(after.winnerUserId || 0) < 0 && after.bots?.[String(after.winnerUserId)]?.userId === after.winnerUserId))) {
+  if (!before.completed && after.completed && (Number(after.winnerUserId || 0) > 0 || (["backgammon-first-party", "uno", "hearts"].includes(context.extensionId) && Number(after.winnerUserId || 0) < 0 && after.bots?.[String(after.winnerUserId)]?.userId === after.winnerUserId))) {
     const latestMove = listLength(after.history) > listLength(before.history) ? latest(after.history) : null;
     const terminalReason = String(after.terminalReason || "").toLowerCase();
     if (context.extensionId === "chess" && terminalReason.includes("checkmate")) return {
@@ -3559,7 +3559,7 @@ function playHeartsTransitionSound(previous, current) {
   }
   const beforeResult = Number(before.lastHandResult?.handNumber || 0);
   const afterResult = Number(after.lastHandResult?.handNumber || 0);
-  if (afterResult > beforeResult && Number(after.lastHandResult?.moonShooterUserId || 0) > 0) playHeartsSound("moon", 180);
+  if (afterResult > beforeResult && Number(after.lastHandResult?.moonShooterUserId || 0) !== 0) playHeartsSound("moon", 180);
 }
 
 function playUnoSound(name, delayMs = 0) {
@@ -7990,7 +7990,7 @@ function renderHearts() {
   }
   if (state.lastHandResult) {
     const shooter = Number(state.lastHandResult.moonShooterUserId || 0);
-    actions.append(make("p", "hearts-last-hand", shooter > 0 ? `${memberName(shooter)} shot the moon.` : `Hand ${Number(state.lastHandResult.handNumber || 0)} scored.`));
+    actions.append(make("p", "hearts-last-hand", shooter !== 0 ? `${memberName(shooter)} shot the moon.` : `Hand ${Number(state.lastHandResult.handNumber || 0)} scored.`));
   }
   actions.append(renderInBoardHandLayout("hearts", heartsHandLayout));
   table.append(banner, seats, center, viewerHand, actions);
@@ -10338,17 +10338,18 @@ function renderReceivedDrawProposalDialog() {
   requestAnimationFrame(() => accept.focus({ preventScroll:true }));
 }
 
-const unoBotController = createUnoBotController({
+function createServerCardBot(gameId, gameName) { return createCardBotController({
+  gameName,
   snapshot: () => ({
-    enabled: context.extensionId === "uno" && gameSurfaceVisible && gameLifecycleAvailable(),
+    enabled: context.extensionId === gameId && gameSurfaceVisible && gameLifecycleAvailable(),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
-  submit: payload => performAction(payload.action, {engine: payload.engine, positionKey: payload.positionKey}, payload.action === "bot-deal" ? "uno-deal" : ""),
+  submit: payload => performAction(payload.action, {engine: payload.engine, positionKey: payload.positionKey}, payload.action === "bot-deal" ? `${gameId}-deal` : ""),
   showStatus: (message, retry) => {
-    let panel = document.getElementById("uno-bot-status");
-    if (!panel && context.extensionId === "uno") {
-      panel = make("div", "uno-bot-status minor"); panel.id = "uno-bot-status";
+    let panel = document.getElementById(`${gameId}-bot-status`);
+    if (!panel && context.extensionId === gameId) {
+      panel = make("div", "uno-bot-status minor"); panel.id = `${gameId}-bot-status`;
       el("player-status-strip")?.insertAdjacentElement("afterend", panel);
     }
     if (!panel) return;
@@ -10356,13 +10357,15 @@ const unoBotController = createUnoBotController({
     const key = JSON.stringify([message || "", Boolean(retry)]);
     if (panel.dataset.statusKey === key && panel.childNodes.length) return;
     panel.dataset.statusKey = key; panel.replaceChildren();
-    const status = make("span", "", message || "Practice UNO bots"); status.setAttribute("role", "status"); panel.append(status);
+    const status = make("span", "", message || `Practice ${gameName} bots`); status.setAttribute("role", "status"); panel.append(status);
     if (retry) { const button = make("button", "btn", "Retry bot"); button.type = "button"; button.addEventListener("click", retry); panel.append(button); }
   },
-});
-window.addEventListener("pagehide", () => unoBotController.stop());
-const unoBotTimer = setInterval(() => { if (context.extensionId === "uno") unoBotController.sync(); }, 250);
-window.addEventListener("pagehide", () => clearInterval(unoBotTimer));
+}); }
+const unoBotController = createServerCardBot("uno", "UNO");
+const heartsBotController = createServerCardBot("hearts", "Hearts");
+window.addEventListener("pagehide", () => { unoBotController.stop(); heartsBotController.stop(); });
+const cardBotTimer = setInterval(() => { if (context.extensionId === "uno") unoBotController.sync(); if (context.extensionId === "hearts") heartsBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => clearInterval(cardBotTimer));
 
 const chessBotController = createChessBotController({
   snapshot: () => ({
@@ -10539,6 +10542,7 @@ function render() {
   scheduleHeartsAutomaticAction();
   scheduleUnoAutomaticAction();
   unoBotController.sync();
+  heartsBotController.sync();
   chessBotController.sync();
   checkersBotController.sync();
   backgammonBotController.sync();

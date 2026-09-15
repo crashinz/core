@@ -2162,6 +2162,7 @@ function multiplayer_game_shared_progress_completed(
         return $action === 'move'
             && (int)($after['moveNumber'] ?? 0) > (int)($before['moveNumber'] ?? 0);
     }
+    if ($extensionId === 'hearts' && $action === 'bot-step') return (int)($after['playSequence'] ?? 0) > (int)($before['playSequence'] ?? 0) || ($before['phase'] ?? '') !== ($after['phase'] ?? '');
     if ($extensionId === 'uno') {
         if ($action === 'bot-step') return (int)($after['playSequence'] ?? 0) > (int)($before['playSequence'] ?? 0) || ($before['phase'] ?? '') !== ($after['phase'] ?? '');
         if ($action === 'call-uno') {

@@ -164,11 +164,11 @@
       "assets/images/uno/cards/yellow-reverse.png": "caa07c6fa5e26360babbd42bee262d0b72b6b091aa84f25b9e88a397e387b422",
       "assets/images/uno/cards/yellow-skip.png": "d96c03ec1974e748a42948cd9e86b99dee4036f64f2d0a6457ff3bc7797c13fa",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "cac3e01892f456728413d8d80e32df138a4d10aaba87f37986dcdf11b5a33b69",
-      "games/uno-first-party/index.html": "d0b858aba004e7072388ded842ac4794c86d4dc71a3c6f0287358c7da293ce89",
+      "games/ocx-extension-game.js": "f9210a9e90f058d1e220c4a47c2698d762ecb100e2b9bae96780982328baa0ea",
+      "games/uno-first-party/index.html": "94017368c21d49f3329460fb566c93fbc1186830b7bad2ddc19a1e668cb1b5f0",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/uno_bot_support.php": "22807b4acbeea92abc1082e6ae419565da02d206d9e66265a3a6e8cf7490768a",
-      "games/uno-bot-controller.js": "76c89c69bfdd8f7a08ff1c1e7ac9b80fdfcce5432c2bba8251c1a0ed5c77fda4"
+      "games/uno-bot-controller.js": "d1c32d65552f52a666e9bac24422ce93abe9eafce1e73a21440f25c630de62cf"
     }
   }
 }
