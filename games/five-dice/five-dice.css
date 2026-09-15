@@ -1521,9 +1521,9 @@ body[data-appearance="built-in"] .play-surface.is-built-in-winning::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body[data-appearance="built-in"] .play-surface *,
-  body[data-appearance="built-in"] .play-surface *::before,
-  body[data-appearance="built-in"] .play-surface *::after {
+  body:not([data-visual-fx="on"])[data-appearance="built-in"] .play-surface *,
+  body:not([data-visual-fx="on"])[data-appearance="built-in"] .play-surface *::before,
+  body:not([data-visual-fx="on"])[data-appearance="built-in"] .play-surface *::after {
     animation-duration: .001ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
@@ -2024,8 +2024,8 @@ body[data-appearance="classic"] .classic-hotspot:disabled { opacity: 1; }
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .die.is-rolling { animation: none; }
-  body[data-appearance="classic"] .classic-roll-strip { animation: none; background-position-y: 100%; }
+  body:not([data-visual-fx="on"]) .die.is-rolling { animation: none; }
+  body:not([data-visual-fx="on"])[data-appearance="classic"] .classic-roll-strip { animation: none; background-position-y: 100%; }
 }
 
 /*
@@ -3907,3 +3907,7 @@ body[data-appearance="classic"] .classic-score-choice:is(:hover, :focus-visible,
   background: rgba(255, 244, 208, .12);
   box-shadow: inset 0 0 0 2px #fff4d0;
 }
+
+/* Keep game art out of browser text selection. */
+.five-dice-approved-artboard { -webkit-user-select: none; user-select: none; }
+.five-dice-approved-artboard img { -webkit-user-drag: none; }

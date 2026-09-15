@@ -87,7 +87,7 @@ import {
 
     ChatMessageRenderer
 
-} from "./renderers/chat-message-renderer.js?v=20260914-emoji-view";
+} from "./renderers/chat-message-renderer.js?v=20260915-emoji-inline";
 
 import {
 

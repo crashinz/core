@@ -44,7 +44,7 @@
  * Defines the Chat Message Renderer.
  */
 
-import { installCustomEmojiViewer } from "../../../core/custom-emoji-viewer.js";
+import { installCustomEmojiViewer } from "../../../core/custom-emoji-viewer.js?v=20260915-inline";
 
 export const CHAT_DISPLAY_STORAGE_KEY = "chatspace.chatDisplayMode";
 
@@ -779,7 +779,7 @@ export class ChatMessageRenderer {
                     .replace(/\[emoji:([a-f0-9]{32})(?::([a-z0-9_-]{1,32}))?\]/g, (token, id, name) => {
                         const source = context.esc(context.mediaUrl(`/api/custom_emojis.php?action=image&id=${id}`));
                         const label = context.esc(`:${name || 'custom-emoji'}:`);
-                        return `<img class="chat-custom-emoji" role="button" tabindex="0" aria-haspopup="dialog" aria-label="View full-size ${label}" src="${source}" alt="${label}" title="${label}" width="32" height="32" loading="lazy" decoding="async">`;
+                        return `<img class="chat-custom-emoji" role="button" tabindex="0" aria-expanded="false" aria-label="View full-size ${label}" src="${source}" alt="${label}" title="${label}" width="32" height="32" loading="lazy" decoding="async">`;
                     });
             }
 

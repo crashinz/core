@@ -1038,8 +1038,9 @@ body[data-appearance="classic"] .board { background-color: transparent; }
 }
 @media (min-width: 640px) and (max-height: 560px) { html, body { min-height: 100%; overflow-x: hidden; overflow-y: auto; } body { padding: 5px; } .game { min-height: 100%; height: auto; gap: 5px; } .layout { grid-template-columns: minmax(420px, 1.18fr) minmax(320px, .82fr); overflow: visible; } .layout[data-score-records-visible="false"] { grid-template-columns: minmax(0, 1fr); } .surface, .records-panel { padding: 6px; } .board { height: auto; width: min(100%, 720px); } .game-header .eyebrow { display: none; } h1 { font-size: 1.25rem; } .badge, .status { padding: 4px 7px; } }
 @media (prefers-reduced-motion: reduce) {
-  .checkers-edge-tab, .classic-hand .classic-card-button { transition-duration: 1ms !important; }
-  .classic-spades-seat-border.is-current-turn-highlight { animation: none !important; opacity: 0; }
+  body:not([data-visual-fx="on"]) .checkers-edge-tab,
+  body:not([data-visual-fx="on"]) .classic-hand .classic-card-button { transition-duration: 1ms !important; }
+  body:not([data-visual-fx="on"]) .classic-spades-seat-border.is-current-turn-highlight { animation: none !important; opacity: 0; }
 }
 
 /* Built-in first-party board restoration. Classic/OCX selectors are intentionally excluded. */
@@ -1219,7 +1220,7 @@ body[data-appearance="classic"] .board { background-color: transparent; }
 .built-in-point-board .point-game-play-direction.is-built-in.is-role-2 ~ .built-in-dice {
   grid-column: 2 / 8;
 }
-.classic-point-board .point-game-play-direction.is-classic {
+.point-game-classic .point-game-play-direction.is-classic {
   position: absolute;
   left: 11%;
   top: 42.5%;
@@ -1229,8 +1230,8 @@ body[data-appearance="classic"] .board { background-color: transparent; }
   pointer-events: none;
   filter: drop-shadow(0 1px 2px rgba(24,15,5,.74));
 }
-.classic-point-board .point-game-play-direction.is-classic.is-role-1,
-.classic-point-board .point-game-play-direction.is-classic.is-role-2 {
+.point-game-classic .point-game-play-direction.is-classic.is-role-1,
+.point-game-classic .point-game-play-direction.is-classic.is-role-2 {
   left: 5%;
   right: auto;
   transform: scaleX(-1);
@@ -1689,16 +1690,16 @@ body[data-appearance="classic"] .board { background-color: transparent; }
 .built-in-point-win.is-reduced .built-in-point-win-checker,
 .built-in-point-win.is-reduced .built-in-point-win-plaque { opacity: 1; transform: none; animation: none; }
 @media (prefers-reduced-motion: reduce) {
-  .built-in-point-win,
-  .built-in-point-win::before,
-  .built-in-point-win-final-checker,
-  .built-in-point-win-particles i,
-  .built-in-point-win-checker,
-  .built-in-point-win-plaque { animation: none !important; }
-  .built-in-point-win-particles,
-  .built-in-point-win-final-checker { display: none; }
-  .built-in-point-win-checker,
-  .built-in-point-win-plaque { opacity: 1; transform: none; }
+  body:not([data-visual-fx="on"]) .built-in-point-win,
+  body:not([data-visual-fx="on"]) .built-in-point-win::before,
+  body:not([data-visual-fx="on"]) .built-in-point-win-final-checker,
+  body:not([data-visual-fx="on"]) .built-in-point-win-particles i,
+  body:not([data-visual-fx="on"]) .built-in-point-win-checker,
+  body:not([data-visual-fx="on"]) .built-in-point-win-plaque { animation: none !important; }
+  body:not([data-visual-fx="on"]) .built-in-point-win-particles,
+  body:not([data-visual-fx="on"]) .built-in-point-win-final-checker { display: none; }
+  body:not([data-visual-fx="on"]) .built-in-point-win-checker,
+  body:not([data-visual-fx="on"]) .built-in-point-win-plaque { opacity: 1; transform: none; }
 }
 
 .built-in-checkers-board {
@@ -2225,7 +2226,7 @@ button.uno-pile:not(:disabled):hover .uno-card, button.uno-pile:not(:disabled):f
   to { filter: drop-shadow(0 0 13px rgba(255, 230, 103, .9)); transform: translateY(-5px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .uno-draw-pile.is-required .uno-card { animation: none; filter: drop-shadow(0 0 8px rgba(255, 230, 103, .75)); }
+  body:not([data-visual-fx="on"]) .uno-draw-pile.is-required .uno-card { animation: none; filter: drop-shadow(0 0 8px rgba(255, 230, 103, .75)); }
 }
 .uno-color-chooser { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: rgba(4,40,42,.66); }
 .uno-color-chooser h3 { flex: 1 0 100%; margin: 0 0 3px; text-align: center; }
@@ -2294,7 +2295,7 @@ button.uno-pile:not(:disabled):hover .uno-card, button.uno-pile:not(:disabled):f
   .uno-table[data-player-count="8"] .uno-center, .uno-table[data-player-count="9"] .uno-center, .uno-table[data-player-count="10"] .uno-center { top: 56%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .uno-card { transition-duration: 1ms; }
+  body:not([data-visual-fx="on"]) .uno-card { transition-duration: 1ms; }
 }
 
 .blackjack-cards.is-paged {
@@ -3426,17 +3427,17 @@ button.modern-battle-ship.is-selected:is(:hover, :focus-visible) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .modern-battle-ocean-grid::before,
-  .modern-battle-fire-sprite,
-  .modern-battle-hit-fire::before,
-  .modern-battle-fire-smoke i,
-  .modern-battle-fire-embers i,
-  .modern-battle-wreck-water,
-  .modern-battle-wreck-oil,
-  .modern-battle-breach-glow,
-  .modern-battle-wreck-smoke i,
-  .modern-battle-wreck-bubbles i,
-  .modern-battle-victory-sweep { animation: none !important; }
+  body:not([data-visual-fx="on"]) .modern-battle-ocean-grid::before,
+  body:not([data-visual-fx="on"]) .modern-battle-fire-sprite,
+  body:not([data-visual-fx="on"]) .modern-battle-hit-fire::before,
+  body:not([data-visual-fx="on"]) .modern-battle-fire-smoke i,
+  body:not([data-visual-fx="on"]) .modern-battle-fire-embers i,
+  body:not([data-visual-fx="on"]) .modern-battle-wreck-water,
+  body:not([data-visual-fx="on"]) .modern-battle-wreck-oil,
+  body:not([data-visual-fx="on"]) .modern-battle-breach-glow,
+  body:not([data-visual-fx="on"]) .modern-battle-wreck-smoke i,
+  body:not([data-visual-fx="on"]) .modern-battle-wreck-bubbles i,
+  body:not([data-visual-fx="on"]) .modern-battle-victory-sweep { animation: none !important; }
 }
 body[data-external-game-controls="true"] [data-external-game-control="pause"],
 body[data-external-game-controls="true"] [data-external-game-row],
@@ -3460,3 +3461,31 @@ body[data-external-game-controls="true"] #surface-options-music {
 @media (pointer: coarse) {
   #game-height-fit-toggle { min-width: 44px; min-height: 44px; }
 }
+
+/* Board art is an interactive game surface, not selectable document text. */
+#board-host { -webkit-user-select: none; user-select: none; }
+#board-host img { -webkit-user-drag: none; }
+#board-host :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
+/* Source sprites already include their pressed/disabled treatment. */
+.classic-source-action-hotspot:disabled { opacity: 1; }
+.classic-source-control-hotspot[data-pressed="true"] .classic-source-control-art { transform: none; }
+
+.classic-point-dice-roll { position:absolute; inset:0; z-index:21; overflow:hidden; pointer-events:none; }
+.classic-dice[data-rolling="true"] { visibility:hidden; }
+
+/* Bot progress must not move the board when thinking/moving text clears. */
+.backgammon-bot-status:not([hidden]) { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-height:2.25rem; margin:0; }
+/* Vector dice retain smooth rounded edges at native and enlarged sizes. */
+.classic-vector-die, .classic-vector-die svg { image-rendering:auto; }
+.classic-vector-die svg {
+  width:140%;
+  height:140%;
+  max-width:none;
+  transform:translate(-14.285714%, -14.285714%);
+  overflow:visible;
+}
+
+/* Empty IMG boxes paint a browser placeholder while a source control reloads.
+   Keep the original board visible until the preloaded artwork has a source. */
+.classic-source-control-art:not([src]),
+.classic-source-action-art:not([src]) { visibility: hidden; }

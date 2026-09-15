@@ -11,6 +11,8 @@ function deepFreeze(value) {
 // Source-space geometry is measured in the immutable native canvas for each
 // original surface. Renderers scale this one map; CSS percentages are not an
 // independent geometry owner.
+// Checkers, Chess and the point games use U resources for lit/enabled FX
+// and D resources for dim/disabled FX; hover stays within the same state.
 export const CLASSIC_SOURCE_MAPS = deepFreeze({
   checkers: {
     canvas: { width: 460, height: 320 },
@@ -72,8 +74,8 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
       resignDrawer: box(382, 161, 78, 109),
     },
     controlSprites: {
-      soundFx: { nativeSize: [40, 72], on: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" }, off: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" } },
-      visualFx: { nativeSize: [36, 86], on: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" }, off: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" } },
+      soundFx: { nativeSize: [40, 72], on: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" }, off: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" } },
+      visualFx: { nativeSize: [36, 86], on: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" }, off: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" } },
     },
     motion: {
       checkerSlide: { durationMs: 760, easing: "cubic-bezier(.22,.61,.36,1)" },
@@ -219,8 +221,8 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
       resign: box(367, 46, 91, 39),
     },
     controlSprites: {
-      soundFx: { nativeSize: [35, 74], on: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" }, off: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" } },
-      visualFx: { nativeSize: [35, 74], on: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" }, off: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" } },
+      soundFx: { nativeSize: [35, 74], on: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" }, off: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" } },
+      visualFx: { nativeSize: [35, 74], on: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" }, off: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" } },
     },
     actionSprites: {
       draw: { nativeSize: [91, 39], rest: "gif-draw-r", hover: "gif-draw-h", pressed: "gif-draw-p", disabled: "gif-draw-d" },
@@ -300,8 +302,8 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
       soundFx: box(411, 201, 49, 119),
     },
     controlSprites: {
-      soundFx: { nativeSize: [49, 119], on: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" }, off: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" } },
-      visualFx: { nativeSize: [49, 119], on: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" }, off: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" } },
+      soundFx: { nativeSize: [49, 119], on: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" }, off: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" } },
+      visualFx: { nativeSize: [49, 119], on: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" }, off: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" } },
     },
     actionSprites: {
       roll: { nativeSize: [44, 78], rest: "gif-roll-r", hover: "gif-roll-h", pressed: "gif-roll-p", disabled: "gif-roll-d" },
@@ -386,8 +388,8 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
       soundFx: box(411, 201, 49, 119),
     },
     controlSprites: {
-      soundFx: { nativeSize: [49, 119], on: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" }, off: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" } },
-      visualFx: { nativeSize: [49, 119], on: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" }, off: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" } },
+      soundFx: { nativeSize: [49, 119], on: { rest: "gif-sfx-ur", hover: "gif-sfx-uh" }, off: { rest: "gif-sfx-dr", hover: "gif-sfx-dh" } },
+      visualFx: { nativeSize: [49, 119], on: { rest: "gif-gfx-ur", hover: "gif-gfx-uh" }, off: { rest: "gif-gfx-dr", hover: "gif-gfx-dh" } },
     },
     actionSprites: {
       roll: { nativeSize: [44, 78], rest: "gif-roll-r", hover: "gif-roll-h", pressed: "gif-roll-p", disabled: "gif-roll-d" },

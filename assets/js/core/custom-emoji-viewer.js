@@ -1,75 +1,63 @@
-// One presentation overlay per document, shared by all chat channels.
+// One in-message expansion per document, shared by all chat channels.
 const viewers = new WeakMap();
 
 export function installCustomEmojiViewer(doc = document) {
   const existing = viewers.get(doc);
   if (existing) { existing.users++; return () => release(doc, existing); }
-  const state = { users: 1, dialog: null, restoreFocus: null };
-  const close = () => {
-    const dialog = state.dialog;
-    if (!dialog) return;
-    state.dialog = null;
-    dialog.close();
-    dialog.remove();
-    state.restoreFocus?.();
-    state.restoreFocus = null;
+  const state = { users: 1, active: null };
+  const mark = (image, expanded) => {
+    image.classList.toggle('chat-custom-emoji-expanded', expanded);
+    image.setAttribute('aria-expanded', String(expanded));
+    image.setAttribute('aria-label', `${expanded ? 'Collapse' : 'View full-size'} ${image.alt || 'custom emoji'}`);
   };
-  const open = trigger => {
-    if (state.dialog) return;
-    const dialog = doc.createElement('dialog');
-    dialog.className = 'custom-emoji-viewer';
-    dialog.tabIndex = -1;
-    dialog.setAttribute('aria-label', `Full-size emoji ${trigger.alt || ''}`);
-    const content = doc.createElement('div');
-    content.className = 'custom-emoji-viewer-content';
-    const image = doc.createElement('img');
-    image.src = trigger.currentSrc || trigger.src;
-    image.alt = trigger.alt || 'Custom emoji';
-    image.className = 'custom-emoji-viewer-image';
-    const hint = doc.createElement('p');
-    hint.className = 'custom-emoji-viewer-hint';
-    hint.textContent = 'Click anywhere or press Escape to close';
-    const button = doc.createElement('button');
-    button.type = 'button';
-    button.className = 'btn';
-    button.textContent = 'Close';
-    content.append(image, hint, button);
-    dialog.append(content);
-    dialog.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-    });
-    dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-    image.addEventListener('error', () => { hint.textContent = 'Image unavailable. Click anywhere or press Escape to close'; });
-    const row = trigger.closest('[data-message-id]');
-    const container = row?.parentElement;
-    const index = row ? [...row.querySelectorAll('img.chat-custom-emoji')].indexOf(trigger) : -1;
-    state.restoreFocus = () => {
-      // Polling may replace the message row while its preview is open.
-      const currentRow = row && [...(container?.children || [])].find(item => item.dataset.messageId === row.dataset.messageId);
-      const replacement = currentRow?.querySelectorAll('img.chat-custom-emoji')[index];
-      const target = trigger.isConnected ? trigger : replacement || doc.getElementById('chat-input');
-      target?.focus({ preventScroll: true });
-    };
-    state.dialog = dialog;
-    doc.body.append(dialog);
-    dialog.showModal();
-    // Keep the opening Space key from activating a newly focused Close button.
-    dialog.focus({ preventScroll: true });
+  const close = () => {
+    if (state.active) mark(state.active.image, false);
+    state.active = null;
+    observer.disconnect();
+  };
+  // Polling can replace a row. Keep the expansion attached to its message,
+  // never recreate it elsewhere in the page or follow it into another channel.
+  const observer = new MutationObserver(() => {
+    const active = state.active;
+    if (!active || active.image.isConnected) return;
+    const row = [...(active.container?.children || [])].find(item => item.dataset.messageId === active.messageId);
+    const replacement = row?.querySelectorAll('img.chat-custom-emoji')[active.index];
+    if (!replacement || replacement.src !== active.src) { close(); return; }
+    active.image = replacement;
+    mark(replacement, true);
+  });
+  const open = image => {
+    const row = image.closest('[data-message-id]');
+    state.active = { image, src: image.src, container: row?.parentElement,
+      messageId: row?.dataset.messageId,
+      index: row ? [...row.querySelectorAll('img.chat-custom-emoji')].indexOf(image) : -1 };
+    mark(image, true);
+    observer.observe(doc.body, { childList: true, subtree: true });
   };
   state.click = event => {
-    const trigger = event.target.closest?.('img.chat-custom-emoji');
-    if (!trigger || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    if (event.button !== 0) return;
+    const image = event.target.closest?.('img.chat-custom-emoji');
+    const wasActive = image && image === state.active?.image;
+    close();
+    if (!image || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     event.preventDefault();
     event.stopPropagation();
-    open(trigger);
+    if (!wasActive) open(image);
   };
   state.keydown = event => {
+    if (event.key === 'Escape' && state.active) {
+      event.preventDefault();
+      const image = state.active.image;
+      close();
+      image.focus({ preventScroll: true });
+      return;
+    }
     if (!['Enter', ' '].includes(event.key) || !event.target.matches?.('img.chat-custom-emoji')) return;
     event.preventDefault();
     event.stopPropagation();
-    open(event.target);
+    const wasActive = event.target === state.active?.image;
+    close();
+    if (!wasActive) open(event.target);
   };
   state.close = close;
   doc.addEventListener('click', state.click, true);

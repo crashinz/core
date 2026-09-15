@@ -93,8 +93,8 @@
     "files": {
       "includes/spades_extension.php": "82bebbdea71642e0502777662de026395cf1d962b38d0a5984bb1b29fc5aa499",
       "includes/spades_bot_support.php": "fdcf75704da109d5a8ee06acbd5bc656c75af4c33561ab1f57b5397e55aa8a3f",
-      "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
-      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "games/ocx-extension-game.css": "7a351c2a05d91d966364b8f7e2365209021a584c8056206eca3f0345c251d9e1",
+      "games/classic-source-maps.js": "6ff02254d0656a06cbf7f509cb4ef581215da5ce27c579fe26a68670c580d881",
       "assets/images/spades-first-party-icon.svg": "d43407d564236de33c78261b829cde931c6e02504e49f4c975cd9104d825a828",
       "assets/audio/built-in-games/ui-select.ogg": "aec0c31ea934a35936ae0d2ab8fac8123c93aa5647f935853a58dbaf90278b7a",
       "assets/audio/built-in-games/game-success.ogg": "33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c",
@@ -116,8 +116,8 @@
       "assets/images/spades-modern/joker-little.svg": "440743d19c6084774094183bd6ed26d9fde77d941f51ede6cc5ced104e0e3f67",
       "assets/images/spades-modern/joker-big.svg": "a42199b120d87380d66625cb7ae9298d1eed10f2e90a34bacfa2ac0a4b11645b",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "f9210a9e90f058d1e220c4a47c2698d762ecb100e2b9bae96780982328baa0ea",
-      "games/spades-first-party/index.html": "3c619f7175b78ac63fda3add06165cd6545a9fc29718b527990feae3a977e76c",
+      "games/ocx-extension-game.js": "00749f73799490f1c0950abb68de42d4837cce3aa7b6ce92b80625dab7f86524",
+      "games/spades-first-party/index.html": "977d17a017f27f2c8e707f9f5ab0541ea29ddcb865f55e5c6b7eaa7190552fc7",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/spades_bot_endgame_support.php": "608657cf5d18490bd64b45646815a4ea82465aa0276db5b2214f4677bcfdc447"
     }

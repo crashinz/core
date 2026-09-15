@@ -86,10 +86,10 @@
       "assets/images/nested-four-first-party-icon.svg": "71bc36278c03d09be075b0784af0c7a113f57338aecbc5fc2c4b69988c82604f",
       "games/nested-four-first-party/style.css": "4094cd7c340e5ec37e693f629d462c4bda2a4092cf4c47e9eae01fddcf218536",
       "games/nested-four-first-party/app.js": "f3b910b2a946abfe3302b6a42f67d50b8c9c46bf7ba50d63c65b2c5e2d6582c8",
-      "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
+      "games/ocx-extension-game.css": "7a351c2a05d91d966364b8f7e2365209021a584c8056206eca3f0345c251d9e1",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "f9210a9e90f058d1e220c4a47c2698d762ecb100e2b9bae96780982328baa0ea",
-      "games/nested-four-first-party/index.html": "847ebc60eed3a0615d9169161fd22958136b48bc4770f89e00977807e6b53df5",
+      "games/ocx-extension-game.js": "00749f73799490f1c0950abb68de42d4837cce3aa7b6ce92b80625dab7f86524",
+      "games/nested-four-first-party/index.html": "0bb218455b4b91725c630d89dfd48ae7dba455a88ca2a0e832ed322ecd8ab96c",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

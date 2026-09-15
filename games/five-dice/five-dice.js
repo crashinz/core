@@ -1,4 +1,4 @@
-import { classicSourceMap } from "../classic-source-maps.js?v=1e1478bc";
+import { classicSourceMap } from "../classic-source-maps.js?v=6ff02254d065";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "../viewport-height-fit.js?v=c2557c225fbc";
 
 import { bindGameAvatar } from "../game-avatar.js?v=20260913-room-avatars";
@@ -34,6 +34,10 @@ let options = null;
 let optionsMutationRevision = 0;
 let optionsSaveTail = Promise.resolve();
 let records = null;
+let recordsRequest = null;
+let recordsScope = "";
+let recordsCompletionKey = "";
+let recordsError = "";
 let busy = false;
 let actionFailureStatusMessage = "";
 let pollTimer = 0;
@@ -328,10 +332,58 @@ async function getRecords() {
     action: "records", session_id: context.sessionId, participant_id: String(context.participantId),
     join_token: context.joinToken, game_key: "g_4f8c2d71"
   });
-  const response = await fetch(`../../api/game_framework.php?${query}`, { cache: "no-store", credentials: "same-origin" });
+  const response = await gameFetch(`../../api/game_framework.php?${query}`, { cache: "no-store", credentials: "same-origin" });
   const data = await readJsonResponse(response, "Recorded results are unavailable.");
   if (!response.ok) throw new Error(data.error || "Recorded results are unavailable.");
   return data;
+}
+
+function fiveDiceRecordsCompletionKey() {
+  return session?.state?.completed ? `${activeGameSessionId}:${session.stateVersion}` : "";
+}
+
+function refreshFiveDiceRecords({ force = false } = {}) {
+  if (terminalSessionError || !session) return Promise.resolve(null);
+  const scope = activeGameSessionId;
+  if (recordsScope !== scope) {
+    recordsScope = scope;
+    records = null;
+    recordsRequest = null;
+    recordsCompletionKey = "";
+    recordsError = "";
+  }
+  const completionKey = fiveDiceRecordsCompletionKey();
+  if (recordsRequest?.scope === scope && recordsRequest.completionKey === completionKey) return recordsRequest.promise;
+  if (!force && records && recordsCompletionKey === completionKey) return Promise.resolve(records);
+  const request = { scope, completionKey, promise: null };
+  recordsRequest = request;
+  recordsError = "";
+  renderRecords();
+  const ownsResponse = () => !terminalSessionError && recordsRequest === request
+    && activeGameSessionId === scope && recordsScope === scope
+    && fiveDiceRecordsCompletionKey() === completionKey;
+  request.promise = (async () => {
+    try {
+      const next = await getRecords();
+      if (!ownsResponse()) return null;
+      if (next?.gameKey !== "g_4f8c2d71" || !next.lifetime || Array.isArray(next.lifetime)
+        || !["win", "loss", "draw", "recorded"].every(key => Number.isInteger(next.lifetime[key]) && next.lifetime[key] >= 0)) {
+        throw new Error("Invalid recorded results");
+      }
+      records = next;
+      recordsCompletionKey = completionKey;
+      return next;
+    } catch {
+      if (ownsResponse()) recordsError = "Recorded results could not be refreshed. Last loaded totals may be out of date; reopen this panel to retry.";
+      return null;
+    } finally {
+      if (recordsRequest === request) {
+        recordsRequest = null;
+        if (!terminalSessionError && activeGameSessionId === scope) renderRecords();
+      }
+    }
+  })();
+  return request.promise;
 }
 
 async function saveOptions(nextOptions) {
@@ -528,6 +580,13 @@ function replaceSession(nextSession) {
     settingsDraft = null;
     settingsDraftSha256 = "";
   }
+  if (before && before.publicId !== nextSession.publicId) {
+    records = null;
+    recordsRequest = null;
+    recordsScope = "";
+    recordsCompletionKey = "";
+    recordsError = "";
+  }
   session = nextSession;
   sessionProjectedAtMs = Date.now();
   observeSessionTransition(before, session);
@@ -650,16 +709,21 @@ async function runAction(actionType, payload = {}) {
   }
 }
 
+function fiveDiceVisualFxEnabled() {
+  const choice = options?.categories?.gfxEnabled;
+  return typeof choice === "boolean" ? choice : !matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 async function roll() {
   if (!canCurrentViewerRoll()) return;
   clearActionFailure();
   const expectedVersion = Number(session.stateVersion);
   busy = true;
   const classic = session.presentation?.effectivePack === "classic";
-  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const gfxEnabled = options?.categories?.gfxEnabled !== false;
+  const reducedMotion = options?.categories?.gfxEnabled !== true && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const gfxEnabled = fiveDiceVisualFxEnabled();
   const musicEnabled = options?.musicEnabled === true;
-  const diceMotionEnabled = gfxEnabled && !reducedMotion;
+  const diceMotionEnabled = gfxEnabled;
   const drumMotionEnabled = (classic ? musicEnabled : gfxEnabled) && !reducedMotion;
   let animationStartedAt = null;
   setFiveDiceActionPendingPresentation(true);
@@ -1804,7 +1868,7 @@ function renderGameOptions() {
   el("accept-game-options").textContent = viewer?.accepted ? "Current Game Options accepted" : "Accept current Game Options";
   const legacyEffectsOn = options?.effectsEnabled !== false;
   const soundOn = options?.categories?.sfxEnabled ?? legacyEffectsOn;
-  const visualOn = options?.categories?.gfxEnabled !== false;
+  const visualOn = fiveDiceVisualFxEnabled();
   el("game-options-sound-fx-toggle").textContent = soundOn ? "On" : "Off";
   el("game-options-sound-fx-toggle").setAttribute("aria-pressed", soundOn ? "true" : "false");
   el("game-options-visual-fx-toggle").textContent = visualOn ? "On" : "Off";
@@ -1879,12 +1943,13 @@ function canCurrentViewerRequestNewGame() {
 }
 
 function renderMediaControls(canRoll = canCurrentViewerRoll()) {
+  document.body.dataset.visualFx = fiveDiceVisualFxEnabled() ? "on" : "off";
   if (terminalSessionError) return;
 
   const legacyEffectsOn = options?.effectsEnabled !== false;
   const soundOn = options?.categories?.sfxEnabled ?? legacyEffectsOn;
   const musicOn = options?.musicEnabled === true;
-  const gfxOn = options?.categories?.gfxEnabled !== false;
+  const gfxOn = fiveDiceVisualFxEnabled();
   el("game-options-sound-fx-toggle").textContent = soundOn ? "On" : "Off";
   el("game-options-sound-fx-toggle").setAttribute("aria-pressed", soundOn ? "true" : "false");
   el("game-options-visual-fx-toggle").textContent = gfxOn ? "On" : "Off";
@@ -2051,6 +2116,9 @@ function recordSummary(entry = {}) {
 function renderRecords() {
   if (terminalSessionError) return;
 
+  const status = el("records-status");
+  status.textContent = recordsError || (recordsRequest ? "Loading recorded results…" : "");
+  status.hidden = !status.textContent;
   const opponentSelect = el("record-opponent");
   const previous = opponentSelect.value;
   const opponents = Array.isArray(records?.opponents) ? records.opponents : [];
@@ -2063,7 +2131,7 @@ function renderRecords() {
   if (opponents.length === 0) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No Recorded opponents yet";
+    option.textContent = records ? "No opponents yet" : recordsRequest ? "Loading…" : "Unavailable";
     opponentSelect.append(option);
     opponentSelect.disabled = true;
   } else {
@@ -2071,8 +2139,8 @@ function renderRecords() {
     if ([...opponentSelect.options].some(option => option.value === previous)) opponentSelect.value = previous;
   }
   const selected = opponents.find(opponent => String(opponent.userId || opponent.opponentUserId || "") === opponentSelect.value) || opponents[0] || {};
-  el("opponent-record").textContent = recordSummary(selected);
-  el("lifetime-record").textContent = recordSummary(records?.lifetime || {});
+  el("opponent-record").textContent = records ? recordSummary(selected) : "Not loaded";
+  el("lifetime-record").textContent = records ? recordSummary(records.lifetime) : "Not loaded";
 }
 
 function renderScoreRecordsVisibility(scheduleCue = true) {
@@ -2128,7 +2196,7 @@ function renderAccessibility() {
   heading.id = "accessibility-panel-heading";
   heading.textContent = "Accessibility";
   const intro = document.createElement("p");
-  intro.textContent = "Keyboard commands act on the control that currently has focus; there are no hidden letter-key shortcuts.";
+  intro.textContent = "Keyboard commands act on the control that currently has focus; there are no hidden letter-key shortcuts. GFX follows your device motion preference until you choose On or Off for this game.";
   const guidance = [
     ["Move focus", "Press Tab to move forward and Shift+Tab to move backward through available controls."],
     ["Activate", "Press Enter or Space to use the focused button, die, scoring category, or game action."],
@@ -2598,8 +2666,7 @@ function renderBuiltInMotionState(state, displayName) {
 
   const board = el("play-surface");
   const classic = session?.presentation?.effectivePack === "classic";
-  const visualFx = options?.categories?.gfxEnabled !== false
-    && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const visualFx = fiveDiceVisualFxEnabled();
   const sessionKey = `${String(session?.publicId || activeGameSessionId)}:${String(session?.startedAt || "")}`;
   if (!classic && String(session?.status || "") === "active" && !state.completed && builtInOpeningKey !== sessionKey) {
     builtInOpeningKey = sessionKey;
@@ -2784,6 +2851,7 @@ function fiveDiceMinimumScoreTargetScale(artboard) {
 }
 
 function render() {
+  document.body.dataset.visualFx = fiveDiceVisualFxEnabled() ? "on" : "off";
   if (terminalSessionError) return;
 
   if (!session) return;
@@ -3021,7 +3089,7 @@ async function toggleViewerCategory(key, label, fallback = true) {
   if (!options) return;
   const previous = options;
   const categories = { ...(options.categories || {}) };
-  const current = typeof categories[key] === "boolean" ? categories[key] : fallback;
+  const current = key === "gfxEnabled" ? fiveDiceVisualFxEnabled() : typeof categories[key] === "boolean" ? categories[key] : fallback;
   categories[key] = !current;
   options = { ...options, categories };
   renderMediaControls();
@@ -3161,7 +3229,10 @@ el("score-records-toggle").addEventListener("click", () => {
   scoreRecordsVisible = !scoreRecordsVisible;
   renderScoreRecordsVisibility();
   fiveDiceScoreLayoutCleanup?.visibilityChanged?.();
-  if (scoreRecordsVisible) el("score-records").focus({ preventScroll: true });
+  if (scoreRecordsVisible) {
+    el("score-records").focus({ preventScroll: true });
+    void refreshFiveDiceRecords({ force: true });
+  }
 });
 el("game-options-toggle").addEventListener("click", () => {
   gameOptionsVisible = !gameOptionsVisible;
@@ -3198,16 +3269,15 @@ async function refresh() {
     if (gameSurfaceVisible === false || documentVisible === false || document.hidden) return;
     const previousSessionIdentity = stableFiveDiceRenderIdentity(session);
     const previousOptionsIdentity = stableFiveDiceRenderIdentity(options);
-    const previousRecordsIdentity = stableFiveDiceRenderIdentity(records);
     const refreshRecords = records === null || refreshCount % 10 === 0;
-    const [nextSession,nextOptions,nextRecords] = await Promise.all([getSession(),options ? Promise.resolve(options) : getOptions(),refreshRecords ? getRecords() : Promise.resolve(records)]);
+    const [nextSession,nextOptions] = await Promise.all([getSession(),options ? Promise.resolve(options) : getOptions()]);
     if (terminalSessionError || requestGameId !== activeGameSessionId) return;
-    replaceSession(nextSession); options=nextOptions; records=nextRecords; refreshCount++;
+    replaceSession(nextSession); options=nextOptions; refreshCount++;
+    void refreshFiveDiceRecords({ force: refreshRecords });
     await reconnectVisibleFiveDiceSession();
     if (terminalSessionError || requestGameId !== activeGameSessionId) return;
     const renderRequired = previousSessionIdentity !== stableFiveDiceRenderIdentity(session)
-      || previousOptionsIdentity !== stableFiveDiceRenderIdentity(options)
-      || previousRecordsIdentity !== stableFiveDiceRenderIdentity(records);
+      || previousOptionsIdentity !== stableFiveDiceRenderIdentity(options);
     clearLoadError();
     if (renderRequired) render();
     else document.body.dataset.lastSuppressedBoardStateVersion = String(session?.stateVersion || 0);

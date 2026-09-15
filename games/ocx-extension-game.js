@@ -2,7 +2,7 @@ import { createCardBotController } from "./uno-bot-controller.js?v=d1c32d65552f"
 import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=65d896c667ff";
 import { createCheckersBotController } from "./checkers-bot-controller.js?v=729241a2b45b";
 import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
-import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=c49eea58cd30";
+import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=6ff02254d065";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=c2557c225fbc";
 
 import { bindGameAvatar } from "./game-avatar.js?v=20260913-room-avatars";
@@ -294,7 +294,9 @@ function fitClassicAssetToSourcePixels(image, sourceBox, anchor = "center") {
 function classicDestinationCue(slot, className, sourceBox, anchor = "center") {
   const cue = document.createElement("img");
   const privateSlot = /^gif-/.test(slot);
-  cue.src = privateSlot ? mediaUrl(slot) : appUrl(slot);
+  // Source-map assets are relative to the game entry, including its ../../.
+  // Applying appUrl as well would strip a deployment prefix such as /core/.
+  cue.src = privateSlot ? mediaUrl(slot) : new URL(slot, window.location.href).href;
   cue.alt = "";
   cue.decoding = "async";
   cue.draggable = false;
@@ -420,7 +422,7 @@ function memberAvatar(member, className = "") {
   image.className = className;
   const fallbackUrl = appMediaUrl(member?.avatarFallbackUrl) || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='32' fill='%230f2e33'/%3E%3Ccircle cx='32' cy='23' r='11' fill='%23808f97'/%3E%3Cpath d='M17 54c0-10 9-17 15-17s15 7 15 17' fill='%23808f97'/%3E%3C/svg%3E";
   image.alt = "";
-  image.decoding = "async";
+  image.decoding = "sync";
   bindGameAvatar(image, { ...member, avatarFallbackUrl: fallbackUrl });
   return image;
 }
@@ -707,7 +709,7 @@ async function readGameResponseJson(response) {
 
 async function apiGet(action, extra = {}) {
   if (terminalSessionError) throw terminalSessionError;
-  return withLoopbackRequestLock(async () => {
+  const request = async () => {
     if (terminalSessionError) throw terminalSessionError;
     const query = new URLSearchParams({
       action, session_id: context.sessionId, participant_id: String(context.participantId),
@@ -724,7 +726,9 @@ async function apiGet(action, extra = {}) {
       throw error;
     }
     return data;
-  });
+  };
+  // Records must not occupy the local gameplay request queue either.
+  return action === "records" ? request() : withLoopbackRequestLock(request);
 }
 
 async function apiPost(action, body = {}, requestOptions = {}) {
@@ -1430,7 +1434,10 @@ function squareBoardAriaLabel(gameName) {
 
 function optionCategory(key, fallback = true) {
   const value = options?.categories?.[key];
-  return typeof value === "boolean" ? value : fallback;
+  // A saved game choice takes precedence; the device preference is the default.
+  if (typeof value === "boolean") return value;
+  if (key === "visualFxEnabled") return fallback && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return fallback;
 }
 
 async function toggleOptionCategory(key, fallback = true) {
@@ -1665,40 +1672,39 @@ function mediaImage(slot, className = "", alt = "") {
   image.src = mediaUrl(slot);
   image.className = className;
   image.alt = alt;
-  image.decoding = "async";
+  image.decoding = "sync";
   image.draggable = false;
   image.addEventListener("load", () => trace("image-loaded", slot, { width: image.naturalWidth, height: image.naturalHeight }));
   image.addEventListener("error", () => trace("image-unavailable", slot));
   return image;
 }
 
+let classicDiePaintId = 0;
 function pointGameClassicDie(value) {
-  const slot = `gif-dice${value}`;
-  const scale = classicBoardScale();
-  const crispAssetPrefix = new Map([
-    ["acey-deucy", "acey-deucy"],
-    ["backgammon-first-party", "backgammon"],
-  ]).get(context.extensionId);
-  const crispSizeByScale = new Map([
-    [1.25, 25],
-    [1.5, 30],
-    [1.75, 35],
-    [2, 40],
-  ]);
-  const crispSize = crispSizeByScale.get(scale);
   const face = Math.max(1, Math.min(6, Math.trunc(Number(value) || 1)));
-  if (!crispAssetPrefix || !crispSize) {
-    return mediaImage(slot, "classic-die", `Die ${face}`);
+  if (!["acey-deucy", "backgammon-first-party"].includes(context.extensionId)) {
+    return mediaImage(`gif-dice${face}`, "classic-die", `Die ${face}`);
   }
-  const die = make("span", "classic-die classic-crisp-die");
+  // Every value uses the same rounded body and shaded sides. Mixing a new
+  // six with the legacy faces made the two dice look like different sets.
+  const acey = context.extensionId === "acey-deucy";
+  const die = make("span", `classic-die classic-vector-die${face === 6 ? " classic-six-die" : ""}`);
   die.setAttribute("role", "img");
   die.setAttribute("aria-label", `Die ${face}`);
-  die.style.backgroundImage = `url("${appUrl(`assets/images/${crispAssetPrefix}-dice-crisp-${crispSize}.png`)}")`;
-  die.style.backgroundRepeat = "no-repeat";
-  die.style.backgroundSize = "600% 100%";
-  die.style.backgroundPosition = `${(face - 1) * 20}% 0`;
   die.dataset.dieFace = String(face);
-  die.dataset.crispAssetSize = `${crispSize}x${crispSize}`;
+  const colors = acey
+    ? { paper:"#eff2d8", rim:"#74805a", side:"#849367", bottom:"#596944", ink:"#1f2d19" }
+    : { paper:"#f7f8f1", rim:"#a2a79f", side:"#b1b7ad", bottom:"#7d857a", ink:"#1f2220" };
+  const pipPositions = {
+    1:[[9,9]],
+    2:[[5.8,5.8],[12.2,12.2]],
+    3:[[5.8,5.8],[9,9],[12.2,12.2]],
+    4:[[5.8,5.8],[12.2,5.8],[5.8,12.2],[12.2,12.2]],
+    5:[[5.8,5.8],[12.2,5.8],[9,9],[5.8,12.2],[12.2,12.2]],
+    6:[[5.8,5.3],[12.2,5.3],[5.8,9],[12.2,9],[5.8,12.7],[12.2,12.7]],
+  }[face];
+  const paintId = `classic-die-face-${++classicDiePaintId}`;
+  die.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="100%" height="100%" aria-hidden="true" focusable="false"><defs><linearGradient id="${paintId}" x2=".8" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="${colors.paper}"/></linearGradient></defs><path fill="#182017" opacity=".35" d="M3 16q7-1 15 0l1 2q-7 2-15 0z"/><path fill="${colors.side}" stroke="${colors.bottom}" stroke-width=".6" d="M14 2.5l3.5 2.7q.6.5.6 1.5v9q0 1-.8 1.4L14 18z"/><path fill="${colors.bottom}" d="M3.2 14.5l2.5 3.2q.4.5 1.5.5h8q1.1 0 2.1-1.1l-2.2-2.6z"/><rect x="2" y="2" width="14" height="14" rx="2.2" fill="url(#${paintId})" stroke="${colors.rim}" stroke-width=".7"/><path d="M3.2 6V4.5q0-1.3 1.4-1.3H13" fill="none" stroke="#ffffff" stroke-width=".7" opacity=".95"/><g fill="${colors.ink}" stroke="${colors.bottom}" stroke-width=".18">${pipPositions.map(([x,y]) => `<circle cx="${x}" cy="${y}" r="1.3"/>`).join("")}</g></svg>`;
   return die;
 }
 
@@ -1723,7 +1729,7 @@ function ensureClassicMotionMediaReady() {
     if (classicMotionMediaPreloads.has(slot)) return classicMotionMediaPreloads.get(slot).ready;
     const image = document.createElement("img");
     image.alt = "";
-    image.decoding = "async";
+    image.decoding = "sync";
     const ready = new Promise((resolve, reject) => {
       image.addEventListener("load", resolve, { once: true });
       image.addEventListener("error", () => reject(new Error(`Classic motion media ${slot} could not be loaded.`)), { once: true });
@@ -1816,6 +1822,37 @@ function sourceControlSlot(definition, enabled, highlighted = false) {
   return highlighted ? state.hover : state.rest;
 }
 
+const classicControlImages = new Map();
+function showClassicControlImage(button, image, slot, nativeSize) {
+  image.dataset.requestedSlot = slot;
+  button.dataset.hotspotReady = "pending";
+  const url = mediaUrl(slot);
+  let ready = classicControlImages.get(url);
+  if (!ready) {
+    ready = new Promise(resolve => {
+      const preload = new Image();
+      preload.onload = () => resolve(preload);
+      preload.onerror = () => { classicControlImages.delete(url); resolve(null); };
+      preload.src = url;
+    });
+    classicControlImages.set(url, ready);
+  }
+  ready.then(preload => {
+    if (image.dataset.requestedSlot !== slot) return;
+    const matched = preload && (!nativeSize || (preload.naturalWidth === Number(nativeSize[0]) && preload.naturalHeight === Number(nativeSize[1])));
+    if (!matched) {
+      button.dataset.hotspotReady = "false";
+      trace("image-unavailable", slot);
+      syncSeparateControlVisibility();
+      return;
+    }
+    image.decoding = "sync";
+    image.src = url;
+    image.dataset.slot = slot;
+    button.dataset.hotspotReady = "true";
+  });
+}
+
 function setSourceControlImage(button, highlighted = false) {
   const definition = button.__sourceControlDefinition;
   const image = button.querySelector(".classic-source-control-art");
@@ -1824,7 +1861,7 @@ function setSourceControlImage(button, highlighted = false) {
   if (image.dataset.slot === slot) return;
   image.dataset.slot = slot;
   image.dataset.loaded = "false";
-  image.src = mediaUrl(slot);
+  showClassicControlImage(button, image, slot, definition.nativeSize);
   button.dataset.controlSlot = slot;
   button.dataset.hotspotReady = "pending";
 }
@@ -1844,7 +1881,7 @@ function appendClassicSourceControls(stage, gameId) {
     setSourceBox(button, geometry, source.canvas.width, source.canvas.height);
     const image = make("img", "classic-source-control-art");
     image.alt = "";
-    image.decoding = "async";
+    image.decoding = "sync";
     image.draggable = false;
     image.addEventListener("load", () => {
       const expected = Array.isArray(definition.nativeSize) ? definition.nativeSize.map(Number) : null;
@@ -1949,7 +1986,7 @@ function setSourceActionImage(button, state = "rest") {
   image.dataset.loaded = "false";
   button.dataset.hotspotReady = "pending";
   button.dataset.sourceAspectMatched = "false";
-  image.src = mediaUrl(slot);
+  showClassicControlImage(button, image, slot, definition.nativeSize);
   button.dataset.actionSlot = slot;
 }
 
@@ -1969,7 +2006,7 @@ function appendClassicSourceActions(stage, gameId) {
     setSourceBox(button, geometry, source.canvas.width, source.canvas.height);
     const image = make("img", "classic-source-action-art");
     image.alt = "";
-    image.decoding = "async";
+    image.decoding = "sync";
     image.draggable = false;
     image.addEventListener("load", () => {
       const expected = Array.isArray(definition.nativeSize) ? definition.nativeSize.map(Number) : null;
@@ -2075,6 +2112,7 @@ function motionLength(gameId, type) {
     + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (type === "point-hit") return pointHitMotionLength(source.hitToBar)
     + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
+  if (type === "backgammon-dice-roll") return 1467 + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (type === "point-no-legal-move") return Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (["backgammon-win", "acey-deucy-win"].includes(type)) {
     return Number(pendingClassicMotion?.leadDurationMs || 0) + source.win.durationMs;
@@ -2270,6 +2308,20 @@ function isCheckersDecisiveTerminalReason(reason) {
     .includes(String(reason || "").toLowerCase());
 }
 
+function backgammonRolledDice(before, after) {
+  if ((after.history || []).length !== (before.history || []).length) return null;
+  const opening = (after.openingRollAttempts || []).length > (before.openingRollAttempts || []).length;
+  const blocked = after.lastNoLegalMove || after.lastBlockedRoll;
+  const newBlocked = blocked && JSON.stringify(blocked) !== JSON.stringify(before.lastNoLegalMove || before.lastBlockedRoll);
+  const rolled = before.backgammonStage === "roll"
+    && (after.backgammonStage !== "roll" || (after.remainingDice || []).length > 0 || newBlocked);
+  if (!opening && !rolled) return null;
+  const dice = opening ? Object.values(after.openingRollAttempts.at(-1).rolls || {})
+    : newBlocked ? blocked.dice : after.dice;
+  return Array.isArray(dice) && dice.length === 2 && dice.every(value => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 6)
+    ? dice.map(Number) : null;
+}
+
 function classifyClassicMotion(previous, current) {
   if (!previous || !current || Number(previous.stateVersion) === Number(current.stateVersion)) return null;
   const before = previous.state || {};
@@ -2328,6 +2380,12 @@ function classifyClassicMotion(previous, current) {
         move,
         ...(changedNoLegalMove ? { noLegalMove } : {}),
       };
+    }
+    const rolledDice = context.extensionId === "backgammon-first-party" ? backgammonRolledDice(before, after) : null;
+    if (rolledDice) {
+      const blocked = after.lastNoLegalMove || after.lastBlockedRoll || null;
+      const changedBlocked = blocked && JSON.stringify(blocked) !== JSON.stringify(before.lastNoLegalMove || before.lastBlockedRoll || null);
+      return { ...base, type: "backgammon-dice-roll", dice: rolledDice, ...(changedBlocked ? { noLegalMove: blocked } : {}) };
     }
     const actor = Number(previous.turnUserId || 0);
     const noLegalMove = after.lastNoLegalMove || after.lastBlockedRoll || null;
@@ -2600,7 +2658,7 @@ function syncClassicAnimation() {
   }
   const duration = motionLength(pendingClassicMotion.gameId, pendingClassicMotion.type);
   if (!duration || classicAnimationTimer) return;
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = !optionCategory("visualFxEnabled", true) && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const enabled = optionCategory("visualFxEnabled", true) && !reduced;
   trace(enabled ? "classic-animation-started" : "classic-animation-suppressed", null, {
     type: pendingClassicMotion.type, durationMs: enabled ? duration : 0,
@@ -3742,7 +3800,7 @@ function renderAccessibility() {
   heading.id = "accessibility-panel-heading";
   panel.append(
     heading,
-    make("p", "", "Keyboard commands act on the control that currently has focus; there are no hidden letter-key shortcuts."),
+    make("p", "", "Keyboard commands act on the control that currently has focus; there are no hidden letter-key shortcuts. Visual FX follows your device motion preference until you choose On or Off for this game."),
   );
   const list = make("dl");
   const guidance = [
@@ -3821,7 +3879,7 @@ function refreshGameRecords({ force = false } = {}) {
       recordsTerminalKey = completionKey;
       return next;
     } catch (error) {
-      if (!ownsResponse() || endUnavailableSession(error)) return null;
+      if (!ownsResponse()) return null;
       recordsError = "Recorded results could not be refreshed. Last loaded totals may be out of date; reopen this panel to retry.";
       trace("records-refresh-unavailable", null, { errorName: String(error?.name || "Error") });
       return null;
@@ -5487,8 +5545,7 @@ function appendPersistedClassicTerminal(stage, gameId) {
 
 function appendClassicMotion(stage, gameId) {
   const motion = pendingClassicMotion;
-  if (!motion || motion.gameId !== gameId || !optionCategory("visualFxEnabled", true)
-    || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (!motion || motion.gameId !== gameId || !optionCategory("visualFxEnabled", true)) return;
   const source = classicSourceMap(gameId);
   const elapsed = performance.now() - motion.startedAt;
   if (elapsed >= motionLength(gameId, motion.type)) return;
@@ -5523,6 +5580,33 @@ function appendClassicMotion(stage, gameId) {
     return;
   }
 
+  if (motion.type === "backgammon-dice-roll") {
+    const duration = 1467;
+    if (elapsed < duration) {
+      stage.querySelector(".classic-dice")?.setAttribute("data-rolling", "true");
+      const layer = make("div", "classic-point-dice-roll");
+      layer.setAttribute("aria-hidden", "true");
+      // Measured original OCX sequence: enter from the right, travel left,
+      // rebound, then settle (owner recording 19-17-56, frames 348-392).
+      const path = [[0, 399, 155, -180], [.25, 197, 173, -540], [.48, 246, 148, -850], [.7, 286, 157, -1040], [.87, 314, 150, -1120], [1, 303, 157, -1080]];
+      for (const [index, value] of motion.dice.entries()) {
+        const die = pointGameClassicDie(value);
+        const destination = source.diceSlots[index];
+        setSourceBox(die, destination, source.canvas.width, source.canvas.height);
+        layer.append(die);
+        const dx = destination.x - 303, dy = destination.y - 157;
+        const frames = path.map(([offset, x, y, angle]) => ({ offset,
+          left: `${(x + dx) / source.canvas.width * 100}%`,
+          top: `${(y + dy) / source.canvas.height * 100}%`,
+          transform: `rotate(${angle}deg)` }));
+        const animation = die.animate(frames, { duration, easing: "linear", fill: "both" });
+        animation.currentTime = elapsed;
+      }
+      stage.append(layer);
+    }
+    if (motion.noLegalMove) appendPointNoLegalMotion(stage, gameId, motion.noLegalMove, elapsed, duration);
+    return;
+  }
   if (motion.type === "point-no-legal-move") {
     appendPointNoLegalMotion(stage, gameId, motion.noLegalMove, elapsed);
     return;
@@ -6626,7 +6710,7 @@ function renderPointGame(gameId) {
   const configurePointDestinationCueHost = (button, geometry) => {
     const natural = source.destinationCueNaturalSize;
     const hotspot = source.destinationCueHotspot;
-    button.style.setProperty("--point-destination-cue", `url("${appUrl(source.destinationCueAsset)}")`);
+    button.style.setProperty("--point-destination-cue", `url("${new URL(source.destinationCueAsset, window.location.href).href}")`);
     button.style.setProperty("--point-destination-cue-width", `${(Number(natural.width) / Number(geometry.width)) * 100}%`);
     button.style.setProperty("--point-destination-cue-hotspot-x", `${(Number(hotspot.x) / Number(natural.width)) * -100}%`);
     button.style.setProperty("--point-destination-cue-hotspot-y", `${(Number(hotspot.y) / Number(natural.height)) * -100}%`);
@@ -6827,9 +6911,10 @@ function renderPointGame(gameId) {
     ));
   }
   if (!classic || !isAcey) {
-    const direction = make("div", `point-game-play-direction ${classic ? "is-classic" : "is-built-in"} is-role-${viewerSide}`);
+    const directionRole = classic ? (source.sourceRole === "role-2" ? 1 : 0) : viewerSide;
+    const direction = make("div", `point-game-play-direction ${classic ? "is-classic" : "is-built-in"} is-role-${directionRole}`);
     direction.setAttribute("role", "img");
-    direction.setAttribute("aria-label", viewerSide === 2
+    direction.setAttribute("aria-label", directionRole === 1
       ? "Direction of play: across the top row from right to left, then across the bottom row from left to right."
       : "Direction of play: across the top row from left to right, then across the bottom row from right to left.");
     direction.append(make("span", "sr-only", "Direction of play"));
@@ -6933,8 +7018,7 @@ function startBuiltInPointWinMotion(motion) {
 function appendBuiltInPointWinMotion(board) {
   const motion = pendingBuiltInPointWin;
   if (!motion || !board?.classList?.contains("built-in-point-board")) return;
-  const reduced = !optionCategory("visualFxEnabled", true)
-    || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = !optionCategory("visualFxEnabled", true);
   const overlay = make("div", `built-in-point-win is-player-${motion.winnerIndex + 1}${reduced ? " is-reduced" : ""}`);
   overlay.setAttribute("role", "status");
   overlay.setAttribute("aria-live", "polite");
@@ -7066,8 +7150,7 @@ function renderBattleGrid(ownerUserId, target) {
     }
     let persistedResult = null;
     if (classic && result && cellBox && gridGeometry) {
-      const shouldAnimate = optionCategory("visualFxEnabled", true)
-        && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const shouldAnimate = optionCategory("visualFxEnabled", true);
       if (result === "miss") {
         const markerDefinition = source.motion.impacts.marker;
         persistedResult = sourceStripFinalFrame(
@@ -7400,8 +7483,7 @@ function builtInBattleshipMotionForGrid(ownerUserId) {
   if (Number(motion.attack.targetUserId || 0) !== Number(ownerUserId)) return null;
   const duration = Number(BUILT_IN_MODERN_MOTION_MS[motion.type] || 0);
   const elapsed = Math.max(0, performance.now() - Number(motion.startedAt || performance.now()));
-  if (!duration || elapsed >= duration || !optionCategory("visualFxEnabled", true)
-    || matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
+  if (!duration || elapsed >= duration || !optionCategory("visualFxEnabled", true)) return null;
   return { ...motion, elapsed, duration };
 }
 
@@ -7495,7 +7577,7 @@ function appendBuiltInBattleshipResult(grid, opponentUserId, motion) {
   overlay.type = "button";
   overlay.setAttribute("aria-live", "assertive");
   overlay.setAttribute("aria-label", `${viewerWon ? "Victory" : "Defeat"}. ${viewerWon ? "Enemy" : "Your"} fleet destroyed. Dismiss result.`);
-  const visualFx = optionCategory("visualFxEnabled", true) && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const visualFx = optionCategory("visualFxEnabled", true);
   const waitMs = visualFx && motion
     ? Math.max(0, (viewerWon ? 23800 : 9700) - Number(motion.elapsed || 0))
     : 0;
@@ -7668,8 +7750,7 @@ function renderBattleship() {
     setSourceBox(target, source.grids.target, source.canvas.width, source.canvas.height);
     const activeTerminalMotion = pendingClassicMotion?.gameId === "battleship"
       && pendingClassicMotion?.type === "battleship-win"
-      && optionCategory("visualFxEnabled", true)
-      && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+      && optionCategory("visualFxEnabled", true);
     const terminalElapsed = activeTerminalMotion
       ? performance.now() - Number(pendingClassicMotion.startedAt || performance.now())
       : Number.POSITIVE_INFINITY;
@@ -8031,7 +8112,7 @@ function renderUnoCard(card, className = "", hidden = false) {
   cardUrl.searchParams.set("v", "20260826-uno-r3-cards");
   image.src = cardUrl.href;
   image.alt = hidden ? "Face-down card" : unoCardLabel(card);
-  image.decoding = "async";
+  image.decoding = "sync";
   image.draggable = false;
   node.append(image);
   return node;
@@ -8274,8 +8355,7 @@ function renderSpades() {
     if (Array.isArray(cards)) {
       const deferredMotion = pendingClassicMotion?.gameId === "spades"
         && pendingClassicMotion.type === "spades-card-play"
-        && optionCategory("visualFxEnabled", true)
-        && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+        && optionCategory("visualFxEnabled", true);
       const layoutCount = deferredMotion ? Number(pendingClassicMotion.fromCount || cards.length + 1) : cards.length;
       hand.dataset.compactionState = deferredMotion ? "deferred-until-card-settles" : "settled";
       for (const [cardIndex, card] of cards.entries()) {
@@ -9096,17 +9176,20 @@ function renderSurfaceOptions() {
   const soundLabel = "Sound FX";
   const sound = make("button", "", `${soundLabel} ${options?.effectsEnabled === false ? "Off" : "On"}`);
   sound.dataset.separateControl = "soundFx";
+  sound.hidden = true;
   sound.type="button"; sound.setAttribute("aria-pressed", options?.effectsEnabled === false ? "false" : "true");
   sound.addEventListener("click", () => toggleSound().catch(error => { el("status").textContent=error.message; })); soundHost.append(sound);
   if (musicSlot()) {
     const music = make("button", "", options?.musicEnabled === true ? "Music On" : "Music Off");
     music.dataset.separateControl = "music";
+    music.hidden = true;
     music.type = "button"; music.setAttribute("aria-pressed", options?.musicEnabled === true ? "true" : "false");
     music.addEventListener("click", () => toggleMusic().catch(error => { el("status").textContent=error.message; })); musicHost.append(music);
   }
   if (["checkers", "chess", "acey-deucy", "battleship", "backgammon-first-party", "spades"].includes(context.extensionId)) {
     const visual = make("button", "", `Visual FX ${optionCategory("visualFxEnabled", true) ? "On" : "Off"}`);
     visual.dataset.separateControl = "visualFx";
+    visual.hidden = true;
     visual.type = "button";
     visual.setAttribute("aria-pressed", optionCategory("visualFxEnabled", true) ? "true" : "false");
     visual.addEventListener("click", () => toggleOptionCategory("visualFxEnabled", true).catch(error => { el("status").textContent = error.message; }));
@@ -10353,11 +10436,11 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
       el("player-status-strip")?.insertAdjacentElement("afterend", panel);
     }
     if (!panel) return;
-    panel.hidden = !Object.keys(session?.state?.bots || {}).length;
+    panel.hidden = (!message && !retry) || !Object.keys(session?.state?.bots || {}).length;
     const key = JSON.stringify([message || "", Boolean(retry)]);
     if (panel.dataset.statusKey === key && panel.childNodes.length) return;
     panel.dataset.statusKey = key; panel.replaceChildren();
-    const status = make("span", "", message || `Practice ${gameName} bots`); status.setAttribute("role", "status"); panel.append(status);
+    const status = make("span", "", message || ""); status.setAttribute("role", "status"); panel.append(status);
     if (retry) { const button = make("button", "btn", "Retry bot"); button.type = "button"; button.addEventListener("click", retry); panel.append(button); }
   },
 }); }
@@ -10382,19 +10465,15 @@ const chessBotController = createChessBotController({
       el("player-status-strip")?.insertAdjacentElement("afterend", panel);
     }
     if (!panel) return;
-    panel.hidden = !session?.state?.bots || !Object.keys(session.state.bots).length;
+    panel.hidden = (!message && !retry) || !Object.keys(session?.state?.bots || {}).length;
     panel.replaceChildren();
-    const status = make("span", "", message || "Practice chess bot");
+    const status = make("span", "", message || "");
     status.setAttribute("role", "status");
     panel.append(status);
     if (retry) {
       const button = make("button", "btn", "Retry bot");
       button.type = "button"; button.addEventListener("click", retry); panel.append(button);
     }
-    const credits = make("a", "", "Engine license & source");
-    credits.href = new URL("../changelog.php?document=third-party-notices#stockfish", import.meta.url).href;
-    credits.target = "_blank"; credits.rel = "noopener";
-    panel.append(document.createTextNode(" · "), credits);
   },
 });
 window.addEventListener("pagehide", () => chessBotController.stop());
@@ -10414,19 +10493,15 @@ const checkersBotController = createCheckersBotController({
       el("player-status-strip")?.insertAdjacentElement("afterend", panel);
     }
     if (!panel) return;
-    panel.hidden = !session?.state?.bots || !Object.keys(session.state.bots).length;
+    panel.hidden = (!message && !retry) || !Object.keys(session?.state?.bots || {}).length;
     panel.replaceChildren();
-    const status = make("span", "", message || "Practice checkers bot");
+    const status = make("span", "", message || "");
     status.setAttribute("role", "status");
     panel.append(status);
     if (retry) {
       const button = make("button", "btn", "Retry bot");
       button.type = "button"; button.addEventListener("click", retry); panel.append(button);
     }
-    const credits = make("a", "", "Engine license & source");
-    credits.href = new URL("../changelog.php?document=third-party-notices#marcher", import.meta.url).href;
-    credits.target = "_blank"; credits.rel = "noopener";
-    panel.append(document.createTextNode(" · "), credits);
   },
 });
 window.addEventListener("pagehide", () => checkersBotController.stop());
@@ -10443,25 +10518,22 @@ const backgammonBotController = createBackgammonBotController({
     if (!panel && context.extensionId === "backgammon-first-party") {
       panel = make("div", "backgammon-bot-status minor");
       panel.id = "backgammon-bot-status";
-      el("player-status-strip")?.insertAdjacentElement("afterend", panel);
+      el("board-host")?.insertAdjacentElement("afterend", panel);
     }
     if (!panel) return;
-    panel.hidden = !session?.state?.bots || !Object.keys(session.state.bots).length;
+    // Keep a compact feedback slot during human turns too, without idle text.
+    panel.hidden = !Object.keys(session?.state?.bots || {}).length;
     const statusKey = JSON.stringify([message || "", Boolean(retry)]);
     if (panel.dataset.statusKey === statusKey && panel.childNodes.length) return;
     panel.dataset.statusKey = statusKey;
     panel.replaceChildren();
-    const status = make("span", "", message || "Practice backgammon bot");
+    const status = make("span", "", message || "");
     status.setAttribute("role", "status");
     panel.append(status);
     if (retry) {
       const button = make("button", "btn", "Retry bot");
       button.type = "button"; button.addEventListener("click", retry); panel.append(button);
     }
-    const credits = make("a", "", "Engine license & source");
-    credits.href = new URL("../changelog.php?document=third-party-notices#gnubg", import.meta.url).href;
-    credits.target = "_blank"; credits.rel = "noopener";
-    panel.append(document.createTextNode(" · "), credits);
   },
 });
 window.addEventListener("pagehide", () => backgammonBotController.stop());
@@ -10470,6 +10542,7 @@ const backgammonBotTimer = setInterval(() => { if (context.extensionId === "back
 window.addEventListener("pagehide", () => clearInterval(backgammonBotTimer));
 
 function render() {
+  document.body.dataset.visualFx = optionCategory("visualFxEnabled", true) ? "on" : "off";
   if (terminalSessionError) return;
   if (!session) return;
   const focusedDrawerKind = document.activeElement?.closest?.(".checkers-edge-tab")?.dataset?.drawer || "";
@@ -10536,6 +10609,9 @@ function render() {
     surface.style.setProperty("--classic-board", `url("${mediaUrl("classic-board")}")`);
   } else el("surface").style.removeProperty("--classic-board");
   renderGameSettings(); renderSurfaceOptions(); renderRules(); renderAccessibility(); renderPlayerStatusStrip(); renderBoard(); renderControls(); renderLiveScore(); renderDrawProgress(); renderRecords(); renderGameEventDialog(); renderReceivedDrawProposalDialog();
+  // The parent room observes these controls too. Set their final visibility
+  // in this render turn, before either window can paint temporary defaults.
+  syncSeparateControlVisibility();
   syncClassicAnimation();
   scheduleSpadesAutomaticAction();
   scheduleBlackjackAutomaticAction();
@@ -10748,7 +10824,9 @@ async function refreshSession(refreshRecords = false, providedSession = null, { 
   scheduleSharedLifecycleDeadline();
   if (musicPlayer && options?.musicEnabled !== true) stopMusic("music-off");
   await reconnectVisibleSession();
-  await refreshGameRecords({ force: refreshRecords });
+  // Auxiliary records own their errors and panel updates. Never let them hold
+  // an accepted action's render, animation window or the next session poll.
+  void refreshGameRecords({ force: refreshRecords });
   return { renderRequired, restoreFocusAfterOptionsClose };
 }
 

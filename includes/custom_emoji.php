@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/upload_duplicates.php';
+require_once __DIR__ . '/custom_emoji_bundled.php';
 
 const CUSTOM_EMOJI_MAX_BYTES = 5 * 1024 * 1024;
 const CUSTOM_EMOJI_MAX_WIDTH = 512;
@@ -86,6 +87,7 @@ function custom_emoji_public(array $record): array {
 }
 
 function custom_emoji_snapshot(PDO $pdo, array $user): array {
+    custom_emoji_install_bundled($pdo);
     $ids = custom_emoji_index($pdo);
     $emojis = [];
     if ($ids) {
@@ -126,6 +128,7 @@ function custom_emoji_storage_directory(bool $create = false): ?string {
 }
 
 function custom_emoji_upload(PDO $pdo, int $userId, mixed $nameValue, mixed $file): array {
+    custom_emoji_install_bundled($pdo);
     $name = is_string($nameValue) ? trim($nameValue) : '';
     if (preg_match('/\A[a-z0-9_-]{1,32}\z/', $name) !== 1) {
         throw new CustomEmojiException('Use a unique name of 1-32 lowercase letters, digits, underscores or hyphens.');

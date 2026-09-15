@@ -96,7 +96,7 @@
       "includes/five_dice_media_pack.php": "8314009fc4ee7b51e1423370a4bb1cc4679b05bdbdfc383788239c1cdf6b73e2",
       "api/five_dice_media.php": "bcfe992463f081a6142c9fb6361f20a82ef55852c2ca1f4a2559a24f594a886e",
       "api/five_dice_media_pack_admin.php": "c75396ff16be391f085f578b9886b318076f2473dbada4e0406a8160a6c29131",
-      "games/classic-source-maps.js": "c49eea58cd30f7c4183b188351e5f47cde2e10b85a14f0f64cd7e0e4b6ed2d0a",
+      "games/classic-source-maps.js": "6ff02254d0656a06cbf7f509cb4ef581215da5ce27c579fe26a68670c580d881",
       "assets/images/five-dice-icon.svg": "a48c7af13b8af9cb9725ec7677eca2ec65db5034e179b209c7aeb201a47c7f9c",
       "assets/images/five-dice-modern/five-dice-approved-board-background-v1.png": "81584203a61d2faefb2d39280312a22555495f3498fdac2494e6e68e738d0872",
       "assets/images/five-dice-modern/jazz-lounge-decor.png": "07c78c1d2862506556a642b38872379a05cb30144abad1cdb4321137e7acb610",
@@ -130,9 +130,9 @@
       "assets/audio/built-in-games/five-dice-draw.wav": "7ec792a10435d0c7e598d44aa52ac07198ad74396c9425214afcbfcb29ba39fb",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
-      "games/five-dice/five-dice.css": "f9a5c9f0a1350f9ef07fff7050ed18d9906c29c43a401c7b41c38794694f7a37",
-      "games/five-dice/five-dice.js": "23113946f657ab846bf2df5a82e0e592b6fa09971aba724cac9f0b1c708b0407",
-      "games/five-dice/index.html": "4cc4442ce95355c6633044d2dfbcaac2274011c0fb4ab34befa082fd44307e96"
+      "games/five-dice/five-dice.css": "25c36a943a212e5f9d29a4e50c563b9ac2016c8f6ef11e3e680c2ff28fe65653",
+      "games/five-dice/five-dice.js": "60d652bbcbc56d0b7fccb46bbb2f967b0311ce2aedcb8f90161b4155de06f824",
+      "games/five-dice/index.html": "70ca0b5cc25500b39a46e61f548551510f4a23ba792fef6248b4edb03cbe6467"
     }
   }
 }

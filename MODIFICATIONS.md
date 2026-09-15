@@ -10,6 +10,46 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-15 — Game FX controls and motion preferences
+
+Added per-game Visual FX choices that override the device motion default. Added matching lit/enabled and dim/disabled Classic sound and visual controls for Backgammon, Acey Deucy, Chess and Checkers. Added protection against white empty-image boxes during Classic control loading. Added browser checks for delayed artwork, saved FX state, keyboard controls and animations under reduced motion. Testing is WIP.
+
+
+## 2026-09-15 — Independent game records loading
+
+Added records loading independent of gameplay across shared games and Five Dice. Added isolated records errors, retained cached totals, stale-response protection and retry on reopening Five Dice records. Added regression coverage for held/failed requests, accepted browser actions, session expiry and retained point-game animations. Testing is WIP.
+
+
+## 2026-09-15 — Readable Classic dice and prompt point-game animation
+
+Added larger dice and separated larger dots for Classic Backgammon and Acey Deucy. Added immediate animation rendering after accepted actions while score records load separately, preserving checker movement and Backgammon roll motion on slow record responses. Added delayed-record movement and opening/ordinary-roll browser verification. Testing is WIP.
+
+
+## 2026-09-15 — Matching Classic dice and stable bot-turn layout
+
+Added matching rounded, shaded dice for all six values in Classic Backgammon and Acey Deucy. Added stable below-board Backgammon bot feedback to prevent vertical board movement during bot turns. Added complete dice-face and bot-opening layout verification. Testing is WIP.
+
+
+## 2026-09-15 — Classic legal-move cues and stable embedded controls
+
+Added deployment-folder-aware legal-move artwork for Classic Backgammon, Acey Deucy, Chess and Checkers. Added stable embedded sound and visual control visibility during game redraws. Added subdirectory and repeated-selection regression coverage. Testing is WIP.
+
+
+## 2026-09-15 — Clear Classic six-face dice
+
+Added scalable six-face pips with clear spacing for Classic Backgammon and Acey Deucy at native and enlarged board sizes. Added populated gameplay-input and board-selection verification across all 15 first-party games. Testing is WIP.
+
+
+## 2026-09-15 — Classic Backgammon controls and board interaction
+
+Added corrected Classic Backgammon direction-arrow positioning and orientation, source-backed dice-roll motion, board artwork selection protection and stable Classic control artwork. Added shared removal of redundant idle practice-bot and engine-credit lines while retaining consolidated Third-Party Notices and active bot feedback. Testing is WIP.
+
+
+## 2026-09-15 — In-message emoji expansion and bundled monkey
+
+Added full-size custom emoji expansion inside the original chat message, proportional containment within the chat, click-away collapse and keyboard controls. Added a bundled animated monkey emoji with automatic one-time catalog installation, duplicate reuse and normal administrator rename/delete support. Testing is WIP.
+
+
 ## 2026-09-14 — Hearts Expert Practice bot
 
 Added an Expert Hearts bot alongside Easy and Normal for two-player and four-player Practice games. Expert compares a small set of plays and passes against possible unseen hands using public card information, current scores and the existing Shoot the Moon rules. Added a short computation limit, Normal fallback and automatic search decision traces. Existing bot seating, late additions, human priority, explicit Start and unranked recording/lifecycle behavior are preserved. Testing is WIP; difficulty labels are relative, not calibrated ratings.

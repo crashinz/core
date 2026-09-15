@@ -89,7 +89,7 @@
   "integrity": {
     "algorithm": "sha256",
     "files": {
-      "games/ocx-extension-game.css": "2fc5c293e6a97663dd83a1fd40f6ae6df59c4ec8253297719cc21d2325406510",
+      "games/ocx-extension-game.css": "7a351c2a05d91d966364b8f7e2365209021a584c8056206eca3f0345c251d9e1",
       "includes/hearts_extension.php": "ab175b11b3a805b7fbf1488ad4e76c4c702ab09a928e3ceed3b0a177a03676e5",
       "assets/images/hearts-first-party-icon.svg": "ca9c61d31a59edb107a4400041cc94412d8901e23635158caee8c05a4449385f",
       "assets/audio/card-games/hearts-broken.mp3": "11658397b40f67789d43ac8cb71c0635adeb44008a1eccff92f7a9172871d1f4",
@@ -111,8 +111,8 @@
       "assets/audio/card-games/hearts-win.wav": "46bc3bcbaf0a1c55849500841af3ccbfb2adc589edf2658b288bdf9cfb3513f6",
       "assets/audio/card-games/hearts-loss.wav": "e4b64f24310e11200e434ba5d50179b6a654506a0914c922e4bef2373fce8637",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "f9210a9e90f058d1e220c4a47c2698d762ecb100e2b9bae96780982328baa0ea",
-      "games/hearts-first-party/index.html": "b2bd4998221beeba4d1d179556a9b283181c91bfb83f409357bcad6a241b269e",
+      "games/ocx-extension-game.js": "00749f73799490f1c0950abb68de42d4837cce3aa7b6ce92b80625dab7f86524",
+      "games/hearts-first-party/index.html": "8c6e3976e67e8a0b329768eb742f26824c1fc2635d41d7fcfbb53cd542810741",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/hearts_bot_support.php": "080168c983c706fd686754373517c6575aa1e3488f3c4ba05482a9421aae47aa",
       "includes/hearts_expert_support.php": "180b64a4efcb150d69a086455cb3d740e82c9c2cf3f96531b9447fe8f276ddbc"
