@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/upload_duplicates.php';
 
 /**
  * Canonical AGST/package and protected-media owner for Gesture Checkpoint Part 4.
@@ -808,6 +809,9 @@ function gesture_package_create(PDO $pdo, array $actor, array $fields, array $fi
             gesture_catalog_lock_user($pdo, $actorId);
             $capability = gesture_catalog_require_user_mutation($pdo, true);
             gesture_capability_require_scope($capability, 'personal');
+            upload_duplicate_lock($pdo, 'gesture');
+            $duplicate = upload_duplicate_find_gesture($pdo, $actorId, $prepared);
+            if ($duplicate !== null) return $duplicate;
             $limit = corechat_limit_value($pdo, 'gesture_upload_limit', 50);
             if ($limit !== null) {
                 $count = $pdo->prepare('SELECT COUNT(*) FROM gestures WHERE owner_user_id = ? AND deleted_at IS NULL');
@@ -880,11 +884,14 @@ function gesture_package_edit(PDO $pdo, array $actor, string $publicId, array $f
                 $capability = gesture_catalog_require_user_mutation($pdo, true);
                 gesture_capability_require_scope($capability, 'personal');
             }
+            upload_duplicate_lock($pdo, 'gesture');
             $row = gesture_catalog_lock_row($pdo, $publicId, $admin ? null : $actorId);
             if ($admin && (empty($row['is_public']) || ($actor['role'] ?? '') !== 'admin')) throw new GestureCatalogException('Admin package editing is not authorized.', 403, 'ADMIN_EDIT_NOT_AUTHORIZED');
             gesture_catalog_require_version((int)$row['version'], $expectedVersion, 'GESTURE_VERSION_CONFLICT', gesture_catalog_row_payload($row, $actorId, $admin));
             $metadata = $prepared['metadata'];
             gesture_catalog_assert_filename_available($pdo, (int)$row['owner_user_id'], $metadata['catalog_filename'], (int)$row['id']);
+            $duplicate = upload_duplicate_find_gesture($pdo, $actorId, $prepared, (int)$row['id']);
+            if ($duplicate !== null) return $duplicate;
             $generation = max(1, (int)$row['package_generation']) + 1;
             $bundle = gesture_package_promote($publicId, $generation, $prepared);
             $promoted = $bundle['promoted'];

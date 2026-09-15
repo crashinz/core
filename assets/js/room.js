@@ -8691,7 +8691,7 @@ function insertEmoji(emoji) {
 let customEmojiPickerPromise = null;
 function openCustomEmojiPicker() {
   if (!customEmojiPickerPromise) {
-    customEmojiPickerPromise = import(appUrl('/assets/js/custom-emojis.js?v=20260914-emoji-actions'))
+    customEmojiPickerPromise = import(appUrl('/assets/js/custom-emojis.js?v=20260914-duplicates'))
       .then(({ CustomEmojiPicker }) => new CustomEmojiPicker({
         root: document.getElementById('custom-emoji-picker'),
         appUrl,
@@ -9030,7 +9030,7 @@ async function uploadGesture(file) {
   formData.append('join_token', cfg.myJoinToken);
   formData.append('_csrf', CSRF_TOKEN);
   formData.append('gesture', file);
-  await new Promise((resolve, reject) => {
+  const uploaded = await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.upload.addEventListener('progress', event => {
       if (bar && event.lengthComputable) bar.style.width = `${Math.max(4, Math.round((event.loaded / event.total) * 100))}%`;
@@ -9046,6 +9046,10 @@ async function uploadGesture(file) {
     xhr.setRequestHeader('X-CSRF-Token', CSRF_TOKEN);
     xhr.send(formData);
   });
+  if (uploaded.duplicate) {
+    const catalog = uploaded.existing.scope === 'server' ? 'Server Gestures' : 'Personal Gestures';
+    alert(`Already uploaded as "${uploaded.existing.name}". Use it from ${catalog}.`);
+  }
   if (bar) bar.style.width = '100%';
   if (gestureCatalogController && cfg.gesturePart3?.features?.enhanced_picker !== false) {
     await gestureCatalogController.refresh('personal');
@@ -9506,7 +9510,7 @@ document.getElementById('tab-manage-relationship')?.addEventListener('click', ()
 document.getElementById('ctx-change-avatar').addEventListener('click', async () => {
   closeContextMenu();
   try {
-    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-movable`);
+    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-duplicates`);
     await openAvatarLibrary({
       userId: cfg.myUserId,
       base: APP_BASE,
@@ -9537,7 +9541,7 @@ ctxChangeNameplate?.addEventListener('click', async () => {
   closeContextMenu();
   try {
     const [{ openAvatarLibrary }, { prepareNameplateFile }, policy] = await Promise.all([
-      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-movable`),
+      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-duplicates`),
       import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
       runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
     ]);
@@ -10912,6 +10916,16 @@ async function applyAvatarFile(file) {
       operation: 'upload-avatar',
       endpointCategory: 'avatar',
     });
+    if (data.duplicate) {
+      if (me && previousAvatarState) {
+        participants.update(cfg.myParticipantId, previousAvatarState);
+        renderParticipant(me);
+      }
+      if (window.confirm(`Already uploaded as "${data.existing.name}". Use the existing avatar?`)) {
+        await applyLibraryAsset('avatar', data.existing.id);
+      }
+      return;
+    }
     const updated = participants.get(cfg.myParticipantId);
     participants.update(cfg.myParticipantId, {
       avatar_path: data.avatar_path,
@@ -10973,6 +10987,12 @@ async function applyNameplateFile(file) {
     operation: 'upload-nameplate',
     endpointCategory: 'avatar',
   });
+  if (response.duplicate) {
+    if (window.confirm(`Already uploaded as "${response.existing.name}". Use the existing nameplate?`)) {
+      await applyLibraryAsset('nameplate', response.existing.id);
+    }
+    return;
+  }
   me.nameplate_path = response.nameplate_path || null;
   me.nameplate_url = response.nameplate_url || null;
   rerenderChatAppearance();

@@ -1336,12 +1336,13 @@ function gesture_catalog_admin_update(PDO $pdo, array $actor, string $publicId, 
 }
 
 /** Administrator deletion is restricted to the shared server catalog. */
-function gesture_catalog_admin_delete(PDO $pdo, array $actor, string $publicId, int $expectedVersion, string $requestKey): array
+function gesture_catalog_admin_delete(PDO $pdo, array $actor, string $publicId, int $expectedVersion, string $requestKey, ?callable $beforeDelete = null): array
 {
     if (($actor['role'] ?? '') !== 'admin') throw new GestureCatalogException('Administrator authorization is required.', 403, 'ADMIN_REQUIRED');
     if ($requestKey === '') throw new GestureCatalogException('A request key is required.', 400, 'REQUEST_KEY_REQUIRED');
     $actorId = (int)$actor['id'];
-    $result = gesture_catalog_idempotent($pdo, $actorId, 'admin-delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $actorId, $publicId, $expectedVersion): array {
+    $result = gesture_catalog_idempotent($pdo, $actorId, 'admin-delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $actorId, $publicId, $expectedVersion, $beforeDelete): array {
+        if ($beforeDelete !== null) $beforeDelete();
         $row = gesture_catalog_lock_row($pdo, $publicId);
         if (empty($row['is_public'])) throw new GestureCatalogException('Only Server Gestures can be deleted by an administrator.', 403, 'ADMIN_DELETE_NOT_AUTHORIZED');
         gesture_catalog_require_version((int)$row['version'], $expectedVersion, 'GESTURE_VERSION_CONFLICT', gesture_catalog_row_payload($row, $actorId, true));
@@ -1356,11 +1357,12 @@ function gesture_catalog_admin_delete(PDO $pdo, array $actor, string $publicId, 
     return $result;
 }
 
-function gesture_catalog_delete(PDO $pdo, int $userId, string $publicId, int $expectedVersion, string $requestKey): array
+function gesture_catalog_delete(PDO $pdo, int $userId, string $publicId, int $expectedVersion, string $requestKey, ?callable $beforeDelete = null): array
 {
-    $result = gesture_catalog_idempotent($pdo, $userId, 'delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $expectedVersion): array {
+    $result = gesture_catalog_idempotent($pdo, $userId, 'delete', $requestKey, compact('publicId', 'expectedVersion'), function () use ($pdo, $userId, $publicId, $expectedVersion, $beforeDelete): array {
         $policy = gesture_catalog_require_user_mutation($pdo, true);
         gesture_capability_require_scope($policy, 'personal');
+        if ($beforeDelete !== null) $beforeDelete();
         $row = gesture_catalog_lock_row($pdo, $publicId, $userId);
         gesture_catalog_require_version((int)$row['version'], $expectedVersion, 'GESTURE_VERSION_CONFLICT', gesture_catalog_row_payload($row, $userId));
         $pdo->prepare("UPDATE gestures SET deleted_at = CURRENT_TIMESTAMP, is_public = 0, active_catalog_key = NULL, visibility_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE id = ?")

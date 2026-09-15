@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/../includes/upload_duplicates.php';
 require_once __DIR__ . '/../includes/base.php';
 require_once __DIR__ . '/../includes/nameplate_policy.php';
 
@@ -57,6 +58,15 @@ if ($method === 'POST') {
             if ($dimensions[0] < AVATAR_UPLOAD_MIN_DIMENSION_PX || $dimensions[1] < AVATAR_UPLOAD_MIN_DIMENSION_PX
                 || $dimensions[0] > $policy['avatarUploadMaxWidthPx'] || $dimensions[1] > $policy['avatarUploadMaxHeightPx']) throw new InvalidArgumentException('Avatar dimensions are outside the configured limits.');
         }
+        $transaction = database_transaction_begin($pdo, true);
+        $destination = null;
+        try {
+        upload_duplicate_lock($pdo, $kind, $userId);
+        $duplicate = upload_duplicate_find_image($pdo, $userId, $kind, $temporary);
+        if ($duplicate !== null) {
+            database_transaction_commit($pdo, $transaction);
+            return $duplicate;
+        }
         $public = ($kind === 'nameplate' ? '/assets/uploads/nameplates/nameplate-' : '/assets/uploads/avatars/') . bin2hex(random_bytes(12)) . '.' . $extensions[$mime];
         security_assert_storage_destination($kind === 'nameplate' ? 'nameplate_upload' : 'avatar_upload', $public);
         $destination = dirname(__DIR__) . $public;
@@ -65,18 +75,16 @@ if ($method === 'POST') {
             if (!is_dir($directory) && !@mkdir($directory, 0755, true) && !is_dir($directory)) throw new RuntimeException('The image could not be stored.');
         }
         if (!move_uploaded_file($temporary, $destination)) throw new RuntimeException('The image could not be stored.');
-        try {
-            $pdo->beginTransaction();
             $id = $kind === 'nameplate'
                 ? server_media_register_nameplate($pdo, $userId, $public, $destination, $mime)
                 : server_media_register_avatar($pdo, $userId, $public, $destination, $mime, false);
             set_app_setting($pdo, $shareKey($id), '1');
             set_app_setting($pdo, $libraryPrefix . 'name.' . $id, mb_substr(basename(str_replace('\\', '/', (string)($file['name'] ?? 'Avatar'))), 0, 180));
             set_app_setting($pdo, $libraryPrefix . 'section.' . $id, mb_substr(trim((string)($_POST['section'] ?? '')), 0, 80));
-            $pdo->commit();
+            database_transaction_commit($pdo, $transaction);
         } catch (Throwable $error) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            @unlink($destination);
+            database_transaction_rollback($pdo, $transaction);
+            if ($destination !== null) @unlink($destination);
             throw $error;
         }
         return ['ok' => true, 'id' => $id];
@@ -102,6 +110,11 @@ if ($method === 'POST') {
     $id = (string)($_POST['id'] ?? '');
     $transaction = database_transaction_begin($pdo, true);
     try {
+        if (isset($_POST['duplicate_review'])) {
+            require_once __DIR__ . '/../includes/library_duplicate_review.php';
+            try { library_duplicate_delete_guard($pdo, $me, $kind, $id, $_POST['duplicate_review']); }
+            catch (CustomEmojiException $error) { throw new ServerMediaException($error->getMessage(), 'DUPLICATE_REVIEW_CHANGED', $error->httpStatus); }
+        }
         // Mutations and first-copy selection lock the same asset before reading sharing/removal state.
         $lockSuffix = db_uses_mysql_syntax($pdo) ? ' FOR UPDATE' : '';
         $query = $pdo->prepare("SELECT public_id,uploader_user_id FROM server_media_assets WHERE public_id=? AND source_owner='avatar' AND source_role=? AND category='avatar' AND status='active' AND (expires_at IS NULL OR expires_at>CURRENT_TIMESTAMP) LIMIT 1" . $lockSuffix);

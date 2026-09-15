@@ -369,9 +369,10 @@ function live_website_rooms_require_import_capacity(PDO $pdo, array $user): void
     }
 }
 
-function live_website_rooms_create(PDO $pdo, array $user, string $url, string $requestedName = ''): array
+function live_website_rooms_create(PDO $pdo, array $user, string $url, string $requestedName = '', mixed $password = ''): array
 {
     security_authorize_outside_content_or_json($pdo, $user, 'live_website_room_create', ['source' => 'live_website_rooms']);
+    $passwordHash = room_access_hash($password);
     $target = live_website_rooms_validate_target($url);
     $owns = db_begin_write_transaction($pdo);
     try {
@@ -379,7 +380,7 @@ function live_website_rooms_create(PDO $pdo, array $user, string $url, string $r
         $name = trim($requestedName) !== '' ? trim($requestedName) : (string)$target['title'];
         $name = function_exists('mb_substr') ? mb_substr($name, 0, 90, 'UTF-8') : substr($name, 0, 90);
         $publicId = uuid_v4();
-        $pdo->prepare('INSERT INTO rooms (public_id,owner_id,name) VALUES (?,?,?)')->execute([$publicId, (int)$user['id'], $name]);
+        $pdo->prepare('INSERT INTO rooms (public_id,owner_id,name,room_password_hash) VALUES (?,?,?,?)')->execute([$publicId, (int)$user['id'], $name, $passwordHash]);
         $roomId = (int)$pdo->lastInsertId();
         $pdo->prepare('INSERT INTO live_website_rooms (room_id,creator_user_id,target_url,target_host,frame_policy) VALUES (?,?,?,?,?)')->execute([
             $roomId, (int)$user['id'], $target['url'], $target['host'], $target['framePolicy'],
@@ -404,7 +405,7 @@ function live_website_rooms_capture_preview(PDO $pdo, int $roomId, array $target
 
 function live_website_room_row(PDO $pdo, string $publicId, bool $forUpdate = false): array
 {
-    $sql = 'SELECT r.public_id,r.owner_id,r.name,l.* FROM rooms r JOIN live_website_rooms l ON l.room_id=r.id WHERE r.public_id=? LIMIT 1';
+    $sql = 'SELECT r.public_id,r.owner_id,r.name,r.room_password_hash,l.* FROM rooms r JOIN live_website_rooms l ON l.room_id=r.id WHERE r.public_id=? LIMIT 1';
     if ($forUpdate && db_uses_mysql_syntax($pdo)) $sql .= ' FOR UPDATE';
     $statement = $pdo->prepare($sql);
     $statement->execute([$publicId]);
@@ -415,7 +416,7 @@ function live_website_room_row(PDO $pdo, string $publicId, bool $forUpdate = fal
 
 function live_website_room_projection(PDO $pdo, int $roomId, int $userId): ?array
 {
-    $statement = $pdo->prepare('SELECT r.public_id,r.owner_id,r.name,l.* FROM rooms r JOIN live_website_rooms l ON l.room_id=r.id WHERE r.id=? LIMIT 1');
+    $statement = $pdo->prepare('SELECT r.public_id,r.owner_id,r.name,r.room_password_hash,l.* FROM rooms r JOIN live_website_rooms l ON l.room_id=r.id WHERE r.id=? LIMIT 1');
     $statement->execute([$roomId]);
     $row = $statement->fetch();
     if (!is_array($row)) return null;
@@ -464,7 +465,7 @@ function live_website_rooms_navigate(PDO $pdo, array $user, string $sourcePublic
         if ((int)$source['owner_id'] !== (int)$user['id']) throw new LiveWebsiteRoomException('Only the current room creator may navigate the shared room.', 'LIVE_WEBSITE_OWNER_REQUIRED', 403);
         if ((int)$source['navigation_version'] !== $expectedVersion) throw new LiveWebsiteRoomException('The live website navigation changed. Refresh and try again.', 'LIVE_WEBSITE_NAVIGATION_STALE', 409, ['actualVersion' => (int)$source['navigation_version']]);
         $destinationPublicId = uuid_v4();
-        $pdo->prepare('INSERT INTO rooms (public_id,owner_id,name) VALUES (?,?,?)')->execute([$destinationPublicId, (int)$user['id'], (string)$target['title']]);
+        $pdo->prepare('INSERT INTO rooms (public_id,owner_id,name,room_password_hash) VALUES (?,?,?,?)')->execute([$destinationPublicId, (int)$user['id'], (string)$target['title'], $source['room_password_hash'] ?? null]);
         $destinationRoomId = (int)$pdo->lastInsertId();
         $pdo->prepare('INSERT INTO live_website_rooms (room_id,creator_user_id,target_url,target_host,frame_policy) VALUES (?,?,?,?,?)')->execute([$destinationRoomId, (int)$user['id'], $target['url'], $target['host'], $target['framePolicy']]);
         active_session_for_room($pdo, $destinationRoomId);
@@ -572,7 +573,7 @@ function live_website_rooms_make_official(PDO $pdo, array $user, string $publicI
             throw new LiveWebsiteRoomException($error->getMessage(), $error->errorCode, $error->httpStatus, $error->projection);
         }
         $successorPublicId = uuid_v4();
-        $pdo->prepare('INSERT INTO rooms (public_id,owner_id,name) VALUES (?,?,?)')->execute([$successorPublicId, (int)$user['id'], (string)$source['name']]);
+        $pdo->prepare('INSERT INTO rooms (public_id,owner_id,name,room_password_hash) VALUES (?,?,?,?)')->execute([$successorPublicId, (int)$user['id'], (string)$source['name'], $source['room_password_hash'] ?? null]);
         $successorId = (int)$pdo->lastInsertId();
         live_website_rooms_promote_successor($pdo, $source, $successorId);
         live_website_rooms_copy_successor_preview($pdo, $source, $successorId);

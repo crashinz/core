@@ -103,15 +103,45 @@ export class CustomEmojiPicker {
   openMenu(emoji, target, x, y) {
     if (!this.canManage || this.busy) return;
     this.menuTarget = target;
+    const rename = this.element('button', '', 'Rename emoji');
+    rename.type = 'button'; rename.setAttribute('role', 'menuitem');
+    rename.addEventListener('click', event => {
+      event.stopPropagation(); this.closeMenu(); this.rename(emoji, target);
+    });
     const remove = this.element('button', '', 'Delete emoji');
     remove.type = 'button'; remove.setAttribute('role', 'menuitem');
     remove.addEventListener('click', event => {
       event.stopPropagation(); this.closeMenu(); this.remove(emoji, target);
     });
-    this.menu.replaceChildren(remove);
+    this.menu.replaceChildren(rename, remove);
     this.menu.hidden = false;
     positionPickerMenu(this.menu, x, y);
-    remove.focus({ preventScroll: true });
+    rename.focus({ preventScroll: true });
+  }
+
+  async rename(emoji, target) {
+    if (!this.canManage || this.busy) return;
+    const answer = window.prompt(`Rename :${emoji.name}: (1-32 lowercase letters, numbers, hyphens or underscores):`, emoji.name);
+    if (answer === null || answer.trim() === emoji.name) { target.focus(); return; }
+    const name = answer.trim();
+    if (!/^[a-z0-9_-]{1,32}$/.test(name)) {
+      this.status.textContent = 'Use a name of 1-32 lowercase letters, digits, underscores or hyphens.';
+      target.focus(); return;
+    }
+    this.busy = true; this.uploadButton.disabled = true;
+    this.status.textContent = `Renaming :${emoji.name}:...`;
+    try {
+      const form = new FormData();
+      form.append('action', 'rename'); form.append('id', emoji.id); form.append('name', name);
+      form.append('expected_version', String(emoji.version || 1));
+      const data = await this.upload(this.appUrl('/api/custom_emojis.php'), form);
+      this.applyCatalog(data);
+      this.status.textContent = `Renamed :${emoji.name}: to :${name}:. Existing messages keep their image.`;
+      this.search.focus();
+    } catch (error) {
+      this.status.textContent = error.message || 'The emoji could not be renamed.';
+      target.focus();
+    } finally { this.busy = false; this.uploadButton.disabled = false; }
   }
 
   async remove(emoji, target) {
@@ -158,7 +188,7 @@ export class CustomEmojiPicker {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Custom emojis could not be loaded.');
         this.applyCatalog(data);
-        this.status.textContent = this.emojis.length ? 'Select an emoji to insert it into your message.' + (this.canManage ? ' Right-click an emoji to delete it (keyboard: Shift+F10).' : '') : 'No custom emojis yet. An admin can add the first one.';
+        this.status.textContent = this.emojis.length ? 'Select an emoji to insert it into your message.' + (this.canManage ? ' Right-click an emoji to rename or delete it (keyboard: Shift+F10).' : '') : 'No custom emojis yet. An admin can add the first one.';
       } catch (error) {
         this.status.textContent = error.message || 'Custom emojis could not be loaded. Use Refresh to try again.';
       } finally {
@@ -188,7 +218,7 @@ export class CustomEmojiPicker {
       image.decoding = 'async';
       button.append(image, this.element('span', '', emoji.name));
       if (this.canManage) {
-        button.title += ' — Right-click to delete';
+        button.title += ' — Right-click to rename or delete';
         button.setAttribute('aria-haspopup', 'menu');
         button.addEventListener('contextmenu', event => {
           event.preventDefault(); event.stopPropagation();
@@ -244,7 +274,9 @@ export class CustomEmojiPicker {
       this.applyCatalog(data);
       this.nameInput.value = '';
       this.fileInput.value = '';
-      this.status.textContent = `:${name}: is ready for members to use.`;
+      this.status.textContent = data.emoji?.duplicate
+        ? `Already uploaded as :${data.emoji.name}:. Select that emoji below to use it.`
+        : `:${name}: is ready for members to use.`;
     } catch (error) {
       this.status.textContent = error.message || 'Custom emoji upload failed.';
     } finally {

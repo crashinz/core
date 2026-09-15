@@ -208,9 +208,9 @@ function roomCardHtml(room) {
     ? `<div class="live-website-room-domain"><span>Live Website</span>${esc(room.live_website_target_host)}</div>`
     : '';
   const edit = room.can_edit
-    ? `<button class="btn btn-primary room-edit-open" type="button" data-room-id="${esc(room.public_id)}" data-room-name="${esc(room.name)}" data-room-bg="${esc(room.background_url || '')}" data-room-thumb="${esc(room.thumb_url || '')}" data-room-mime="${esc(room.background_mime || '')}">Edit</button>`
+    ? `<button class="btn btn-primary room-edit-open" type="button" data-room-id="${esc(room.public_id)}" data-room-name="${esc(room.name)}" data-can-delete="${room.can_delete ? 'true' : 'false'}" data-room-bg="${esc(room.background_url || '')}" data-room-thumb="${esc(room.thumb_url || '')}" data-room-mime="${esc(room.background_mime || '')}">Edit</button>`
     : '';
-  return `<div class="room-card-media"${bg}>${roomVideoPlaceholder(room)}</div>
+  return `<div class="room-card-media"${bg}>${roomVideoPlaceholder(room)}${room.is_private ? '<span class="room-private-badge">PRIVATE ROOM</span>' : ''}</div>
     <div class="room-card-body">
       <h2 class="room-card-name">${esc(room.name)}</h2>
       ${liveDomain}
@@ -218,6 +218,7 @@ function roomCardHtml(room) {
       <p class="room-card-actions">
         <a class="btn btn-primary" href="${esc(room.enter_url)}">Enter</a>
         ${edit}
+        ${room.can_delete ? `<button class="btn btn-danger room-delete-direct" type="button" data-room-id="${esc(room.public_id)}" data-room-name="${esc(room.name)}">Delete</button>` : ''}
         ${room.can_refresh_preview ? `<button class="btn room-preview-refresh" type="button" data-room-id="${esc(room.public_id)}">Refresh Preview</button><span class="minor room-preview-status" role="status"></span>` : ''}
       </p>
     </div>`;
@@ -246,6 +247,9 @@ function updateRoomCard(card, room) {
   if (media) {
     const image = room.tile_background_url ? `url(${JSON.stringify(String(room.tile_background_url))})` : '';
     if (media.style.backgroundImage !== image) media.style.backgroundImage = image;
+    const badge = media.querySelector('.room-private-badge');
+    if (!room.is_private) badge?.remove();
+    else if (!badge) media.insertAdjacentHTML('beforeend', '<span class="room-private-badge">PRIVATE ROOM</span>');
     if (!room.video_without_thumb) media.querySelector('.room-video-placeholder')?.remove();
     else if (!media.querySelector('.room-video-placeholder')) media.insertAdjacentHTML('beforeend', roomVideoPlaceholder(room));
   }
@@ -253,7 +257,14 @@ function updateRoomCard(card, room) {
   if (count && count.textContent !== String(Number(room.online_count || 0))) count.textContent = String(Number(room.online_count || 0));
   if (owner && owner.textContent !== room.owner_name) owner.textContent = room.owner_name;
   if (enter) enter.href = room.enter_url;
+  let remove = card.querySelector('.room-delete-direct');
+  if (!room.can_delete) remove?.remove();
+  else {
+    if (!remove) { remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-danger room-delete-direct'; remove.textContent = 'Delete'; card.querySelector('.room-card-actions')?.append(remove); }
+    remove.dataset.roomId = room.public_id; remove.dataset.roomName = room.name;
+  }
   if (edit) {
+    edit.dataset.canDelete = room.can_delete ? 'true' : 'false';
     edit.dataset.roomId = room.public_id;
     edit.dataset.roomName = room.name;
     edit.dataset.roomBg = room.background_url || '';
@@ -446,6 +457,7 @@ function renderRoomImportPreview(preview) {
     <div class="room-import-preview-images">${images.map(importSectionThumb).join('') || '<div class="room-import-preview-empty">No images found</div>'}</div>
     ${text ? `<p>${esc(text.length > 180 ? `${text.slice(0, 180)}...` : text)}</p>` : ''}
     <label>Room name<input id="room-import-name" value="${esc(defaultName)}"></label>
+    <label><span>Room password (optional)</span><input id="room-import-password" type="password" maxlength="72" autocomplete="new-password" placeholder="Leave blank for no password"></label>
     <div class="room-import-actions">
       <button class="btn btn-primary" id="room-import-accept" type="button">Accept Import</button>
       <button class="btn" id="room-import-cancel" type="button">Cancel</button>
@@ -487,7 +499,7 @@ async function acceptRoomImport() {
   if (acceptBtn) acceptBtn.disabled = true;
   setImportStatus('Copying assets into ChatSpace...', true);
   try {
-    const data = await lobbyApiPost('/api/room_import.php', { action: 'create', url, name });
+    const data = await lobbyApiPost('/api/room_import.php', { action: 'create', url, name, room_password: document.getElementById('room-import-password')?.value || '' });
     if (data.room) insertRoomCard(data.room, true);
     roomImportUrl.value = '';
     currentImportPreview = null;
@@ -530,7 +542,7 @@ async function createLiveWebsiteRoom() {
   if (roomLiveWebsiteCreate) roomLiveWebsiteCreate.disabled = true;
   setLiveWebsiteStatus('Checking whether the website can open safely...', true);
   try {
-    const data = await lobbyApiPost('/api/live_website_rooms.php', { action: 'create', url, name });
+    const data = await lobbyApiPost('/api/live_website_rooms.php', { action: 'create', url, name, room_password: document.getElementById('room-live-website-password')?.value || '' });
     if (!data.room?.enterUrl) throw new Error('The Live Website Room was created without an entry URL.');
     setLiveWebsiteStatus(`Opening ${data.room.targetHost || 'website'}...`, true);
     window.location.href = data.room.enterUrl;
@@ -780,8 +792,18 @@ roomGrid?.addEventListener('click', async e => {
     }
     return;
   }
+  const deleteButton = e.target.closest('.room-delete-direct');
+  if (deleteButton) {
+    lobbyRoomEditId.value = deleteButton.dataset.roomId || '';
+    lobbyRoomEditName.value = deleteButton.dataset.roomName || '';
+    lobbyRoomDeleteModal.querySelector('p').textContent = `Delete room "${deleteButton.dataset.roomName || ''}"? Everyone in the room will be returned to the lobby.`;
+    lobbyRoomDeleteModal.classList.add('open');
+    document.getElementById('lobby-room-delete-cancel')?.focus();
+    return;
+  }
   const btn = e.target.closest('.room-edit-open');
   if (!btn) return;
+  document.getElementById('lobby-room-delete-open').hidden = btn.dataset.canDelete !== 'true';
   lobbyRoomEditId.value = btn.dataset.roomId || '';
   lobbyRoomEditName.value = btn.dataset.roomName || '';
   lobbyRoomEditBackground.value = '';
@@ -800,6 +822,7 @@ document.getElementById('lobby-room-edit-close')?.addEventListener('click', () =
 });
 
 document.getElementById('lobby-room-delete-open')?.addEventListener('click', () => {
+  lobbyRoomDeleteModal.querySelector('p').textContent = `Delete room "${lobbyRoomEditName.value}"? Everyone in the room will be returned to the lobby.`;
   lobbyRoomDeleteModal?.classList.add('open');
 });
 

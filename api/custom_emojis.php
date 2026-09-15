@@ -23,8 +23,17 @@ try {
     csrf_protect_post();
     if (!custom_emoji_can_manage($pdo, $user)) json_out(['error' => 'Administrator or installation owner required.'], 403);
     security_require_recent_authentication_or_json();
+    if (($_POST['action'] ?? '') === 'rename') {
+        $emoji = custom_emoji_rename($pdo, (int)$user['id'], $_POST['id'] ?? null, $_POST['name'] ?? null, (int)($_POST['expected_version'] ?? 0));
+        json_out(['ok' => true, 'emoji' => $emoji] + custom_emoji_snapshot($pdo, $user));
+    }
     if (($_POST['action'] ?? '') === 'delete') {
-        custom_emoji_delete($pdo, $_POST['id'] ?? null);
+        $guard = null;
+        if (isset($_POST['duplicate_review'])) {
+            require_once __DIR__ . '/../includes/library_duplicate_review.php';
+            $guard = static fn() => library_duplicate_delete_guard($pdo, $user, 'emoji', (string)($_POST['id'] ?? ''), $_POST['duplicate_review']);
+        }
+        custom_emoji_delete($pdo, $_POST['id'] ?? null, $guard);
         json_out(['ok' => true] + custom_emoji_snapshot($pdo, $user));
     }
     if (($_POST['action'] ?? '') !== 'upload') json_out(['error' => 'Unknown custom emoji action.'], 400);

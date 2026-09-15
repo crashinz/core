@@ -217,7 +217,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
     if (!files.length) { status.textContent = 'No supported images found in that folder.'; return; }
     if (!window.confirm(kindText(`Publish ${files.length} images to the community avatar library? Your current avatar will not change.`))) return;
     busy = true; folder.disabled = true;
-    let uploaded = 0; const failures = [];
+    let uploaded = 0, duplicates = 0; const failures = [];
     let batch = [], batchBytes = 0, blocked = false;
     const flush = async () => {
       if (!batch.length) return;
@@ -226,7 +226,8 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
         const response = await requestForm({ action: 'upload_shared_batch', avatars: pending.map(item => item.prepared), section: uploadSection.value });
         for (const [index, item] of pending.entries()) {
           const result = response.results?.find(result => result.index === index);
-          if (result?.ok) uploaded++;
+          if (result?.duplicate) duplicates++;
+          else if (result?.ok) uploaded++;
           else failures.push(`${item.file.name}: ${kindText(result?.error || 'Upload did not complete.')}`);
         }
       } catch (error) {
@@ -248,7 +249,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
     if (!blocked) await flush();
     busy = false; folder.disabled = false; folderInput.value = '';
     view = 'mine'; await load();
-    status.textContent = `${uploaded}/${files.length} images published.${failures.length ? ' Failed: ' + failures.join('; ') : ''}`;
+    status.textContent = `${uploaded}/${files.length} images published. ${duplicates} already uploaded; skipped.${failures.length ? ' Failed: ' + failures.join('; ') : ''}`;
   });
   close.addEventListener('click', () => { if (!busy) closePicker(); });
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });

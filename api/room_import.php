@@ -31,6 +31,8 @@ function import_lobby_room_payload(array $room, array $user): array {
         'background_url' => $backgroundPath !== '' ? media_url($backgroundPath) : '',
         'thumb_url' => $thumbPath !== '' ? media_url($thumbPath) : '',
         'video_without_thumb' => $tileBg === '' && $backgroundPath !== '' && str_starts_with($backgroundMime, 'video/'),
+        'is_private' => room_access_is_private($room),
+        'can_delete' => room_access_can_delete($user, $room),
         'can_edit' => (int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true),
         'enter_url' => app_url('/chatroom.php?id=' . rawurlencode((string)$room['public_id'])),
     ];
@@ -134,6 +136,7 @@ try {
     if ($action === 'create') {
         security_authorize_outside_content_or_json($pdo, $user, 'room_import_create', ['source' => 'room_import']);
         live_website_rooms_require_import_capacity($pdo, $user);
+        $passwordHash = room_access_hash($body['room_password'] ?? '');
         $preview = room_import_preview_from_url($url);
         $localized = room_import_localize($preview);
         $sourceName = trim((string)($body['name'] ?? ''));
@@ -156,8 +159,8 @@ try {
             }
         }
         $stmt = $pdo->prepare(
-            'INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path, import_url, import_layout_json, music_playlist_json)
-             VALUES (?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path, import_url, import_layout_json, music_playlist_json, room_password_hash)
+             VALUES (?,?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
             $publicId,
@@ -169,6 +172,7 @@ try {
             $preview['source_url'] ?? $url,
             json_encode($localized['layout'], JSON_UNESCAPED_SLASHES),
             json_encode($localized['music'], JSON_UNESCAPED_SLASHES),
+            $passwordHash,
         ]);
         $roomId = (int)$pdo->lastInsertId();
         active_session_for_room($pdo, $roomId);

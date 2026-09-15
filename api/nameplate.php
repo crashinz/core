@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/../includes/upload_duplicates.php';
 
 require_once __DIR__ . '/../includes/base.php';
 require_once __DIR__ . '/../includes/nameplate_policy.php';
@@ -62,6 +63,13 @@ if ($action === 'select') {
     $inspected = nameplate_upload_inspect($pdo, $temporary);
     if (isset($inspected['error'])) json_out(['error' => $inspected['error']], 400);
     $mime = $inspected['mime'];
+    $uploadTransaction = database_transaction_begin($pdo, true);
+    upload_duplicate_lock($pdo, 'nameplate', (int)$participant['user_id']);
+    $duplicate = upload_duplicate_find_image($pdo, (int)$participant['user_id'], 'nameplate', $temporary);
+    if ($duplicate !== null) {
+        database_transaction_commit($pdo, $uploadTransaction);
+        json_out($duplicate);
+    }
     $file = 'nameplate-' . bin2hex(random_bytes(12)) . '.' . $inspected['extension'];
     $public = '/assets/uploads/nameplates/' . $file;
     security_assert_storage_destination('nameplate_upload', $public);
@@ -77,7 +85,7 @@ if ($action === 'select') {
 }
 
 try {
-    $pdo->beginTransaction();
+    $uploadTransaction ??= database_transaction_begin($pdo, true);
     $pdo->prepare('UPDATE users SET nameplate_path = ? WHERE id = ?')
         ->execute([$public, (int)$participant['user_id']]);
     $pdo->prepare('UPDATE participants SET nameplate_path = ? WHERE user_id = ?')
@@ -94,9 +102,9 @@ try {
         );
         set_app_setting($pdo, 'nameplate_library.name.' . $nameplateLibraryId, mb_substr(basename(str_replace('\\', '/', (string)($_FILES['nameplate']['name'] ?? 'Nameplate'))), 0, 180));
     }
-    $pdo->commit();
+    database_transaction_commit($pdo, $uploadTransaction);
 } catch (Throwable $error) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
+    database_transaction_rollback($pdo, $uploadTransaction);
     if ($selectedAsset === null) @unlink($destination);
     throw $error;
 }

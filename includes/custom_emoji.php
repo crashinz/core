@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/upload_duplicates.php';
 
 const CUSTOM_EMOJI_MAX_BYTES = 5 * 1024 * 1024;
 const CUSTOM_EMOJI_MAX_WIDTH = 512;
@@ -78,7 +79,7 @@ function custom_emoji_record(PDO $pdo, string $id): ?array {
 
 function custom_emoji_public(array $record): array {
     return [
-        'id' => $record['id'], 'name' => $record['name'],
+        'id' => $record['id'], 'name' => $record['name'], 'version' => max(1, (int)($record['version'] ?? 1)),
         'url' => app_url('/api/custom_emojis.php?action=image&id=' . $record['id']),
         'width' => $record['width'], 'height' => $record['height'],
     ];
@@ -156,6 +157,18 @@ function custom_emoji_upload(PDO $pdo, int $userId, mixed $nameValue, mixed $fil
             : 'INSERT OR IGNORE INTO app_settings (setting_key,value) VALUES (?,?)');
         $initialize->execute([CUSTOM_EMOJI_INDEX_KEY, '[]']);
         $ids = custom_emoji_index($pdo, true);
+        foreach ($ids as $existingId) {
+            $existing = custom_emoji_record($pdo, $existingId);
+            if ($existing && hash_equals($existing['sha256'], $hash)) {
+                $directory = custom_emoji_storage_directory();
+                $path = $directory ? realpath($directory . DIRECTORY_SEPARATOR . $existing['file']) : false;
+                if ($path && dirname($path) === $directory && is_file($path)
+                    && hash_equals($hash, (string)hash_file('sha256', $path))) {
+                    database_transaction_commit($pdo, $transaction);
+                    return custom_emoji_public($existing) + upload_duplicate_result('emoji', $existingId, $existing['name'], 'community');
+                }
+            }
+        }
         if (count($ids) >= CUSTOM_EMOJI_MAX_ENTRIES) throw new CustomEmojiException('The custom emoji library already contains 500 entries.', 409);
         if (app_setting($pdo, CUSTOM_EMOJI_NAME_PREFIX . $name, '') !== '') throw new CustomEmojiException('That custom emoji name is already in use.', 409);
         $id = '';
@@ -201,12 +214,51 @@ function custom_emoji_upload(PDO $pdo, int $userId, mixed $nameValue, mixed $fil
     }
 }
 
-/** Remove picker membership; immutable history remains resolvable. */
-function custom_emoji_delete(PDO $pdo, mixed $id): void {
+/** Change catalog naming only; public identity and original image bytes never change. */
+function custom_emoji_rename(PDO $pdo, int $userId, mixed $id, mixed $nameValue, int $expectedVersion): array {
+    if (!custom_emoji_valid_id($id)) throw new CustomEmojiException('Custom emoji unavailable.', 404);
+    $name = is_string($nameValue) ? trim($nameValue) : '';
+    if (preg_match('/\A[a-z0-9_-]{1,32}\z/', $name) !== 1) {
+        throw new CustomEmojiException('Use a name of 1-32 lowercase letters, digits, underscores or hyphens.');
+    }
+    if ($expectedVersion < 1) throw new CustomEmojiException('Refresh the custom emoji picker before renaming.', 409);
+    $transaction = database_transaction_begin($pdo, true);
+    if (empty($transaction['owned'])) throw new LogicException('Custom emoji rename must own its transaction.');
+    try {
+        $ids = custom_emoji_index($pdo, true);
+        $record = in_array($id, $ids, true) ? custom_emoji_record($pdo, $id) : null;
+        if (!$record) throw new CustomEmojiException('The emoji is no longer in the picker.', 404);
+        $version = max(1, (int)($record['version'] ?? 1));
+        if ($record['name'] === $name) {
+            database_transaction_commit($pdo, $transaction);
+            return custom_emoji_public($record);
+        }
+        if ($version !== $expectedVersion) throw new CustomEmojiException('This emoji changed. Refresh the picker before renaming.', 409);
+        if (app_setting($pdo, CUSTOM_EMOJI_NAME_PREFIX . $name, '') !== '') throw new CustomEmojiException('That custom emoji name is already in use.', 409);
+        $oldName = $record['name'];
+        $record['originalName'] ??= $oldName;
+        $record['name'] = $name;
+        $record['version'] = $version + 1;
+        $record['renamedBy'] = $userId;
+        $record['renamedAt'] = gmdate('Y-m-d\TH:i:s\Z');
+        $pdo->prepare('INSERT INTO app_settings (setting_key,value) VALUES (?,?)')->execute([CUSTOM_EMOJI_NAME_PREFIX . $name, $id]);
+        set_app_setting($pdo, CUSTOM_EMOJI_RECORD_PREFIX . $id, json_encode($record, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        $pdo->prepare('DELETE FROM app_settings WHERE setting_key=? AND value=?')->execute([CUSTOM_EMOJI_NAME_PREFIX . $oldName, $id]);
+        database_transaction_commit($pdo, $transaction);
+        return custom_emoji_public($record);
+    } catch (Throwable $error) {
+        database_transaction_rollback($pdo, $transaction);
+        throw $error;
+    }
+}
+
+/** Remove picker membership; historical identity and images remain resolvable. */
+function custom_emoji_delete(PDO $pdo, mixed $id, ?callable $beforeDelete = null): void {
     if (!custom_emoji_valid_id($id)) throw new CustomEmojiException('Custom emoji unavailable.', 404);
     $transaction = database_transaction_begin($pdo, true);
     if (empty($transaction['owned'])) throw new LogicException('Custom emoji deletion must own its transaction.');
     try {
+        if ($beforeDelete !== null) $beforeDelete();
         $ids = custom_emoji_index($pdo, true);
         $record = custom_emoji_record($pdo, $id);
         if (!$record) throw new CustomEmojiException('Custom emoji unavailable.', 404);

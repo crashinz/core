@@ -228,6 +228,11 @@ form.addEventListener("submit", async event => {
             error.authoritative = payload.authoritative || null;
             throw error;
         }
+        if (payload.duplicate) {
+            const catalog = payload.existing.scope === 'server' ? 'Server Gestures' : 'Personal Gestures';
+            setStatus(`Already uploaded as "${payload.existing.name}". Use the existing item in ${catalog}; nothing was changed.`, "ok");
+            return;
+        }
         state.applySaved(payload);
         hydrate({ ...payload, features: state.features(), preferences: state.preferences() });
         channel?.postMessage({ type: "gesture-saved", gesturePublicId: payload.gesture?.public_id, version: payload.gesture?.version });

@@ -95,7 +95,7 @@ function gesture_maker_extension_render_editor(array $view): void {
     </div>
   </form>
 </main>
-<script type="module" src="<?= e(app_url('/extensions/gesture-maker/assets/gesture-editor.js?v=20260914-delete')) ?>"></script>
+<script type="module" src="<?= e(app_url('/extensions/gesture-maker/assets/gesture-editor.js?v=20260914-duplicates')) ?>"></script>
 </body>
 </html>
     <?php

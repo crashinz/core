@@ -10,6 +10,21 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-14 — Private room passwords and room controls
+
+Added optional passwords when creating regular, imported URL and Live Website rooms, with private-room entry prompts and PRIVATE ROOM overlays in the room list. Added owner/admin deletion controls for Live Website rooms and a single-line optional room-name label. Testing is WIP.
+
+
+## 2026-09-14 — Admin library duplicate review
+
+Added Find duplicates under Admin Storage Management, with compact previews and grouped exact matches across avatar, nameplate, gesture and custom emoji libraries. Administrators can choose a copy to keep and confirm individual removals, with current-match checks, private-library boundaries and existing historical-image protections. Scans show progress, cancellation and skipped entries. Testing is WIP.
+
+
+## 2026-09-14 — Duplicate uploads and custom emoji renaming
+
+Added content-based duplicate checks for avatars, nameplates, gestures and custom emojis, including folder uploads and older stored media. Existing accessible images can be selected without another upload; private libraries remain separate and distinct gesture text, sound or posters remain supported. Added administrator Rename emoji beside Delete, preserving existing image references and protecting against name conflicts and stale edits. Testing is WIP.
+
+
 ## 2026-09-14 — Emoji and gesture management actions
 
 Added administrator right-click custom emoji deletion while preserving images in older messages. Restored gesture three-dot menus, added Manage gesture and Delete gesture for administrators, and added deletion to the existing admin gesture editor. Added viewport bounds for picker menus. Testing is WIP.

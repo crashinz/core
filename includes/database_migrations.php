@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-09-14-001-shared-game-recording';
+const CORE_MIGRATION_REQUIRED_ID = '2026-09-14-002-room-passwords';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -874,7 +874,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => '9EF9C04BCE2CD227E6FD4C126AC8001F8A893BF818A8C27DF9D23A25279375C6',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-09-14-001-shared-game-recording',
             'title' => 'Shared protected game recordings',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -883,6 +883,17 @@ function database_migrations_manifest(): array
             'validate' => 'database_migration_validate_game_recordings',
             'source_functions' => ['database_migration_apply_game_recordings', 'database_migration_validate_game_recordings'],
             'expected_checksum' => 'F70AA46D1640F5733F06FDB08AA77CCBF2F4D5B649C41D9FD1D4B9E1C2F6A9AC',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Optional private room passwords',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_room_passwords',
+            'validate' => 'database_migration_validate_room_passwords',
+            'source_functions' => ['database_migration_apply_room_passwords', 'database_migration_validate_room_passwords'],
+            'expected_checksum' => '09A0DD6869EFC0E828ED9A3EB6E4A0626C1C8F57C21B18663C39FF14B1543ACE',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -4335,4 +4346,17 @@ function database_migrations_run(
 function database_migrations_install_clean(PDO $pdo): void
 {
     database_migrations_run($pdo, null, true);
+}
+
+function database_migration_apply_room_passwords(PDO $pdo): void
+{
+    if (!database_migration_validate_room_passwords($pdo)) {
+        $type = db_uses_mysql_syntax($pdo) ? 'VARCHAR(255)' : 'TEXT';
+        $pdo->exec("ALTER TABLE rooms ADD COLUMN room_password_hash {$type} DEFAULT NULL");
+    }
+}
+
+function database_migration_validate_room_passwords(PDO $pdo): bool
+{
+    return in_array('room_password_hash', database_migration_columns($pdo, 'rooms'), true);
 }

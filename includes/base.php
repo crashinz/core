@@ -24,8 +24,9 @@ const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
     '2026-09-01-runtime-audit-runs',
     '2026-09-12-live-website-official-successors',
     '2026-09-13-avatar-exact-display-size',
+    '2026-09-14-shared-game-recording',
 ];
-const CHATSPACE_SCHEMA_VERSION = '2026-09-14-shared-game-recording';
+const CHATSPACE_SCHEMA_VERSION = '2026-09-14-room-passwords';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 5000;
 const CHATSPACE_SQLITE_POLL_BUSY_TIMEOUT_MS = 100;
 const CHATSPACE_SQLITE_POLL_RETRY_BUDGET_MS = 1500;
@@ -37,6 +38,7 @@ function chatspace_application_version(): string {
 }
 
 require_once __DIR__ . '/auth_rate_limit.php';
+require_once __DIR__ . '/room_access.php';
 require_once __DIR__ . '/security_policy.php';
 if (!defined('CHATSPACE_DB_DRIVER') && is_file(CHATSPACE_CONFIG)) {
     require_once CHATSPACE_CONFIG;
@@ -8024,6 +8026,7 @@ function resolve_session_id(PDO $pdo, mixed $sessionKey): int {
 }
 
 function participant_for_user(PDO $pdo, int $sessionId, array $user): array {
+    room_access_require($pdo, room_access_for_session($pdo, $sessionId), $user);
     $avatarIdentity = avatar_identity_ensure_user($pdo, (int)$user['id']);
     $user['avatar_identity'] = $avatarIdentity['identity'];
     $user['avatar_source_width_px'] = $avatarIdentity['width'];
@@ -8129,6 +8132,12 @@ function auth_participant(PDO $pdo, int|string $sessionId, ?string $joinToken = 
     $stmt->execute([$sessionId, $joinToken]);
     $p = $stmt->fetch();
     if (!$p) json_out(['error' => 'Unauthorized'], 403);
+    $accessRoom = room_access_for_session($pdo, $sessionId);
+    if (room_access_is_private($accessRoom)) {
+        $accessUser = current_user();
+        if (!$accessUser || (int)$accessUser['id'] !== (int)$p['user_id']) json_out(['error'=>'Unauthorized'], 403);
+        room_access_require($pdo, $accessRoom, $accessUser);
+    }
     return $p;
 }
 

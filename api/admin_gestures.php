@@ -57,7 +57,15 @@ auth_rate_record_failure($pdo, $rateScope, (string)$me['id']);
 
 try {
     if ($action === 'delete') {
-        json_out(gesture_catalog_admin_delete($pdo, $me, (string)($body['public_id'] ?? ''), (int)($body['expected_version'] ?? -1), substr(trim((string)($body['request_key'] ?? '')), 0, 96)));
+        $guard = null;
+        if (isset($body['duplicate_review'])) {
+            require_once __DIR__ . '/../includes/library_duplicate_review.php';
+            $guard = static function () use ($pdo, $body, $me) {
+                try { library_duplicate_delete_guard($pdo, $me, 'gesture', (string)($body['public_id'] ?? ''), $body['duplicate_review']); }
+                catch (CustomEmojiException $error) { throw new GestureCatalogException($error->getMessage(), $error->httpStatus, 'DUPLICATE_REVIEW_CHANGED'); }
+            };
+        }
+        json_out(gesture_catalog_admin_delete($pdo, $me, (string)($body['public_id'] ?? ''), (int)($body['expected_version'] ?? -1), substr(trim((string)($body['request_key'] ?? '')), 0, 96), $guard));
     }
     if ($action !== 'update_metadata') {
         throw new GestureCatalogException('Unsupported Admin gesture action.', 400, 'UNSUPPORTED_ACTION');

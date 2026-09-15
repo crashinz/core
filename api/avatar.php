@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../includes/upload_duplicates.php';
 require_once __DIR__ . '/../includes/base.php';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'POST required'], 405);
 $pdo = db();
@@ -128,6 +129,13 @@ if ($action === 'select') {
     ], 400);
     }
 
+    $uploadTransaction = database_transaction_begin($pdo, true);
+    upload_duplicate_lock($pdo, 'avatar', (int)$p['user_id']);
+    $duplicate = upload_duplicate_find_image($pdo, (int)$p['user_id'], 'avatar', (string)$_FILES['avatar']['tmp_name']);
+    if ($duplicate !== null) {
+        database_transaction_commit($pdo, $uploadTransaction);
+        json_out($duplicate);
+    }
     $file = bin2hex(random_bytes(12)) . '.' . $allowed[$mime];
     $dest = __DIR__ . '/../assets/uploads/avatars/' . $file;
     if (!move_uploaded_file($_FILES['avatar']['tmp_name'], $dest)) {
@@ -141,7 +149,7 @@ $avatarWidth = max(1, (int)$dims[0]);
 $avatarHeight = max(1, (int)$dims[1]);
 
 try {
-    $pdo->beginTransaction();
+    $uploadTransaction ??= database_transaction_begin($pdo, true);
     avatar_identity_apply(
         $pdo,
         (int)$p['user_id'],
@@ -160,9 +168,9 @@ try {
         $avatarLibraryId = server_media_register_avatar($pdo, (int)$p['user_id'], $public, $dest, $mime, false);
         set_app_setting($pdo, 'avatar_library.name.' . $avatarLibraryId, mb_substr(basename(str_replace('\\', '/', (string)($_FILES['avatar']['name'] ?? 'Avatar'))), 0, 180));
     }
-    $pdo->commit();
+    database_transaction_commit($pdo, $uploadTransaction);
 } catch (Throwable $error) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
+    database_transaction_rollback($pdo, $uploadTransaction);
     if ($selectedAsset === null) @unlink($dest);
     throw $error;
 }

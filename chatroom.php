@@ -51,6 +51,10 @@ if ($activeEjection) {
     ];
     redirect_to('/lobby.php');
 }
+if (!room_access_allowed($room, $user)) {
+    require __DIR__ . '/includes/room_access_entry.php';
+    exit;
+}
 $csrfToken = csrf_token();
 if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();
@@ -557,7 +561,7 @@ $roomAssetVersion = static function (string $path): string {
     </div>
     <div class="room-edit-actions">
       <button class="btn btn-primary" type="submit">Save Room</button>
-      <button class="btn btn-danger" id="room-delete-open" type="button">Delete Room</button>
+      <?php if (room_access_can_delete($user, $room)): ?><button class="btn btn-danger" id="room-delete-open" type="button">Delete Room</button><?php endif; ?>
     </div>
   </form>
 </div>

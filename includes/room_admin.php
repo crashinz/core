@@ -37,6 +37,9 @@ function room_admin_load_context(PDO $pdo, array $user, array $source, string $p
     $room = $stmt->fetch();
     if (!$room) json_out(['error' => 'Room not found'], 404);
 
+    if ($permission === 'delete' && !room_access_can_delete($user, $room)) {
+        json_out(['error'=>'Only the room owner or an admin can delete this room.'], 403);
+    }
     if ($permission === 'manage' && !can_manage_room($user, $room)) {
         json_out(['error' => 'Only the room owner, admins, or developers can manage this room'], 403);
     }

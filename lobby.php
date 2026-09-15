@@ -42,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $name = trim($_POST['name'] ?? '');
     if ($name !== '') {
         try {
+            $passwordHash = room_access_hash($_POST['room_password'] ?? '');
             $bgPath = null;
             $bgMime = null;
             $bgThumbPath = null;
@@ -52,8 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bgMime = $saved['mime'];
                 $bgThumbPath = $saved['thumb_path'];
             }
-            $stmt = $pdo->prepare('INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path) VALUES (?,?,?,?,?,?)');
-            $stmt->execute([uuid_v4(), (int)$user['id'], $name, $bgPath, $bgMime, $bgThumbPath]);
+            $stmt = $pdo->prepare('INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path, room_password_hash) VALUES (?,?,?,?,?,?,?)');
+            $stmt->execute([uuid_v4(), (int)$user['id'], $name, $bgPath, $bgMime, $bgThumbPath, $passwordHash]);
             active_session_for_room($pdo, (int)$pdo->lastInsertId());
             redirect_to('/lobby.php');
         } catch (RuntimeException $e) {
@@ -93,8 +94,10 @@ $rooms = $roomsStmt->fetchAll();
   <title><?= e(branded_page_title('Lobby', $pdo, 'lobby')) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css?v=20260913-permission-toggles')) ?>">
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/live-website-rooms.css')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/room-access.css')) ?>">
   <?php if ($canvasAvailable): ?><link rel="stylesheet" href="<?= e(app_url('/extensions/canvas/assets/canvas.css?v=20260828-checklist-r2')) ?>"><?php endif; ?>
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=20260914-shared-controls')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/library-duplicate-review.css?v=20260914')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-user-id="<?= (int)$user['id'] ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="picker-shell">
@@ -143,6 +146,7 @@ $rooms = $roomsStmt->fetchAll();
           </div>
           <div class="room-create-panel active" id="room-create-manual">
             <label>Room name<input name="name" required placeholder="Moonlit Study, Neon Lounge, Table 7..."></label>
+            <label><span>Room password (optional)</span><input name="room_password" type="password" maxlength="72" autocomplete="new-password" placeholder="Leave blank for no password"></label>
             <label>Background image or video
               <span class="file-picker">
                 <input id="room-background-input" type="file" name="background" accept="image/*,video/mp4,video/webm">
@@ -167,7 +171,8 @@ $rooms = $roomsStmt->fetchAll();
           <div class="room-create-panel" id="room-create-live">
             <p class="minor live-website-create-note">Open an approved HTTPS website inside a temporary room. The website stays direct and personal; ChatSpace does not proxy it.</p>
             <label>HTTPS website URL<input id="room-live-website-url" type="url" inputmode="url" autocomplete="url" placeholder="https://example.com" required></label>
-            <label>Room name <span class="minor">(optional)</span><input id="room-live-website-name" maxlength="90" placeholder="Uses the website title when blank"></label>
+            <label><span class="room-create-label">Room name (optional)</span><input id="room-live-website-name" maxlength="90" placeholder="Uses the website title when blank"></label>
+            <label><span>Room password (optional)</span><input id="room-live-website-password" type="password" maxlength="72" autocomplete="new-password" placeholder="Leave blank for no password"></label>
             <button class="btn btn-primary" id="room-live-website-create" type="button">Create Live Website Room</button>
             <div class="room-import-status" id="room-live-website-status" role="status" aria-live="polite"></div>
           </div>
@@ -186,6 +191,7 @@ $rooms = $roomsStmt->fetchAll();
           }
         ?>
         <div class="room-card-media" <?php if ($tileBg): ?>style="background-image:url('<?= e(media_url($tileBg)) ?>')"<?php endif; ?>>
+          <?php if (room_access_is_private($room)): ?><span class="room-private-badge">PRIVATE ROOM</span><?php endif; ?>
           <?php if (!$tileBg && $room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
           <div class="room-video-placeholder">Video Room</div>
           <?php endif; ?>
@@ -201,8 +207,9 @@ $rooms = $roomsStmt->fetchAll();
             <span class="minor room-preview-status" role="status"></span>
             <?php endif; ?>
             <?php if (empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true))): ?>
-            <button class="btn btn-primary room-edit-open" type="button" data-room-id="<?= e($room['public_id']) ?>" data-room-name="<?= e($room['name']) ?>" data-room-bg="<?= e($room['background_path'] ? media_url($room['background_path']) : '') ?>" data-room-thumb="<?= e($room['background_thumb_path'] ? media_url($room['background_thumb_path']) : '') ?>" data-room-mime="<?= e($room['background_mime'] ?? '') ?>">Edit</button>
+            <button class="btn btn-primary room-edit-open" type="button" data-room-id="<?= e($room['public_id']) ?>" data-room-name="<?= e($room['name']) ?>" data-can-delete="<?= room_access_can_delete($user, $room) ? 'true' : 'false' ?>" data-room-bg="<?= e($room['background_path'] ? media_url($room['background_path']) : '') ?>" data-room-thumb="<?= e($room['background_thumb_path'] ? media_url($room['background_thumb_path']) : '') ?>" data-room-mime="<?= e($room['background_mime'] ?? '') ?>">Edit</button>
             <?php endif; ?>
+            <?php if (room_access_can_delete($user, $room)): ?><button class="btn btn-danger room-delete-direct" type="button" data-room-id="<?= e($room['public_id']) ?>" data-room-name="<?= e($room['name']) ?>">Delete</button><?php endif; ?>
           </p>
         </div>
       </article>
@@ -828,6 +835,20 @@ $rooms = $roomsStmt->fetchAll();
         <section class="admin-section" id="admin-section-storage">
           <div class="admin-section-title">Storage Management</div>
           <div class="admin-section-sub">Review authenticated server files, their references, retention, risk classification, and cleanup state.</div>
+          <?php if (($user['role'] ?? '') === 'admin'): ?>
+          <details class="admin-panel" id="admin-library-duplicates">
+            <summary>Find duplicates</summary>
+            <p class="minor">Scan shared libraries and your own personal items for exact matches. Other members' private libraries are excluded. Gesture text, sound and poster must also match.</p>
+            <div class="duplicate-toolbar">
+              <label>Library<select aria-label="Library to scan"><option value="all">All four libraries</option><option value="avatar">Avatars</option><option value="nameplate">Nameplates</option><option value="gesture">Gestures</option><option value="emoji">Custom emojis</option></select></label>
+              <button class="btn btn-primary" type="button" data-duplicate-scan>Scan libraries</button>
+              <button class="btn" type="button" data-duplicate-cancel hidden>Cancel scan</button>
+            </div>
+            <p class="minor" data-duplicate-status role="status" aria-live="polite">Nothing is deleted automatically. Review matches and choose which entries to remove.</p>
+            <div data-duplicate-results></div>
+            <div class="duplicate-pages" data-duplicate-pages aria-label="Duplicate result pages"></div>
+          </details>
+          <?php endif; ?>
           <div class="admin-panel admin-file-review-start">
             <h3>File Review Session</h3>
             <p class="minor">A review session lasts a fixed 60 minutes and ends immediately on logout, role loss, session revocation, or security change. Every file action is recorded separately with the original reason.</p>
@@ -1012,6 +1033,7 @@ $rooms = $roomsStmt->fetchAll();
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260913-clear-warning-box')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260914-webcam-shared-controls')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/lobby.js?v=20260913-compact-admin')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260914')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>
 </body>
 </html>

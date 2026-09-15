@@ -87,7 +87,7 @@ if ($action === 'update') {
 }
 
 if ($action === 'delete') {
-    $ctx = room_admin_load_context($pdo, $user, $source, 'manage', !empty($source['session_id']));
+    $ctx = room_admin_load_context($pdo, $user, $source, 'delete', !empty($source['session_id']));
     $room = $ctx['room'];
     $sessionId = (int)$ctx['session_id'];
     $sessionPublicId = (string)$ctx['session_public_id'];

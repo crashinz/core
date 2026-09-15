@@ -63,6 +63,8 @@ function lobby_room_payload(array $room, array $user): array {
         'video_without_thumb' => $tileBg === '' && $backgroundPath !== '' && str_starts_with($backgroundMime, 'video/'),
         'live_website_target_host' => (string)($room['live_website_target_host'] ?? ''),
         'can_refresh_preview' => !empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || live_website_rooms_is_admin($user)),
+        'is_private' => room_access_is_private($room),
+        'can_delete' => room_access_can_delete($user, $room),
         'can_edit' => empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true)),
         'enter_url' => app_url('/chatroom.php?id=' . rawurlencode((string)$room['public_id'])),
     ];
@@ -78,7 +80,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($name === '') json_out(['error' => 'Room name required'], 400);
 
     try {
-        $bgPath = null;
+        $passwordHash = room_access_hash($_POST['room_password'] ?? '');
+            $bgPath = null;
         $bgMime = null;
         $bgThumbPath = null;
         if (!empty($_FILES['background']['tmp_name']) && is_uploaded_file($_FILES['background']['tmp_name'])) {
@@ -89,8 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bgThumbPath = $saved['thumb_path'];
         }
         $publicId = uuid_v4();
-        $stmt = $pdo->prepare('INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path) VALUES (?,?,?,?,?,?)');
-        $stmt->execute([$publicId, (int)$user['id'], $name, $bgPath, $bgMime, $bgThumbPath]);
+        $stmt = $pdo->prepare('INSERT INTO rooms (public_id, owner_id, name, background_path, background_mime, background_thumb_path, room_password_hash) VALUES (?,?,?,?,?,?,?)');
+        $stmt->execute([$publicId, (int)$user['id'], $name, $bgPath, $bgMime, $bgThumbPath, $passwordHash]);
         $roomId = (int)$pdo->lastInsertId();
         active_session_for_room($pdo, $roomId);
         $roomStmt = $pdo->prepare('SELECT r.*, u.display_name AS owner_name, 0 AS online_count FROM rooms r JOIN users u ON u.id = r.owner_id WHERE r.id = ? LIMIT 1');

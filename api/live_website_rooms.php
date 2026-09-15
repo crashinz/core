@@ -14,6 +14,7 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $publicId = trim((string)($_GET['room_public_id'] ?? ''));
         $room = live_website_room_row($pdo, $publicId);
+        room_access_require($pdo, $room, $user);
         json_out(['ok' => true, 'liveWebsiteRoom' => live_website_room_projection($pdo, (int)$room['room_id'], (int)$user['id'])]);
     }
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_out(['error' => 'POST required'], 405);
@@ -21,9 +22,10 @@ try {
     $body = input_json();
     $action = (string)($body['action'] ?? '');
     if ($action === 'create') {
-        json_out(['ok' => true, 'room' => live_website_rooms_create($pdo, $user, (string)($body['url'] ?? ''), (string)($body['name'] ?? ''))]);
+        json_out(['ok' => true, 'room' => live_website_rooms_create($pdo, $user, (string)($body['url'] ?? ''), (string)($body['name'] ?? ''), $body['room_password'] ?? '')]);
     }
     $roomPublicId = trim((string)($body['room_public_id'] ?? ''));
+    room_access_require($pdo, live_website_room_row($pdo, $roomPublicId), $user);
     if ($action === 'music') {
         require_once __DIR__ . '/../includes/live_website_room_music.php';
         json_out(['ok' => true] + live_website_room_music($pdo, $user, $roomPublicId, $body));
@@ -45,6 +47,8 @@ try {
     json_out(['error' => 'Unknown action'], 400);
 } catch (LiveWebsiteRoomException $error) {
     json_out(['error' => $error->getMessage(), 'code' => $error->errorCode] + $error->projection, $error->httpStatus);
+} catch (RoomPasswordException $error) {
+    json_out(['error'=>$error->getMessage()], 400);
 } catch (SecurityPolicyViolation $error) {
     json_out(['error' => $error->getMessage(), 'code' => 'LIVE_WEBSITE_SECURITY_REJECTED'], $error->getCode() >= 400 ? $error->getCode() : 400);
 }
