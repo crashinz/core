@@ -112,7 +112,35 @@ function ocx_game_media_chess_slots(): array
     foreach (['DRAW_D','DRAW_H','DRAW_P','DRAW_R','RSGN_D','RSGN_H','RSGN_P','RSGN_R','GFX_DH','GFX_DR','GFX_UH','GFX_UR','SFX_DH','SFX_DR','SFX_UH','SFX_UR','LAVATAR1','LAVATAR2','EMPTY'] as $name) ocx_game_media_add_image($slots, 'GIF_' . $name);
     ocx_game_media_add_image($slots, 'IDG_GAMEGROUP.gif');
     foreach (['WAV_CHECK','WAV_DIE','WAV_DRAW','WAV_LOCK','WAV_MATE','WAV_MOVE','WAV_OOT','WAV_OUTTIME','WAV_RESIGN','WAV_UNLOCK','WAV_YOOT'] as $name) ocx_game_media_add_wav($slots,$name);
+    $captureSizes = [[36,966],[35,910],[32,812],[28,742]];
+    foreach (range(500,539) as $id) {
+        ocx_game_media_add_optional_native_strip($slots, $id, $captureSizes[($id-500)%4], 'Original capture animation');
+    }
+    foreach ([600=>1351,601=>1274,602=>1217,603=>1059,604=>1311,605=>1299,606=>1223,607=>1116] as $id=>$height) {
+        ocx_game_media_add_optional_native_strip($slots,$id,[54,$height],'Original defeated king animation');
+    }
     return $slots;
+}
+
+function ocx_game_media_add_optional_native_strip(array &$slots, int $id, array $dimensions, string $label): void
+{
+    $slot = 'bitmap-' . $id;
+    ocx_game_media_add_image($slots, $slot . '.png', $dimensions, $label,
+        ocx_game_media_edge_matte_preparation([0, 0, 0]));
+    $slots[$slot]['acceptedOriginalNames'][] = $id . '.png';
+    $slots[$slot]['requiredForClassic'] = false;
+}
+
+function ocx_game_media_add_bear_off_strips(array &$slots): void
+{
+    foreach ([507 => [32, 256], 508 => [32, 285]] as $id => $dimensions) {
+        $slot = 'bitmap-' . $id;
+        ocx_game_media_add_image($slots, $slot . '.png', $dimensions,
+            'Optional original checker bear-off frames', ocx_game_media_edge_matte_preparation([0, 0, 0]));
+        $slots[$slot]['acceptedOriginalNames'][] = $id . '.png';
+        // Older installed packs remain complete without these additional frames.
+        $slots[$slot]['requiredForClassic'] = false;
+    }
 }
 
 function ocx_game_media_acey_deucy_slots(): array
@@ -126,6 +154,10 @@ function ocx_game_media_acey_deucy_slots(): array
     }
     ocx_game_media_add_image($slots, 'IDG_GAMEGROUP.gif');
     foreach (['WAV_ACEYDEUCY','WAV_AWCRAP','WAV_AWW','WAV_BKGAMM','WAV_BTRLUK','WAV_DANGIT','WAV_DBLSIX','WAV_DICE','WAV_EAT','WAV_GAMMON','WAV_LOCK','WAV_MOVE','WAV_OUT','WAV_UCANT','WAV_UNLOCK','WAV_VICTORY','WAV_YGO','WAV_YMOVE','WAV_YMOVE2','WAV_YTURN'] as $name) ocx_game_media_add_wav($slots,$name);
+    ocx_game_media_add_bear_off_strips($slots);
+    foreach ([515=>[60,396],519=>[80,380],523=>[77,513],527=>[51,1710]] as $base=>$dimensions) {
+        foreach (range($base,$base+3) as $id) ocx_game_media_add_optional_native_strip($slots,$id,$dimensions,'Original victory animation');
+    }
     return $slots;
 }
 
@@ -220,6 +252,7 @@ function ocx_game_media_backgammon_slots(): array
     foreach (['WAV_BKGAMM','WAV_BTRLUK','WAV_DBLSIX','WAV_DICE','WAV_EAT','WAV_GAMMON','WAV_LOCK','WAV_MOVE','WAV_OUT','WAV_UCANT','WAV_UNLOCK','WAV_VICTORY','WAV_YGO','WAV_YMOVE','WAV_YTURN'] as $name) {
         ocx_game_media_add_wav($slots, $name);
     }
+    ocx_game_media_add_bear_off_strips($slots);
     return $slots;
 }
 
@@ -412,9 +445,27 @@ function ocx_game_media_prepared_file(array $validatedSource, string $directory)
 
 function ocx_game_media_pack_status(PDO $pdo,string $extensionId): array
 {
-    $directory=ocx_game_media_active_directory($pdo,$extensionId);$installed=[];$missing=[];$invalid=[];
-    foreach(array_keys(ocx_game_media_pack_slots($extensionId)) as $slot){$result=ocx_game_media_validate_slot($extensionId,$slot,$directory);if($result['state']==='installed'&&is_array($result['preparation']??null)&&$directory!==null){try{ocx_game_media_prepared_file($result,$directory);}catch(Throwable){$result['state']='invalid';$result['reason']='The source-backed private media preparation failed.';}}$public=['slot'=>$slot,'label'=>$result['label'],'installName'=>$result['installName'],'state'=>$result['state']];if($result['state']==='installed')$installed[]=$public;elseif($result['state']==='missing')$missing[]=$public;else$invalid[]=$public+['guidance'=>'Replace this file with the recognized original or prepared media for this slot.'];}
-    $required=count(ocx_game_media_pack_slots($extensionId));return['extensionId'=>$extensionId,'installed'=>$installed,'missing'=>$missing,'invalid'=>$invalid,'installedCount'=>count($installed),'requiredCount'=>$required,'classicComplete'=>count($installed)===$required&&$invalid===[],'privateStorage'=>true,'publicWebRoot'=>false,'acceptedOriginalNames'=>array_keys(ocx_game_media_pack_name_map($extensionId))];
+    $directory = ocx_game_media_active_directory($pdo, $extensionId);
+    $installed = []; $missing = []; $invalid = []; $optional = [];
+    $required = 0;
+    foreach (ocx_game_media_pack_slots($extensionId) as $slot => $definition) {
+        $isRequired = !empty($definition['requiredForClassic']);
+        if ($isRequired) $required++;
+        $result = ocx_game_media_validate_slot($extensionId, $slot, $directory);
+        if ($result['state'] === 'installed' && is_array($result['preparation'] ?? null) && $directory !== null) {
+            try { ocx_game_media_prepared_file($result, $directory); }
+            catch (Throwable) { $result['state'] = 'invalid'; }
+        }
+        $public = ['slot'=>$slot, 'label'=>$result['label'], 'installName'=>$result['installName'], 'state'=>$result['state']];
+        if (!$isRequired) { $optional[] = $public; continue; }
+        if ($result['state'] === 'installed') $installed[] = $public;
+        elseif ($result['state'] === 'missing') $missing[] = $public;
+        else $invalid[] = $public + ['guidance'=>'Replace this file with the recognized original or prepared media for this slot.'];
+    }
+    return ['extensionId'=>$extensionId, 'installed'=>$installed, 'missing'=>$missing, 'invalid'=>$invalid,
+        'optional'=>$optional, 'installedCount'=>count($installed), 'requiredCount'=>$required,
+        'classicComplete'=>count($installed)===$required && $invalid===[], 'privateStorage'=>true,
+        'publicWebRoot'=>false, 'acceptedOriginalNames'=>array_keys(ocx_game_media_pack_name_map($extensionId))];
 }
 
 function ocx_game_media_safe_upload_name(string $name): string
@@ -484,7 +535,17 @@ function ocx_game_media_attempt_metadata(string $extensionId,string $attempt,int
 
 function ocx_game_media_attempt_progress(string $extensionId,string $attempt): array
 {
-    $count=0;$bytes=0;foreach(ocx_game_media_pack_slots($extensionId) as $definition){$path=$attempt.DIRECTORY_SEPARATOR.$definition['installName'];if(is_file($path)){$count++;$bytes+=(int)(filesize($path)?:0);}}return['stagedCount'=>$count,'requiredCount'=>count(ocx_game_media_pack_slots($extensionId)),'stagedBytes'=>$bytes];
+    $count = 0; $bytes = 0; $required = 0; $optional = 0;
+    foreach (ocx_game_media_pack_slots($extensionId) as $definition) {
+        $isRequired = !empty($definition['requiredForClassic']);
+        if ($isRequired) $required++;
+        $path = $attempt . DIRECTORY_SEPARATOR . $definition['installName'];
+        if (is_file($path)) {
+            if ($isRequired) $count++; else $optional++;
+            $bytes += (int)(filesize($path) ?: 0);
+        }
+    }
+    return ['stagedCount'=>$count, 'requiredCount'=>$required, 'optionalStagedCount'=>$optional, 'stagedBytes'=>$bytes];
 }
 
 function ocx_game_media_begin_attempt(PDO $pdo,string $extensionId,int $actorUserId): array
@@ -553,8 +614,9 @@ function ocx_game_media_activate_attempt(PDO $pdo,string $extensionId,int $actor
     $attemptRoot=security_private_storage_directory(ocx_game_media_category($extensionId,'attempts'));
     try{
         $progress=ocx_game_media_attempt_progress($extensionId,$attempt);
-        if((int)$progress['stagedCount']!==count(ocx_game_media_pack_slots($extensionId)))throw new RuntimeException('The selected pack is incomplete. Add every required media slot before activation.');
-        foreach(array_keys(ocx_game_media_pack_slots($extensionId)) as $slot){
+        if((int)$progress['stagedCount']!==(int)$progress['requiredCount'])throw new RuntimeException('The selected pack is incomplete. Add every required media slot before activation.');
+        foreach(ocx_game_media_pack_slots($extensionId) as $slot=>$definition){
+            if(empty($definition['requiredForClassic']) && !is_file($attempt.DIRECTORY_SEPARATOR.$definition['installName'])) continue;
             $validated=ocx_game_media_validate_slot($extensionId,$slot,$attempt);
             if(($validated['state']??'')!=='installed')throw new RuntimeException('A selected pack file no longer passes validation.');
             if(is_array($validated['preparation']??null))ocx_game_media_prepared_file($validated,$attempt);

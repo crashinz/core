@@ -87,9 +87,9 @@
     "algorithm": "sha256",
     "files": {
       "includes/blackjack_extension.php": "face6ac0344e445db6f22f8bf2bb9aa364270a51fa105eeaebde7d501f757935",
-      "games/blackjack-first-party/index.html": "1f3a25c2956ee4321339c807cf9433d3192728fe4e573c0cc951489ceadefa44",
-      "games/ocx-extension-game.css": "7a351c2a05d91d966364b8f7e2365209021a584c8056206eca3f0345c251d9e1",
-      "games/classic-source-maps.js": "6ff02254d0656a06cbf7f509cb4ef581215da5ce27c579fe26a68670c580d881",
+      "games/blackjack-first-party/index.html": "38fb1869dd30993be935fed31ea9098c8e8579d9f6a467cfa575b9ed44faca74",
+      "games/ocx-extension-game.css": "a1f0eed3328e00cafaad850c4111648890caee435bd138101a9cc4d1eff46cee",
+      "games/classic-source-maps.js": "cf6201672747fa92b1c85323cee69b629a702fca83cd28058be66c2c1cc3d808",
       "assets/images/blackjack-first-party-icon.svg": "e1f365609bb10c7da4d97117245d80975eb90aeda65c57ace75a0446ab1688a1",
       "assets/audio/blackjack/card-deal-1.mp3": "5bc7b9144b29688fc1cb8c66334c70eb2e34a165e6c59157cbe6cc2e410cc30a",
       "assets/audio/blackjack/card-deal-2.mp3": "c85faca1c7286c9b16ab4abe9bcf19a4ae69019ab83c0a841e0e422a589ee7f6",
@@ -108,7 +108,7 @@
       "assets/audio/blackjack/turn-stand.mp3": "05c4db985a439758c1c025cde7857a3f6d6174606e7684a841d1fef7e9963da6",
       "assets/audio/blackjack/ui-button.mp3": "11658397b40f67789d43ac8cb71c0635adeb44008a1eccff92f7a9172871d1f4",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "00749f73799490f1c0950abb68de42d4837cce3aa7b6ce92b80625dab7f86524",
+      "games/ocx-extension-game.js": "20842fe8b83f95b1dc1c2698245b3a9551875df562b3544440cd458721def5a9",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
     }
   }

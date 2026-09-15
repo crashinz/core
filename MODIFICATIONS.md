@@ -10,6 +10,46 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-15 — Original point-game rack alignment
+
+Corrected Classic Backgammon and Acey Deucy bear-off rack positions to match the original upper/lower baselines and alternating offsets. Corrected Acey Deucy resting checker widths and kept the animation destination aligned with the resting stack. Testing is WIP.
+
+
+## 2026-09-15 — Acey direction and original Chess king animation
+
+Corrected Classic Acey Deucy’s lower-row direction and player bear-off racks. Added the original Chess king-and-flag animation with working frame playback, cleanup and optional-media fallback. Verify now checks its artwork. Corrected Backgammon and Acey Deucy bear-off to use the original concurrent slide and turn, eight complete frames at80ms, and clean handoff to the resting rack. Testing is WIP.
+
+
+## 2026-09-15 — Original Chess capture and Acey Deucy victory animations
+
+Added optional original Chess capture artwork for all piece depths and both viewing orientations, including en passant, and the original five-stage Acey Deucy victory sequence. Verify reports whether the new animation artwork is installed. Existing Classic packs retain their fallback effects. Testing is WIP.
+
+
+## 2026-09-15 — Five Dice original and doubled Classic media
+
+Added complete static Five Dice OCX import, original-size image preparation, and automatic preference for supplied doubled artwork when multiple sources are selected. Verify now identifies 2x artwork, Original OCX 1x artwork, or a mixture, alongside missing and invalid file checks. Existing complete packs and protected private installation remain supported. Testing is WIP.
+
+
+## 2026-09-15 — Classic media details on demand
+
+Kept the Classic game list compact by moving optional bear-off artwork details into the Verify result. Verification still reports progress, missing or invalid files, and failures beside the relevant game. Testing is WIP.
+
+
+## 2026-09-15 — Clear Classic media verification results
+
+Added verification progress, file counts and errors beside each game in Admin, with results remaining visible when its menu is closed. Added separate original bear-off animation status for Backgammon and Acey Deucy so missing artwork clearly requests re-import. Added immediate status refresh after installation or removal and an unverified message for older server responses. Testing is WIP.
+
+
+## 2026-09-15 — Shared original bear-off animation
+
+Added matching rack-entry and overlapping checker-turn motion for Classic Backgammon and Acey Deucy, using the original optional bear-off frames. Added a full bear-off duration for Acey Deucy so cleanup no longer truncates the shared sequence. Added compatible optional-media import and a working fallback for existing packs or unavailable artwork, with both-seat ordinary and final-checker checks. Testing is WIP.
+
+
+## 2026-09-15 — Single blocked-roll dice pair and Backgammon rack entry
+
+Added a single displayed dice pair during Classic Backgammon rolls and blocked bar-entry turns, preventing smaller legacy dice from appearing over the new dice. Added the same dice renderer for blocked-turn fallback. Added a Backgammon bear-off path that enters the side channel before travelling along the rack and turning edge-on into the notch, with existing total duration preserved. Added both-seat blocked-roll and ordinary/final bear-off checks, plus Acey Deucy regression coverage. Testing is WIP.
+
+
 ## 2026-09-15 — Game FX controls and motion preferences
 
 Added per-game Visual FX choices that override the device motion default. Added matching lit/enabled and dim/disabled Classic sound and visual controls for Backgammon, Acey Deucy, Chess and Checkers. Added protection against white empty-image boxes during Classic control loading. Added browser checks for delayed artwork, saved FX state, keyboard controls and animations under reduced motion. Testing is WIP.

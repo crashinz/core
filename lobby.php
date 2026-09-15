@@ -96,7 +96,7 @@ $rooms = $roomsStmt->fetchAll();
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/live-website-rooms.css')) ?>">
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/room-access.css')) ?>">
   <?php if ($canvasAvailable): ?><link rel="stylesheet" href="<?= e(app_url('/extensions/canvas/assets/canvas.css?v=20260828-checklist-r2')) ?>"><?php endif; ?>
-<link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=20260914-shared-controls')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=e365788d6f6d')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/library-duplicate-review.css?v=20260914')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-user-id="<?= (int)$user['id'] ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
@@ -1031,7 +1031,7 @@ $rooms = $roomsStmt->fetchAll();
 <script src="<?= e(app_url('/assets/js/game-recordings.js?v=20260914')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260914-game-recordings')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260913-clear-warning-box')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260914-webcam-shared-controls')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=80871a7c8373')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/lobby.js?v=20260913-compact-admin')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260914')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>

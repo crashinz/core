@@ -2,7 +2,7 @@ import { createCardBotController } from "./uno-bot-controller.js?v=d1c32d65552f"
 import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=65d896c667ff";
 import { createCheckersBotController } from "./checkers-bot-controller.js?v=729241a2b45b";
 import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
-import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=6ff02254d065";
+import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=cf6201672747";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=c2557c225fbc";
 
 import { bindGameAvatar } from "./game-avatar.js?v=20260913-room-avatars";
@@ -1708,6 +1708,88 @@ function pointGameClassicDie(value) {
   return die;
 }
 
+const nativeClassicMedia = new Map();
+function optionalClassicStrip(slot) {
+  const entry = session?.presentation?.mediaPack?.optional?.find(item => item.slot === slot && item.state === "installed");
+  const cached = nativeClassicMedia.get(mediaUrl(slot));
+  return entry && cached && cached.image.complete && cached.image.naturalWidth > 0 ? cached.image : null;
+}
+
+function ensureNativeClassicMediaReady() {
+  if (!["chess", "acey-deucy"].includes(context.extensionId) || session?.presentation?.effectivePack !== "classic") return;
+  const wanted = new Set();
+  if (context.extensionId === "chess") {
+    const source = classicSourceMap("chess");
+    // Preload the two king variants first, followed by current capture variants.
+    for (const kings of [true,false]) for (let row=0;row<8;row++) for(let column=0;column<8;column++) {
+      const piece = session.state?.board?.[row]?.[column];
+      if (!piece || (piece[1] === "K") !== kings) continue;
+      const base = kings ? 600 : source.motion.nativeCapture.baseByPiece[piece[1]];
+      if (base === undefined) continue;
+      const level = source.pieceSizeByRow[squareVisualCoordinates("chess",row,column).row];
+      wanted.add(`bitmap-${base+(piece[0] === "w" ? 4 : 0)+level-1}`);
+    }
+  } else for (const base of [515,519,523,527]) for (const side of [0,2]) wanted.add(`bitmap-${base+side}`);
+  for (const slot of wanted) {
+    const entry = session.presentation.mediaPack?.optional?.find(item=>item.slot===slot && item.state==="installed");
+    if (!entry) continue;
+    const url = mediaUrl(entry.slot);
+    if (nativeClassicMedia.has(url)) continue;
+    const image = new Image();
+    image.decoding = "sync";
+    nativeClassicMedia.set(url, { image, sha256:entry.sha256 });
+    image.src = url;
+  }
+  document.body.dataset.nativeClassicMediaReady = String([...wanted].every(slot=>
+    !session.presentation.mediaPack?.optional?.some(item=>item.slot===slot && item.state==="installed") || optionalClassicStrip(slot)));
+}
+
+function chessNativeCapture(motion) {
+  const victim = chessCaptureVictim(motion);
+  if (!victim) return null;
+  const source = classicSourceMap("chess");
+  const native = source.motion.nativeCapture;
+  const projected = squareVisualCoordinates("chess", victim.row, victim.column);
+  const level = source.pieceSizeByRow[projected.row];
+  const base = native.baseByPiece[victim.piece[1]];
+  if (base === undefined) return null;
+  const slot = `bitmap-${base + (victim.piece[0] === "w" ? 4 : 0) + level - 1}`;
+  if (!optionalClassicStrip(slot)) return null;
+  const box = bottomCenteredSourceAssetBox(checkerCellBox("chess",victim.row,victim.column),native.frameSizes[level-1]);
+  box.y -= native.rowYOffset[projected.row];
+  return { slot, box, victim, ...native };
+}
+
+function chessCaptureDuration(motion = pendingClassicMotion) {
+  return chessNativeCapture(motion)?.durationMs || classicSourceMap("chess").motion.captureFall.durationMs;
+}
+
+function aceyNativeWin(motion = pendingClassicMotion) {
+  const state = motion?.after || session?.state;
+  const index = (state?.turnOrder || []).map(Number).indexOf(Number(state?.winnerUserId));
+  if (index < 0) return null;
+  const definition = classicSourceMap("acey-deucy").motion.nativeWin;
+  const slots = definition.baseSlots.map(id => `bitmap-${id + (index === 0 ? 0 : 2)}`);
+  return slots.every(slot => optionalClassicStrip(slot))
+    ? { ...definition, slots, positions:definition.positions[index === 0 ? "white" : "black"] } : null;
+}
+
+const pointBearOffMedia = new Map();
+function ensurePointBearOffMediaReady() {
+  if (!["backgammon-first-party", "acey-deucy"].includes(context.extensionId)
+    || session?.presentation?.effectivePack !== "classic") return;
+  for (const entry of session.presentation.mediaPack?.optional || []) {
+    if (entry.state !== "installed" || !["bitmap-507", "bitmap-508"].includes(entry.slot)) continue;
+    const url = mediaUrl(entry.slot);
+    if (pointBearOffMedia.has(url)) continue;
+    const image = new Image();
+    image.decoding = "sync";
+    pointBearOffMedia.set(url, image);
+    // Optional artwork never delays a move or replaces a working board.
+    image.src = url;
+  }
+}
+
 function ensureClassicMotionMediaReady() {
   if (!["checkers", "battleship"].includes(context.extensionId) || session?.presentation?.effectivePack !== "classic") {
     return Promise.resolve();
@@ -2106,16 +2188,16 @@ function motionLength(gameId, type) {
   if (type === "checkers-win") return Number(pendingClassicMotion?.leadDurationMs || 0)
     + source.decisiveTerminal.durationMs;
   if (type === "chess-move") return source.pieceSlide.durationMs;
-  if (type === "chess-capture") return source.captureFall.durationMs + source.pieceSlide.durationMs;
+  if (type === "chess-capture") return chessCaptureDuration() + source.pieceSlide.durationMs;
   if (type === "chess-checkmate") return Number(pendingClassicMotion?.leadDurationMs || 0) + source.checkmateFlag.durationMs;
-  if (["point-move", "point-bear-off"].includes(type)) return source.checkerSlide.durationMs
+  if (["point-move", "point-bear-off"].includes(type)) return (type === "point-bear-off" ? source.bearOff.durationMs : source.checkerSlide.durationMs)
     + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (type === "point-hit") return pointHitMotionLength(source.hitToBar)
     + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (type === "backgammon-dice-roll") return 1467 + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (type === "point-no-legal-move") return Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (["backgammon-win", "acey-deucy-win"].includes(type)) {
-    return Number(pendingClassicMotion?.leadDurationMs || 0) + source.win.durationMs;
+    return Number(pendingClassicMotion?.leadDurationMs || 0) + (gameId === "acey-deucy" ? aceyNativeWin()?.durationMs || source.win.durationMs : source.win.durationMs);
   }
   if (type === "battleship-auto-placement") return source.autoPlacement.durationMs;
   if (type === "battleship-shot") return source.shot.durationMs;
@@ -2237,8 +2319,8 @@ function pointStateCount(state, actorUserId, location) {
 }
 
 function pointBorneDirection(gameId, playerIndex) {
-  if (gameId === "backgammon-first-party") return "up";
-  return playerIndex === 0 ? "down" : "up";
+  // Both original rack coordinate branches subtract seven pixels per checker.
+  return "up";
 }
 
 function sourceStackCheckerBox(gameId, location, actorUserId, state) {
@@ -2265,7 +2347,7 @@ function sourceStackCheckerBox(gameId, location, actorUserId, state) {
   if (borneProfile) {
     const profileWidth = Number(borneProfile.nativeSizes?.[playerIndex]?.[0] || 25);
     const profileHeight = Number(borneProfile.nativeSizes?.[playerIndex]?.[1] || 5);
-    const inset = Number(borneProfile.edgeInset || 0);
+    const inset = Number(borneProfile.edgeInsets?.[playerIndex] ?? borneProfile.edgeInset ?? 0);
     const profileStep = Number(borneProfile.stackStep || profileHeight);
     const notchInsets = borneProfile.notchLeftInsets?.[playerIndex] || [];
     const notchCandidate = notchInsets.length ? Number(notchInsets[(count - 1) % notchInsets.length]) : NaN;
@@ -2334,7 +2416,7 @@ function classifyClassicMotion(previous, current) {
       ...base, type: "chess-checkmate", move: latestMove,
       leadDurationMs: latestMove
         ? classicSourceMap("chess").motion.pieceSlide.durationMs
-          + (latestMove.capture ? classicSourceMap("chess").motion.captureFall.durationMs : 0)
+          + (latestMove.capture ? chessCaptureDuration({before,after,move:latestMove}) : 0)
         : 0,
     };
     if (context.extensionId === "checkers" && isCheckersDecisiveTerminalReason(terminalReason)) {
@@ -4778,6 +4860,15 @@ function appendChessCaptureFall(stage, motion, delayMs = 0) {
   const victim = chessCaptureVictim(motion);
   if (!victim) return 0;
   const source = classicSourceMap("chess");
+  const native = chessNativeCapture(motion);
+  if (native) {
+    const elapsed = Math.max(0, performance.now() - Number(pendingClassicMotion?.startedAt || performance.now()));
+    const host = sourceStripNode("chess", native.slot, native.box, native, delayMs, "classic-chess-native-capture", elapsed);
+    host.dataset.captureSquare = `${victim.row}:${victim.column}`;
+    host.dataset.capturedPiece = victim.piece;
+    stage.append(host);
+    return native.durationMs;
+  }
   const timeline = source.motion.captureFall;
   const cell = checkerCellBox("chess", victim.row, victim.column);
   const elapsed = Math.max(0, performance.now() - Number(pendingClassicMotion?.startedAt || performance.now()));
@@ -5033,8 +5124,8 @@ function appendSquareMoveMotion(stage, gameId, motion, motionType, delayMs = 0) 
     revealAfterMotion(destination, delayMs + effectEnd);
   } else {
     const classicPiece = { K:"k", Q:"q", R:"r", B:"b", N:"kn", P:"p" };
-    const fromSize = source.pieceSizeByRow[Number(motion.move.from?.[0])];
-    const toSize = source.pieceSizeByRow[Number(motion.move.to?.[0])];
+    const fromSize = source.pieceSizeByRow[squareVisualCoordinates("chess",Number(motion.move.from?.[0]),Number(motion.move.from?.[1])).row];
+    const toSize = source.pieceSizeByRow[squareVisualCoordinates("chess",Number(motion.move.to?.[0]),Number(motion.move.to?.[1])).row];
     const movingSlot = `gif-${classicPiece[piece[1]]}-${piece[0]}-h-${fromSize}`;
     const destinationSlot = `gif-${classicPiece[piece[1]]}-${piece[0]}-h-${toSize}`;
     const captureDelay = motionType === "chess-capture" ? appendChessCaptureFall(stage, motion, delayMs) : 0;
@@ -5060,6 +5151,74 @@ function pointFinalChecker(stage, location, actorUserId) {
   if (location === "borne-off") return stage.querySelector(`.classic-borne-zone .classic-checker-pile[data-owner-user-id="${owner}"] .classic-checker:last-child`);
   const point = typeof location === "string" && location.startsWith("point:") ? Number(location.slice(6)) : Number(location);
   return stage.querySelector(`[data-point-key="point:${point}"] .classic-checker-pile[data-owner-user-id="${owner}"] .classic-checker:last-child`);
+}
+
+function appendPointBearOffMotion(stage, gameId, slot, from, to, playerIndex, durationMs, delayMs) {
+  const source = classicSourceMap(gameId);
+  const profile = source.borneOffCheckers.nativeSizes[playerIndex];
+  const turnSlot = playerIndex === 0 ? "bitmap-507" : "bitmap-508";
+  const turnImage = pointBearOffMedia.get(mediaUrl(turnSlot));
+  const sourceTurn = turnImage?.complete && turnImage.naturalWidth === 32
+    && turnImage.naturalHeight === (playerIndex === 0 ? 256 : 285);
+  const image = make("div", "classic-source-motion-asset is-point-slide point-bear-off is-rack-entry");
+  let frames, artwork;
+  if (sourceTurn) {
+    // Both OCXs pass a 32px cell at point - (4,16), moving directly to
+    // rack - (4,16). Each 80ms tick advances position AND turning artwork.
+    // Native integer division leaves any remainder for the final board redraw.
+    const count = Math.floor(turnImage.naturalHeight / 32);
+    const start = { x: Math.round(from.x) - 4, y: Math.round(from.y) - 16 };
+    const end = {
+      x: Math.round(to.x - (profile[0] - to.width) / 2) - 4,
+      y: Math.round(to.y - (profile[1] - to.height) / 2) - 16,
+    };
+    const stepX = Math.trunc((end.x - start.x) / (count - 1));
+    const stepY = Math.trunc((end.y - start.y) / (count - 1));
+    frames = Array.from({ length: count + 1 }, (_, tick) => {
+      const frame = Math.min(tick, count - 1);
+      return { x: start.x + frame * stepX, y: start.y + frame * stepY,
+        width: 32, height: 32, offset: tick / count, easing: "steps(1, end)" };
+    });
+    const turn = make("div", "point-bearoff-turn");
+    turn.dataset.frameCount = String(count);
+    artwork = mediaImage(turnSlot, "point-bearoff-turn-image", "");
+    artwork.style.height = `${turnImage.naturalHeight / 32 * 100}%`;
+    turn.append(artwork); image.append(turn);
+  } else {
+    // Older complete media packs keep a direct slide and edge-on fallback.
+    frames = [{ ...from, offset: 0 }, {
+      x: to.x + (to.width - profile[0]) / 2, y: to.y + (to.height - profile[1]) / 2,
+      width: profile[0], height: profile[1], offset: 1,
+    }];
+    image.append(mediaImage(slot, "point-bearoff-checker", ""));
+  }
+  image.dataset.sourceTurn = sourceTurn ? turnSlot : "fallback";
+  image.dataset.motionSlot = slot;
+  image.dataset.motionFrom = `${from.x},${from.y},${from.width},${from.height}`;
+  image.dataset.motionTo = `${to.x},${to.y},${to.width},${to.height}`;
+  image.dataset.motionDurationMs = String(durationMs);
+  image.dataset.motionDelayMs = String(delayMs);
+  setSourceBox(image, frames[0], source.canvas.width, source.canvas.height);
+  stage.append(image);
+  // The terminal sequence can outlive this move; hand the rack back to its
+  // resting checker at the same instant that revealAfterMotion reveals it.
+  hideAfterMotion(image, delayMs + durationMs);
+  requestAnimationFrame(() => {
+    const timing = { duration: durationMs, delay: delayMs, easing: "linear", fill: "both" };
+    const animation = image.animate(frames.map(box => ({ offset: box.offset, easing: box.easing || "linear",
+      left: `${box.x / source.canvas.width * 100}%`, top: `${box.y / source.canvas.height * 100}%`,
+      width: `${box.width / source.canvas.width * 100}%`, height: `${box.height / source.canvas.height * 100}%`,
+    })), timing);
+    const elapsed = Math.min(durationMs + delayMs,
+      Math.max(0, performance.now() - Number(pendingClassicMotion?.startedAt || performance.now())));
+    animation.currentTime = elapsed;
+    if (artwork) {
+      const changing = artwork.animate(frames.map((box, tick) => ({
+        top: `${-Math.min(tick, frames.length - 2) * 100}%`, offset: box.offset, easing: "steps(1, end)",
+      })), timing);
+      changing.currentTime = elapsed;
+    }
+  });
 }
 
 function appendPointMoveMotion(stage, gameId, motion, motionType, delayMs = 0) {
@@ -5110,7 +5269,11 @@ function appendPointMoveMotion(stage, gameId, motion, motionType, delayMs = 0) {
       ? source.motion.hitToBar.moverDurationMs
       : source.motion.checkerSlide.durationMs;
   revealAfterMotion(pointFinalChecker(stage, motion.move.to, actor), delayMs + duration);
-  appendMovingAsset(stage, slot, from, to, duration, source.motion.checkerSlide.easing, `is-point-slide ${motionType}`, delayMs);
+  if (motionType === "point-bear-off") {
+    appendPointBearOffMotion(stage, gameId, slot, from, to, playerIndex, duration, delayMs);
+  } else {
+    appendMovingAsset(stage, slot, from, to, duration, source.motion.checkerSlide.easing, `is-point-slide ${motionType}`, delayMs);
+  }
   if (motionType !== "point-hit") return;
   const victimIndex = playerIndex === 0 ? 1 : 0;
   const victimUserId = Number(motion.after.turnOrder?.[victimIndex] || 0);
@@ -5340,6 +5503,28 @@ function appendPointWinMotion(stage, gameId, motion, elapsed) {
   const definition = source.motion.win;
   if (motion.move) appendPointMoveMotion(stage, gameId, motion, "point-bear-off");
 
+  const aceyNative = gameId === "acey-deucy" ? aceyNativeWin(motion) : null;
+  if (aceyNative) {
+    const host = make("div", "classic-point-win is-acey-deucy is-native-strips");
+    host.dataset.motionKind = "acey-native-terminal-strips";
+    host.dataset.sourceFrameCount = "70";
+    host.dataset.sourceDurationMs = String(aceyNative.durationMs);
+    host.dataset.sourceStripSlots = aceyNative.slots.join(",");
+    setSourceBox(host,{x:0,y:0,width:source.canvas.width,height:source.canvas.height},source.canvas.width,source.canvas.height);
+    let offset = 0;
+    aceyNative.frames.forEach((frame,phase) => {
+      const [x,y] = aceyNative.positions[phase];
+      const strip = sourceStripNode(gameId,aceyNative.slots[phase],{x,y,width:frame.width,height:frame.height},
+        {frameCount:frame.count,frameDurationMs:aceyNative.frameDurationMs},Number(motion.leadDurationMs||0)+offset,
+        "classic-acey-native-victory-phase",elapsed);
+      strip.dataset.phaseIndex = String(phase);
+      host.append(strip);
+      offset += frame.count * aceyNative.frameDurationMs;
+    });
+    stage.append(host);
+    return;
+  }
+
   if (gameId === "backgammon-first-party") {
     const winnerIndex = Math.max(0, (motion.after?.turnOrder || []).map(Number)
       .indexOf(Number(motion.after?.winnerUserId || 0)));
@@ -5459,9 +5644,14 @@ function appendPointNoLegalMotion(stage, gameId, event, elapsed, delayMs = 0) {
   host.append(make("span", "sr-only", kind === "partial-turn"
     ? "No remaining legal move. The turn passes after the source delay."
     : "No legal move. The turn passes after the source delay."));
-  if (kind === "whole-turn") {
+  // The roll layer or settled tray already owns the displayed pair. The
+  // blocked-turn status must not add old, smaller GIF dice over those dice.
+  // If the next-turn state cleared the tray, retain the verified roll here
+  // using the same face renderer until the blocked-turn display finishes.
+  if (kind === "whole-turn" && !stage.querySelector(".classic-die")) {
     (event?.dice || []).slice(0, 2).forEach((value, index) => {
-      const die = mediaImage(`gif-dice${Number(value)}`, "classic-blocked-roll-die", `Rolled ${Number(value)}`);
+      const die = pointGameClassicDie(Number(value));
+      die.classList.add("classic-blocked-roll-die");
       die.dataset.motionKind = "no-legal-roll-die";
       die.dataset.dieValue = String(Number(value));
       setSourceBox(die, source.diceSlots[index], source.canvas.width, source.canvas.height);
@@ -5470,6 +5660,62 @@ function appendPointNoLegalMotion(stage, gameId, event, elapsed, delayMs = 0) {
   }
   host.style.setProperty("--source-no-legal-delay", `${Number(delayMs) - Number(elapsed)}ms`);
   stage.append(host);
+}
+
+let nativeChessKingEpoch = null;
+function appendNativeChessKing(stage, motion = null) {
+  const state = motion?.after || session?.state;
+  if (!state?.completed || !String(state.terminalReason || "").includes("checkmate")
+      || !optionCategory("visualFxEnabled",true)) return false;
+  const winnerColor = state.colorAssignments?.[String(state.winnerUserId)];
+  if (!["w","b"].includes(winnerColor)) return false;
+  const piece = `${winnerColor === "w" ? "b" : "w"}K`;
+  let square = null;
+  for (let row=0;row<8;row++) for(let column=0;column<8;column++) if(state.board?.[row]?.[column]===piece) square={row,column};
+  if (!square) return false;
+  const source = classicSourceMap("chess");
+  const row = squareVisualCoordinates("chess",square.row,square.column).row;
+  const level = source.pieceSizeByRow[row];
+  const index = (piece[0] === "w" ? 4 : 0) + level - 1;
+  const slot = `bitmap-${600+index}`;
+  if (!optionalClassicStrip(slot)) return false;
+  const frameHeight = source.motion.nativeCapture.frameSizes[level-1].height;
+  const bitmapHeight = source.motion.nativeKing.bitmapHeights[index];
+  // The original loader floors bitmap-height/frame-height; do not stretch
+  // trailing partial rows into its displayed frames.
+  const count = Math.floor(bitmapHeight/frameHeight);
+  const start = source.motion.nativeKing.loopStarts[index];
+  const tick = source.motion.nativeKing.frameDurationMs;
+  const box = bottomCenteredSourceAssetBox(checkerCellBox("chess",square.row,square.column),{width:54,height:frameHeight});
+  box.y -= source.motion.nativeCapture.rowYOffset[row];
+  const key = `${context.gameSessionId}:${state.winnerUserId}:${square.row}:${square.column}`;
+  if (nativeChessKingEpoch?.key !== key) nativeChessKingEpoch = { key,
+    at:motion ? motion.startedAt + Number(motion.leadDurationMs||0) : performance.now()-count*tick };
+  const elapsed = performance.now()-nativeChessKingEpoch.at;
+  const ordinary = stage.querySelector(`[data-row="${square.row}"][data-column="${square.column}"] .classic-chess-piece`);
+  if (ordinary) {
+    if (elapsed >= 0) ordinary.style.opacity = "0";
+    else ordinary.animate([{opacity:0},{opacity:0}],{duration:count*tick,delay:-elapsed,fill:"forwards"});
+  }
+  const intro = sourceStripNode("chess",slot,box,{frameCount:count,frameDurationMs:tick},0,"classic-chess-native-king-intro",elapsed);
+  for (const image of intro.querySelectorAll("img")) image.style.height = `${bitmapHeight/frameHeight*100}%`;
+  const loop = make("div","classic-source-strip-host classic-chess-native-king-loop");
+  setSourceBox(loop,box,source.canvas.width,source.canvas.height);
+  loop.dataset.motionSlot = slot;
+  loop.dataset.loopStart = String(start);
+  loop.dataset.frameCount = String(count);
+  loop.dataset.kingSquare = `${square.row}:${square.column}`;
+  loop.dataset.epoch = String(nativeChessKingEpoch.at);
+  const image = mediaImage(slot,"classic-source-strip-image","");
+  image.style.height = `${bitmapHeight/frameHeight*100}%`;
+  const length = count-start;
+  const frames = Array.from({length:length+1},(_,i)=>({top:`${-(start+i%length)*100}%`,offset:i/length,easing:"steps(1,end)"}));
+  // Step each frame segment; a whole-animation steps(1) freezes the flag.
+  image.animate(frames,{duration:length*tick,delay:count*tick-elapsed,iterations:Infinity,easing:"linear"});
+  loop.style.opacity = "0";
+  loop.animate([{opacity:1},{opacity:1}],{duration:length*tick,delay:count*tick-elapsed,fill:"forwards"});
+  loop.append(image);stage.append(intro,loop);
+  return true;
 }
 
 function classicTerminalSequence(gameId, settled = false, animationDelayMs = 0, terminalMotion = pendingClassicMotion, elapsed = 0) {
@@ -5531,6 +5777,7 @@ function classicTerminalSequence(gameId, settled = false, animationDelayMs = 0, 
 
 function appendPersistedClassicTerminal(stage, gameId) {
   if (pendingClassicMotion?.gameId === gameId || !session.state?.completed) return;
+  if (gameId === "chess" && appendNativeChessKing(stage)) return;
   const reason = String(session.state.terminalReason || "").toLowerCase();
   const source = classicSourceMap(gameId);
   const ownsPersistentFinal = gameId === "chess"
@@ -5565,7 +5812,7 @@ function appendClassicMotion(stage, gameId) {
 
   if (motion.type === "chess-checkmate") {
     if (motion.move) appendSquareMoveMotion(stage, "chess", motion, motion.move.capture ? "chess-capture" : "chess-move");
-    stage.append(classicTerminalSequence("chess", false, Number(motion.leadDurationMs || 0) - elapsed));
+    if (!appendNativeChessKing(stage,motion)) stage.append(classicTerminalSequence("chess", false, Number(motion.leadDurationMs || 0) - elapsed));
     return;
   }
 
@@ -5574,7 +5821,7 @@ function appendClassicMotion(stage, gameId) {
     if (motion.noLegalMove) {
       const delayMs = motion.type === "point-hit"
         ? pointHitMotionLength(source.motion.hitToBar)
-        : source.motion.checkerSlide.durationMs;
+        : motion.type === "point-bear-off" ? source.motion.bearOff.durationMs : source.motion.checkerSlide.durationMs;
       appendPointNoLegalMotion(stage, gameId, motion.noLegalMove, elapsed, delayMs);
     }
     return;
@@ -5583,14 +5830,20 @@ function appendClassicMotion(stage, gameId) {
   if (motion.type === "backgammon-dice-roll") {
     const duration = 1467;
     if (elapsed < duration) {
-      stage.querySelector(".classic-dice")?.setAttribute("data-rolling", "true");
+      // Transfer the settled dice into the roll layer rather than painting a
+      // second pair over hidden copies. Keep one owner for each die throughout
+      // the roll/settle transition, including redraws during the animation.
+      const tray = stage.querySelector(".classic-dice");
+      const existingDice = tray ? Array.from(tray.children) : [];
+      tray?.replaceChildren();
       const layer = make("div", "classic-point-dice-roll");
       layer.setAttribute("aria-hidden", "true");
       // Measured original OCX sequence: enter from the right, travel left,
       // rebound, then settle (owner recording 19-17-56, frames 348-392).
       const path = [[0, 399, 155, -180], [.25, 197, 173, -540], [.48, 246, 148, -850], [.7, 286, 157, -1040], [.87, 314, 150, -1120], [1, 303, 157, -1080]];
       for (const [index, value] of motion.dice.entries()) {
-        const die = pointGameClassicDie(value);
+        const existing = existingDice[index];
+        const die = Number(existing?.dataset.dieFace) === Number(value) ? existing : pointGameClassicDie(value);
         const destination = source.diceSlots[index];
         setSourceBox(die, destination, source.canvas.width, source.canvas.height);
         layer.append(die);
@@ -6540,7 +6793,7 @@ function renderAceyDeucyLegacy() {
       const source = classicSourceMap("acey-deucy");
       const pointRow = source.pointRows[point < 12 ? 0 : 1];
       setSourceBox(button, {
-        x: source.pointX[point % 12],
+        x: source.pointX[source.pointOrder[point]],
         y: pointRow.y,
         width: pointRow.width,
         height: pointRow.height,
@@ -6737,7 +6990,7 @@ function renderPointGame(gameId) {
     host.setAttribute("aria-label", `${label}: ${Math.max(0, Number(count || 0))}`);
     const stackStep = stackStepPercent(count, sourceHeight, checkerHeight, minimumStep);
     host.style.setProperty("--stack-step", `${stackStep}%`);
-    host.style.setProperty("--stack-inset", `${(Number(borneProfile?.edgeInset || 0) / Number(sourceHeight)) * 100}%`);
+    host.style.setProperty("--stack-inset", `${(Number(borneProfile?.edgeInsets?.[player.index] ?? borneProfile?.edgeInset ?? 0) / Number(sourceHeight)) * 100}%`);
     host.dataset.stackStep = String(stackStep);
     host.dataset.ownerUserId = String(player.userId);
     host.dataset.stackCount = String(Math.max(0, Number(count || 0)));
@@ -10570,6 +10823,9 @@ function render() {
   el("game-title").textContent = name;
   const pack = safe(session.presentation?.effectivePack || "built-in");
   document.body.dataset.appearance = pack;
+  ensurePointBearOffMediaReady();
+  ensureNativeClassicMediaReady();
+  if (!session.state?.completed) nativeChessKingEpoch = null;
   if (pack === "classic" && ["checkers", "battleship"].includes(context.extensionId)) {
     void ensureClassicMotionMediaReady().catch(() => {});
   }

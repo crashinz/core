@@ -1910,7 +1910,8 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
                 && moderation_identity_is_owner($pdo, $viewerId);
             $status = five_dice_media_pack_status($pdo);
             if (!$canManage) {
-                unset($status['acceptedOriginalNames'], $status['acceptedPreparedNames'], $status['acceptedFilenameSlots']);
+                unset($status['acceptedOriginalNames'], $status['acceptedPreparedNames'], $status['acceptedFilenameSlots'],
+                    $status['acceptedFilenamePriorities'], $status['imageSlotDimensions'], $status['sourceSelection']);
                 foreach (['installed', 'missing', 'invalid'] as $collection) {
                     if (!is_array($status[$collection] ?? null)) continue;
                     foreach ($status[$collection] as &$item) unset($item['installName']);

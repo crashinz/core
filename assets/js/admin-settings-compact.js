@@ -318,36 +318,87 @@
       const status = node('p', 'minor'); status.setAttribute('role', 'status');
       const rows = node('div', 'settings-bulk-media-rows');
       const labels = new Map();
-      const resultLabel = pack => (pack.classicAvailable || pack.classicComplete) ? 'Classic installed' : (pack.installedCount ? 'Incomplete Classic media' : 'Classic not installed');
+      const resultLabel = pack => (pack.classicComplete ?? pack.classicAvailable) ? 'Classic installed' : (pack.installedCount ? 'Incomplete Classic media' : 'Classic not installed');
+      const bearOffLabel = pack => {
+        if (!['backgammon-first-party', 'acey-deucy'].includes(pack.extensionId)) return '';
+        if (!Array.isArray(pack.optional)) return 'Bear-off animation: unverified — update site, then verify';
+        const installed = ['bitmap-507', 'bitmap-508'].every(slot => pack.optional.some(item => item.slot === slot && item.state === 'installed'));
+        return installed ? 'Bear-off animation: installed' : 'Bear-off animation: re-import needed';
+      };
+      const nativeAnimationLabel = pack => {
+        const groups = pack.extensionId === 'chess' ? [['Capture animation',500,539],['King animation',600,607]]
+          : pack.extensionId === 'acey-deucy' ? [['Victory animation',515,530]] : [];
+        return groups.map(([label,first,last]) => {
+          if (!Array.isArray(pack.optional)) return `${label}: unverified — update site, then verify`;
+          const installed = Array.from({length:last-first+1},(_,i)=>`bitmap-${first+i}`)
+            .every(slot=>pack.optional.some(item=>item.slot===slot && item.state==='installed'));
+          return `${label}: ${installed ? 'installed' : 're-import needed'}`;
+        }).join('. ');
+      };
+      const verificationLabel = (pack, includeOptional = false) => {
+        const missing = pack.missing?.length || 0;
+        const invalid = pack.invalid?.length || 0;
+        const counts = `${pack.installedCount}/${pack.requiredCount} required files valid`;
+        const artwork = !pack.extensionId && pack.artworkSources;
+        const sourceLabel = artwork ? (!artwork.original1x && !artwork.supplied2x ? 'Artwork: no valid artwork installed' : artwork.original1x && artwork.supplied2x
+          ? `Artwork: mixed — ${artwork.supplied2x} images use 2× artwork; ${artwork.original1x} use Original OCX 1× artwork`
+          : (artwork.original1x ? `Artwork: Original OCX 1× artwork (${artwork.original1x}/${artwork.required} images)`
+            : `Artwork: 2× artwork (${artwork.supplied2x}/${artwork.required} images)`)) : '';
+        const optional = includeOptional ? [bearOffLabel(pack), nativeAnimationLabel(pack), sourceLabel].filter(Boolean).join('. ') : '';
+        return `Verification complete: ${counts}${missing ? ` · ${missing} missing` : ''}${invalid ? ` · ${invalid} invalid` : ''}.${missing || invalid ? ' Re-import needed.' : ''}${optional ? ` ${optional}.` : ''}`;
+      };
+      const refreshPack = (pack, data) => {
+        const updated = data.gameMediaPack || data.fiveDiceMediaPack;
+        if (!updated) throw new Error('Media status was not returned. Please verify again.');
+        Object.assign(pack, updated);
+        // Do not preserve stale optional success if an older server omits its inventory.
+        if (!Object.hasOwn(updated, 'optional')) delete pack.optional;
+        if (!Object.hasOwn(updated, 'artworkSources')) delete pack.artworkSources;
+        labels.get(pack).refresh();
+      };
       for (const pack of packs) {
         const row = node('div', 'settings-bulk-media-row');
-        const label = node('span', '', resultLabel(pack)); labels.set(pack, label);
+        const label = node('span', '', resultLabel(pack));
+        const feedback = node('p', 'minor settings-media-feedback');
+        feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite'); feedback.setAttribute('aria-atomic', 'true');
+        if (pack.extensionId) feedback.dataset.gameMediaStatus = pack.extensionId;
+        else feedback.classList.add('settings-five-dice-media-action-status');
+        labels.set(pack, { feedback, refresh: () => {
+          label.textContent = resultLabel(pack);
+        } });
         row.append(node('strong', '', pack.displayName || 'Five Dice'), label);
         const actions = info(`Manage ${pack.displayName || 'Five Dice'} Classic media`, node('p', '', pack.guidance || 'Validated Classic media is optional. Built-in presentation remains available.'));
+        let rowBusy = false;
         for (const [action, text] of [['verify', 'Verify'], ['remove', 'Remove Classic media']]) {
           const button = node('button', 'btn', text); button.type = 'button';
           button.disabled = !pack.canManage || this.readOnly || this.locked;
           button.addEventListener('click', async () => {
-            if (this.locked || this.readOnly || !pack.canManage) return;
+            if (rowBusy || busy || this.locked || this.readOnly || !pack.canManage) return;
             if (action === 'remove' && !window.confirm(`Remove Classic media for ${pack.displayName || 'Five Dice'}? Built-in presentation will be used; game state and scores are unchanged.`)) return;
-            button.disabled = true;
+            rowBusy = true;
+            actions.querySelectorAll('button').forEach(control => { control.disabled = true; });
+            feedback.textContent = action === 'verify' ? 'Verifying…' : 'Removing Classic media…';
             try {
               const data = await this.onMediaPackAction(action, { game: pack.extensionId || '', confirmed: action === 'remove', deferRefresh: true }, this);
-              Object.assign(pack, data.gameMediaPack || data.fiveDiceMediaPack || {});
-              label.textContent = resultLabel(pack);
-              status.textContent = `${pack.displayName || 'Five Dice'}: ${action === 'verify' ? 'verification complete' : 'Classic media removed'}.`;
-            } catch (error) { status.textContent = error.message; }
-            finally { button.disabled = this.locked || this.readOnly; }
+              refreshPack(pack, data);
+              feedback.textContent = action === 'verify' ? verificationLabel(pack, true) : 'Classic media removed. Built-in presentation is available.';
+            } catch (error) { feedback.textContent = `${action === 'verify' ? 'Verification failed' : 'Removal failed'}: ${error.message}`; }
+            finally {
+              rowBusy = false;
+              actions.querySelectorAll('button').forEach(control => { control.disabled = this.locked || this.readOnly || !pack.canManage; });
+            }
           });
           actions.appendChild(button);
         }
-        row.appendChild(actions); rows.appendChild(row);
+        row.append(actions, feedback); rows.appendChild(row);
       }
       const aliases = pack => [...new Set([normalize(pack.extensionId), normalize(pack.displayName), ...(!pack.extensionId ? ['yahtzee', 'fivedice', 'yahtzeemychange'] : []), ...(String(pack.extensionId).startsWith('backgammon') ? ['backgammon'] : [])])].filter(Boolean);
-      let selection = []; let busy = false;
+      let selection = []; let busy = false; let selectionVersion = 0;
       const select = async files => {
         if (busy) return;
-        selection = []; const notes = [];
+        const version = ++selectionVersion;
+        selection = []; install.disabled = true;
+        const selected = []; const notes = [];
         const list = [...files];
         const path = file => String(file.webkitRelativePath || file._classicRelativePath || file.name).replaceAll('\\', '/');
         for (const pack of packs) {
@@ -368,15 +419,45 @@
             const parent = path(file).split('/').slice(0, -1);
             return (sourceDirectory && parent.join('/') === sourceDirectory) || parent.some(part => names.includes(normalize(part)));
           });
-          const slots = new Map(); let conflict = false;
+          const groups = new Map();
           for (const file of supplements) {
             const slot = pack.acceptedFilenameSlots[file.name.toLowerCase()] || file.name.toLowerCase();
-            if (slots.has(slot)) { if (!(await this.mediaPackFilesAreIdentical(slots.get(slot), file))) conflict = true; }
-            else slots.set(slot, file);
+            if (!groups.has(slot)) groups.set(slot, []);
+            groups.get(slot).push(file);
+          }
+          const slots = new Map(); let conflict = false;
+          for (const [slot, candidates] of groups) {
+            const ranked = [];
+            for (const file of candidates) {
+              let priority = 0;
+              if (pack.sourceSelection === 'prefer-doubled-five-dice') {
+                priority = Number(pack.acceptedFilenamePriorities?.[file.name.toLowerCase()] || 0);
+                const dimensions = pack.imageSlotDimensions?.[slot];
+                if (dimensions) {
+                  let bitmap;
+                  try {
+                    bitmap = await createImageBitmap(file);
+                    const scale = bitmap.width === dimensions[0] && bitmap.height === dimensions[1] ? 2
+                      : (bitmap.width * 2 === dimensions[0] && bitmap.height * 2 === dimensions[1] ? 1 : 0);
+                    if (!scale) throw new Error('Unsupported artwork dimensions');
+                    priority = scale * 10 + (/\.png$/i.test(file.name) ? 1 : 0);
+                  } catch { conflict = true; }
+                  finally { bitmap?.close(); }
+                }
+              }
+              ranked.push({ file, priority });
+            }
+            const highest = Math.max(...ranked.map(item => item.priority));
+            const preferred = ranked.filter(item => item.priority === highest).map(item => item.file);
+            const first = preferred[0];
+            for (const file of preferred.slice(1)) if (!(await this.mediaPackFilesAreIdentical(first, file))) conflict = true;
+            slots.set(slot, first);
           }
           if (conflict) { notes.push(`${pack.displayName}: conflicting media copies, skipped`); continue; }
-          if (sources.length || slots.size >= Number(pack.requiredCount || Infinity)) selection.push({ pack, files: [...slots.values(), ...sources] });
+          if (sources.length || slots.size >= Number(pack.requiredCount || Infinity)) selected.push({ pack, files: [...slots.values(), ...sources] });
         }
+        if (version !== selectionVersion) return;
+        selection = selected;
         const recognized = new Set(selection.flatMap(item => item.files));
         const unknown = list.filter(file => /\.ocx$/i.test(file.name) && !recognized.has(file)).length;
         status.textContent = `${selection.length} game(s) ready: ${selection.map(item => item.pack.displayName || 'Five Dice').join(', ') || 'none'}. ${unknown} unselected/unsupported OCX file(s). ${notes.join('; ')}`;
@@ -420,12 +501,16 @@
             if (this.locked) { results.push('Remaining games not installed: settings locked.'); break; }
             const name = item.pack.displayName || 'Five Dice';
             status.textContent = `Installing ${name}...`;
+            labels.get(item.pack).feedback.textContent = 'Installing…';
             try {
               const result = await this.onMediaPackAction(item.pack.installedCount ? 'replace' : 'install', { game: item.pack.extensionId || '', files: item.files, deferRefresh: true }, this);
-              Object.assign(item.pack, result.gameMediaPack || result.fiveDiceMediaPack || {});
-              labels.get(item.pack).textContent = resultLabel(item.pack);
+              refreshPack(item.pack, result);
+              labels.get(item.pack).feedback.textContent = verificationLabel(item.pack);
               results.push(`${name}: installed`);
-            } catch (error) { results.push(`${name}: ${error.message}`); }
+            } catch (error) {
+              labels.get(item.pack).feedback.textContent = `Installation failed: ${error.message}`;
+              results.push(`${name}: ${error.message}`);
+            }
           }
         } finally {
           busy = false; choose.disabled = false; install.disabled = this.locked || this.readOnly;

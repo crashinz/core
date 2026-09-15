@@ -1,4 +1,4 @@
-import { classicSourceMap } from "../classic-source-maps.js?v=6ff02254d065";
+import { classicSourceMap } from "../classic-source-maps.js?v=cf6201672747";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "../viewport-height-fit.js?v=c2557c225fbc";
 
 import { bindGameAvatar } from "../game-avatar.js?v=20260913-room-avatars";

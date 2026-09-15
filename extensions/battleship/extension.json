@@ -90,8 +90,8 @@
     "algorithm": "sha256",
     "files": {
       "includes/battleship_extension.php": "46272e9ef6f6e028b49c59c498adf0797877f004399b0d8b555f0eb7f77c1c0d",
-      "games/ocx-extension-game.css": "7a351c2a05d91d966364b8f7e2365209021a584c8056206eca3f0345c251d9e1",
-      "games/classic-source-maps.js": "6ff02254d0656a06cbf7f509cb4ef581215da5ce27c579fe26a68670c580d881",
+      "games/ocx-extension-game.css": "a1f0eed3328e00cafaad850c4111648890caee435bd138101a9cc4d1eff46cee",
+      "games/classic-source-maps.js": "cf6201672747fa92b1c85323cee69b629a702fca83cd28058be66c2c1cc3d808",
       "assets/images/battleship-first-party-icon.svg": "d5ed447292bfc5dc80436bb0c86e54000146b8d577e444ad2b8b1783edbb9023",
       "assets/images/battleship-modern/broken-missile-miss.png": "dd756279023bb39bdc08346af3582019e6a5504ae944f17fef8acb4ed039abfc",
       "assets/images/battleship-modern/naval-attack-craft-1-destroyed.png": "15f87340ed3b240dbc3e184bba418a7ce3eb260b7b3ceab6799001c63db12db6",
@@ -123,8 +123,8 @@
       "assets/audio/built-in-games/ship-water-miss.wav": "b50f1e210b80ccc232d2b67c01cd4f4ecb63fd641dbabf2bd733a12f4a3f1d69",
       "assets/audio/built-in-games/ship-sinking-sequence.wav": "9dc83503785a5cf3d06ca28c2b57bc7627c0bd9a340c37b832dcacbb0014bd19",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "00749f73799490f1c0950abb68de42d4837cce3aa7b6ce92b80625dab7f86524",
-      "games/battleship-first-party/index.html": "5efcf29a6b2eb9dace4230aceee631fef1f508c0fcf15c7a2c208e6e6ce1c559",
+      "games/ocx-extension-game.js": "20842fe8b83f95b1dc1c2698245b3a9551875df562b3544440cd458721def5a9",
+      "games/battleship-first-party/index.html": "d839a3ea0c54a499aae13c8fd960878b41beccacb88f1f87f18b6e492b679c8a",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/battleship_bot_support.php": "ced0e98f1db62f3f95e72dd3cbb066cb40c1f6287134e5c5b8805d565c025a4f"
     }

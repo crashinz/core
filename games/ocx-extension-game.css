@@ -336,6 +336,7 @@ body[data-extension="chess"] .board[data-appearance-pack="corechat"] .chess-coor
 @keyframes chess-source-hole { 0% { opacity: 0; transform: scale(.2); } 12%, 82% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.2); } }
 .classic-checkers-captured-predecessor { position: absolute; z-index: 19; display: block; max-width: none; max-height: none; object-fit: contain; pointer-events: none; }
 .classic-source-strip-host { position: absolute; z-index: 22; overflow: visible; pointer-events: none; }
+.classic-chess-native-king-loop { overflow: hidden; }
 .classic-source-strip-frame { position: absolute; inset: 0; overflow: hidden; opacity: 0; animation: classic-source-discrete-frame var(--source-frame-duration) steps(1, end) var(--source-frame-delay) 1; pointer-events: none; }
 .classic-source-strip-image { position: absolute; left: 0; display: block; width: 100%; max-width: none; max-height: none; object-fit: fill; image-rendering: pixelated; pointer-events: none; }
 .classic-source-static-strip-frame { overflow: hidden; }
@@ -401,9 +402,9 @@ body[data-extension="chess"] .board[data-appearance-pack="corechat"] .chess-coor
 .backgammon-classic .classic-checker { width: 100%; }
 .backgammon-classic .classic-bar-zone .classic-checker { width: 96.153846%; }
 .backgammon-classic .classic-borne-zone .classic-checker { width: 92.592593%; }
-.backgammon-classic .classic-borne-zone .is-side-profile .classic-checker { height: auto; object-fit: contain; image-rendering: pixelated; }
-.backgammon-classic .classic-borne-zone .is-side-profile .classic-checker[data-checker-slot="gif-w-s"] { width: 85.185185%; }
-.backgammon-classic .classic-borne-zone .is-side-profile .classic-checker[data-checker-slot="gif-b-s"] { width: 88.888889%; }
+.point-game-classic .classic-borne-zone .is-side-profile .classic-checker { height: auto; object-fit: contain; image-rendering: pixelated; }
+.point-game-classic .classic-borne-zone .is-side-profile .classic-checker[data-checker-slot="gif-w-s"] { width: 85.185185%; }
+.point-game-classic .classic-borne-zone .is-side-profile .classic-checker[data-checker-slot="gif-b-s"] { width: 88.888889%; }
 .classic-dice { position: absolute; inset: 0; pointer-events: none; }
 .classic-die { position: absolute; display: block; max-width: none; height: auto; aspect-ratio: 1; object-fit: contain; image-rendering: pixelated; }
 .battle-grids { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 13px; }
@@ -3471,7 +3472,6 @@ body[data-external-game-controls="true"] #surface-options-music {
 .classic-source-control-hotspot[data-pressed="true"] .classic-source-control-art { transform: none; }
 
 .classic-point-dice-roll { position:absolute; inset:0; z-index:21; overflow:hidden; pointer-events:none; }
-.classic-dice[data-rolling="true"] { visibility:hidden; }
 
 /* Bot progress must not move the board when thinking/moving text clears. */
 .backgammon-bot-status:not([hidden]) { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-height:2.25rem; margin:0; }
@@ -3489,3 +3489,8 @@ body[data-external-game-controls="true"] #surface-options-music {
    Keep the original board visible until the preloaded artwork has a source. */
 .classic-source-control-art:not([src]),
 .classic-source-action-art:not([src]) { visibility: hidden; }
+
+/* Original optional bear-off strips retain their native cell proportions. */
+.point-bearoff-checker { display:block; width:100%; height:100%; max-width:none; max-height:none; object-fit:fill; }
+.point-bearoff-turn { position:absolute; left:0; top:0; width:100%; height:100%; overflow:hidden; pointer-events:none; }
+.point-bearoff-turn-image { position:absolute; left:0; top:0; width:100%; max-width:none; max-height:none; object-fit:fill; }

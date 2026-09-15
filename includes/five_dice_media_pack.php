@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/five_dice_identity.php';
 require_once __DIR__ . '/ocx_static_media_extractor.php';
+require_once __DIR__ . '/five_dice_media_sources.php';
 
 /**
  * Installation-private Five Dice presentation pack.
@@ -394,13 +395,81 @@ function five_dice_media_pack_slots(): array
             'requiredForClassic' => true,
         ];
     }
+    // RGBA fingerprints preserve approved artwork across lossless PNG encoders.
+    $pixelHashes = [
+        'die-0' => 'dcf96163ac2485478af474ccd3281f22e2f8989fe0e9399087f2afe8026622e0',
+        'die-1' => 'c7b09346abd8745576f9240612725b37cb9b7cb08eb8f21751772ab9f60317f9',
+        'held-die-1' => 'eeed1c6ff0b775b59d1bce0739e1f12466a61aa0e848a1cebcc1901d9ca7ca37',
+        'die-2' => 'd65c85952d4bf4feb67751dc5cb54124bae85d9c62530ee8cab32ddc1f7be654',
+        'held-die-2' => 'b00414e4a79386aa54e16e211eec9a317c56be82f67f7e2a74972ed5f7c97cc6',
+        'die-3' => '5406f07d0544b88154218e8ef47ffe61a8d3348d5103f869088fd021cfef8c6a',
+        'held-die-3' => 'f956f4dbcd17cdac26c6e56cefc5917c03bb6f2974ceb3232790022616104764',
+        'die-4' => '70906405ea0aae6049737dbed0dcb81a03d5fc1b24ca86d07eab103c06c6ebc3',
+        'held-die-4' => '3155653e3433bb4c9714c6a3d7a69723ea4c2e1f56226ade2d0a49517313db6f',
+        'die-5' => '01d8981fbd45de8c039c86c79a2e0632990eb4710765f1173ce6f8d95a41793a',
+        'held-die-5' => '25b4dd451abd478f0f013288b1a78f2e06775bfdae106f8bd95e012daa51072e',
+        'die-6' => '7c7beb2a08639d0215bba710c048372196804453984fd6cb1b9a9030f47d92a3',
+        'held-die-6' => '7becab87bc175bca9dd45b06d4be228dfe01f040e6323132d40ffff5fbe2849c',
+        'gfx-off-hover' => '7ae79dbb85316562ed2d7187bd050956f8dc18bf7ec1a0c703c6f1b7350d9082',
+        'gfx-off' => '73a60d506910fbe1560d718530f02a0c293e7a1a86797aea0437e1f026db9d6f',
+        'gfx-on-hover' => '701343e3068b9959eb6eb3746220a0a408f8920d44056079f5cdd4821013e535',
+        'gfx-on' => '78f13d959f878a71e26599538226fd508e31efa002497320bf7d1468f7abcae2',
+        'current-player-lane' => 'f17189bcb46ed055292efcc00d72fadf96a53df9095b63e5c4d88eae859de4f5',
+        'music-on-hover' => '018d603b80ec2067912736549ed873afa7e19f6a6554031bf7cc7276617c4047',
+        'music-on' => 'd6a39b00dd8ae46a5662b23fb27306fa1b4e50a3d6a27c624b8b0b7e20f13184',
+        'music-off-hover' => '018d603b80ec2067912736549ed873afa7e19f6a6554031bf7cc7276617c4047',
+        'music-off' => '207d7a2af275f66eb85530b74d0e9fb2608fc56b07983133bd058baff2933aed',
+        'roll-control-disabled' => '97aa7160d56f6bb3829fd06e6917eaa211523f56deaa570b83a10ceb691d4a03',
+        'roll-control-hover' => 'ad66684776f71f1dca8090c35c5c3f42c85fda83d700a9691f4ed4d93ab5813a',
+        'roll-control-pressed' => 'e4bfe1e0bcbf57f1ca0e6e56aecaf179876ad960448c3c5ae614e917794186e9',
+        'roll-control' => 'a025d5536ce7774c64bfe2f77c61bd4ad5e001d35b7b088df68a5a8280b00ec6',
+        'sound-on-hover' => 'c933349cf66957fa8a76575be9e6b83d73dd4582e818bb52cfde52caf924f0e0',
+        'sound-on' => '67039aa71075de82588cd333cc8a7ae9c5adb8dde084730c9aa4bc684e2966c0',
+        'sound-off-hover' => 'c933349cf66957fa8a76575be9e6b83d73dd4582e818bb52cfde52caf924f0e0',
+        'sound-off' => 'd795164fcc67aeba101448703905c50b1d974a78cb6052719bbb210021bdf742',
+        'microphone-wave-strip' => 'd473327ff5079748c695690b963946424e8c093cc9c11950e83728ebb5dcbdfe',
+        'start-new-game' => '3b4b8606b2e6fbe736a5292b01a0938648fcc49c12257ea9b90fd6a9da29683a',
+        'player-lane-1' => '3d0f26a80c094d7d6843adf774c2af2d8e1783a3f7a68aa1b3a15353cc3613c3',
+        'on-hold-lane-1' => 'b217ff913da5b8ce4c6c22ea16d14c07db327595732a03b25d41537ae0a20925',
+        'player-lane-2' => '2cd864d0ec4ae3de3ce5c4f94806ac019d3e8412b5f4dc52918dfa86ef7a6e35',
+        'on-hold-lane-2' => 'c5fe73c3912f4b24adc02686c3155dea49ac96d0af811d1c61113a88447c52f3',
+        'player-lane-3' => 'a3c2f944b38adc810d83893aa6c934a23c75c03eab48a5c87261fa5788846982',
+        'on-hold-lane-3' => 'ec1f7d56812dc9af94cd8e077927d7f23859b062d0b32e7428cf81fe5a3415ac',
+        'player-lane-4' => '273acc1579493800add37576cf4b91a726435241879d728f7208ded6c3e2173e',
+        'on-hold-lane-4' => 'd9ea29d116bf0f7b6bf78ab763f09b92faf35fe704e96b2a15cd26650074f6d7',
+        'score-row-500' => '65a4d35028d8efd3a675d2f4bbb1617410e1ac7e37854cf21f92b92cc791bed2',
+        'score-row-501' => 'aadd70c3375ff48aff9c420143b85ac181a039e6130fdc841d10ebc1b6fd7f79',
+        'score-row-502' => '47783cdb080cc278fa898238d507c8f09dbd375647e7ee4ae1e06280de4b2067',
+        'score-row-503' => '175f4ecd4be4d3f0f846ce77e3bf74afa05eb3eb7d3f84ea9af5869aa73e99c4',
+        'score-row-504' => '82e8295480300c6e1a30d1d0d2606763d7c05aaae1e841882a353612c5e92ec9',
+        'score-row-505' => 'bb48dd04a3b58d07b2b749e94be3fa9cb844d7074cc33c81fb1d793bb3e9d01f',
+        'score-row-506' => 'a94c0c3c5ce6bd6aa82d0419962f5e6343f1854263180c32ccbcc56a89815819',
+        'score-row-507' => 'be0f9ea105e19570e133d86c3f1d28041dc60b7f3d74c1d4447cfc44c6ec303a',
+        'score-row-508' => '8968f5b4189f16ed18184a964e902d2678c9a98fca47304983b9c338d2cc61f9',
+        'score-row-509' => 'ea948aa009607998e4e6a0147eeeb4bb2c28cff9b91d89df55d791451ce5bb27',
+        'score-row-510' => '63c4d016b088eb0d5d3e87467a886a78895bb16afb94de37dc3ea699dd06a16d',
+        'score-row-511' => 'd5fbd559c8070873e5f8dcfca6d3bf43132a6f23edb7779ba475bddedbc64558',
+        'score-row-512' => '16d35b3d952134b4a1364e824e3f5992483872cafbb7f09754752f621fd1a9e6',
+        'score-row-513' => '9ae1c3eac6a4d86f6c93583bb235f67d47b7194ba8fa3fadcab3c61c80e0f5f0',
+        'score-row-514' => 'd67b59999b2aaaf78f2c655c04fd5e31ad75415d94eb4f5af64a86a568365754',
+        'score-row-515' => '4eef3da92cff176ec5322d1b899e72335de2a3eab5fa49a6eb182b6ed975c7c6',
+        'score-row-516' => '321c32ddf8d9830f729669312f3e8f2346c6f4f764befe727fe5280675168968',
+        'rolling-dice-a' => 'eb1bb0d9e62c0a58d01e9a4216213e977c011a85cee35d76a83b60bb553db52e',
+        'rolling-dice-b' => 'a83ec77b08f41c81e3819c8d42bc264ed39a44ed24ec6149c28ee86d805b646a',
+        'drum-motion' => '4f0843774e5b455b253280cdfb3b9a1de4d480f13949e2dfcf73129609b50beb',
+        'classic-board' => 'b85f49fbf2b3d7f36ebbed5b44befd9748d3102a4d9133b6d3e66aff6cad5ea7',
+    ];
+    foreach ($slots as $slot => &$definition) {
+        if (isset($definition['requiredSha256'], $pixelHashes[$slot])) $definition['requiredPixelSha256'] = $pixelHashes[$slot];
+    }
+    unset($definition);
     return $slots + [
         'background-music' => [
             'label' => 'Background music',
             'installName' => 'background-music.mp3',
             'kind' => 'mp3',
             'mime' => 'audio/mpeg',
-            'maximumBytes' => 5242880,
+            'maximumBytes' => 16777216,
             'requiredForClassic' => true,
         ],
         'roll-sound' => [
@@ -520,6 +589,14 @@ function five_dice_media_pack_accepted_filename_map(): array
     foreach (five_dice_media_pack_slots() as $slot => $definition) {
         $map[strtolower((string)$definition['installName'])] = (string)$slot;
     }
+    foreach (five_dice_media_pack_original_filename_map() as $name => $slot) {
+        if (str_ends_with($name, '@2x.png')) {
+            $stem = substr($name, 0, -7);
+            foreach (['.png', '.gif', '.bmp'] as $extension) $map[$stem . $extension] = $slot;
+        }
+    }
+    $map['mid_ytz.rmid'] = 'background-music';
+    $map['mid_ytz.mid'] = 'background-music';
     return $map;
 }
 
@@ -640,12 +717,16 @@ function five_dice_media_pack_validate_slot(string $slot, ?string $directory = n
             && (int)$image[1] <= (int)($definition['maximumHeight'] ?? 512)
             && (!isset($definition['requiredWidth']) || (int)$image[0] === (int)$definition['requiredWidth'])
             && (!isset($definition['requiredHeight']) || (int)$image[1] === (int)$definition['requiredHeight'])
-            && (!isset($definition['requiredSha256']) || hash_equals(strtoupper((string)$definition['requiredSha256']), $sha256));
+            && (!isset($definition['requiredSha256']) || hash_equals(strtoupper((string)$definition['requiredSha256']), $sha256)
+                || (isset($definition['requiredPixelSha256']) && hash_equals($definition['requiredPixelSha256'], five_dice_media_pixel_hash($resolvedPath))));
         if (is_array($image)) $dimensions = [(int)$image[0], (int)$image[1]];
     } elseif ($definition['kind'] === 'wav') {
         $valid = five_dice_wav_signature_valid($resolvedPath);
     } elseif ($definition['kind'] === 'mp3') {
         $valid = five_dice_mp3_signature_valid($resolvedPath);
+        if (!$valid && $slot === 'background-music' && five_dice_wav_signature_valid($resolvedPath)) {
+            $valid = true; $definition['mime'] = 'audio/wav';
+        }
     }
     if (!$valid) {
         return $definition + ['slot' => $slot, 'state' => 'invalid', 'path' => null, 'reason' => 'The file signature, format, or image dimensions are not allowed.'];
@@ -1045,6 +1126,10 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
     $installed = [];
     $missing = [];
     $invalid = [];
+    $artwork = ['supplied2x' => 0, 'original1x' => 0, 'required' => count(array_filter(
+        five_dice_media_pack_slots(), static fn(array $slot): bool => $slot['kind'] === 'image'
+    ))];
+    $sourceInventory = five_dice_media_source_inventory($directory);
     foreach (array_keys(five_dice_media_pack_slots()) as $slot) {
         $result = five_dice_media_pack_validate_slot($slot, $directory);
         if (($result['state'] ?? '') === 'installed' && is_array($result['preparation'] ?? null)) {
@@ -1061,7 +1146,10 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
             'installName' => (string)$result['installName'],
             'state' => (string)$result['state'],
         ];
-        if ($result['state'] === 'installed') $installed[] = $public;
+        if ($result['state'] === 'installed') {
+            $installed[] = $public;
+            if ($result['kind'] === 'image') $artwork[five_dice_media_source_rank($result, $sourceInventory) === 1 ? 'original1x' : 'supplied2x']++;
+        }
         elseif ($result['state'] === 'missing') $missing[] = $public;
         else $invalid[] = $public + ['guidance' => 'Replace this file with a supported file that matches the listed slot.'];
     }
@@ -1070,7 +1158,7 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
         five_dice_media_pack_slots()
     ), true);
     foreach (scandir($directory) ?: [] as $name) {
-        if ($name === '.' || $name === '..' || isset($knownNames[$name])) continue;
+        if ($name === '.' || $name === '..' || $name === '.source-selection.json' || isset($knownNames[$name])) continue;
         if (!is_file($directory . DIRECTORY_SEPARATOR . $name)) continue;
         $invalid[] = [
             'slot' => 'unrecognized',
@@ -1113,6 +1201,14 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
             five_dice_media_pack_slots()
         )),
         'acceptedFilenameSlots' => five_dice_media_pack_accepted_filename_map(),
+        'artworkSources' => $artwork,
+        'sourceSelection' => 'prefer-doubled-five-dice',
+        'imageSlotDimensions' => array_map(static fn(array $slot): array => [$slot['requiredWidth'], $slot['requiredHeight']],
+            array_filter(five_dice_media_pack_slots(), static fn(array $slot): bool => $slot['kind'] === 'image')),
+        'acceptedFilenamePriorities' => array_map(static fn(string $name): int =>
+            str_contains($name, '@2x.png') || str_ends_with($name, '.mp3') ? 3
+                : (in_array($name, array_column(five_dice_media_pack_slots(), 'installName'), true) ? 2 : 1),
+            array_combine(array_keys(five_dice_media_pack_accepted_filename_map()), array_keys(five_dice_media_pack_accepted_filename_map()))),
     ];
 }
 
@@ -1361,35 +1457,20 @@ function five_dice_media_pack_stage_attempt(PDO $pdo, int $actorUserId, string $
                 throw new RuntimeException('The selected pack is outside the allowed total size.');
             }
             foreach ($files as $file) {
-                if ($file['error'] !== UPLOAD_ERR_OK || $file['bytes'] < 1 || !is_file($file['tmpName'])) {
+                if ($file['error'] !== UPLOAD_ERR_OK || $file['bytes'] < 1 || !is_file($file['tmpName'])
+                    || (PHP_SAPI !== 'cli' && !is_uploaded_file($file['tmpName']))) {
                     throw new RuntimeException('Every selected pack file must upload completely.');
                 }
                 $safeName = five_dice_media_pack_safe_upload_name($file['fullPath'] !== '' ? $file['fullPath'] : $file['name']);
                 if (str_ends_with($safeName, '.ocx')) {
-                    $staticOcx[] = ocx_static_media_stage(
-                        $file['tmpName'],
-                        $attempt,
-                        $nameMap,
-                        $slots,
-                        static fn(string $slot, string $directory): array => five_dice_media_pack_validate_slot($slot, $directory)
-                    );
+                    $staticOcx[] = five_dice_media_stage_ocx($file['tmpName'], $attempt);
                     continue;
                 }
                 $slot = $nameMap[$safeName] ?? null;
                 if (!is_string($slot) || !isset($slots[$slot])) {
                     throw new RuntimeException('The selected pack contains an unknown file. Choose only a recognized OCX, original media, or prepared media.');
                 }
-                $target = $attempt . DIRECTORY_SEPARATOR . (string)$slots[$slot]['installName'];
-                if (is_file($target)) throw new RuntimeException('The selected pack contains duplicate files for one media slot.');
-                if ($file['bytes'] > (int)$slots[$slot]['maximumBytes']) {
-                    throw new RuntimeException('A selected pack file exceeds its safe size limit.');
-                }
-                $moved = PHP_SAPI === 'cli' ? copy($file['tmpName'], $target) : move_uploaded_file($file['tmpName'], $target);
-                if (!$moved || !is_file($target)) throw new RuntimeException('A selected pack file could not be staged privately.');
-                $validation = five_dice_media_pack_validate_slot($slot, $attempt);
-                if (($validation['state'] ?? '') !== 'installed') {
-                    throw new RuntimeException((string)($validation['reason'] ?? 'A selected pack file did not pass validation.'));
-                }
+                five_dice_media_stage_source($slot, (string)file_get_contents($file['tmpName']), $attempt);
             }
             $next = five_dice_media_pack_attempt_progress($attempt);
             if ($staticOcx !== []) $next['staticOcx'] = $staticOcx;
@@ -1477,7 +1558,7 @@ function five_dice_media_pack_install(PDO $pdo, int $actorUserId): array
         $files = five_dice_media_pack_uploaded_files();
         $slots = five_dice_media_pack_slots();
         if (count($files) !== count($slots)) {
-            throw new RuntimeException('Choose the complete 41-file Classic artwork and sound pack.');
+            throw new RuntimeException('Choose the complete ' . count($slots) . '-file Classic artwork and sound pack.');
         }
         $total = array_sum(array_column($files, 'bytes'));
         if ($total < 1 || $total > FIVE_DICE_MEDIA_PACK_MAX_UPLOAD_BYTES) {
@@ -1493,7 +1574,8 @@ function five_dice_media_pack_install(PDO $pdo, int $actorUserId): array
         try {
             $nameMap = five_dice_media_pack_accepted_filename_map();
             foreach ($files as $file) {
-                if ($file['error'] !== UPLOAD_ERR_OK || $file['bytes'] < 1 || !is_file($file['tmpName'])) {
+                if ($file['error'] !== UPLOAD_ERR_OK || $file['bytes'] < 1 || !is_file($file['tmpName'])
+                    || (PHP_SAPI !== 'cli' && !is_uploaded_file($file['tmpName']))) {
                     throw new RuntimeException('Every selected pack file must upload completely.');
                 }
                 $safeName = five_dice_media_pack_safe_upload_name($file['fullPath'] !== '' ? $file['fullPath'] : $file['name']);
@@ -1506,11 +1588,7 @@ function five_dice_media_pack_install(PDO $pdo, int $actorUserId): array
                 if ($file['bytes'] > (int)$slots[$slot]['maximumBytes']) {
                     throw new RuntimeException('A selected pack file exceeds its safe size limit.');
                 }
-                $target = $attempt . DIRECTORY_SEPARATOR . (string)$slots[$slot]['installName'];
-                $moved = PHP_SAPI === 'cli'
-                    ? copy($file['tmpName'], $target)
-                    : move_uploaded_file($file['tmpName'], $target);
-                if (!$moved || !is_file($target)) throw new RuntimeException('A selected pack file could not be staged privately.');
+                five_dice_media_stage_source($slot, (string)file_get_contents($file['tmpName']), $attempt);
             }
             if (count($seen) !== count($slots)) throw new RuntimeException('The selected pack does not cover all ' . count($slots) . ' required media slots.');
             foreach (array_keys($slots) as $slot) {

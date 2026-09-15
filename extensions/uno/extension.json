@@ -92,7 +92,7 @@
     "algorithm": "sha256",
     "files": {
       "includes/uno_extension.php": "0c7918d66b919eae93c5baff3a4fa17ab45fea3a058aa30ff313f2a39c160d37",
-      "games/ocx-extension-game.css": "7a351c2a05d91d966364b8f7e2365209021a584c8056206eca3f0345c251d9e1",
+      "games/ocx-extension-game.css": "a1f0eed3328e00cafaad850c4111648890caee435bd138101a9cc4d1eff46cee",
       "assets/images/uno-first-party-icon.svg": "08d32da15f43b3ac70522684f65d2caf328b3dec3de307cccbcccee01a4d39f4",
       "assets/images/uno/cards/README.md": "6641838e44002900d2abf39a5a93e3f9e4469cf881fe7c6636635a15587a8371",
       "assets/audio/card-games/hearts-shuffle.mp3": "7b70777fea6421a1b6bcc37b2794112e780205c7414c69fa448ffcaf3d283679",
@@ -164,8 +164,8 @@
       "assets/images/uno/cards/yellow-reverse.png": "caa07c6fa5e26360babbd42bee262d0b72b6b091aa84f25b9e88a397e387b422",
       "assets/images/uno/cards/yellow-skip.png": "d96c03ec1974e748a42948cd9e86b99dee4036f64f2d0a6457ff3bc7797c13fa",
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "00749f73799490f1c0950abb68de42d4837cce3aa7b6ce92b80625dab7f86524",
-      "games/uno-first-party/index.html": "204a43ad899d8300a4284066c44d3432703a93737458b1ac6699e0167f455da8",
+      "games/ocx-extension-game.js": "20842fe8b83f95b1dc1c2698245b3a9551875df562b3544440cd458721def5a9",
+      "games/uno-first-party/index.html": "235a7cf83346008400eadbc51af09182c62a1f187fd41f3ad2168ff283d6875a",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "includes/uno_bot_support.php": "22807b4acbeea92abc1082e6ae419565da02d206d9e66265a3a6e8cf7490768a",
       "games/uno-bot-controller.js": "d1c32d65552f52a666e9bac24422ce93abe9eafce1e73a21440f25c630de62cf"

@@ -93,10 +93,10 @@
     "files": {
       "includes/five_dice_identity.php": "bd640ae753bb7560dc8ce59f540ac4b29c50bcb5420615989e0536d682efbab4",
       "includes/five_dice_extension.php": "646b02ba373af1bf9d0fa399e3e57d9e194ceef251db8a96edfab7b597918651",
-      "includes/five_dice_media_pack.php": "8314009fc4ee7b51e1423370a4bb1cc4679b05bdbdfc383788239c1cdf6b73e2",
+      "includes/five_dice_media_pack.php": "fb0863bb847c46232536e2f91b4eba590c4761c4139626422b8d4a096ed0ea30",
       "api/five_dice_media.php": "bcfe992463f081a6142c9fb6361f20a82ef55852c2ca1f4a2559a24f594a886e",
       "api/five_dice_media_pack_admin.php": "c75396ff16be391f085f578b9886b318076f2473dbada4e0406a8160a6c29131",
-      "games/classic-source-maps.js": "6ff02254d0656a06cbf7f509cb4ef581215da5ce27c579fe26a68670c580d881",
+      "games/classic-source-maps.js": "cf6201672747fa92b1c85323cee69b629a702fca83cd28058be66c2c1cc3d808",
       "assets/images/five-dice-icon.svg": "a48c7af13b8af9cb9725ec7677eca2ec65db5034e179b209c7aeb201a47c7f9c",
       "assets/images/five-dice-modern/five-dice-approved-board-background-v1.png": "81584203a61d2faefb2d39280312a22555495f3498fdac2494e6e68e738d0872",
       "assets/images/five-dice-modern/jazz-lounge-decor.png": "07c78c1d2862506556a642b38872379a05cb30144abad1cdb4321137e7acb610",
@@ -131,8 +131,9 @@
       "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
       "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
       "games/five-dice/five-dice.css": "25c36a943a212e5f9d29a4e50c563b9ac2016c8f6ef11e3e680c2ff28fe65653",
-      "games/five-dice/five-dice.js": "60d652bbcbc56d0b7fccb46bbb2f967b0311ce2aedcb8f90161b4155de06f824",
-      "games/five-dice/index.html": "70ca0b5cc25500b39a46e61f548551510f4a23ba792fef6248b4edb03cbe6467"
+      "games/five-dice/five-dice.js": "9cd16aea1cecc71e776d67977def9ad4227dc4cc890bd079ac346ddb3341078e",
+      "games/five-dice/index.html": "79e354d0ce193f3137a2c6ef639436915679747bf0189e460980854b324dfab5",
+      "includes/five_dice_media_sources.php": "c018aa33c699b23272e5fa705b3749ec4e36815ebde7cb2ff8b6bb3fe06b3f0d"
     }
   }
 }

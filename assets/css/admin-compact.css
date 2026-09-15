@@ -69,6 +69,8 @@
 .settings-bulk-media-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr) max-content; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); gap: 10px; }
 .settings-bulk-media-row:has(details[open]) { grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr); }
 .settings-bulk-media-row details[open] { grid-column: 1 / -1; }
+.settings-bulk-media-row .settings-media-feedback { grid-column: 1 / -1; margin: 0; overflow-wrap: anywhere; }
+.settings-media-feedback:empty { display: none; }
 .admin-event-dialog { width: min(700px, 92vw); max-height: 85vh; overflow: auto; color: var(--text); background: var(--panel, #161923); border: 1px solid var(--accent); border-radius: 10px; padding: 20px; }
 .admin-event-dialog::backdrop { background: #0009; }
 .admin-event-dialog dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }

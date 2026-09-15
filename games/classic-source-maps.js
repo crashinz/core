@@ -230,9 +230,19 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
     },
     motion: {
       pieceSlide: { durationMs: 1260, easing: "cubic-bezier(.2,.72,.3,1)" },
-      // The source capture does not teleport/remove the victim. It first
-      // resolves through the original DEAD_* fall fragments and black hole,
-      // then the attacking piece completes its ordinary source slide.
+      // Optional original 500-539 strips contain the complete sinking piece.
+      // Older packs retain the fragment fallback and its existing timing.
+      nativeCapture: {
+        baseByPiece: { B:500, N:508, P:516, Q:524, R:532 },
+        frameCount:14, frameDurationMs:80, durationMs:1120,
+        frameSizes:[{width:36,height:69},{width:35,height:65},{width:32,height:58},{width:28,height:53}],
+        rowYOffset:[2,3,3,2,3,2,6,0],
+      },
+      nativeKing: {
+        frameDurationMs:80,
+        bitmapHeights:[1351,1274,1217,1059,1311,1299,1223,1116],
+        loopStarts:[7,7,8,8,8,9,9,9],
+      },
       captureFall: {
         durationMs: 1000,
         frameDurationMs: 100,
@@ -272,18 +282,22 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
     destinationCueHotspot: { x: 15, y: 15 },
     destinationCueResourceSha256: "B2A97A056DEC993896AFF22AC533FAE75031318DEAA06CBA6526C385B7991B94",
     pointX: [42, 70, 97, 125, 152, 181, 236, 265, 292, 320, 348, 375],
+    // Same logical0..23 track as Backgammon: the lower row returns right-to-left.
+    pointOrder: [0,1,2,3,4,5,6,7,8,9,10,11,11,10,9,8,7,6,5,4,3,2,1,0],
     pointRows: [box(0, 8, 25, 132), box(0, 180, 25, 132)],
     bar: box(206, 7, 29, 305),
     reserves: [box(469, 20, 27, 129), box(469, 176, 29, 137)],
-    borneOff: [box(4, 46, 27, 113), box(4, 206, 27, 108)],
+    borneOff: [box(4, 206, 27, 108), box(4, 46, 27, 113)],
     // The Acey Deucy source uses the same narrow side-view checker resources
     // and alternating rack notches as Backgammon once a checker bears off.
     borneOffCheckers: {
       slots: ["gif-w-s", "gif-b-s"],
       nativeSizes: [[23, 5], [24, 5]],
+      // Native lower/upper baselines:305 and148; both advance upward by7.
       edgeInset: 4,
+      edgeInsets: [4, 6],
       stackStep: 7,
-      notchLeftInsets: [[1, 3], [1, 2]],
+      notchLeftInsets: [[0, 2], [2, 0]],
     },
     avatarFrames: [box(0, 163, 35, 42), box(0, 4, 35, 41)],
     avatarWells: [box(5, 168, 25, 33), box(5, 9, 25, 32)],
@@ -311,11 +325,21 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
     motion: {
       checkerSlide: { durationMs: 620, easing: "cubic-bezier(.22,.61,.36,1)" },
       hitToBar: { moverDurationMs: 620, capturedDelayMs: 410, capturedDurationMs: 620 },
-      bearOff: { durationMs: 620 },
+      // Both original OCXs select the same bear-off strips and animation parameters.
+      bearOff: { durationMs: 640, frameDurationMs: 80, frameCount: 8 },
       // The approved static Acey Deucy audit owns an immediate authoritative
       // resolution for every no-legal path. Do not invent Backgammon's timed
       // blocked-roll panel, a delay, or a generic failure effect here.
       noLegalMove: { ticks: 0, tickMs: 0, durationMs: 0, presentation: "source-immediate" },
+      nativeWin: {
+        frameDurationMs:80, durationMs:5600,
+        baseSlots:[515,519,519,523,527],
+        frames:[{width:60,height:36,count:11},{width:80,height:38,count:10},{width:80,height:38,count:10},{width:77,height:57,count:9},{width:51,height:57,count:30}],
+        // Acey's source board has a fixed orientation: white travels across
+        // the lower row, black across the upper. The two extra variants are
+        // imported for the original opposite orientation, not CSS-mirrored.
+        positions:{white:[[2,190],[38,190],[93,190],[150,190],[196,190]],black:[[4,32],[40,32],[95,32],[152,32],[198,32]]},
+      },
       win: {
         // Acey Deucy and the original Backgammon surface share the authenticated
         // W-S/B-S trail sprites, but retain independent canvas registration and
@@ -369,9 +393,11 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
       // The OCX seats the side profiles in the rack's alternating source
       // notches. The first lower-rack profile starts at source y=305, then
       // advances by seven pixels toward the avatar.
+      // Native lower/upper baselines:305 and148; both advance upward by7.
       edgeInset: 4,
+      edgeInsets: [4, 6],
       stackStep: 7,
-      notchLeftInsets: [[1, 3], [1, 2]],
+      notchLeftInsets: [[0, 2], [2, 0]],
     },
     avatarFrames: [box(0, 163, 35, 42), box(0, 4, 35, 41)],
     // Interior apertures measured from the original 35 x 42 and 35 x 41
@@ -409,7 +435,7 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
         moverDelayMs: 1000,
         moverDurationMs: 2000,
       },
-      bearOff: { durationMs: 1900 },
+      bearOff: { durationMs: 640, frameDurationMs: 80, frameCount: 8 },
       blockedReentry: {
         wholeTurn: { ticks: 30, tickMs: 80, durationMs: 2400 },
         partialTurn: { ticks: 7, tickMs: 80, durationMs: 560 },
@@ -745,7 +771,7 @@ const BACKGAMMON_ROLE_2_SOURCE_MAP = deepFreeze({
     ...CLASSIC_SOURCE_MAPS["backgammon-first-party"].borneOffCheckers,
     // Horizontal mirror of the left-rack notch seats. The two checker assets
     // have different native widths, so each source identity owns its insets.
-    notchLeftInsets: [[3, 1], [2, 1]],
+    notchLeftInsets: [[2, 4], [4, 2]],
   },
   avatarFrames: [box(378, 163, 35, 42), box(378, 4, 35, 41)],
   // Role 2 keeps the immutable frame pixels but centers the authenticated
