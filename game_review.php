@@ -5,6 +5,7 @@ require_once __DIR__.'/includes/game_review.php';
 require_once __DIR__.'/includes/game_review_references.php';
 require_once __DIR__.'/includes/game_review_baselines.php';
 require_once __DIR__.'/includes/game_review_snapshots.php';
+require_once __DIR__.'/includes/game_review_pack.php';
 $user=require_user();
 try { game_review_assert_admin($user); } catch(MultiplayerGameException $e){http_response_code(403);exit('Administrator access is required.');}
 header('Cache-Control: private, no-store');
@@ -31,7 +32,7 @@ try {
         catch(MultiplayerGameException $expired){if($expired->errorCode!=='GAME_REVIEW_EXPIRED'||$_SERVER['REQUEST_METHOD']!=='POST'||($_POST['operation']??'')!=='start')throw $expired;}
         if($review&&($review['case']['id']!==$caseId||$review['pack']!==$pack))throw new MultiplayerGameException('Start the selected example.','GAME_REVIEW_BINDING',409);
     }
-    if($_SERVER['REQUEST_METHOD']==='GET'&&isset($_GET['progress'])&&$review){$snapshot=game_review_snapshot_case($review);json_out(['live'=>['step'=>$review['step'],'complete'=>$review['step']>=count($review['steps'])],'reference'=>['step'=>(int)($review['referenceCursor']??0),'complete'=>(int)($review['referenceCursor']??0)>=count($snapshot['steps'])]]);}
+    if($_SERVER['REQUEST_METHOD']==='GET'&&isset($_GET['progress'])&&$review){$referenceProgress=null;try{$snapshot=game_review_snapshot_case($review);$referenceProgress=['step'=>(int)($review['referenceCursor']??0),'complete'=>(int)($review['referenceCursor']??0)>=count($snapshot['steps'])];}catch(Throwable $missingReference){}json_out(['live'=>['step'=>$review['step'],'complete'=>$review['step']>=count($review['steps'])],'reference'=>$referenceProgress]);}
     if($_SERVER['REQUEST_METHOD']==='POST'){
         if(!csrf_verify())csrf_failure_response();$op=(string)($_POST['operation']??'');
         if($op==='start'){
@@ -57,11 +58,28 @@ try {
 }catch(Throwable $e){if(isset($_POST['ajax']))json_out(['error'=>$e->getMessage()],$e instanceof MultiplayerGameException?$e->httpStatus:500);$error=$e->getMessage();}
 $projection=$review?game_review_projection($pdo,$review):null;$latest=$references?end($references):null;
 $selectedRef=$latest;foreach($references as $ref)if($ref['id']===($_GET['revision']??''))$selectedRef=$ref;
-$frozen=null;$frozenError='';if($review){try{$frozen=game_review_snapshot_case($review);}catch(Throwable $e){$frozenError=$e->getMessage();}}
+$frozen=null;$frozenError='';if($review){try{
+    $referenceStatus=game_review_pack_status();$baseStatus=$referenceStatus['base'];
+    if($baseStatus['changed'])throw new RuntimeException('Some frozen reference files have changed. Restore their backup; they will not be replaced automatically.');
+    if($baseStatus['missing'])throw new RuntimeException('Reference pack v1 is not fully installed. Open Reference pack to download and install it.');
+    if($pack==='classic'){$mediaStatus=$referenceStatus['classic'][$case['game']]??null;if($mediaStatus&&($mediaStatus['missing']||$mediaStatus['changed']))throw new RuntimeException('Classic reference media is missing or different for this game. Open Reference pack to copy matching installed Classic media or restore your reference backup.');}
+    $frozen=game_review_snapshot_case($review);
+}catch(Throwable $e){$frozenError=$e->getMessage();}}
+$packDownload=game_review_pack_descriptor();
 $url=null;if($review){$path=$def['path']??'';$entry=$def['entry']??'index.html';
     $url='games/'.$path.'/'.$entry.'?'.http_build_query(['game_session_id'=>$review['id'],'participant_id'=>1,'user'=>1,'csrf'=>csrf_token()]);}
 ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administrator game review</title><link rel="stylesheet" href="assets/css/game-review.css"></head><body>
 <main><header><p class="eyebrow">Administrator tools</p><h1>Game review</h1><p>Repeat a known example and compare the live game with a saved, verified reference.</p></header>
+<details id="reference-pack"><summary>Reference pack — optional download and installation</summary>
+<p>Frozen references stay unchanged when games are updated. Existing matching references are reused. Live examples and rules comparisons also work without this pack.</p>
+<p><a href="<?=e($packDownload['url'])?>">Download reference pack <?=e($packDownload['version'])?> ZIP (<?=e((string)round($packDownload['bytes']/1000000))?> MB)</a> · <a href="<?=e($packDownload['releaseUrl'])?>" target="_blank" rel="noopener">Release details and checksum</a></p>
+<form id="reference-pack-upload" data-bytes="<?=$packDownload['bytes']?>" data-chunk="<?=min(524288,game_review_upload_limit())?>"><?=csrf_input()?>
+<label>Downloaded reference ZIP<input type="file" name="pack_file" accept=".zip,application/zip" required></label><button type="submit">Install reference pack</button></form>
+<p class="minor">Uploads use small chunks. Allow about <?=e((string)ceil(($packDownload['bytes']+$packDownload['expandedBytes'])/1000000))?> MB of free private storage during installation. The ZIP contains no original OCX media or personal reference images.</p>
+<div class="toolbar"><button type="button" id="reference-pack-check">Check installed references</button><button type="button" id="reference-pack-classic">Copy installed Classic media</button></div>
+<p class="minor">Classic references use verified copies of your installed Classic artwork and sounds, up to 18 MB for all games. Missing or different media affects that game's Classic comparison only. Install missing Classic media through the game's administrator controls, then retry. Different existing reference files are never overwritten.</p>
+<progress hidden aria-label="Reference pack upload"></progress><p class="pack-status" role="status" aria-live="polite"></p><ul id="reference-pack-status"></ul>
+</details>
 <form method="get" class="selector" id="review-selector"><label>Game / example<select name="example" id="review-example"><?php foreach($catalog as $id=>$item):?><option value="<?=e($id)?>" <?=$id===$caseId?'selected':''?>><?=e($item['label'])?></option><?php endforeach?></select></label><label>Appearance<select name="pack"><?php foreach($packs as $id=>$item):?><option value="<?=e($id)?>" <?=$id===$pack?'selected':''?>><?=e($item['label']??ucfirst($id))?></option><?php endforeach?></select></label></form>
 <?php if($error):?><p class="error" role="alert"><?=e($error)?></p><?php endif?><?php if($notice):?><p role="status"><?=e($notice)?></p><?php endif?>
 <h2><?=e($case['label'])?> — <?=e($packs[$pack]['label']??ucfirst($pack))?></h2>
@@ -88,4 +106,4 @@ $url=null;if($review){$path=$def['path']??'';$entry=$def['entry']??'index.html';
 <details><summary>Reference revisions (<?=count($references)?>)</summary><ul><?php foreach(array_reverse($references) as $ref):?><li><a href="?<?=e(http_build_query(['example'=>$caseId,'pack'=>$pack,'review'=>$review['id']??'','revision'=>$ref['id']]))?>"><?=e($ref['createdAt'].' — '.$ref['note'])?></a></li><?php endforeach?></ul></details>
 <?php else:?><p>No additional reference image or clip has been saved. The frozen replay above is independent of live updates.</p><?php endif?>
 <?php if($review):?><details><summary><?=$latest?'Add a new verified reference revision':'Save a verified reference'?></summary><form method="post" enctype="multipart/form-data"><?=csrf_input()?><input type="hidden" name="operation" value="reference"><input type="hidden" name="review_id" value="<?=e($review['id'])?>"><input type="hidden" name="previous" value="<?=e($latest['id']??'')?>"><label>Reference image or animation clip<input type="file" name="reference_file" accept="image/png,image/jpeg,image/gif,image/webp,video/webm,video/mp4" required></label><label>What you verified<textarea name="note" maxlength="1500" required></textarea></label><label class="check"><input type="checkbox" name="verified" value="1" required>I checked this reference and want to preserve it as correct.</label><button>Save verified reference</button><p class="minor">Up to <?=e((string)round(game_review_upload_limit()/1048576,1))?> MB on this server. Stored privately for administrators. Earlier revisions are retained.</p></form></details><?php endif?></details></section></div>
-</main><script src="assets/js/game-review.js"></script></body></html>
+</main><script src="assets/js/game-review.js"></script><script src="assets/js/game-review-pack.js"></script></body></html>

@@ -10,6 +10,11 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-16 — Optional downloadable Game Review references
+
+Add a versioned optional reference ZIP distributed through GitHub Releases, with administrator download, chunked installation, verification and per-game Classic media copying. Built-in assets and frozen example code/sequences are distributed separately from ordinary application updates; original OCX media and personal references remain private. Existing matching references are reused and differing files are never overwritten. Missing Classic references affect only their game, while live examples and rules comparisons remain available. Testing is WIP.
+
+
 ## 2026-09-16 — Immediate administrator game-review selection
 
 Administrator Game Review now defaults to Classic where supported. Changing the example or appearance applies immediately; the Choose example button is removed. Explicit appearance choices, Built-in-only games, Start/Reset and independent frozen references remain supported. Testing is WIP.
