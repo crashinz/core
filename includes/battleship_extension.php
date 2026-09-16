@@ -429,6 +429,7 @@ function battleship_project_state(array $state, int $viewerUserId, array $contex
         unset($ship);
     }
     unset($fleet);
+    $projected['botTask'] = ($state['phase'] ?? '') === 'battle' ? paced_bot_task($state, $viewerUserId, $context, 'battleship-paced-1') : null;
     return $projected;
 }
 

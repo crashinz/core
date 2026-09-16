@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/paced_bot_support.php';
 
 const BATTLESHIP_BOT_ID = -6302;
 
@@ -125,16 +126,25 @@ function battleship_apply_action(array $state, int $actorUserId, string $action,
     if (!empty($state['bots']) && ($context['mode'] ?? 'practice') !== 'practice') {
         throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
     }
+    if ($action === 'bot-step') {
+        $actor = paced_bot_validate($state, $actorUserId, $payload, $context, 'battleship-paced-1');
+        return battleship_bot_step($state, $actor, $context);
+    }
     $applied = battleship_apply_action_core($state, $actorUserId, $action, $payload, $context);
     if (function_exists('game_recording_observe')) game_recording_observe($context, 'battleship', $state, $actorUserId, $action, $payload, $applied['state']);
     $next = (int)($applied['turnUserId'] ?? 0);
-    if (empty($applied['terminal']) && ($applied['state']['phase'] ?? '') === 'battle' && isset($applied['state']['bots'][(string)$next])) {
-        $before = $applied['state'];
+    if (empty($context['deferBotActions']) && empty($applied['terminal']) && ($applied['state']['phase'] ?? '') === 'battle' && isset($applied['state']['bots'][(string)$next])) {
+        $applied = battleship_bot_step($applied['state'], $next, $context);
+    }
+    return $applied;
+}
+
+function battleship_bot_step(array $before, int $next, array $context): array
+{
         $started = hrtime(true);
         $choice = battleship_bot_choose_attack(battleship_bot_observation($before, $next));
         $applied = battleship_apply_action_core($before, $next, 'attack', $choice['payload'], $context);
         $trace = $choice['trace'] + ['elapsedMs' => (hrtime(true) - $started) / 1000000];
         if (function_exists('game_recording_observe')) game_recording_observe($context, 'battleship', $before, $next, 'attack', $choice['payload'], $applied['state'], $trace);
-    }
     return $applied;
 }

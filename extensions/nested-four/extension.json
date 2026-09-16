@@ -90,6 +90,7 @@
     "games/nested-four-first-party/index.html",
     "games/game-avatar.js",
     "games/classic-game-audio.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "games/bot-pacing.js"
   ]
 }

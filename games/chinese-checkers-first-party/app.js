@@ -1,4 +1,7 @@
+import { createMoveMotionTracker, moveKeyframes } from "./motion.js?v=319576c23b2e";
 const ChineseCheckers = (() => {
+  const moveMotion = createMoveMotionTracker();
+  let motionEndTimer = 0;
   const SCALE_STEPS = Object.freeze([1, 1.25, 1.5, 1.75, 2]);
   const SCALE_STORAGE_KEY = "corechat.chinese-checkers.board-scale.v1";
   const ARMS = Object.freeze(["top", "upper-right", "lower-right", "bottom", "lower-left", "upper-left"]);
@@ -127,6 +130,22 @@ const ChineseCheckers = (() => {
     grid.append(wrapper);
   }
 
+  function appendGoalGuide(stage, playerIndex) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("cc-goal-guide", `cc-player-${PIECE_COLORS[playerIndex % PIECE_COLORS.length]}`);
+    svg.setAttribute("viewBox", "0 0 800 680");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Your goal: move all ten marbles into the opposite triangle at the top.");
+    // Shares the marbles' auto-fit layer; never intercepts a board action.
+    svg.innerHTML = `<path class="cc-goal-outline" d="M400 8 L491 169 L309 169 Z"/>
+      <path class="cc-goal-line" d="M336 123 H341 L355 135"/>
+      <rect class="cc-goal-label" x="190" y="103" width="146" height="40" rx="20"/>
+      <text x="263" y="129" text-anchor="middle" class="cc-goal-title">Your goal</text>
+      <path class="cc-goal-line" d="M508 578 V516 M499 526 L508 516 L517 526"/>
+      <text x="526" y="550" class="cc-goal-direction">Move this way</text>`;
+    stage.append(svg);
+  }
+
   function createGeometry() {
     const holes = [];
     const byId = new Map();
@@ -245,6 +264,9 @@ const ChineseCheckers = (() => {
     activeMasterVolume = Math.max(0, Math.min(100, Number(options?.masterVolume ?? 100)));
     const showLegalMoves = optionCategory("showLegalMoves", true);
     const visualFxEnabled = optionCategory("visualFxEnabled", true);
+    const motion = moveMotion.observe(session, visualFxEnabled && typeof Element.prototype.animate === "function");
+    clearTimeout(motionEndTimer);
+    if (motion) motionEndTimer = window.setTimeout(rerender, Math.max(1, motion.duration - (performance.now() - motion.startedAt)) + 20);
     syncAuthoritativeCue(session, viewerUserId, effectsEnabled);
 
     const turnOrder = Array.isArray(state.turnOrder) ? state.turnOrder.map(Number) : [];
@@ -267,7 +289,7 @@ const ChineseCheckers = (() => {
       event.preventDefault();
       selectedHole = "";
       playCue("deselect", effectsEnabled);
-      setStatus("Marble deselected.");
+      // Selection is announced by the board's existing live region, not an error banner.
       rerender();
     });
 
@@ -312,6 +334,9 @@ const ChineseCheckers = (() => {
     const boardField = makeNode("div", "cc-board-field");
     boardField.setAttribute("aria-hidden", "true");
     stage.append(boardField);
+    // The existing seated-viewer rotation puts home at bottom and target at top.
+    if (turnOrder.includes(viewerUserId) && state.targetByUser?.[String(viewerUserId)]
+        && optionCategory("showGoalGuide", true)) appendGoalGuide(stage, turnOrder.indexOf(viewerUserId));
 
     const routeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     routeSvg.classList.add("cc-route-layer");
@@ -358,23 +383,25 @@ const ChineseCheckers = (() => {
       const legal = Boolean(selectedMoves[hole.id]);
       const button = makeNode("button", "cc-hole");
       button.type = "button";
-      button.disabled = Boolean(state.completed) || turnUserId !== viewerUserId;
+      button.disabled = Boolean(state.completed) || turnUserId !== viewerUserId || Boolean(motion);
       button.dataset.hole = hole.id;
       button.style.setProperty("--cc-x", `${point[0] / 8}%`);
       button.style.setProperty("--cc-y", `${point[1] / 6.8}%`);
-      button.classList.toggle("has-piece", ownerUserId > 0);
+      button.classList.toggle("has-piece", ownerUserId !== 0 && !(motion && hole.id === motion.to));
+      button.classList.toggle("cc-last-from", state.lastAction?.type === "move" && hole.id === state.lastAction.from);
+      button.classList.toggle("cc-last-to", state.lastAction?.type === "move" && hole.id === state.lastAction.to);
       button.classList.toggle("is-selected", hole.id === selectedHole);
       button.classList.toggle("is-legal", legal);
       button.classList.toggle("is-legal-visible", legal && showLegalMoves);
       button.classList.toggle("is-own-piece", ownerUserId === viewerUserId);
-      if (ownerUserId > 0) button.classList.add(`cc-piece-${PIECE_COLORS[ownerIndex % PIECE_COLORS.length]}`);
+      if (ownerUserId !== 0) button.classList.add(`cc-piece-${PIECE_COLORS[ownerIndex % PIECE_COLORS.length]}`);
       for (const arm of ARMS) {
         if (!armHoles.get(arm).has(hole.id)) continue;
         const zoneIndex = turnOrder.indexOf(armOwner.get(arm));
         if (zoneIndex >= 0) button.classList.add(`cc-zone-${PIECE_COLORS[zoneIndex % PIECE_COLORS.length]}`);
       }
       const route = selectedMoves[hole.id];
-      const ownerLabel = ownerUserId > 0 ? `${memberName(ownerUserId)} marble` : "Empty hole";
+      const ownerLabel = ownerUserId !== 0 ? `${memberName(ownerUserId)} marble` : "Empty hole";
       const legalLabel = legal
         ? `, legal ${route.kind === "jump" ? `${route.path.length}-jump` : "step"} destination`
         : "";
@@ -390,16 +417,14 @@ const ChineseCheckers = (() => {
       });
       button.addEventListener("blur", () => updateRoute([]));
       button.addEventListener("click", async () => {
-        if (busy || state.completed || state.phase !== "playing") return;
+        if (busy || moveMotion.current() || state.completed || state.phase !== "playing") return;
         if (ownerUserId === viewerUserId && turnUserId === viewerUserId) {
           if (selectedHole === hole.id) {
             selectedHole = "";
             playCue("deselect", effectsEnabled);
-            setStatus("Marble deselected.");
           } else {
             selectedHole = hole.id;
             playCue("select", effectsEnabled);
-            setStatus(`${Object.keys(legalMoves[hole.id] || {}).length} legal destinations available.`);
           }
           rerender();
           return;
@@ -419,6 +444,22 @@ const ChineseCheckers = (() => {
         }
       });
       stage.append(button);
+    }
+
+    if (motion) {
+      const points = motion.path.map(transformedPoint);
+      if (points.every(Boolean)) {
+        const traveler = makeNode("span", `cc-hole has-piece cc-moving-marble cc-piece-${PIECE_COLORS[turnOrder.indexOf(Number(motion.userId)) % PIECE_COLORS.length]}`);
+        traveler.setAttribute("aria-hidden", "true");
+        traveler.dataset.motionFrom = motion.from;
+        traveler.dataset.motionTo = motion.to;
+        traveler.style.setProperty("--cc-x", `${points[0][0] / 8}%`);
+        traveler.style.setProperty("--cc-y", `${points[0][1] / 6.8}%`);
+        stage.append(traveler);
+        const animation = traveler.animate(moveKeyframes(points, motion.kind), { duration: motion.duration, easing: "linear", fill: "both" });
+        // Polls/options rerender the DOM; resume elapsed progress rather than restarting.
+        animation.currentTime = Math.max(0, performance.now() - motion.startedAt);
+      }
     }
 
     const membersByUser = new Map((session?.members || []).map(member => [Number(member.userId), member]));
@@ -442,7 +483,7 @@ const ChineseCheckers = (() => {
       copy.append(
         makeNode("strong", "", safeText(member.displayName || memberName(userId) || `Player ${colorIndex + 1}`)),
         makeNode("span", "", `${PIECE_COLORS[colorIndex % PIECE_COLORS.length]} marbles · ${Number(progress[String(userId)] || 0)}/10 home`),
-        makeNode("small", connected === false ? "is-offline" : "", connected === null ? "Connection unknown" : connected ? "Connected" : "Disconnected"),
+        makeNode("small", connected === false ? "is-offline" : "", state.bots?.[String(userId)] ? "Practice bot" : connected === null ? "Connection unknown" : connected ? "Connected" : "Disconnected"),
       );
       plaque.append(avatar, copy);
       const playerSlot = makeNode("div", `cc-player-slot cc-player-slot-${displayArm}`);
@@ -466,7 +507,7 @@ const ChineseCheckers = (() => {
     return shell;
   }
 
-  return Object.freeze({ render, appendBoardSizeOption, boardScale });
+  return Object.freeze({ render, appendBoardSizeOption, boardScale, isAnimating: () => Boolean(moveMotion.current()) });
 })();
 
 window.CoreChatChineseCheckers = ChineseCheckers;

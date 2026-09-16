@@ -1,6 +1,7 @@
+import { remainingBotPause } from "./bot-pacing.js?v=31356370ce09";
 export function createCheckersBotController({snapshot,submit,showStatus,WorkerClass=globalThis.Worker}) {
   let job=null,failedKey='';
-  function stop(){if(job){clearTimeout(job.timeout);job.worker?.terminate();job=null;}}
+  function stop(){if(job){clearTimeout(job.timeout);clearTimeout(job.delay);job.worker?.terminate();job=null;}}
   function fail(active,message){
     if(job!==active)return;
     stop();failedKey=active.key;
@@ -11,12 +12,14 @@ export function createCheckersBotController({snapshot,submit,showStatus,WorkerCl
     if(!current?.enabled||!current.task){stop();failedKey='';showStatus('');return;}
     if(job?.key===current.key||failedKey===current.key)return;
     stop();
-    const active={key:current.key,worker:null,timeout:null,submitted:false,searching:false};job=active;
+    const active={started:performance.now(),key:current.key,worker:null,timeout:null,submitted:false,searching:false};job=active;
     const task=current.task;
     async function finish(move){
       if(job!==active||active.submitted)return;
       const latest=snapshot();if(!latest?.enabled||latest.key!==active.key){stop();return;}
       active.submitted=true;clearTimeout(active.timeout);active.worker?.terminate();active.worker=null;
+      if(!task.respondToDraw) await new Promise(resolve=>{active.delay=setTimeout(resolve,remainingBotPause(active.started,task));});
+      if(job!==active||!snapshot()?.enabled||snapshot()?.key!==active.key)return;
       showStatus('The bot is moving…');
       try{
         const ok=await submit({positionKey:task.positionKey,engine:task.engine,...move});

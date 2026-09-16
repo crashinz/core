@@ -119,6 +119,8 @@
     "games/game-avatar.js",
     "includes/spades_bot_endgame_support.php",
     "games/classic-game-audio.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "games/bot-pacing.js",
+    "includes/paced_bot_support.php"
   ]
 }

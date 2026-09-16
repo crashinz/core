@@ -2,7 +2,7 @@
 const engineId='gnubg-95d0ffc-corechat-1';let engine;
 onmessage=async({data})=>{try{
  if(data.type==='boot'){
-  importScripts('./rules.js?v=1','./search.js?v=1','./gnubg.js?v=1');
+  importScripts('./rules.js?v=1','./search.js?v=fbfa3a846d01','./gnubg.js?v=1');
   engine=await createGnuBG({locateFile:p=>'./'+p+'?v=1',print:()=>{},printErr:()=>{}});
   if(engine._core_init()!==1)throw Error('Engine initialization failed');
   postMessage({type:'ready',engine:engineId});return;

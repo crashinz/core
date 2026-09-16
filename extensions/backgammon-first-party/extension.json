@@ -124,6 +124,7 @@
     "games/vendor/gnubg/BUILD.md",
     "games/vendor/gnubg/build.py",
     "games/classic-game-audio.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "games/bot-pacing.js"
   ]
 }

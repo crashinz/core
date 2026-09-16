@@ -1,9 +1,10 @@
+import { createChineseCheckersBotController } from "./chinese-checkers-bot-controller.js?v=c1460ca5a716";
 import { gameViewStorage } from "./game-view-storage.js?v=1dd11e938aa8";
 import { originalAudioCatalog, originalVoiceEnabled, originalRollAnnouncement, originalPlacementCue, originalReminderPlan, originalPointRoll } from "./classic-game-audio.js?v=b0d39dcd022c";
-import { createCardBotController } from "./uno-bot-controller.js?v=d1c32d65552f";
-import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=65d896c667ff";
-import { createCheckersBotController } from "./checkers-bot-controller.js?v=729241a2b45b";
-import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
+import { createCardBotController } from "./uno-bot-controller.js?v=19690003d452";
+import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=421ff552bf1e";
+import { createCheckersBotController } from "./checkers-bot-controller.js?v=18da92e0dd97";
+import { createChessBotController } from "./chess-bot-controller.js?v=45b22e9ad57b";
 import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=f69e083b7fee";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=f9547db55052";
 
@@ -10054,6 +10055,15 @@ function renderViewerGameOptions() {
   }
   if (context.extensionId === "chinese-checkers") {
     window.CoreChatChineseCheckers?.appendBoardSizeOption({ grid, make, rerender:render });
+    const guideSetting = make("div", "game-setting viewer-effect-option");
+    const guideEnabled = optionCategory("showGoalGuide", true);
+    const guideToggle = make("button", "compact-state-button", guideEnabled ? "On" : "Off");
+    guideToggle.type = "button";
+    guideToggle.setAttribute("aria-pressed", String(guideEnabled));
+    guideToggle.setAttribute("aria-label", `Goal guide ${guideEnabled ? "On" : "Off"}`);
+    guideToggle.addEventListener("click", () => toggleOptionCategory("showGoalGuide", true).catch(error => { el("status").textContent = error.message; }));
+    guideSetting.append(make("span", "game-setting-label", "Goal guide"), guideToggle);
+    grid.append(guideSetting);
   }
   if (context.extensionId === "nested-four") {
     window.CoreChatNestedFour?.appendBoardSizeOption({ grid, make, rerender:render });
@@ -11077,7 +11087,8 @@ function showBotStatus(gameId, message, retry) {
 function createServerCardBot(gameId, gameName) { return createCardBotController({
   gameName,
   snapshot: () => ({
-    enabled: context.extensionId === gameId && gameSurfaceVisible && gameLifecycleAvailable(),
+    enabled: context.extensionId === gameId && gameSurfaceVisible && gameLifecycleAvailable()
+      && !(pendingClassicMotion?.gameId === gameId && performance.now() - pendingClassicMotion.startedAt < motionLength(gameId, pendingClassicMotion.type)),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11086,9 +11097,24 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
 }); }
 const unoBotController = createServerCardBot("uno", "UNO");
 const heartsBotController = createServerCardBot("hearts", "Hearts");
-window.addEventListener("pagehide", () => { unoBotController.stop(); heartsBotController.stop(); });
-const cardBotTimer = setInterval(() => { if (context.extensionId === "uno") unoBotController.sync(); if (context.extensionId === "hearts") heartsBotController.sync(); }, 250);
+const spadesBotController = createServerCardBot("spades", "Spades");
+const battleshipBotController = createServerCardBot("battleship", "Battleship");
+window.addEventListener("pagehide", () => { unoBotController.stop(); heartsBotController.stop(); spadesBotController.stop(); battleshipBotController.stop(); });
+const cardBotTimer = setInterval(() => { if (context.extensionId === "uno") unoBotController.sync(); if (context.extensionId === "hearts") heartsBotController.sync(); if (context.extensionId === "spades") spadesBotController.sync(); if (context.extensionId === "battleship") battleshipBotController.sync(); }, 250);
 window.addEventListener("pagehide", () => clearInterval(cardBotTimer));
+
+const chineseCheckersBotController = createChineseCheckersBotController({
+  snapshot: () => ({
+    enabled: context.extensionId === "chinese-checkers" && gameSurfaceVisible && gameLifecycleAvailable() && !window.CoreChatChineseCheckers?.isAnimating(),
+    key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
+    task: session?.state?.botTask,
+  }),
+  submit: payload => performAction("bot-step", payload),
+  showStatus: (message, retry) => showBotStatus("chinese-checkers", message, retry),
+});
+window.addEventListener("pagehide", () => chineseCheckersBotController.stop());
+const chineseBotTimer = setInterval(() => { if (context.extensionId === "chinese-checkers") chineseCheckersBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => clearInterval(chineseBotTimer));
 
 const chessBotController = createChessBotController({
   snapshot: () => ({
@@ -11208,6 +11234,7 @@ function render() {
   scheduleUnoAutomaticAction();
   unoBotController.sync();
   heartsBotController.sync();
+  chineseCheckersBotController.sync();
   chessBotController.sync();
   checkersBotController.sync();
   backgammonBotController.sync();

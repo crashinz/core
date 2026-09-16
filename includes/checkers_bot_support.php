@@ -53,7 +53,7 @@ function checkers_bot_task(array $state, int $viewer, array $context): ?array
         $budget = max(20, min($budget, $remaining * 100));
     }
     return ['positionKey' => checkers_bot_position_key($state), 'engine' => CHECKERS_BOT_ENGINE,
-        'difficulty' => $difficulty, 'moveTimeMs' => $budget, 'respondToDraw' => $offer === $viewer,
+        'difficulty' => $difficulty, 'moveTimeMs' => $budget, 'presentationDelayMs' => isset($remaining) ? max(0,min(2000,($remaining-2)*1000)) : 2000, 'respondToDraw' => $offer === $viewer,
         'position' => array_intersect_key($state, array_flip(['board', 'turnOrder', 'turnIndex', 'sideAssignments',
             'forcedFrom', 'quietKingPlies', 'positionCounts', 'positionSnapshots', 'positionHistoryComplete', 'settings', 'drawOfferBy', 'completed']))];
 }

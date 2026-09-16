@@ -36,7 +36,7 @@
     }
 
     Array.prototype.slice.call(stage.children).forEach(function (child) {
-      if (child !== layer && child.matches('.cc-board-field, .cc-route-layer, .cc-hole')) {
+      if (child !== layer && child.matches('.cc-board-field, .cc-route-layer, .cc-goal-guide, .cc-hole')) {
         layer.appendChild(child);
       }
     });
@@ -113,7 +113,7 @@
       width: stageRect.width,
       height: stageRect.height
     };
-    var holeRects = Array.prototype.map.call(stage.querySelectorAll('.cc-board-geometry .cc-hole'), function (hole) {
+    var holeRects = Array.prototype.map.call(stage.querySelectorAll('.cc-board-geometry .cc-hole:not(.cc-moving-marble)'), function (hole) {
       return hole.getBoundingClientRect();
     });
     var placements = [];

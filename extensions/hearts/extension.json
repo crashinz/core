@@ -115,6 +115,7 @@
     "includes/hearts_bot_support.php",
     "includes/hearts_expert_support.php",
     "games/classic-game-audio.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "games/bot-pacing.js"
   ]
 }

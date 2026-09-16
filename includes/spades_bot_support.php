@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/paced_bot_support.php';
 
 require_once __DIR__ . '/spades_bot_endgame_support.php';
 
@@ -1440,6 +1441,39 @@ function spades_bot_advance(array $result, array $context): array
             $result['turnUserId'] = spades_bot_first_human($state);
             return $result;
         }
+        if (!empty($context['deferBotActions'])) { $result['turnUserId'] = $logicalUserId; return $result; }
+        $result = spades_bot_step($state, $logicalUserId, $context, $deadlineNs);
+    }
+    throw new MultiplayerGameException('The Practice bots exceeded the bounded decision limit.', 'SPADES_BOT_DECISION_LIMIT', 500);
+}
+
+function spades_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+{
+    if ($action === 'bot-step') {
+        $bot = paced_bot_validate($state, $actorUserId, $payload, $context, 'spades-paced-1');
+        if (in_array($state['phase'] ?? '', ['deal','settling'], true))
+            throw new MultiplayerGameException('Wait for the current trick.', 'SPADES_BOT_PHASE_INVALID', 409);
+        $result = spades_bot_step($state, $bot, $context, hrtime(true) + SPADES_BOT_EXPERT_CHAIN_BUDGET_MS * 1000000);
+        return spades_bot_advance($result, array_replace($context, ['deferBotActions'=>true]));
+    }
+    $coreActor = $actorUserId;
+    $turnOrder = array_values(array_map('intval', (array)($state['turnOrder'] ?? [])));
+    $logicalUserId = (int)($turnOrder[(int)($state['turnIndex'] ?? -1)] ?? 0);
+    if (in_array($action, ['deal', 'settle-trick'], true)
+        && spades_bot_is_player($state, $logicalUserId)
+        && $actorUserId > 0
+        && in_array($actorUserId, $turnOrder, true)) {
+        $coreActor = $logicalUserId;
+    }
+    $result = spades_apply_action_core($state, $coreActor, $action, $payload, $context);
+    if (isset($context['recordingCollector'])) {
+        game_recording_observe($context, 'spades', $state, $coreActor, $action, $payload, $result['state']);
+    }
+    return spades_bot_advance($result, $context);
+}
+
+function spades_bot_step(array $state, int $logicalUserId, array $context, int $deadlineNs): array
+{
         unset($GLOBALS['spades_bot_last_decision_trace'], $GLOBALS['spades_bot_last_bid_trace'], $GLOBALS['spades_bot_last_pass_trace']);
         $decisionStarted = hrtime(true);
         $decision = spades_bot_choose_action($state, $logicalUserId, $deadlineNs);
@@ -1458,24 +1492,5 @@ function spades_bot_advance(array $result, array $context): array
             $trace['reason'] ??= 'phase-policy';
             game_recording_observe($context, 'spades', $state, $logicalUserId, (string)$decision['action'], (array)$decision['payload'], $result['state'], $trace);
         }
-    }
-    throw new MultiplayerGameException('The Practice bots exceeded the bounded decision limit.', 'SPADES_BOT_DECISION_LIMIT', 500);
-}
-
-function spades_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
-{
-    $coreActor = $actorUserId;
-    $turnOrder = array_values(array_map('intval', (array)($state['turnOrder'] ?? [])));
-    $logicalUserId = (int)($turnOrder[(int)($state['turnIndex'] ?? -1)] ?? 0);
-    if (in_array($action, ['deal', 'settle-trick'], true)
-        && spades_bot_is_player($state, $logicalUserId)
-        && $actorUserId > 0
-        && in_array($actorUserId, $turnOrder, true)) {
-        $coreActor = $logicalUserId;
-    }
-    $result = spades_apply_action_core($state, $coreActor, $action, $payload, $context);
-    if (isset($context['recordingCollector'])) {
-        game_recording_observe($context, 'spades', $state, $coreActor, $action, $payload, $result['state']);
-    }
-    return spades_bot_advance($result, $context);
+    return $result;
 }

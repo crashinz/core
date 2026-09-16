@@ -1,9 +1,10 @@
+import { remainingBotPause } from "./bot-pacing.js?v=31356370ce09";
 /** UCI transport for a separately licensed Stockfish worker. Game rules stay on the server. */
 export function createChessBotController({snapshot, submit, showStatus, WorkerClass = globalThis.Worker}) {
   let job = null;
   let failedKey = "";
   function stop() {
-    if (job) { clearTimeout(job.timeout); job.worker?.terminate(); job = null; }
+    if (job) { clearTimeout(job.timeout); clearTimeout(job.delay); job.worker?.terminate(); job = null; }
   }
   function fail(key, message) {
     if (job?.key !== key) return;
@@ -17,7 +18,7 @@ export function createChessBotController({snapshot, submit, showStatus, WorkerCl
     if (job?.key === key || failedKey === key) return;
     stop();
     const task = current.task;
-    const active = {key, worker: null, timeout: null, searching: false, submitted: false};
+    const active = {started:performance.now(), key, worker: null, timeout: null, searching: false, submitted: false};
     job = active;
     async function finish(move, elapsedMs) {
       if (job !== active || active.submitted) return;
@@ -25,6 +26,8 @@ export function createChessBotController({snapshot, submit, showStatus, WorkerCl
       if (!latest?.enabled || latest.key !== key) { stop(); return; }
       active.submitted = true;
       clearTimeout(active.timeout); active.worker?.terminate(); active.worker = null;
+      if (!task.respondToDraw) await new Promise(resolve => { active.delay = setTimeout(resolve, remainingBotPause(active.started, task)); });
+      if (job !== active || !snapshot()?.enabled || snapshot()?.key !== key) return;
       showStatus("The bot is moving…");
       try {
         const ok = await submit({positionKey: task.positionKey, move, elapsedMs});

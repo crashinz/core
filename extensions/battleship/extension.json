@@ -126,6 +126,8 @@
     "games/game-avatar.js",
     "includes/battleship_bot_support.php",
     "games/classic-game-audio.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "games/bot-pacing.js",
+    "includes/paced_bot_support.php"
   ]
 }

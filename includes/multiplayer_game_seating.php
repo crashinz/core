@@ -12,6 +12,7 @@ function multiplayer_game_bot_slots(array $definition): array
     return match ((string)($definition['extensionId'] ?? '')) {
         'spades', 'hearts' => [1, 2, 3, 4],
         'uno' => range(1, 10),
+        'chinese-checkers' => range(1,6),
         'battleship', 'chess', 'checkers', 'backgammon-first-party' => [2],
         default => [],
     };
@@ -19,6 +20,10 @@ function multiplayer_game_bot_slots(array $definition): array
 
 function multiplayer_game_bot_choices(array $definition): array
 {
+    if (($definition['extensionId'] ?? '') === 'chinese-checkers') {
+        require_once __DIR__ . '/chinese_checkers_bot_support.php';
+        return chinese_checkers_bot_choices();
+    }
     if (($definition['extensionId'] ?? '') === 'hearts') {
         require_once __DIR__ . '/hearts_bot_support.php';
         return hearts_bot_choices();
@@ -76,11 +81,11 @@ function multiplayer_game_bot_lobby_projection(array $definition, array $session
             'difficulty' => $difficulty, 'editable' => $isHost && !$occupied];
     }
     return ['choices' => multiplayer_game_bot_choices($definition),
-        'strengthNote' => match ($definition['extensionId'] ?? '') { 'hearts' => 'Easy uses simple legal play; Normal considers passing, played cards and shooting the moon; Expert adds a short lookahead. Practice only.', 'uno' => 'Easy uses simple legal play; Normal manages colors and action cards. Practice only.', 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), 'backgammon-first-party' => backgammon_bot_strength_note(), default => '' },
+        'strengthNote' => match ($definition['extensionId'] ?? '') { 'chinese-checkers' => 'Practice bots use classical JumpStar-derived evaluation. Difficulty names are relative levels, not Elo ratings.', 'hearts' => 'Easy uses simple legal play; Normal considers passing, played cards and shooting the moon; Expert adds a short lookahead. Practice only.', 'uno' => 'Easy uses simple legal play; Normal manages colors and action cards. Practice only.', 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), 'backgammon-first-party' => backgammon_bot_strength_note(), default => '' },
         'options' => $options, 'isHost' => $isHost, 'mode' => $session['mode'],
         'settingsSha256' => $session['settings_sha256'], 'playerSetSha256' => $playerSetSha,
         'showStart' => $isHost && !multiplayer_game_has_seat_choices($definition),
-        'canStart' => $isHost && (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : (($definition['extensionId'] ?? '') === 'hearts' ? in_array($readyCount, [2,4], true) : $readyCount === (int)$definition['maxPlayers'])) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
+        'canStart' => $isHost && (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : (($definition['extensionId'] ?? '') === 'hearts' ? in_array($readyCount, [2,4], true) : (($definition['extensionId'] ?? '') === 'chinese-checkers' ? $readyCount>=2 && $readyCount<=6 : $readyCount === (int)$definition['maxPlayers']))) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
 }
 
 /** Update one empty slot atomically with mode/acceptance; never start or displace a person. */

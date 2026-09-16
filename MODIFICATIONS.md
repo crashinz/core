@@ -10,6 +10,25 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Chinese Checkers guide colors - 2026-09-16
+
+Added matching marble colors to the goal triangle, labels and direction arrow. Testing is WIP.
+
+## 2026-09-16 - Chinese Checkers goal guide
+
+Added a personal destination outline, Your goal label and direction arrow to Chinese Checkers, with a saved Goal guide setting that defaults to On. Added support across board appearances and viewer-relative seats. Added visible marble steps and hops along confirmed move routes, last-move markers, and bot waits for completed animations. Testing is WIP.
+
+
+## 2026-09-16 - Readable Practice bot turns
+
+Added viewing intervals for individual bot actions across Chinese Checkers, Chess, Checkers, Backgammon, Spades, Hearts, UNO and Battleship. Added separate visible server replies for Spades and Battleship, individually paced Backgammon checker moves including doubles, and a larger Expert Backgammon reply-search allowance within the viewing interval. Preserved bottom status placement, game animations and Practice-only recording. Testing is WIP.
+
+
+## 2026-09-16 - Chinese Checkers Practice bots
+
+Added optional Easy, Normal and Expert Chinese Checkers bots using an attributed JumpStar classical adaptation, empty-seat lobby controls, server-validated moves, Practice-only protection, and reserved thinking/retry feedback below the controls. Added multiplayer goal planning, bounded lookahead and decision recording. Testing is WIP.
+
+
 ## 2026-09-16 — Optional downloadable Game Review references
 
 Add a versioned optional reference ZIP distributed through GitHub Releases, with administrator download, chunked installation, verification and per-game Classic media copying. Built-in assets and frozen example code/sequences are distributed separately from ordinary application updates; original OCX media and personal references remain private. Existing matching references are reused and differing files are never overwritten. Missing Classic references affect only their game, while live examples and rules comparisons remain available. Testing is WIP.

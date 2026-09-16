@@ -118,6 +118,7 @@
     "games/ocx-extension-game.js",
     "games/game-avatar.js",
     "games/classic-game-audio.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "games/bot-pacing.js"
   ]
 }

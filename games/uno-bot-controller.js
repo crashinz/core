@@ -1,3 +1,4 @@
+import { BOT_ACTION_PAUSE_MS } from "./bot-pacing.js?v=31356370ce09";
 /** Only opaque task identities cross the browser boundary; strategy runs on the server. */
 export function createCardBotController({ gameName = "UNO", snapshot, submit, showStatus, schedule = setTimeout, cancel = clearTimeout }) {
   let job = null, failedKey = "";
@@ -25,7 +26,7 @@ export function createCardBotController({ gameName = "UNO", snapshot, submit, sh
         stop(); failedKey = active.key;
         showStatus(`The ${gameName} bot action could not be saved. Retry when the connection is available.`, () => { failedKey = ""; sync(); });
       }
-    }, Math.max(300, Math.min(2500, Number(current.task.delayMs) || 700)));
+    }, Math.max(BOT_ACTION_PAUSE_MS, Math.min(5000, Number(current.task.delayMs) || BOT_ACTION_PAUSE_MS)));
   }
   return { sync, stop };
 }

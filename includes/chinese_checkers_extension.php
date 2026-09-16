@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/chinese_checkers_bot_support.php';
 
 const CHINESE_CHECKERS_EXTENSION_ID = 'chinese-checkers';
 const CHINESE_CHECKERS_STATE_SCHEMA_VERSION = 1;
@@ -10,7 +11,7 @@ const CHINESE_CHECKERS_PIECES_PER_PLAYER = 10;
 function chinese_checkers_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['playerCount', 'homeByUser', 'actionSequence', 'board', 'completed', 'history', 'lastAction', 'moveNumber', 'phase', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'targetByUser', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
+        'stateKeys' => ['bots', 'playerCount', 'homeByUser', 'actionSequence', 'board', 'completed', 'history', 'lastAction', 'moveNumber', 'phase', 'resignedUserId', 'roundNumber', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'targetByUser', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
         'payloadKeys' => ['from', 'to']];
 }
 
@@ -25,6 +26,7 @@ function chinese_checkers_extension_adapter(): array
         'settingsProjection' => 'chinese_checkers_settings_projection',
         'rulesProjection' => 'chinese_checkers_rules_projection',
         'projectState' => 'chinese_checkers_project_state',
+        'projectVirtualMembers' => 'chinese_checkers_project_virtual_members',
         'presentationStatus' => 'chinese_checkers_presentation_status',
         'openingProcedure' => 'fixed-star-seats-first-player-starts',
         'rematchSeatRotation' => true,
@@ -58,6 +60,13 @@ function chinese_checkers_validate_settings(array $settings, string $mode, array
     }
 
     $allowed = ['inactivityProfile', 'customInactivitySeconds'];
+    $bots=[];
+    for ($seat=1;$seat<=6;$seat++) {
+        $key='botSeat'.$seat.'Difficulty'; $allowed[]=$key; $value=$settings[$key] ?? 'none';
+        if (!in_array($value,array_column(chinese_checkers_bot_choices(),'value'),true)) throw new MultiplayerGameException('Choose a listed bot difficulty.','CHINESE_CHECKERS_SETTINGS_INVALID',422);
+        if ($value!=='none' && $mode!=='practice') throw new MultiplayerGameException('Games with bots are Practice only.','MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY',422);
+        if ($mode==='practice') $bots[$key]=$value;
+    }
     if (array_diff(array_keys($settings), $allowed)) {
         throw new MultiplayerGameException(
             'A Chinese Checkers setting is not supported.',
@@ -91,7 +100,7 @@ function chinese_checkers_validate_settings(array $settings, string $mode, array
     return [
         'inactivityProfile' => $profile,
         'customInactivitySeconds' => (int)$customSeconds,
-    ];
+    ] + $bots;
 }
 
 function chinese_checkers_settings_projection(array $settings, string $mode, array $definition = []): array
@@ -99,7 +108,7 @@ function chinese_checkers_settings_projection(array $settings, string $mode, arr
     chinese_checkers_validate_settings($settings, $mode, $definition);
     return [
         'label' => 'Game Options',
-        'description' => 'Standard Chinese Checkers for two through six authenticated human players.',
+        'description' => 'Chinese Checkers for two through six players. Add optional Practice bots to empty seats in the waiting lobby.',
         'classificationLabel' => 'Accepted Chinese Checkers options',
         'controls' => [],
     ];
@@ -114,7 +123,7 @@ function chinese_checkers_rules_projection(array $settings, string $mode, array 
         'sections' => [
             [
                 'label' => 'Players and setup',
-                'text' => 'Two through six authenticated human players receive ten marbles in fixed star points. There are no bots, captures, cards, dice, or hidden information.',
+                'text' => 'Two through six players receive ten marbles in fixed star points. Practice games may include bots with at least one human. Bot games never affect ranked records. There are no captures, cards, dice, or hidden information.',
             ],
             [
                 'label' => 'A turn',
@@ -246,14 +255,17 @@ function chinese_checkers_player_arms(int $playerCount): array
 function chinese_checkers_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) < 2 || count($players) > 6 || min($players) < 1) {
+    if (count($players) < 1 || count($players) > 6 || min($players) < 1) {
         throw new MultiplayerGameException(
             'Chinese Checkers requires two through six authenticated players.',
             'CHINESE_CHECKERS_PLAYER_SET_INVALID',
             422
         );
     }
-    chinese_checkers_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    $mode=(string)($context['mode'] ?? 'practice');
+    $settings=chinese_checkers_validate_settings((array)($context['settings'] ?? []),$mode);
+    [$players,$bots]=chinese_checkers_bot_fill_seats($players,$settings,$mode,(array)($context['humanSeats'] ?? []));
+    if (count($players)<2 || count($players)>6) throw new MultiplayerGameException('Chinese Checkers needs two through six people or Practice bots.','MULTIPLAYER_GAME_MINIMUM_PLAYERS',409);
     $arms = chinese_checkers_player_arms(count($players));
     $armHoles = chinese_checkers_arm_holes();
     $board = [];
@@ -270,6 +282,8 @@ function chinese_checkers_initial_state(array $playerUserIds, array $context = [
     return [
         'schemaVersion' => CHINESE_CHECKERS_STATE_SCHEMA_VERSION,
         'playerCount' => count($players),
+        'bots' => $bots,
+        'settings' => $settings,
         'turnOrder' => $players,
         'turnIndex' => 0,
         'phase' => 'playing',
@@ -453,6 +467,7 @@ function chinese_checkers_project_state(array $state, int $viewerUserId, array $
             $projection['legalActions'][] = 'move';
         }
     }
+    $projection['botTask']=chinese_checkers_bot_task($state,$viewerUserId,$context);
     $projection['homeProgress'] = chinese_checkers_home_progress($state);
     $projection['piecesPerPlayer'] = CHINESE_CHECKERS_PIECES_PER_PLAYER;
     $projection['geometry'] = [
@@ -471,7 +486,7 @@ function chinese_checkers_result(array $state, int $winnerUserId): array
     return ocx_game_result_from_scores($scores);
 }
 
-function chinese_checkers_apply_action(
+function chinese_checkers_apply_action_core(
     array $state,
     int $actorUserId,
     string $action,

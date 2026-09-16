@@ -92,7 +92,7 @@ function chess_bot_task(array $state, int $viewer, array $context): ?array
     }
     $position = $state['botPosition'] ?? ['fen' => chess_bot_fen($state), 'moves' => []];
     return ['positionKey' => chess_bot_position_key($state), 'engine' => CHESS_BOT_ENGINE,
-        'rating' => (int)substr($difficulty, 4), 'moveTimeMs' => $budget,
+        'rating' => (int)substr($difficulty, 4), 'moveTimeMs' => $budget, 'presentationDelayMs' => isset($remaining) ? max(0,min(2000,($remaining-2)*1000)) : 2000,
         'position' => 'position fen ' . $position['fen'] . (empty($position['moves']) ? '' : ' moves ' . implode(' ', $position['moves'])),
         'respondToDraw' => $offer === $viewer];
 }

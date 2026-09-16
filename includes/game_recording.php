@@ -137,6 +137,7 @@ function game_recording_capture_core(PDO $pdo, string $publicId, string $kind, a
             $files = [str_replace('-', '_', $game) . '_extension.php'];
             if ($game === 'spades') $files = array_merge($files, ['spades_bot_support.php', 'spades_bot_endgame_support.php']);
             if ($game === 'battleship') $files[] = 'battleship_bot_support.php';
+            if (in_array($game, ['spades','battleship'], true)) $files[] = 'paced_bot_support.php';
             if ($game === 'chess') $files[] = 'chess_bot_support.php';
             if ($game === 'checkers') $files[] = 'checkers_bot_support.php';
             if ($game === 'backgammon') $files[] = 'backgammon_bot_support.php';

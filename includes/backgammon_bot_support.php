@@ -11,7 +11,7 @@ function backgammon_bot_task(array $s,int $viewer,array $c):?array {
  if(($c['mode']??'')!=='practice'||($c['status']??'')!=='active'||!in_array($c['viewerRole']??'',['master','player'],true)||$viewer<=0||!in_array($viewer,$s['turnOrder']??[],true)||empty($s['bots'][(string)BACKGAMMON_BOT_ID])||!empty($s['completed']))return null;
  if(($s['backgammonStage']??'')==='opening-roll'||(int)($s['turnOrder'][(int)($s['turnIndex']??-1)]??0)!==BACKGAMMON_BOT_ID)return null;
  $difficulty=$s['bots'][(string)BACKGAMMON_BOT_ID]['difficulty'];if(!isset(backgammon_bot_levels()[$difficulty]))return null;
- return ['engine'=>BACKGAMMON_BOT_ENGINE,'positionKey'=>backgammon_bot_position_key($s),'actor'=>BACKGAMMON_BOT_ID,'difficulty'=>$difficulty,'moveTimeMs'=>1200,'action'=>$s['backgammonStage']==='roll'?'roll':'move','position'=>array_intersect_key($s,array_flip(['turnOrder','points','bar','borneOff','remainingDice','moveUseRule']))];
+ return ['engine'=>BACKGAMMON_BOT_ENGINE,'positionKey'=>backgammon_bot_position_key($s),'actor'=>BACKGAMMON_BOT_ID,'difficulty'=>$difficulty,'moveTimeMs'=>$difficulty==='expert'?1800:1200,'action'=>$s['backgammonStage']==='roll'?'roll':'move','position'=>array_intersect_key($s,array_flip(['turnOrder','points','bar','borneOff','remainingDice','moveUseRule']))];
 }
 function backgammon_apply_action(array $s,int $actor,string $action,array $payload,array $context):array {
  if($actor<=0||!in_array($actor,$s['turnOrder']??[],true))throw new MultiplayerGameException('Only an authenticated Backgammon participant may act.','BACKGAMMON_PLAYER_INVALID',403);

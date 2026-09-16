@@ -42,7 +42,7 @@
     "icon": "chinese-checkers-first-party-icon.svg",
     "profile": "versus",
     "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 6,
     "seats": [
@@ -89,7 +89,7 @@
     },
     "rulesHelp": {
       "label": "Chinese Checkers rules",
-      "description": "Standard step-and-jump race for two through six human players."
+      "description": "Step-and-jump race for two through six players, with optional Practice bots."
     }
   },
   "requiredFiles": [
@@ -107,6 +107,12 @@
     "games/game-avatar.js",
     "includes/chinese_checkers_extension.php",
     "games/classic-game-audio.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "includes/chinese_checkers_bot_support.php",
+    "games/chinese-checkers-bot-controller.js",
+    "games/chinese-checkers-engine.js",
+    "games/chinese-checkers-worker.js",
+    "games/bot-pacing.js",
+    "games/chinese-checkers-first-party/motion.js"
   ]
 }

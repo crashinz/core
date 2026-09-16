@@ -3,7 +3,7 @@
  function search(M,task){
   const started=performance.now(),{board,side}=R.unpack(task.position,task.actor),rule=task.position.moveUseRule;
   if(!['easy','normal','expert'].includes(task.difficulty)||!['standard','legacy-ocx'].includes(rule))throw Error('Invalid task');
-  const budget=Math.min(1200,Math.max(50,Number(task.moveTimeMs)||0));
+  const budget=Math.min(1800,Math.max(50,Number(task.moveTimeMs)||0));
   let evaluations=0;
   function value(b){
    M.HEAPU32.set(b.flat(),M._core_board()/4);

@@ -1,20 +1,23 @@
+import { remainingBotPause } from "./bot-pacing.js?v=31356370ce09";
 export function createBackgammonBotController({snapshot,submit,showStatus,WorkerClass=globalThis.Worker}){
  let job=null,failedKey='';
- function stop(){if(job){clearTimeout(job.timeout);job.worker?.terminate();job=null;}}
+ function stop(){if(job){clearTimeout(job.timeout);clearTimeout(job.delay);job.worker?.terminate();job=null;}}
  function fail(active,message){if(job!==active)return;stop();failedKey=active.key;showStatus(message,()=>{failedKey='';sync();});}
  function sync(){
   const current=snapshot();if(!current?.enabled||!current.task){stop();if(!current?.task)failedKey='';showStatus('');return;}
   if(job?.key===current.key||failedKey===current.key)return;stop();
-  const active={key:current.key,worker:null,timeout:null,submitted:false,searching:false};job=active;const task=current.task;
+  const active={started:performance.now(),key:current.key,worker:null,timeout:null,submitted:false,searching:false};job=active;const task=current.task;
   async function finish(move){
    if(job!==active||active.submitted)return;const latest=snapshot();if(!latest?.enabled||latest.key!==active.key){stop();return;}
-   active.submitted=true;clearTimeout(active.timeout);active.worker?.terminate();active.worker=null;showStatus(task.action==='roll'?'The bot is rolling…':'The bot is moving…');
+   active.submitted=true;clearTimeout(active.timeout);active.worker?.terminate();active.worker=null;await new Promise(resolve=>{active.delay=setTimeout(resolve,remainingBotPause(active.started,task));});
+   if(job!==active||!snapshot()?.enabled||snapshot()?.key!==active.key)return;
+   showStatus(task.action==='roll'?'The bot is rolling…':'The bot is moving…');
    try{const ok=await submit({positionKey:task.positionKey,engine:task.engine,action:task.action,...move});if(!ok&&snapshot()?.key===active.key){fail(active,'The bot action could not be saved. Retry when the connection is available.');return;}if(job===active){stop();showStatus('');}sync();}catch{fail(active,'The bot action could not be saved. Retry when the connection is available.');}
   }
   if(task.action==='roll'){showStatus('The bot is ready to roll…');active.timeout=setTimeout(()=>void finish({elapsedMs:0}),500);return;}
   showStatus('Loading the backgammon bot…');
   try{
-   const worker=new WorkerClass(new URL('./vendor/gnubg/worker.js?v=1',import.meta.url));active.worker=worker;
+   const worker=new WorkerClass(new URL('./vendor/gnubg/worker.js?v=54aecadac14c',import.meta.url));active.worker=worker;
    active.timeout=setTimeout(()=>fail(active,'The backgammon bot could not load. Check your connection, then retry.'),15000);
    worker.onerror=e=>{e?.preventDefault?.();fail(active,'The backgammon engine could not run. Retry with a current browser.');};
    worker.onmessage=({data})=>{

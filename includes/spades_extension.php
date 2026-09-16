@@ -364,6 +364,7 @@ function spades_legal_cards(array $state, int $actorUserId): array
 function spades_project_state(array $state, int $viewerUserId, array $context): array
 {
     $projection = spades_upgrade_state_settings($state);
+    $projection['botTask'] = in_array($state['phase'] ?? '', ['deal','settling'], true) ? null : paced_bot_task($state, $viewerUserId, $context, 'spades-paced-1');
     $projection['legalCards'] = spades_legal_cards($projection, $viewerUserId);
     $isPlayer = in_array($viewerUserId, array_map('intval', (array)($projection['turnOrder'] ?? [])), true);
     $viewerTeam = $isPlayer ? spades_team_index($projection, $viewerUserId) : -1;
