@@ -7,7 +7,11 @@ $user = require_user();
 $pdo = db();
 
 try {
-    $file = five_dice_media_pack_authorized_file(
+    $reviewId=trim((string)($_GET['game_session_id']??''));
+    if(str_starts_with($reviewId,'review-')){
+        require_once __DIR__.'/../includes/game_review.php';
+        $file=game_review_media_file($pdo,$user,$reviewId,'five-dice',trim((string)($_GET['slot']??'')));
+    }else $file = five_dice_media_pack_authorized_file(
         $pdo,
         trim((string)($_GET['game_session_id'] ?? '')),
         (int)$user['id'],

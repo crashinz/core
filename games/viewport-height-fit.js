@@ -1,9 +1,10 @@
+import { gameViewStorage } from "./game-view-storage.js?v=1dd11e938aa8";
 const heightFitOverrides = new Map();
 
 export function viewerHeightFitEnabled(gameId, fallback = false) {
   if (heightFitOverrides.has(gameId)) return heightFitOverrides.get(gameId);
   try {
-    const saved = localStorage.getItem("corechat:" + gameId + ":height-fit");
+    const saved = gameViewStorage.getItem("corechat:" + gameId + ":height-fit");
     if (saved === "true" || saved === "false") return saved === "true";
   } catch {}
   return Boolean(fallback);
@@ -12,7 +13,7 @@ export function viewerHeightFitEnabled(gameId, fallback = false) {
 export function setViewerHeightFit(gameId, enabled) {
   const value = Boolean(enabled);
   heightFitOverrides.set(gameId, value);
-  try { localStorage.setItem("corechat:" + gameId + ":height-fit", String(value)); } catch {}
+  try { gameViewStorage.setItem("corechat:" + gameId + ":height-fit", String(value)); } catch {}
 }
 
 export function setStyleIfChanged(style, name, value, priority = "") {

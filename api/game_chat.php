@@ -156,6 +156,15 @@ $messagePayload = function(array $row) use ($pdo, $participant): array {
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $since = (int)($source['since_id'] ?? 0);
+    if ($frameworkMember) {
+        $messages = multiplayer_game_rematch_chat_history($pdo, $lobby, (int)$user['id'], $since);
+        json_out([
+            'messages' => array_map(static function (array $row) use ($messagePayload, $lobby): array {
+                return $messagePayload($row) + ['chat_lobby_code' => $lobby];
+            }, $messages),
+            'typing' => [],
+        ]);
+    }
     $stmt = $pdo->prepare(
         'SELECT gcm.*, COALESCE(gcm.user_id, p.user_id) AS author_user_id,
                 COALESCE(NULLIF(gcm.display_name, ""), p.display_name, "Player") AS author_display_name,

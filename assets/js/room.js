@@ -668,10 +668,10 @@ async function initializeAvatarRuntime() {
 
   const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }, ServerClock] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
-    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260915-emoji-inline')),
+    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260915-rematch-chat')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
-    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=084fa623d9fa')),
+    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=20260915-rematch-chat')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
     import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js?v=20260913-regression')),
     import(`${appUrl('/assets/js/runtime/avatar/avatar-runtime.js?v=20260914-bubble-emojis')}?v=20260913-away-layout`),
@@ -1897,7 +1897,9 @@ async function messageProtectionContentKey(conversation, epoch) {
 }
 
 async function messageProtectionDecryptMessage(message, chatKey) {
-  const conversation = messageProtectionConversation(chatKey);
+  const sourceChatKey = message?.channel === "game" && message?.chat_lobby_code && message?.lobby_code
+    ? `game:${message.lobby_code}` : chatKey;
+  const conversation = messageProtectionConversation(sourceChatKey);
   const envelope = message?.protection_envelope;
   if (!conversation || !envelope) throw new Error('The protected message envelope is unavailable.');
   const { key, context } = await messageProtectionContentKey(conversation, Number(envelope.keyEpoch));
@@ -2975,6 +2977,12 @@ function configureGameRuntime() {
     getCsrfToken: () => CSRF_TOKEN,
     activeChatKey,
     gameChatKey,
+    continueGameChat(previousLobby, nextLobby) {
+      const state = chatMessageState();
+      for (const message of state.sortedMessagesForChannel(gameChatKey(previousLobby))) {
+        state.addMessageToChannel({ ...message, chat_lobby_code: nextLobby }, gameChatKey(nextLobby));
+      }
+    },
     switchChat,
     startGameChatPolling,
     stopGameChatPolling,

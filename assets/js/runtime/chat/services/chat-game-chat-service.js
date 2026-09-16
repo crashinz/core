@@ -247,13 +247,16 @@ export class ChatGameChatService {
         const activeGame =
             context.getActiveGame();
 
-        if (!activeGame || message?.lobby_code !== activeGame.lobby_code) {
+        // The server can route authorized predecessor history into this
+        // rematch while retaining the original lobby for protected messages.
+        const chatLobby = message?.chat_lobby_code || message?.lobby_code;
+        if (!activeGame || chatLobby !== activeGame.lobby_code) {
             return false;
         }
 
         context.addMessageToChannel(
             message,
-            this.chatKey(message.lobby_code),
+            this.chatKey(chatLobby),
             live
         );
 

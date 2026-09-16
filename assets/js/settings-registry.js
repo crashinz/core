@@ -2338,6 +2338,24 @@
       }
       categorySection.appendChild(heading);
       this.renderSubsections(categorySection, entries, category.id);
+      if (category.id === 'system') {
+        const diagnostics = element('details', 'settings-checksum-diagnostics');
+        const extensions = this.registry?.firstPartyExtensions || [];
+        const changed = extensions.filter(item => item.integrity?.state !== 'verified');
+        diagnostics.appendChild(element('summary', '', `Release file checksums — ${changed.length ? `${changed.length} modified or unverified features` : 'all checked files match'}`));
+        diagnostics.appendChild(element('p', '', 'Compared with release-manifest.json. Editing files does not update this inventory. Checksums are refreshed when a reviewed release is prepared.'));
+        for (const item of extensions) {
+          const detail = element('details');
+          const check = item.integrity;
+          const label = check?.state === 'modified' ? 'Locally modified' : check?.state === 'verified' ? 'Matches release' : 'Unverified';
+          detail.appendChild(element('summary', '', `${item.name} — ${label}${item.state === 'integrity-blocked' ? ' (blocked by strict checking)' : ''}`));
+          if (item.failure) detail.appendChild(element('p', '', item.failure));
+          for (const path of check?.modifiedFiles || []) detail.appendChild(element('div', '', path));
+          for (const path of check?.unverifiedFiles || []) detail.appendChild(element('div', '', `${path} — no release checksum`));
+          diagnostics.appendChild(detail);
+        }
+        categorySection.appendChild(diagnostics);
+      }
       target.appendChild(categorySection);
     }
 

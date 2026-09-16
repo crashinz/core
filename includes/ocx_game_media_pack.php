@@ -133,10 +133,10 @@ function ocx_game_media_add_optional_native_strip(array &$slots, int $id, array 
 
 function ocx_game_media_add_bear_off_strips(array &$slots): void
 {
-    foreach ([507 => [32, 256], 508 => [32, 285]] as $id => $dimensions) {
+    foreach ([501 => [25, 175], 502 => [25, 175], 505 => [30, 444], 506 => [30, 444], 507 => [32, 256], 508 => [32, 285], 509 => [31, 248], 510 => [31, 248], 511 => [32, 192], 512 => [32, 192], 513 => [31, 124], 514 => [31, 124]] as $id => $dimensions) {
         $slot = 'bitmap-' . $id;
         ocx_game_media_add_image($slots, $slot . '.png', $dimensions,
-            'Optional original checker bear-off frames', ocx_game_media_edge_matte_preparation([0, 0, 0]));
+            'Optional original checker capture, movement and landing frames', ocx_game_media_edge_matte_preparation([0, 0, 0]));
         $slots[$slot]['acceptedOriginalNames'][] = $id . '.png';
         // Older installed packs remain complete without these additional frames.
         $slots[$slot]['requiredForClassic'] = false;

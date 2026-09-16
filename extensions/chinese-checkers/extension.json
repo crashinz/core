@@ -92,22 +92,21 @@
       "description": "Standard step-and-jump race for two through six human players."
     }
   },
-  "integrity": {
-    "algorithm": "sha256",
-    "files": {
-      "games/chinese-checkers-first-party/index.html": "a1e186a23cc19333b19a4df5696c0c0a534c4b568ee7c67840ac86c415c73b1f",
-      "games/ocx-extension-game.css": "a1f0eed3328e00cafaad850c4111648890caee435bd138101a9cc4d1eff46cee",
-      "games/chinese-checkers-first-party/style.css": "8e4b90c5eb4e184a2c754107fcdc2a22f80b22e4617af2dc3c6b7cf284752a3c",
-      "games/chinese-checkers-first-party/player-placement.css": "58ba4cf655aef4f7011577b567ad60ccfd329fb212fbc46f46172d16444bf4a5",
-      "games/chinese-checkers-first-party/app.js": "1fce3fe1ce2e7e84b7dcbd17bc9f88757f2d9af5a10e41686c0f04f312f9a981",
-      "games/chinese-checkers-first-party/player-placement.js": "5f342b603b776d0110ce3cba3a9daba3f065e5dd27074e95a2583edbd7971c9d",
-      "assets/audio/built-in-games/chinese-checkers-step.wav": "312dcbea64a227a95e6c397a8c8d5a0c5490116d3c9bd7f77e469d88a72ea0f2",
-      "assets/audio/built-in-games/chinese-checkers-jump.wav": "ba3985f47d6e172ce2e6332130ae1eeffb6ef9985e5a8af7c29a46f7918fc751",
-      "assets/images/chinese-checkers-first-party-icon.svg": "865cebf36e346ce615369f19fa256a0566afb46b854d1abb09413cb9b1f80599",
-      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "20842fe8b83f95b1dc1c2698245b3a9551875df562b3544440cd458721def5a9",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e",
-      "includes/chinese_checkers_extension.php": "ac768166ca65362c9355e37234fe76581d10340f992ad4c59d3630806ce853fa"
-    }
-  }
+  "requiredFiles": [
+    "games/chinese-checkers-first-party/index.html",
+    "games/ocx-extension-game.css",
+    "games/chinese-checkers-first-party/style.css",
+    "games/chinese-checkers-first-party/player-placement.css",
+    "games/chinese-checkers-first-party/app.js",
+    "games/chinese-checkers-first-party/player-placement.js",
+    "assets/audio/built-in-games/chinese-checkers-step.wav",
+    "assets/audio/built-in-games/chinese-checkers-jump.wav",
+    "assets/images/chinese-checkers-first-party-icon.svg",
+    "games/viewport-height-fit.js",
+    "games/ocx-extension-game.js",
+    "games/game-avatar.js",
+    "includes/chinese_checkers_extension.php",
+    "games/classic-game-audio.js",
+    "games/game-view-storage.js"
+  ]
 }

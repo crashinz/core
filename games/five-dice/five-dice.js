@@ -1,7 +1,12 @@
-import { classicSourceMap } from "../classic-source-maps.js?v=cf6201672747";
-import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "../viewport-height-fit.js?v=c2557c225fbc";
+import { gameViewStorage } from "../game-view-storage.js?v=1dd11e938aa8";
+import { classicSourceMap } from "../classic-source-maps.js?v=f69e083b7fee";
+import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "../viewport-height-fit.js?v=f9547db55052";
 
 import { bindGameAvatar } from "../game-avatar.js?v=20260913-room-avatars";
+
+import { optionalVoices, originalVoices, voiceEnabled, classicScoreReaction, classicRecordReaction, chooseIdleVoice } from "./five-dice-voices.js?v=8d931646bee3";
+
+import { reactionStrips, reactionFrame } from "./five-dice-reactions.js?v=8b09bca30632";
 
 const params = new URLSearchParams(location.search);
 const context = Object.freeze({
@@ -58,6 +63,13 @@ let newGameVoteStatus = null;
 let documentVisible = !document.hidden;
 let gameSurfaceVisible = true;
 const audioPlayers = new Map();
+let idleVoiceTimer = 0;
+let idleVoiceActivityAt = Date.now();
+let idleVoiceIndex = 0;
+let activeOptionalVoice = null;
+let classicReaction = null;
+let classicReactionTimer = 0;
+const classicSoundPreparations = new Map();
 const classicVisualPreloads = new Map();
 const classicRollVisualSlots = Object.freeze([
   "rolling-dice-a", "rolling-dice-b", "drum-motion",
@@ -67,6 +79,9 @@ const classicRollVisualSlots = Object.freeze([
 const mediaTrace = [];
 const playedStateAudioKeys = new Set();
 let rolling = false;
+let fiveDiceRollPresentation = null;
+let fiveDiceRollTimer = 0;
+let suppressNextFiveDiceRoll = false;
 let drumRolling = false;
 let drumFrame = classicGeometry.motion.drumRestFrame;
 const motionTimers = new Set();
@@ -103,7 +118,7 @@ function endUnavailableFiveDiceSession(error) {
   fiveDiceStatusLayoutCleanup?.();
   fiveDiceStatusLayoutCleanup = null;
   for (const timer of [pollTimer,sharedLifecycleDeadlineTimer,sharedLifecycleRenderTimer,builtInOpeningTimer,builtInScoreMotionTimer,builtInTerminalMotionTimer]) clearTimeout(timer);
-  clearClassicMotionTimers(); pauseAllAudio('session-unavailable');
+  cancelFiveDiceRoll(); pauseAllAudio('session-unavailable');
   gameSurfaceVisible=false; documentVisible=false; busy=false;
   session=null; options=null; records=null;
   document.body.classList.add('five-dice-session-unavailable');
@@ -170,7 +185,7 @@ async function reconnectVisibleFiveDiceSession() {
       });
     }
     if (Number(nextSession.stateVersion) < Number(session.stateVersion)) return;
-    replaceSession(nextSession);
+    replaceSession(nextSession, {presentRoll:false});
   } finally {
     if (pendingVisibleFiveDiceReconnect === pending) pendingVisibleFiveDiceReconnect = null;
   }
@@ -317,7 +332,7 @@ async function getOptions() {
 
   const query = new URLSearchParams({
     action: "options", session_id: context.sessionId, participant_id: String(context.participantId),
-    join_token: context.joinToken, game_key: "g_4f8c2d71"
+    join_token: context.joinToken, game_session_id: activeGameSessionId, game_key: "g_4f8c2d71"
   });
   const response = await fetch(`../../api/game_framework.php?${query}`, { cache: "no-store", credentials: "same-origin" });
   const data = await readJsonResponse(response, "Game sound settings are unavailable.");
@@ -330,7 +345,7 @@ async function getRecords() {
 
   const query = new URLSearchParams({
     action: "records", session_id: context.sessionId, participant_id: String(context.participantId),
-    join_token: context.joinToken, game_key: "g_4f8c2d71"
+    join_token: context.joinToken, game_session_id: activeGameSessionId, game_key: "g_4f8c2d71"
   });
   const response = await gameFetch(`../../api/game_framework.php?${query}`, { cache: "no-store", credentials: "same-origin" });
   const data = await readJsonResponse(response, "Recorded results are unavailable.");
@@ -502,9 +517,12 @@ function playStateAudioOnce(key, slot, details = {}) {
   playOptionalSound(slot);
 }
 
-function observeSessionTransition(before, after) {
+function observeSessionTransition(before, after, present = true) {
   if (!before || !after) return;
   const publicId = String(after.publicId || activeGameSessionId);
+  const recordViewer = Number(after.members?.find(member => Number(member.participantId) === context.participantId)?.userId || 0);
+  const recordCue = present && documentVisible && gameSurfaceVisible && !document.hidden
+    ? classicRecordReaction(before, after, recordViewer) : null;
   const authoritativeRoundStarted = String(after.status || "") === "active"
     && (String(before.status || "") === "lobby"
       || (before.state?.completed && String(before.publicId || activeGameSessionId) !== publicId));
@@ -548,7 +566,7 @@ function observeSessionTransition(before, after) {
     const tiedLeaders = winners.length > 1;
     const viewerIsWinner = winners.includes(viewerUserId);
     const slot = !winners.length ? null : tiedLeaders && viewerIsWinner ? "draw-sound" : viewerIsWinner ? "win-sound" : "loser-sound";
-    if (viewerCanOwnResultAudio) {
+    if (viewerCanOwnResultAudio && !recordCue) {
       playStateAudioOnce(key, slot, {
         owner: tiedLeaders && viewerIsWinner ? "authoritative-terminal-draw" : viewerIsWinner ? "authoritative-terminal-winner" : "authoritative-terminal-loser",
         outcome: tiedLeaders && viewerIsWinner ? "draw" : viewerIsWinner ? "winner" : "loser",
@@ -557,15 +575,98 @@ function observeSessionTransition(before, after) {
       });
     } else {
       traceMedia("terminal-result-sound-suppressed", slot, {
-        reason: winners.length ? "viewer-is-not-a-player" : "outcome-unavailable",
+        reason: recordCue ? "original-record-cue-takes-priority" : winners.length ? "viewer-is-not-a-player" : "outcome-unavailable",
         winnerUserIds: winners,
         viewerUserId,
       });
     }
   }
+  if (recordCue) {
+    // A later record projection replaces an already-started result voice, as the original sound channel did.
+    for (const slot of ["win-sound", "loser-sound", "draw-sound"]) audioPlayers.get(slot)?.pause();
+    playStateAudioOnce(recordCue.key,recordCue.slot,{owner:"original-personal-record",score:recordCue.score,viewerUserId:recordViewer});
+  }
 }
 
-function replaceSession(nextSession) {
+function fiveDiceAcceptedRoll(before, after) {
+  const a = before?.state, b = after?.state;
+  if (!a || !b || !before.publicId || before.publicId !== after.publicId
+      || before.status !== "active" || after.status !== "active" || a.completed || b.completed
+      || Number(after.stateVersion) <= Number(before.stateVersion)) return null;
+  const actor = a.turnOrder?.[a.turnIndex];
+  if (!actor || actor !== b.turnOrder?.[b.turnIndex]
+      || Number(b.rollsThisTurn) !== Number(a.rollsThisTurn) + 1
+      || ![1,2,3].includes(Number(b.rollsThisTurn))
+      || !Array.isArray(b.dice) || b.dice.length !== 5
+      || b.dice.some(n => !Number.isInteger(n) || n < 1 || n > 6)) return null;
+  return { key:`${after.publicId}:${actor}:${after.stateVersion}`, publicId:after.publicId,
+    actor, roll:Number(b.rollsThisTurn), dice:[...b.dice], held:[...(b.held || [])],
+    previousDice:[...(a.dice || [])], previousRoll:Number(a.rollsThisTurn) };
+}
+
+function fiveDiceRollStillCurrent(event) {
+  const state = session?.state;
+  return fiveDiceRollPresentation === event && !terminalSessionError && documentVisible && gameSurfaceVisible
+    && !state?._framework?.serviceInterruption?.active
+    && !["paused", "resuming"].includes(state?._framework?.pause?.mode)
+    && session.publicId === event.publicId && session.status === "active" && !state?.completed
+    && state.turnOrder?.[state.turnIndex] === event.actor && Number(state.rollsThisTurn) === event.roll
+    && JSON.stringify(state.dice) === JSON.stringify(event.dice)
+    && JSON.stringify(state.held || []) === JSON.stringify(event.held);
+}
+
+function cancelFiveDiceRoll() {
+  clearTimeout(fiveDiceRollTimer);
+  clearClassicMotionTimers();
+  rolling = false; drumRolling = false; drumFrame = classicGeometry.motion.drumRestFrame;
+  const event = fiveDiceRollPresentation;
+  fiveDiceRollPresentation = null;
+  event?.resolve?.();
+}
+
+function observeFiveDiceRollTransition(before, after, present = true) {
+  if (fiveDiceRollPresentation && !fiveDiceRollStillCurrent(fiveDiceRollPresentation)) cancelFiveDiceRoll();
+  const event = fiveDiceAcceptedRoll(before, after);
+  if (!present || !event || !documentVisible || !gameSurfaceVisible || document.hidden) return;
+  cancelFiveDiceRoll();
+  fiveDiceRollPresentation = event;
+  event.done = new Promise(resolve => { event.resolve = resolve; });
+  void startFiveDiceAcceptedRoll(event);
+}
+
+async function startFiveDiceAcceptedRoll(event) {
+  const classic = session?.presentation?.effectivePack === "classic";
+  try {
+    if (classic) await Promise.all([ensureClassicRollVisuals(), prepareClassicSound("roll-sound")]);
+  } catch {
+    if (fiveDiceRollPresentation === event) {
+      traceMedia("dice-motion-media-unavailable", null, {key:event.key});
+      cancelFiveDiceRoll(); render();
+    }
+    return;
+  }
+  if (!fiveDiceRollStillCurrent(event)) { if (fiveDiceRollPresentation === event) cancelFiveDiceRoll(); return; }
+  const reduced = options?.categories?.gfxEnabled !== true && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  rolling = fiveDiceVisualFxEnabled();
+  drumRolling = (classic ? options?.musicEnabled === true : rolling) && !reduced;
+  event.startedAt = performance.now();
+  event.gfx = rolling;
+  event.music = options?.musicEnabled === true;
+  drumFrame = drumRolling ? classicGeometry.motion.drumSequence[0] : classicGeometry.motion.drumRestFrame;
+  if (classic) startClassicRollMotion();
+  const duration = classic ? Math.max(rolling ? classicGeometry.motion.diceDurationMs : 0,
+    drumRolling ? classicGeometry.motion.drumFrameDurationsMs.reduce((a,b)=>a+b,0) : 0) : rolling ? 1260 : 0;
+  render();
+  playOptionalBackgroundMusic();
+  playOptionalSound("roll-sound");
+  traceMedia("accepted-roll-presentation-started", "roll-sound", {key:event.key,actor:event.actor,durationMs:duration,held:event.held});
+  fiveDiceRollTimer = setTimeout(() => {
+    if (fiveDiceRollPresentation !== event) return;
+    cancelFiveDiceRoll(); render();
+  }, duration);
+}
+
+function replaceSession(nextSession, { presentRoll = true } = {}) {
   if (terminalSessionError) return session;
 
   assertGameSessionEnvelope(nextSession);
@@ -589,7 +690,11 @@ function replaceSession(nextSession) {
   }
   session = nextSession;
   sessionProjectedAtMs = Date.now();
-  observeSessionTransition(before, session);
+  observeSessionTransition(before, session, presentRoll && !suppressNextFiveDiceRoll);
+  observeClassicScoreVoice(before, session, presentRoll && !suppressNextFiveDiceRoll);
+  syncIdleVoiceActivity(before, session);
+  observeFiveDiceRollTransition(before, session, presentRoll && !suppressNextFiveDiceRoll);
+  suppressNextFiveDiceRoll = false;
   return session;
 }
 
@@ -685,7 +790,7 @@ async function reconcileFiveDiceActionFailure(error, actionType, expectedVersion
 }
 
 async function runAction(actionType, payload = {}) {
-  if (busy || terminalSessionError || !session || session.status !== "active" || session.state?.completed) return { ok: false, reason: "not-playable" };
+  if (busy || fiveDiceRollPresentation || terminalSessionError || !session || session.status !== "active" || session.state?.completed) return { ok: false, reason: "not-playable" };
   clearActionFailure();
   const before = session;
   const expectedVersion = Number(session.stateVersion);
@@ -716,25 +821,14 @@ function fiveDiceVisualFxEnabled() {
 
 async function roll() {
   if (!canCurrentViewerRoll()) return;
+  cancelClassicReaction();
   clearActionFailure();
+  stopOptionalVoice();
+  idleVoiceActivityAt = Date.now();
   const expectedVersion = Number(session.stateVersion);
   busy = true;
-  const classic = session.presentation?.effectivePack === "classic";
-  const reducedMotion = options?.categories?.gfxEnabled !== true && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const gfxEnabled = fiveDiceVisualFxEnabled();
-  const musicEnabled = options?.musicEnabled === true;
-  const diceMotionEnabled = gfxEnabled;
-  const drumMotionEnabled = (classic ? musicEnabled : gfxEnabled) && !reducedMotion;
-  let animationStartedAt = null;
   setFiveDiceActionPendingPresentation(true);
   try {
-    if (classic) await ensureClassicRollVisuals();
-    rolling = diceMotionEnabled;
-    drumRolling = drumMotionEnabled;
-    drumFrame = drumRolling ? classicGeometry.motion.drumSequence[0] : classicGeometry.motion.drumRestFrame;
-    animationStartedAt = performance.now();
-    if (classic) startClassicRollMotion();
-    render();
     const randomnessRequestId = randomId("five-dice-roll");
     if (session.mode === "practice") {
       const reveal = { dice: randomPracticeDice(), nonce: crypto.randomUUID() };
@@ -748,37 +842,12 @@ async function roll() {
       request_id: randomId("five-dice-action"), expected_version: expectedVersion,
       action_type: "roll", payload: {}, randomness_request_id: randomnessRequestId
     });
-    playOptionalBackgroundMusic();
-    playOptionalSound("roll-sound");
     replaceSession(actionResult?.session || await getSession());
-    traceMedia(diceMotionEnabled ? "dice-motion-started" : "dice-motion-suppressed", "rolling-dice-a", {
-      durationMs: diceMotionEnabled ? classicGeometry.motion.diceDurationMs : 0,
-      reason: diceMotionEnabled ? "gfx-on" : (reducedMotion ? "reduced-motion" : gfxEnabled ? "built-in" : "gfx-off"),
-      source: "owner-private-ocx-motion-reference",
-    });
-    traceMedia(drumMotionEnabled ? "drum-motion-started" : "drum-motion-suppressed", "drum-motion", {
-      durationMs: drumMotionEnabled ? classicGeometry.motion.drumFrameDurationsMs.reduce((total, duration) => total + duration, 0) : 0,
-      reason: drumMotionEnabled ? "music-on" : (reducedMotion ? "reduced-motion" : musicEnabled ? "built-in" : "music-off"),
-      source: "owner-private-ocx-motion-reference",
-    });
+    if (fiveDiceRollPresentation?.done) await fiveDiceRollPresentation.done;
   } catch (error) {
     await reconcileFiveDiceActionFailure(error, "roll", expectedVersion);
     playOptionalSound("invalid-sound");
   } finally {
-    const sourceMotionDuration = classic
-      ? Math.max(
-        diceMotionEnabled ? classicGeometry.motion.diceDurationMs : 0,
-        drumMotionEnabled ? classicGeometry.motion.drumFrameDurationsMs.reduce((total, duration) => total + duration, 0) : 0
-      )
-      : diceMotionEnabled ? 1260 : 0;
-    const remaining = animationStartedAt === null
-      ? 0
-      : Math.max(0, sourceMotionDuration - (performance.now() - animationStartedAt));
-    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
-    clearClassicMotionTimers();
-    rolling = false;
-    drumRolling = false;
-    drumFrame = classicGeometry.motion.drumRestFrame;
     busy = false;
     setFiveDiceActionPendingPresentation(false);
     render();
@@ -860,7 +929,7 @@ const fiveDiceBoardScaleSteps = [1, 1.25, 1.5, 1.75, 2];
 const fiveDiceBoardScaleStorageKey = "corechat:five-dice:classic-board-scale";
 
 function fiveDiceBoardScaleIndex() {
-  const stored = Number(localStorage.getItem(fiveDiceBoardScaleStorageKey) || 1);
+  const stored = Number(gameViewStorage.getItem(fiveDiceBoardScaleStorageKey) || 1);
   const index = fiveDiceBoardScaleSteps.findIndex(scale => Math.abs(scale - stored) < 0.001);
   return index >= 0 ? index : 0;
 }
@@ -896,7 +965,7 @@ function fiveDiceCrispDieArtwork(value, held) {
 function changeFiveDiceBoardScale(direction) {
   const current = fiveDiceBoardScaleIndex();
   const next = Math.max(0, Math.min(fiveDiceBoardScaleSteps.length - 1, current + Number(direction || 0)));
-  localStorage.setItem(fiveDiceBoardScaleStorageKey, String(fiveDiceBoardScaleSteps[next]));
+  gameViewStorage.setItem(fiveDiceBoardScaleStorageKey, String(fiveDiceBoardScaleSteps[next]));
   render();
 }
 
@@ -918,6 +987,9 @@ function renderDice(state, canAct) {
 
   const host = el("dice");
   host.replaceChildren();
+  const presentation = fiveDiceRollPresentation;
+  if (presentation && presentation.startedAt == null) state = {...state,dice:presentation.previousDice,rollsThisTurn:presentation.previousRoll};
+  const elapsed = presentation?.startedAt == null ? 0 : Math.max(0,performance.now()-presentation.startedAt);
   (state.dice || [1,1,1,1,1]).forEach((value, index) => {
     const classic = session?.presentation?.effectivePack === "classic";
     const displayValue = classic && Number(state.rollsThisTurn || 0) < 1 ? 0 : Number(value);
@@ -925,6 +997,7 @@ function renderDice(state, canAct) {
     button.type = "button";
     const isRollingDie = rolling && !state.held?.[index];
     button.className = `die${isRollingDie ? " is-rolling" : ""}${state.held?.[index] ? " is-held" : ""}`;
+    if (isRollingDie) button.style.animationDelay = `-${elapsed}ms`;
     button.dataset.face = String(displayValue);
     button.dataset.held = state.held?.[index] ? "true" : "false";
     button.textContent = displayValue === 0 ? "·" : diceGlyphs[Math.max(1, Math.min(6, displayValue)) - 1];
@@ -949,6 +1022,7 @@ function renderDice(state, canAct) {
       if (isRollingDie) {
         const strip = document.createElement("span");
         strip.className = "classic-roll-strip";
+        strip.style.animationDelay = `-${elapsed}ms`;
         strip.dataset.mediaSlot = index < 2 ? "rolling-dice-b" : "rolling-dice-a";
         strip.style.setProperty("--five-dice-roll-strip", `url("${mediaUrl(strip.dataset.mediaSlot)}")`);
         strip.setAttribute("aria-hidden", "true");
@@ -1160,6 +1234,7 @@ function setClassicScorePreview(category = null) {
 }
 
 async function chooseScore(category) {
+  stopOptionalVoice();
   const beforePlayer = session?.state?.players?.[String(currentUserId())] || {};
   const beforeDice = Array.isArray(session?.state?.dice) ? session.state.dice.map(Number) : [];
   const result = await runAction("score", { category });
@@ -1199,7 +1274,7 @@ async function chooseScore(category) {
     if (upperBonus > 0) {
       window.setTimeout(() => playOptionalSound("upper-bonus-sound"), 260);
     }
-    if (isFiveDice || repeatBonus > 0) {
+    if (result.after?.presentation?.effectivePack !== "classic" && (isFiveDice || repeatBonus > 0)) {
       window.setTimeout(() => playOptionalSound("celebration-sound"), upperBonus > 0 ? 680 : 300);
     }
   }
@@ -1933,7 +2008,7 @@ function canCurrentViewerRoll() {
   return gameLifecycleAvailable()
     && currentUserId() === turnUserId
     && Number(state.rollsThisTurn || 0) < 3
-    && !busy;
+    && !busy && !fiveDiceRollPresentation;
 }
 
 function canCurrentViewerRequestNewGame() {
@@ -1943,6 +2018,7 @@ function canCurrentViewerRequestNewGame() {
 }
 
 function renderMediaControls(canRoll = canCurrentViewerRoll()) {
+  renderOptionalVoices();
   document.body.dataset.visualFx = fiveDiceVisualFxEnabled() ? "on" : "off";
   if (terminalSessionError) return;
 
@@ -2851,10 +2927,13 @@ function fiveDiceMinimumScoreTargetScale(artboard) {
 }
 
 function render() {
+  scheduleIdleVoice();
+  renderClassicReaction();
   document.body.dataset.visualFx = fiveDiceVisualFxEnabled() ? "on" : "off";
   if (terminalSessionError) return;
 
   if (!session) return;
+  if (fiveDiceRollPresentation?.startedAt != null && (fiveDiceRollPresentation.gfx !== fiveDiceVisualFxEnabled() || fiveDiceRollPresentation.music !== (options?.musicEnabled === true))) cancelFiveDiceRoll();
   const scoringFocus = fiveDiceScoreLayoutCleanup?.captureFocus?.();
   const state = fiveDicePresentationState();
   const sessionEndedWithoutResult = state.completed === true && session.state?.completed !== true;
@@ -2877,7 +2956,7 @@ function render() {
   const turnUserId = Number(session.turnUserId || state.turnOrder?.[state.turnIndex] || 0);
   const turnMember = session.members.find(member => Number(member.userId) === turnUserId);
   const mine = currentUserId();
-  const canAct = gameLifecycleAvailable() && mine === turnUserId;
+  const canAct = gameLifecycleAvailable() && mine === turnUserId && !fiveDiceRollPresentation;
   el("turn-name").textContent = state.completed ? (sessionEndedWithoutResult ? "Game ended" : "Game complete") : (turnMember?.displayName || "Waiting for players");
   el("roll-count").textContent = `Rolls used: ${Number(state.rollsThisTurn || 0)} of 3`;
   el("roll").disabled = !canAct || Number(state.rollsThisTurn) >= 3 || busy;
@@ -2930,6 +3009,206 @@ function render() {
   scheduleSharedLifecycleDeadline();
 }
 
+
+
+function cancelClassicReaction() {
+  clearTimeout(classicReactionTimer); classicReactionTimer = 0;
+  classicReaction = null;
+  for (const node of document.querySelectorAll(".classic-native-reaction")) node.remove();
+  el("play-surface")?.classList.remove("has-native-mouth-reaction");
+}
+
+function classicReactionStillCurrent(event) {
+  return classicReaction === event && !terminalSessionError && documentVisible && gameSurfaceVisible
+    && !document.hidden && session?.publicId === event.publicId
+    && session?.presentation?.effectivePack === "classic" && session.status === "active" && !session.state?.completed
+    && !session.state?._framework?.serviceInterruption?.active
+    && !["paused", "resuming"].includes(session.state?._framework?.pause?.mode);
+}
+
+async function startClassicReaction(reaction) {
+  if (playedStateAudioKeys.has(reaction.key)) return;
+  cancelClassicReaction();
+  const event = { ...reaction, publicId:session.publicId, strips:[] };
+  classicReaction = event;
+  const strips = (reactionStrips[reaction.slot] || []).filter(s => classicVoiceAvailable(`reaction-${s.id}`));
+  if (fiveDiceVisualFxEnabled()) {
+    try { await Promise.all(strips.map(s => preloadClassicVisual(`reaction-${s.id}`))); event.strips = strips; }
+    catch { traceMedia("reaction-media-unavailable", reaction.slot); }
+  }
+  await prepareClassicSound(event.slot);
+  if (!classicReactionStillCurrent(event)) return;
+  if (event.idle) {
+    const choice = optionalVoices.find(v => v.slot === event.slot);
+    if (!choice || !voiceEnabled(options,choice.key)) { cancelClassicReaction(); return; }
+    activeOptionalVoice = event.slot;
+  }
+  event.startedAt = performance.now();
+  playStateAudioOnce(event.key,event.slot,{owner:event.idle ? "optional-original-idle" : "original-classic-score-reaction"});
+  traceMedia("classic-reaction-started",event.slot,{key:event.key,strips:event.strips.map(s=>s.id),clockMs:80});
+  renderClassicReaction();
+}
+
+function renderClassicReaction() {
+  const event = classicReaction;
+  if (!event) return;
+  if (!classicReactionStillCurrent(event) || !fiveDiceVisualFxEnabled()) { cancelClassicReaction(); return; }
+  if (event.startedAt == null) return;
+  clearTimeout(classicReactionTimer);
+  const elapsed = performance.now()-event.startedAt, host=el("play-surface");
+  let shown=0, mouth=false;
+  for (const strip of event.strips) {
+    const frame=reactionFrame(strip,elapsed);
+    let node=host.querySelector(`[data-native-reaction="${strip.id}"]`);
+    if (!frame) { node?.remove(); continue; }
+    if (!node) {
+      node=document.createElement("div"); node.className="classic-native-reaction";
+      node.dataset.nativeReaction=String(strip.id); node.setAttribute("aria-hidden","true");host.append(node);
+      node.style.backgroundImage=`url("${mediaUrl(`reaction-${strip.id}`)}")`;
+      node.style.backgroundSize=`100% ${strip.frames*100}%`;
+    }
+    node.style.left=`${frame.x/420*100}%`;node.style.top=`${frame.y/320*100}%`;
+    node.style.width=`${strip.width/420*100}%`;node.style.height=`${strip.height/320*100}%`;
+    node.style.backgroundPosition=`0 ${frame.frame/(strip.frames-1)*100}%`;
+    node.dataset.frame=String(frame.frame);shown++;mouth ||= strip.id>=526 && strip.id<=534 && strip.id!==530;
+  }
+  host.classList.toggle("has-native-mouth-reaction",mouth);
+  if (!shown) { cancelClassicReaction(); return; }
+  classicReactionTimer=setTimeout(renderClassicReaction, Math.max(1,80-(elapsed%80)));
+}
+
+function classicVoiceAvailable(slot) {
+  return session?.presentation?.effectivePack === "classic"
+    && (session.presentation.availableMediaSlots || []).includes(slot);
+}
+
+function stopOptionalVoice() {
+  if (!activeOptionalVoice) return;
+  const audio = audioPlayers.get(activeOptionalVoice);
+  if (audio) { audio.pause(); audio.currentTime = 0; }
+  activeOptionalVoice = null;
+}
+
+function optionalVoiceSurfaceActive() {
+  return !terminalSessionError && documentVisible && gameSurfaceVisible && !document.hidden
+    && session?.presentation?.effectivePack === "classic"
+    && !session?.state?._framework?.serviceInterruption?.active
+    && !["paused", "resuming"].includes(session?.state?._framework?.pause?.mode)
+    && (options?.categories?.sfxEnabled ?? options?.effectsEnabled !== false);
+}
+
+function previewOriginalVoice(slot) {
+  stopOptionalVoice(); idleVoiceActivityAt = Date.now();
+  if (!optionalVoiceSurfaceActive() || !classicVoiceAvailable(slot)) return;
+  activeOptionalVoice = slot;
+  playOptionalSound(slot);
+  const audio = audioPlayers.get(slot);
+  if (audio) {
+    const clear = () => { if (activeOptionalVoice === slot) activeOptionalVoice = null; };
+    audio.onended = clear; audio.onerror = clear;
+  }
+}
+
+function renderOptionalVoices() {
+  const host = el("optional-voices");
+  if (!host) return;
+  host.hidden = session?.presentation?.effectivePack !== "classic";
+  if (host.hidden) { stopOptionalVoice(); return; }
+  const choices = el("optional-voice-choices"), previews = el("other-voice-previews");
+  if (!choices.children.length) {
+    for (const voice of originalVoices) {
+      const row = document.createElement("div"); row.className = "optional-voice-row";
+      if (voice.key) {
+        const label = document.createElement("label");
+        const input = document.createElement("input"); input.type = "checkbox";
+        input.dataset.voiceKey = voice.key;
+        input.addEventListener("change", () => {
+          stopOptionalVoice(); idleVoiceActivityAt = Date.now();
+          void toggleViewerCategory(voice.key, voice.label, false);
+        });
+        label.append(input, document.createTextNode(` ${voice.label}`)); row.append(label);
+      } else {
+        const label = document.createElement("span"); label.textContent = voice.label; row.append(label);
+      }
+      const button = document.createElement("button"); button.type = "button";
+      button.textContent = "Play"; button.dataset.voiceSlot = voice.slot;
+      button.setAttribute("aria-label", `Play ${voice.label}`);
+      button.addEventListener("click", () => previewOriginalVoice(voice.slot)); row.append(button);
+      (voice.key ? choices : previews).append(row);
+    }
+  }
+  for (const input of choices.querySelectorAll("input")) {
+    const voice = optionalVoices.find(v => v.key === input.dataset.voiceKey);
+    input.checked = voiceEnabled(options, voice.key);
+    input.disabled = !classicVoiceAvailable(voice.slot);
+  }
+  for (const button of host.querySelectorAll("button[data-voice-slot]")) {
+    button.disabled = !optionalVoiceSurfaceActive() || !classicVoiceAvailable(button.dataset.voiceSlot);
+  }
+  const missing = originalVoices.some(v => !classicVoiceAvailable(v.slot));
+  el("optional-voice-status").textContent = missing
+    ? "Some clips are not installed. An administrator can add them by reinstalling the Classic media pack."
+    : "";
+  if (!optionalVoiceSurfaceActive()) stopOptionalVoice();
+}
+
+function observeClassicScoreVoice(before, after, present) {
+  if (!present || !documentVisible || !gameSurfaceVisible || document.hidden || terminalSessionError) return;
+  const reaction = classicScoreReaction(before, after);
+  if (!reaction) return;
+  stopOptionalVoice();
+  void startClassicReaction(reaction);
+}
+
+function syncIdleVoiceActivity(before, after) {
+  const shape = envelope => JSON.stringify([envelope?.publicId, envelope?.status,
+    envelope?.state?.turnIndex, envelope?.state?.rollsThisTurn, envelope?.state?.dice,
+    envelope?.state?.held, envelope?.state?.players, envelope?.state?._framework?.pause?.mode,
+    envelope?.state?._framework?.serviceInterruption?.active]);
+  if (shape(before) !== shape(after)) {
+    idleVoiceActivityAt = Date.now(); idleVoiceIndex = 0; stopOptionalVoice();
+  }
+}
+
+function scheduleIdleVoice() {
+  clearTimeout(idleVoiceTimer); idleVoiceTimer = 0;
+  if (!optionalVoiceSurfaceActive()) { stopOptionalVoice(); idleVoiceActivityAt = Date.now(); return; }
+  if (!gameLifecycleAvailable()
+      || Number(session?.turnUserId || session?.state?.turnOrder?.[session.state.turnIndex]) !== currentUserId()
+      || !chooseIdleVoice(options, session?.state?.rollsThisTurn, 0)) {
+    idleVoiceActivityAt = Date.now(); return;
+  }
+  idleVoiceTimer = setTimeout(() => {
+    if (!optionalVoiceSurfaceActive() || !gameLifecycleAvailable()) { scheduleIdleVoice(); return; }
+    const otherEffectPlaying = [...audioPlayers].some(([key, audio]) => key !== "background-music" && !audio.paused);
+    if (!busy && !fiveDiceRollPresentation && !otherEffectPlaying
+        && Date.now() - idleVoiceActivityAt > 15000 && Math.floor(Math.random() * 80) === 0) {
+      const voice = chooseIdleVoice(options, session?.state?.rollsThisTurn, idleVoiceIndex++);
+      if (voice && classicVoiceAvailable(voice.slot)) {
+        idleVoiceActivityAt = Date.now();
+        void startClassicReaction({slot:voice.slot,key:`idle:${session.publicId}:${idleVoiceActivityAt}`,idle:true});
+      }
+    }
+    scheduleIdleVoice();
+  }, 80);
+}
+
+
+async function prepareClassicSound(slot) {
+  if (!classicVoiceAvailable(slot) || !(options?.categories?.sfxEnabled ?? options?.effectsEnabled !== false)) return;
+  let audio=audioPlayers.get(slot);
+  if (!audio) { audio=new Audio(mediaUrl(slot));audio.preload="auto";audioPlayers.set(slot,audio); }
+  if (audio.readyState>=4) return;
+  if (classicSoundPreparations.has(slot)) return classicSoundPreparations.get(slot);
+  const request = new Promise(resolve => {
+    const finish=()=>{clearTimeout(timer);audio.removeEventListener("canplaythrough",finish);audio.removeEventListener("error",finish);resolve();};
+    const timer=setTimeout(finish,8000);
+    audio.addEventListener("canplaythrough",finish,{once:true});audio.addEventListener("error",finish,{once:true});audio.load();
+  }).finally(()=>classicSoundPreparations.delete(slot));
+  classicSoundPreparations.set(slot,request);
+  return request;
+}
+
 function mediaUrl(slot) {
   const query = new URLSearchParams({ game_session_id: activeGameSessionId, slot });
   return `../../api/five_dice_media.php?${query}`;
@@ -2962,6 +3241,7 @@ function preloadClassicVisual(slot) {
 async function ensureClassicRollVisuals() {
   if (session?.presentation?.effectivePack !== "classic") return;
   document.body.dataset.classicRollMediaReady = "pending";
+  void prepareClassicSound("roll-sound");
   try {
     await Promise.all(classicRollVisualSlots.map(preloadClassicVisual));
     document.body.dataset.classicRollMediaReady = "true";
@@ -2988,7 +3268,9 @@ const BUILT_IN_PUBLIC_SOUND_ROOT = "../../assets/audio/built-in-games";
   });
 
 function playOptionalSound(slot) {
+  if (session?.presentation?.effectivePack === "classic" && slot === "ready-sound" && !voiceEnabled(options, "idleReady") && activeOptionalVoice !== slot) return;
   const classic = session?.presentation?.effectivePack === "classic";
+  if (classic && !classicVoiceAvailable(slot)) { traceMedia("effect-suppressed",slot,{reason:"classic-slot-not-installed"}); return; }
   const builtInAsset = classic ? "" : String(BUILT_IN_PUBLIC_SOUND_BY_SLOT[slot] ?? "").trim();
   if (!classic && !builtInAsset) {
     traceMedia("effect-suppressed", slot, { reason: "built-in-unmapped", soundOwner: "built-in-public-cc0" });
@@ -3010,11 +3292,11 @@ function playOptionalSound(slot) {
     traceMedia("audio-created", classic ? slot : builtInAsset, { kind: "effect", soundOwner: classic ? "classic-private" : "built-in-public-cc0" });
   }
   audio.volume = Math.max(0, Math.min(1, Number(options?.masterVolume ?? 100) / 100));
-  audio.currentTime = 0;
+  if (audio.currentTime !== 0) audio.currentTime = 0;
   traceMedia("effect-play-requested", classic ? slot : builtInAsset, { category, soundOwner: classic ? "classic-private" : "built-in-public-cc0" });
   audio.play()
     .then(() => traceMedia("effect-playing", classic ? slot : builtInAsset))
-    .catch(() => traceMedia("effect-unavailable", classic ? slot : builtInAsset));
+    .catch(error => traceMedia("effect-unavailable", classic ? slot : builtInAsset, {reason:String(error?.name || "Error")}));
 }
 
 function playOptionalBackgroundMusic() {
@@ -3037,6 +3319,9 @@ function playOptionalBackgroundMusic() {
 }
 
 function pauseAllAudio(reason) {
+  cancelClassicReaction();
+  clearTimeout(idleVoiceTimer); idleVoiceTimer = 0; idleVoiceActivityAt = Date.now();
+  activeOptionalVoice = null;
   for (const [slot, audio] of audioPlayers) {
     if (!audio.paused) audio.pause();
     if (slot !== "background-music") audio.currentTime = 0;
@@ -3081,7 +3366,7 @@ function toggleSound() {
   return toggleEffectCategory("sfxEnabled", "sfx", new Set([
     "roll-sound", "hold-sound", "release-sound", "invalid-sound",
     "ready-sound", "turn-start-sound", "score-commit-sound", "upper-bonus-sound",
-    "celebration-sound", "win-sound", "loser-sound", "draw-sound"
+    "celebration-sound", "win-sound", "loser-sound", "draw-sound", ...originalVoices.map(v => v.slot)
   ]));
 }
 
@@ -3301,6 +3586,7 @@ addEventListener("message", event => {
   if (event.origin !== location.origin || event.data?.type !== "corechat-game-surface-visibility") return;
   if (event.data.visible === false) {
     gameSurfaceVisible = false;
+    suppressNextFiveDiceRoll = true; cancelFiveDiceRoll();
     pauseAllAudio("game-surface-hidden");
   } else if (event.data.visible === true) {
     gameSurfaceVisible = true;
@@ -3312,7 +3598,7 @@ document.addEventListener("visibilitychange", () => {
   if (terminalSessionError) return;
 
   documentVisible = !document.hidden;
-  if (!documentVisible) pauseAllAudio("document-hidden");
+  if (!documentVisible) { suppressNextFiveDiceRoll = true; cancelFiveDiceRoll(); pauseAllAudio("document-hidden"); }
   else playOptionalBackgroundMusic();
   renderMicrophoneMotion();
 });
@@ -3323,6 +3609,7 @@ addEventListener("pagehide", () => {
   activeRequestControllers.clear();
   void post("disconnect", {}, { keepalive: true }).catch(() => {});
   documentVisible = false;
+  suppressNextFiveDiceRoll = true; cancelFiveDiceRoll();
   gameSurfaceVisible = false;
   renderMicrophoneMotion();
   clearTimeout(pollTimer);

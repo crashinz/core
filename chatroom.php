@@ -1378,6 +1378,7 @@ $roomAssetVersion = static function (string $path): string {
   <div class="game-picker-empty" id="game-picker-empty" hidden>No installed games match that search.</div>
   <div class="game-picker-bottom-grip" data-game-picker-drag-handle role="button" tabindex="0" aria-label="Drag game picker from bottom" title="Drag popup or double-click to center"></div>
   <footer class="game-picker-footer">
+    <?php if (($user['role'] ?? '') === 'admin'): ?><a class="btn" href="game_review.php" target="_blank" rel="noopener">Game review</a><?php endif; ?>
     <div class="game-picker-selection" aria-live="polite">
       <span>Selected game</span>
       <strong id="game-picker-selection">No game selected</strong>

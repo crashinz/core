@@ -35,13 +35,10 @@
     "disablePolicy": "preserve",
     "uninstallPolicy": "explicit-cleanup-only"
   },
-  "integrity": {
-    "algorithm": "sha256",
-    "files": {
-      "includes/canvas_extension.php": "52e5275b8bbe359ae7c9134fa5ce261ef7bc155621dc6aa3f6735244a05cdb9d",
-      "api/canvas.php": "030c628666ceab964a2fbc2c6d7ffe1a3a0b8dad4f5f42407277f064d63b4b62",
-      "extensions/canvas/assets/canvas.css": "dc68b285c859e669030670d47b7ddf1eca5f63f0d3f35c0cc8661effa1e40ddc",
-      "extensions/canvas/assets/canvas.js": "953cd17aaab6ad03a46ef1d9b5a958f8a8786da5cbd1e6b40f3b32659e0fed59"
-    }
-  }
+  "requiredFiles": [
+    "includes/canvas_extension.php",
+    "api/canvas.php",
+    "extensions/canvas/assets/canvas.css",
+    "extensions/canvas/assets/canvas.js"
+  ]
 }

@@ -143,7 +143,7 @@ import {
 
     ChatGameChatService
 
-} from "./services/chat-game-chat-service.js?v=20260913-diagnostics-recovery";
+} from "./services/chat-game-chat-service.js?v=20260915-rematch-chat";
 
 import {
 

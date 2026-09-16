@@ -699,7 +699,11 @@ export class GameLifecycleService {
             if (terminalFramework && terminalStatus !== "") {
                 const rematchSuccessor = this._rematchSuccessorFor(terminalFramework, priorActiveGame);
                 if (rematchSuccessor) {
-                    await this.openGame(rematchSuccessor, { skipJoin: true });
+                    // This successor has already passed room, game, consent and
+                    // membership checks. Adopt it in place; ordinary game-switch
+                    // teardown would expose the room and clear the visible chat.
+                    this.#context?.continueGameChat?.(priorActiveGame.lobby_code, rematchSuccessor.lobby_code);
+                    this._presentGame(rematchSuccessor);
                     return true;
                 }
 
@@ -1612,10 +1616,10 @@ export class GameLifecycleService {
         this.#activeGame = Object.assign({}, game);
         this.#stage?.showStage(this.#activeGame, this._buildStageContext());
         this.updateStagePlayers();
-        this.setLayerVisibility();
         this.#context?.switchChat?.(
             this.#context?.gameChatKey?.(this.#activeGame.lobby_code)
         );
+        this.setLayerVisibility();
         this.#context?.renderLinkTabs?.();
         this.#context?.startGameChatPolling?.();
         this.#context?.onGameOpened?.(this.#activeGame);

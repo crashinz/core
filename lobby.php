@@ -1029,9 +1029,9 @@ $rooms = $roomsStmt->fetchAll();
 </div>
 <?php endif; ?>
 <script src="<?= e(app_url('/assets/js/game-recordings.js?v=20260914')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260914-game-recordings')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260915-central-checksums')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260913-clear-warning-box')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=80871a7c8373')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=e0ccdc9f5c28')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/lobby.js?v=20260913-compact-admin')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260914')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>

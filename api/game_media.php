@@ -7,7 +7,11 @@ $user = require_user();
 $pdo = db();
 security_protect_private_response();
 try {
-    $file = ocx_game_media_authorized_file(
+    $reviewId=trim((string)($_GET['game_session_id']??''));
+    if(str_starts_with($reviewId,'review-')){
+        require_once __DIR__.'/../includes/game_review.php';
+        $file=game_review_media_file($pdo,$user,$reviewId,strtolower(trim((string)($_GET['game']??''))),trim((string)($_GET['slot']??'')));
+    }else $file = ocx_game_media_authorized_file(
         $pdo,
         strtolower(trim((string)($_GET['game'] ?? ''))),
         trim((string)($_GET['game_session_id'] ?? '')),

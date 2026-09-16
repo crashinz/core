@@ -1336,6 +1336,17 @@ function settings_registry_definitions(bool $includeInstalledGames = true): arra
     ]);
     $definitions = array_merge($definitions, $capacityEntries);
 
+    $definitions[] = settings_registry_entry([
+        'id' => 'first_party_extension.strict_integrity',
+        'settingKey' => 'first_party_extension.strict_integrity',
+        'categoryId' => 'system', 'subsectionId' => 'release-checksums',
+        'subsectionLabel' => 'Release Checksums', 'subsectionOrder' => 80,
+        'label' => 'Require matching extension checksums',
+        'description' => 'Off by default: locally edited files remain usable and are listed below.',
+        'helpText' => 'Turning this on blocks extensions whose required files or manifest differ from release-manifest.json, or cannot be verified. Missing required files and invalid manifests are always errors. Turn this off to work on files without updating checksums. Frozen review references keep their own strict verification.',
+        'type' => 'boolean', 'defaultValue' => false,
+        'bulkOperations' => ['setting'], 'setupVisible' => false,
+    ]);
     $gameOrder = 10;
     foreach ($includeInstalledGames ? multiplayer_game_registry() : [] as $gameKey => $game) {
         $extensionId = trim((string)($game['extensionId'] ?? ''));
@@ -1948,7 +1959,9 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
                 }
                 $packs[] = $status + [
                     'displayName' => multiplayer_game_effective_display_name($pdo, $definition),
-                    'presentation' => multiplayer_game_presentation_projection($pdo, $definition, $viewerId),
+                    'presentation' => first_party_extension_status($pdo, $extensionId)['state'] === 'integrity-blocked'
+                        ? ['effectivePack' => 'built-in', 'requestedPack' => 'built-in', 'classicAvailable' => false, 'integrityBlocked' => true]
+                        : multiplayer_game_presentation_projection($pdo, $definition, $viewerId),
                     'surface' => $surface,
                     'installationOwnerExists' => $owner !== null,
                     'canManage' => $canManage,

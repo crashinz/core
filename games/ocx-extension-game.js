@@ -1,9 +1,11 @@
+import { gameViewStorage } from "./game-view-storage.js?v=1dd11e938aa8";
+import { originalAudioCatalog, originalVoiceEnabled, originalRollAnnouncement, originalPlacementCue, originalReminderPlan, originalPointRoll } from "./classic-game-audio.js?v=b0d39dcd022c";
 import { createCardBotController } from "./uno-bot-controller.js?v=d1c32d65552f";
 import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=65d896c667ff";
 import { createCheckersBotController } from "./checkers-bot-controller.js?v=729241a2b45b";
 import { createChessBotController } from "./chess-bot-controller.js?v=4f211cad590f";
-import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=cf6201672747";
-import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=c2557c225fbc";
+import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=f69e083b7fee";
+import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=f9547db55052";
 
 import { bindGameAvatar } from "./game-avatar.js?v=20260913-room-avatars";
 import { renderGameSeatControls, renderGameBotControls } from "../assets/js/runtime/game/renderers/game-seat-controls.js?v=8829b14ae801";
@@ -278,7 +280,7 @@ function setNestedSourceBox(node, inner, outer) {
   node.dataset.sourceBox = `${inner.x},${inner.y},${inner.width},${inner.height}`;
 }
 
-function fitClassicAssetToSourcePixels(image, sourceBox, anchor = "center") {
+function fitClassicAssetToSourcePixels(image, sourceBox, anchor = "center", followArtworkChanges = false) {
   const apply = () => {
     if (!image.naturalWidth || !image.naturalHeight) return;
     image.style.width = `${(image.naturalWidth / Number(sourceBox.width)) * 100}%`;
@@ -286,7 +288,7 @@ function fitClassicAssetToSourcePixels(image, sourceBox, anchor = "center") {
     image.dataset.sourceAssetSize = `${image.naturalWidth},${image.naturalHeight}`;
   };
   image.classList.add(`is-source-anchored-${anchor}`);
-  image.addEventListener("load", apply, { once: true });
+  image.addEventListener("load", apply, { once: !followArtworkChanges });
   if (image.complete) apply();
   return image;
 }
@@ -352,7 +354,7 @@ function classicBoardScaleStorageKey() {
 }
 
 function classicBoardScaleIndex() {
-  const saved = localStorage.getItem(classicBoardScaleStorageKey());
+  const saved = gameViewStorage.getItem(classicBoardScaleStorageKey());
   const stored = Number(saved === null ? defaultClassicBoardScale() : saved);
   const index = classicBoardScaleSteps.findIndex(scale => Math.abs(scale - stored) < 0.001);
   return index >= 0 ? index : 0;
@@ -365,7 +367,7 @@ function classicBoardScale() {
 function changeClassicBoardScale(direction) {
   const current = classicBoardScaleIndex();
   const next = Math.max(0, Math.min(classicBoardScaleSteps.length - 1, current + Number(direction || 0)));
-  localStorage.setItem(classicBoardScaleStorageKey(), String(classicBoardScaleSteps[next]));
+  gameViewStorage.setItem(classicBoardScaleStorageKey(), String(classicBoardScaleSteps[next]));
   render();
 }
 
@@ -387,14 +389,14 @@ function supportsBuiltInBoardScale() {
 }
 function builtInBoardScaleIndex() {
   try {
-    const saved = localStorage.getItem("corechat:" + context.extensionId + ":built-in-board-scale");
+    const saved = gameViewStorage.getItem("corechat:" + context.extensionId + ":built-in-board-scale");
     const index = builtInBoardScaleSteps.indexOf(saved === null ? 1 : Number(saved));
     return index < 0 ? 2 : index;
   } catch { return 2; }
 }
 function changeBuiltInBoardScale(direction) {
   const index = Math.max(0, Math.min(builtInBoardScaleSteps.length - 1, builtInBoardScaleIndex() + direction));
-  try { localStorage.setItem("corechat:" + context.extensionId + ":built-in-board-scale", String(builtInBoardScaleSteps[index])); }
+  try { gameViewStorage.setItem("corechat:" + context.extensionId + ":built-in-board-scale", String(builtInBoardScaleSteps[index])); }
   catch { return; }
   render();
 }
@@ -1450,6 +1452,8 @@ async function updateViewerOptions(next) {
   const returned = await apiPost("options", { game_key: context.gameKey, options: next });
   if (revision !== optionsMutationRevision) return false;
   options = returned;
+  if (options.effectsEnabled===false) {cancelOriginalAudio();for(const audio of audioPlayers.values())audio.pause();}
+  else if(options.voiceEnabled===false)stopOriginalVoice();
   return true;
 }
 
@@ -1774,12 +1778,109 @@ function aceyNativeWin(motion = pendingClassicMotion) {
     ? { ...definition, slots, positions:definition.positions[index === 0 ? "white" : "black"] } : null;
 }
 
+// Cache by authorized session URL, not just slot: one game's artwork must not
+// become another game's fallback. A slow/failed replacement never erases what
+// the player already sees, and detached selections cannot update a new render.
+const pointPresentationMedia = new Map();
+function pointPresentationEntry(slot) {
+  const url = mediaUrl(slot);
+  if (pointPresentationMedia.has(url)) return pointPresentationMedia.get(url);
+  const image = new Image();
+  const entry = { image, ready: false, promise: null };
+  entry.promise = new Promise(resolve => {
+    image.onload = async () => {
+      try {
+        await image.decode();
+        entry.ready = image.naturalWidth > 0 && image.naturalHeight > 0;
+      } catch { entry.ready = false; }
+      resolve(entry.ready);
+    };
+    image.onerror = () => resolve(false);
+  });
+  pointPresentationMedia.set(url, entry);
+  if (pointPresentationMedia.size > 64) pointPresentationMedia.delete(pointPresentationMedia.keys().next().value);
+  image.src = url;
+  return entry;
+}
+
+function pointSelectionImage(slot, fallbackSlot, className) {
+  if (slot === fallbackSlot) return mediaImage(slot, className, "");
+  const entry = pointPresentationEntry(slot);
+  const image = mediaImage(entry.ready ? slot : fallbackSlot, className, "");
+  if (!entry.ready) entry.promise.then(ready => {
+    if (ready && image.isConnected) image.src = entry.image.src;
+  });
+  return image;
+}
+
+// A focus/selection change may arrive before its artwork does. Keep the
+// decoded predecessor, and let only the latest request update this node.
+function setSquarePieceArtwork(image, slot) {
+  const url = mediaUrl(slot);
+  image.dataset.requestedPieceArtwork = url;
+  image.dataset.requestedPieceArtworkSlot = slot;
+  if (image.src === url) return;
+  const entry = pointPresentationEntry(slot);
+  if (entry.ready) image.src = url;
+  else entry.promise.then(ready => {
+    if (ready && image.isConnected && image.dataset.requestedPieceArtwork === url) image.src = url;
+  });
+}
+
+function squareSelectionImage(slot, restSlot, className) {
+  const image = mediaImage(restSlot, className, "");
+  setSquarePieceArtwork(image, slot);
+  return image;
+}
+
+function connectSquarePieceArtwork(board) {
+  // Chess mounts a decoded board asynchronously. A highlight may have become
+  // ready while that board was detached; retry only the board being mounted.
+  for (const image of board.querySelectorAll("[data-requested-piece-artwork-slot]")) {
+    setSquarePieceArtwork(image, image.dataset.requestedPieceArtworkSlot);
+  }
+}
+
+function setPointBoardArtwork(stage, slot, fallbackSlot) {
+  const entry = pointPresentationEntry(slot);
+  stage.style.setProperty("--classic-board", `url("${mediaUrl(entry.ready ? slot : fallbackSlot)}")`);
+  if (!entry.ready) entry.promise.then(ready => {
+    if (ready && stage.isConnected) stage.style.setProperty("--classic-board", `url("${entry.image.src}")`);
+  });
+}
+
+function ensurePointPresentationMediaReady() {
+  if (!["backgammon-first-party", "acey-deucy"].includes(context.extensionId)
+    || session?.presentation?.effectivePack !== "classic") return;
+  ["gif-w-h", "gif-b-h", ...(context.extensionId === "acey-deucy" ? ["classic-board-result"] : [])]
+    .forEach(pointPresentationEntry);
+}
+
+const pointNativeDimensions = Object.fromEntries([
+  [501,25,175],[502,25,175],[505,30,444],[506,30,444],[507,32,256],[508,32,285],
+  [509,31,248],[510,31,248],[511,32,192],[512,32,192],[513,31,124],[514,31,124],
+].map(([id,w,h]) => [`bitmap-${id}`,[w,h]]));
+function pointNativeReady() {
+  return ["backgammon-first-party","acey-deucy"].includes(context.extensionId)
+    && session?.presentation?.effectivePack === "classic"
+    && Object.entries(pointNativeDimensions).every(([slot,[w,h]]) => {
+      const image = pointBearOffMedia.get(mediaUrl(slot));
+      return image?.complete && image.naturalWidth === w && image.naturalHeight === h;
+    });
+}
+// Freeze readiness in classifyClassicMotion: loading must not switch a running timeline.
+function pointMoveDuration(gameId, type, motion) {
+  if (motion?.pointNative) return type === "point-hit" ? 2480 : type === "point-bear-off" ? 1120 : 960;
+  const source = classicSourceMap(gameId).motion;
+  return type === "point-hit" ? pointHitMotionLength(source.hitToBar)
+    : type === "point-bear-off" ? source.bearOff.durationMs : source.checkerSlide.durationMs;
+}
 const pointBearOffMedia = new Map();
 function ensurePointBearOffMediaReady() {
   if (!["backgammon-first-party", "acey-deucy"].includes(context.extensionId)
     || session?.presentation?.effectivePack !== "classic") return;
   for (const entry of session.presentation.mediaPack?.optional || []) {
-    if (entry.state !== "installed" || !["bitmap-507", "bitmap-508"].includes(entry.slot)) continue;
+    if (entry.state !== "installed" || !Object.hasOwn(pointNativeDimensions, entry.slot)) continue;
     const url = mediaUrl(entry.slot);
     if (pointBearOffMedia.has(url)) continue;
     const image = new Image();
@@ -1871,7 +1972,9 @@ function ensureBattleshipPlacementMediaReady() {
 
 function classicStage(boardSlot, className) {
   const stage = make("div", `classic-board-stage ${className}`);
-  stage.style.setProperty("--classic-board", `url("${mediaUrl(boardSlot)}")`);
+  if (context.extensionId === "acey-deucy" && boardSlot === "classic-board-result") {
+    setPointBoardArtwork(stage, boardSlot, "classic-board-alternate");
+  } else stage.style.setProperty("--classic-board", `url("${mediaUrl(boardSlot)}")`);
   stage.dataset.boardSlot = boardSlot;
   appendClassicSourceControls(stage, context.extensionId);
   appendClassicSourceActions(stage, context.extensionId);
@@ -2190,9 +2293,9 @@ function motionLength(gameId, type) {
   if (type === "chess-move") return source.pieceSlide.durationMs;
   if (type === "chess-capture") return chessCaptureDuration() + source.pieceSlide.durationMs;
   if (type === "chess-checkmate") return Number(pendingClassicMotion?.leadDurationMs || 0) + source.checkmateFlag.durationMs;
-  if (["point-move", "point-bear-off"].includes(type)) return (type === "point-bear-off" ? source.bearOff.durationMs : source.checkerSlide.durationMs)
+  if (["point-move", "point-bear-off"].includes(type)) return pointMoveDuration(gameId, type, pendingClassicMotion)
     + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
-  if (type === "point-hit") return pointHitMotionLength(source.hitToBar)
+  if (type === "point-hit") return pointMoveDuration(gameId, type, pendingClassicMotion)
     + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (type === "backgammon-dice-roll") return 1467 + Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
   if (type === "point-no-legal-move") return Number(pendingClassicMotion?.noLegalMove?.durationMs || 0);
@@ -2203,7 +2306,7 @@ function motionLength(gameId, type) {
   if (type === "battleship-shot") return source.shot.durationMs;
   if (type === "battleship-hit") return source.hit.durationMs;
   if (type === "battleship-miss") return source.miss.durationMs;
-  if (type === "battleship-sunk") return source.sunk.durationMs;
+  if (type === "battleship-sunk") return battleshipAttackTimeline(pendingClassicMotion).settleMs;
   if (type === "battleship-win") return Number(pendingClassicMotion?.leadDurationMs || 0) + source.victoryFlag.durationMs;
   if (type === "spades-card-play") return source.cardPlay.durationMs;
   return 0;
@@ -2386,7 +2489,7 @@ function pointMoveHitOpponent(before, after, move) {
 }
 
 function isCheckersDecisiveTerminalReason(reason) {
-  return ["no-legal-move", "all-pieces-captured", "resignation", "forfeit", "forfeiture"]
+  return ["no-legal-move", "all-pieces-captured", "resignation", "forfeit", "forfeiture", "clock-expiration"]
     .includes(String(reason || "").toLowerCase());
 }
 
@@ -2408,7 +2511,7 @@ function classifyClassicMotion(previous, current) {
   if (!previous || !current || Number(previous.stateVersion) === Number(current.stateVersion)) return null;
   const before = previous.state || {};
   const after = current.state || {};
-  const base = { gameId: context.extensionId, version: Number(current.stateVersion), before, after, startedAt: performance.now() };
+  const base = { pointNative: pointNativeReady(), gameId: context.extensionId, version: Number(current.stateVersion), before, after, startedAt: performance.now() };
   if (!before.completed && after.completed && (Number(after.winnerUserId || 0) > 0 || (["backgammon-first-party", "uno", "hearts"].includes(context.extensionId) && Number(after.winnerUserId || 0) < 0 && after.bots?.[String(after.winnerUserId)]?.userId === after.winnerUserId))) {
     const latestMove = listLength(after.history) > listLength(before.history) ? latest(after.history) : null;
     const terminalReason = String(after.terminalReason || "").toLowerCase();
@@ -2431,16 +2534,16 @@ function classifyClassicMotion(previous, current) {
       const resultType = String(attack?.result || "sunk") === "sunk" ? "battleship-sunk" : "battleship-hit";
       return {
         ...base, type: "battleship-win", attack, resultType,
-        leadDurationMs: attack ? classicSourceMap("battleship").motion.sunk.durationMs : 0,
+        leadDurationMs: attack ? battleshipAttackTimeline({ attack, after }).settleMs : 0,
       };
     }
     if (context.extensionId === "backgammon-first-party" && String(after.terminalCause || "") === "bear-off") return {
       ...base, type: "backgammon-win", move: latestMove,
-      leadDurationMs: latestMove ? classicSourceMap("backgammon-first-party").motion.bearOff.durationMs : 0,
+      leadDurationMs: latestMove ? pointMoveDuration("backgammon-first-party", "point-bear-off", base) : 0,
     };
     if (context.extensionId === "acey-deucy" && latestMove?.to === "borne-off") return {
       ...base, type: "acey-deucy-win", move: latestMove,
-      leadDurationMs: classicSourceMap("acey-deucy").motion.bearOff.durationMs,
+      leadDurationMs: pointMoveDuration("acey-deucy", "point-bear-off", base),
     };
   }
   if (["checkers", "chess"].includes(context.extensionId) && listLength(after.history) > listLength(before.history)) {
@@ -2625,6 +2728,36 @@ function reconcileOptimisticBuiltInCheckersMotion(authoritativeMotion, version) 
   return true;
 }
 
+function chessCastlingRook(before, move, after = null) {
+  const [row, column] = move?.from || [];
+  const [targetRow, targetColumn] = move?.to || [];
+  const king = before?.board?.[row]?.[column];
+  if (!['wK', 'bK'].includes(king) || column !== 4
+      || row !== (king[0] === 'w' ? 7 : 0) || targetRow !== row
+      || ![2, 6].includes(targetColumn) || move.capture || move.promotion) return null;
+  const kingside = targetColumn === 6;
+  const rook = king[0] + 'R';
+  const from = [row, kingside ? 7 : 0];
+  const to = [row, kingside ? 5 : 3];
+  const corridor = kingside ? [5, 6] : [1, 2, 3];
+  if (before.board[row][from[1]] !== rook
+      || corridor.some(file => before.board[row][file] != null)) return null;
+  if (!after) {
+    // This is only a visual prediction for an already selected legal action.
+    // The server remains responsible for attacked squares and move legality.
+    if (!before.castling?.[king[0] + (kingside ? 'K' : 'Q')]) return null;
+  } else {
+    const expected = new Map([[`${row}:4`, null], [`${row}:${targetColumn}`, king],
+      [`${row}:${from[1]}`, null], [`${row}:${to[1]}`, rook]]);
+    for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+      const key = `${r}:${c}`;
+      if (!Array.isArray(after.board?.[r]) || after.board[r][c] !==
+          (expected.has(key) ? expected.get(key) : before.board?.[r]?.[c])) return null;
+    }
+  }
+  return { from, to, piece: rook };
+}
+
 function startOptimisticBuiltInChessMove(from, to) {
   if (context.extensionId !== "chess" || session?.presentation?.effectivePack !== "built-in") return;
   const before = JSON.parse(JSON.stringify(session?.state || {}));
@@ -2635,6 +2768,11 @@ function startOptimisticBuiltInChessMove(from, to) {
   const capturedPiece = after.board?.[Number(to?.[0])]?.[Number(to?.[1])] || null;
   after.board[Number(from[0])][Number(from[1])] = null;
   after.board[Number(to[0])][Number(to[1])] = movingPiece;
+  const castle = chessCastlingRook(before, { from, to });
+  if (castle) {
+    after.board[castle.from[0]][castle.from[1]] = null;
+    after.board[castle.to[0]][castle.to[1]] = castle.piece;
+  }
   const likelyCheckmate = Boolean(chessCaptureAuditId() && capturedPiece);
   const startedAt = performance.now();
   const move = {
@@ -2680,6 +2818,7 @@ function startOptimisticBuiltInChessMove(from, to) {
     captured: Boolean(capturedPiece),
     likelyCheckmate,
   });
+  if (castle) render();
 }
 
 function reconcileOptimisticBuiltInChessMotion(authoritativeMotion, version) {
@@ -2705,6 +2844,12 @@ function reconcileOptimisticBuiltInChessMotion(authoritativeMotion, version) {
 function syncClassicAnimation() {
   if (!pendingClassicMotion) return;
   const presentationPack = session?.presentation?.effectivePack || "built-in";
+  if (presentationPack === "classic" && pendingClassicMotion.gameId === "chess"
+      && pendingClassicMotion.type === "chess-move"
+      && chessCastlingRook(pendingClassicMotion.before, pendingClassicMotion.move, pendingClassicMotion.after)) {
+    pendingClassicMotion = null;
+    return;
+  }
   if (presentationPack === "corechat") {
     pendingClassicMotion = null;
     return;
@@ -2769,6 +2914,112 @@ function trace(event, slot = null, details = {}) {
   if (/^(?:audio-|effect-|music-|all-audio)/.test(event)) {
     document.body.dataset.lastMediaTrace = JSON.stringify(record);
   }
+}
+
+let originalAudioDetailsOpen = false;
+let originalAudioOtherOpen = false;
+let originalVoiceTimer = 0;
+let originalVoiceTurn = "";
+let originalVoiceStartedAt = 0;
+let originalVoiceDone = new Set();
+let originalVoiceActive = "";
+let originalPreviewActive = "";
+let originalAudioEpoch = 0;
+
+function originalAudioSurfaceActive() {
+  return session?.presentation?.effectivePack === "classic" && options?.effectsEnabled !== false
+    && gameSurfaceVisible && !document.hidden && !terminalSessionError
+    && !session?.state?._framework?.serviceInterruption?.active
+    && !["paused","resuming"].includes(session?.state?._framework?.pause?.mode);
+}
+function stopOriginalVoice() {
+  if (originalVoiceActive) { const audio=audioPlayers.get(originalVoiceActive);audio?.pause(); }
+  originalVoiceActive="";
+}
+function stopOriginalPreview() {
+  if (originalPreviewActive) audioPlayers.get(originalPreviewActive)?.pause();
+  originalPreviewActive="";
+}
+function cancelOriginalAudio() {
+  clearTimeout(originalVoiceTimer);originalVoiceTimer=0;originalAudioEpoch++;
+  for(const item of originalReminderPlan(context.extensionId,options))originalVoiceDone.add(item.delay);
+  stopOriginalVoice();stopOriginalPreview();
+}
+function previewOriginalAudio(slot) {
+  if (!originalAudioSurfaceActive()) return;
+  stopOriginalVoice();stopOriginalPreview();originalPreviewActive=slot;playSound(slot);
+}
+function renderOriginalAudioOptions() {
+  const entries=originalAudioCatalog[context.extensionId];
+  if (!entries || session?.presentation?.effectivePack!=="classic") return null;
+  const panel=make("details","classic-audio-options");panel.open=originalAudioDetailsOpen;
+  panel.append(make("summary","","Optional voices and sound previews"));
+  panel.addEventListener("toggle",()=>{originalAudioDetailsOpen=panel.open;});
+  panel.append(make("p","classic-audio-note","Extra voices are off by default. These choices apply only to you. Sound FX must be on."));
+  const list=make("div","classic-audio-list");
+  const add=(entry,host)=>{
+    const row=make("div","classic-audio-row");
+    if (entry.option) {
+      const label=make("label");const check=make("input");check.type="checkbox";check.checked=originalVoiceEnabled(options,entry);
+      check.id=`original-voice-${entry.slot}`;check.setAttribute("aria-label",entry.label);
+      check.addEventListener("change",async()=>{
+        const next=check.checked;check.disabled=true;
+        if (!next && originalVoiceActive===entry.slot) stopOriginalVoice();
+        try { if(await updateViewerOptions({...options,categories:{...(options?.categories||{}),[entry.option]:next}})) { render();scheduleOriginalVoices(); } }
+        catch(error){check.checked=!next;el("status").textContent=error.message;} finally{check.disabled=false;}
+      });label.append(check,document.createTextNode(` ${entry.label}`));row.append(label);
+    } else row.append(make("span","",entry.label+(entry.usedByOriginal?"":" (preview only)")));
+    const play=make("button","", "Play");play.type="button";play.setAttribute("aria-label",`Play ${entry.label}`);play.disabled=!originalAudioSurfaceActive();
+    play.addEventListener("click",()=>previewOriginalAudio(entry.slot));row.append(play);host.append(row);
+  };
+  for (const entry of entries.filter(c=>c.option))add(entry,list);
+  panel.append(list);
+  const other=make("details","classic-audio-other");other.open=originalAudioOtherOpen;other.append(make("summary","","Other original sounds"));
+  other.addEventListener("toggle",()=>{originalAudioOtherOpen=other.open;});
+  for (const entry of entries.filter(c=>!c.option))add(entry,other);
+  other.append(make("p","classic-audio-note","Preview-only clips have no located original playback trigger."));panel.append(other);return panel;
+}
+function scheduleOriginalVoices(previous = null, current = session) {
+  clearTimeout(originalVoiceTimer);originalVoiceTimer=0;
+  const key=current && Number(current.turnUserId)===currentUserId() && current.status==="active" && !current.state?.completed
+    ? `${current.publicId}:${currentUserId()}:${current.state?.phase||""}` : "";
+  if (key!==originalVoiceTurn || (previous && Number(previous.turnUserId)!==Number(current?.turnUserId))) {
+    originalVoiceTurn=key;originalVoiceStartedAt=Date.now();originalVoiceDone.clear();stopOriginalVoice();
+    // A loaded/reconnected view must not speak an old turn-start reminder.
+    if (!previous) originalVoiceDone.add(0);
+  }
+  if (!key || !originalAudioSurfaceActive() || options?.voiceEnabled===false || !gameLifecycleAvailable()) {stopOriginalVoice();return;}
+  const plan=originalReminderPlan(context.extensionId,options);
+  const next=plan.find(item=>!originalVoiceDone.has(item.delay));
+  if (!next) return;
+  originalVoiceTimer=setTimeout(()=>{
+    originalVoiceTimer=0;
+    if (!originalAudioSurfaceActive() || !canAct() || options?.voiceEnabled===false) return;
+    const playing=[...audioPlayers.values()].some(a=>!a.paused && !a.ended);
+    if (playing || pendingClassicMotion) {originalVoiceTimer=setTimeout(()=>scheduleOriginalVoices(),250);return;}
+    const live=originalReminderPlan(context.extensionId,options).find(p=>p.delay===next.delay);
+    originalVoiceDone.add(next.delay);
+    if (live?.slots.length) {
+      const slot=live.slots[Math.floor(Math.random()*live.slots.length)];originalVoiceActive=slot;
+      trace("original-optional-voice",slot,{reason:"source-turn-reminder",delayMs:next.delay});playSound(slot);
+    }
+    scheduleOriginalVoices();
+  },Math.max(0,next.delay-(Date.now()-originalVoiceStartedAt)));
+}
+function scheduleOriginalRollVoice(slot, diceAudio, stateVersion) {
+  if (!slot || !diceAudio) return;
+  const epoch=originalAudioEpoch,publicId=session.publicId;
+  const play=()=>{
+    if (epoch!==originalAudioEpoch || publicId!==session?.publicId || Number(session.stateVersion)!==Number(stateVersion) || !originalAudioSurfaceActive()) return;
+    const entry=(originalAudioCatalog[context.extensionId]||[]).find(c=>c.slot===slot);
+    if(entry?.option && (!originalVoiceEnabled(options,entry)||options?.voiceEnabled===false))return;
+    if(pendingClassicMotion && /dice-roll/.test(pendingClassicMotion.type)) {
+      const timer=setTimeout(()=>{scheduledSoundTimers.delete(timer);play();},80);scheduledSoundTimers.add(timer);return;
+    }
+    if(entry?.option)originalVoiceActive=slot;
+    trace("original-roll-announcement",slot,{stateVersion});playSound(slot);
+  };
+  if(diceAudio.ended)play();else diceAudio.addEventListener("ended",play,{once:true});
 }
 
 function playSound(slot) {
@@ -3042,7 +3293,7 @@ function builtInPointDiceSoundAsset() {
     : BUILT_IN_PUBLIC_SOUNDS.backgammonDice;
 }
 
-function playPointDiceSound(dice, reason, stateVersion) {
+function playPointDiceSound(dice, reason, stateVersion, details = {}) {
   if (session?.presentation?.effectivePack !== "classic") {
     const diceAsset = builtInPointDiceSoundAsset();
     trace("transition-classified", diceAsset, { reason, stateVersion, dice: [...dice], soundOwner: "built-in-public-cc0" });
@@ -3051,24 +3302,8 @@ function playPointDiceSound(dice, reason, stateVersion) {
   }
   trace("transition-classified", "wav-dice", { reason, stateVersion, dice: [...dice] });
   const diceAudio = playSound("wav-dice");
-  if (!diceAudio || !isExactDoubleSix(dice)) return;
-  trace("double-six-supplement-scheduled", "wav-dblsix", {
-    reason: "exact-6-6-after-dice-ended-and-visually-settled",
-    stateVersion,
-    dice: [...dice],
-  });
-  diceAudio.addEventListener("ended", () => {
-    // The authoritative dice have already been rendered before WAV_DICE can
-    // end. A future source-backed dice-motion owner may retain a live motion
-    // here; fail closed instead of overlapping that motion.
-    const diceMotionActive = pendingClassicMotion
-      && ["acey-deucy-dice-roll", "backgammon-dice-roll"].includes(pendingClassicMotion.type);
-    if (diceMotionActive) {
-      trace("effect-suppressed", "wav-dblsix", { reason: "dice-motion-not-settled", stateVersion });
-      return;
-    }
-    playSound("wav-dblsix");
-  }, { once: true });
+  const slot=originalRollAnnouncement(context.extensionId,dice,Boolean(details.blocked),details.actorUserId,currentUserId(),options);
+  scheduleOriginalRollVoice(slot,diceAudio,stateVersion);
 }
 
 function listLength(value) {
@@ -3217,6 +3452,10 @@ function playBuiltInTransitionSound(previous, current) {
   const before = previous?.state || {};
   const after = current?.state || {};
   const pointGame = ["acey-deucy", "backgammon-first-party"].includes(context.extensionId);
+  if (pointGame && pendingClassicMotion?.pointNative && pendingClassicMotion.type === "point-hit") {
+    playOrderedSoundChain([["wav-eat", "native-checker-capture", 0], ["wav-move", "native-checker-move", 1520]]);
+    return;
+  }
   const noLegalMove = after.lastNoLegalMove || after.lastBlockedRoll || null;
   const changedWholeTurnNoLegal = pointGame
     && noLegalMove
@@ -3483,6 +3722,15 @@ function playTransitionSound(previous, current) {
     playBuiltInTransitionSound(previous, current);
     return;
   }
+  if (["checkers","chess"].includes(context.extensionId) && Number(after.drawOfferBy)>0
+      && Number(after.drawOfferBy)!==currentUserId() && Number(before.drawOfferBy||0)!==Number(after.drawOfferBy)
+      && ["master","player"].includes(current.viewerRole)) {playSound("wav-draw");return;}
+  if (context.extensionId==="chess" && listLength(after.history)>listLength(before.history)) {
+    const move=latest(after.history)||{},chain=[[move.capture?"wav-die":"wav-move",move.capture?"capture":"move",0]];
+    if(after.completed){const [slot,reason]=terminalSound(after);chain.push([slot,reason,Number(pendingClassicMotion?.leadDurationMs||0)]);}
+    else if(move.check)chain.push(["wav-check","check-after-move",0]);
+    playOrderedSoundChain(chain);return;
+  }
   const sequence = [];
   let supplementalResultSlot = "";
   let supplementalResultDelayMs = 0;
@@ -3514,20 +3762,10 @@ function playTransitionSound(previous, current) {
       return;
     }
   }
-  const changedWholeTurnNoLegal = pointGame
-    && noLegalMove
-    && String(noLegalMove.kind || "whole-turn") === "whole-turn"
-    && JSON.stringify(before.lastNoLegalMove || before.lastBlockedRoll || null) !== JSON.stringify(noLegalMove);
-  const changedVisibleDice = pointGame
-    && listLength(after.dice) === 2
-    && JSON.stringify(after.dice) !== JSON.stringify(before.dice);
-  if (changedWholeTurnNoLegal || changedVisibleDice) {
-    const rolledDice = changedWholeTurnNoLegal ? [...(noLegalMove.dice || [])] : [...after.dice];
-    playPointDiceSound(
-      rolledDice,
-      changedWholeTurnNoLegal ? "whole-turn-no-legal-roll" : "roll",
-      Number(current?.stateVersion || 0),
-    );
+  const acceptedPointRoll=pointGame ? originalPointRoll(context.extensionId,before,after) : null;
+  if (acceptedPointRoll) {
+    playPointDiceSound(acceptedPointRoll.dice,acceptedPointRoll.blocked?"whole-turn-no-legal-roll":"roll",Number(current.stateVersion||0),
+      {blocked:acceptedPointRoll.blocked,actorUserId:acceptedPointRoll.actorUserId||previous.turnUserId});
     return;
   }
   if (context.extensionId === "battleship") {
@@ -3535,16 +3773,17 @@ function playTransitionSound(previous, current) {
     const placementChanged = after.phase === "placement"
       && JSON.stringify(before.fleets?.[viewer]?.ships || []) !== JSON.stringify(after.fleets?.[viewer]?.ships || []);
     if (placementChanged) {
-      playOrderedSoundChain([["wav-locate", "authoritative-ship-location-change", 0]]);
+      playOrderedSoundChain([[originalPlacementCue(before,after,currentUserId()), "authoritative-ship-location-change", 0]]);
       return;
     }
   }
+  if (context.extensionId === "battleship" && before.phase==="placement" && after.phase==="battle") return;
   if (context.extensionId === "battleship" && listLength(after.attackHistory) > listLength(before.attackHistory)) {
     const attack = latest(after.attackHistory) || {};
     const result = String(attack.result || "miss");
     const source = classicSourceMap("battleship");
     const impactOffsetMs = Number(source.motion.audio.impactStartMs);
-    const resultSettleMs = Number(source.motion[result]?.durationMs || source.motion.shot.durationMs);
+    const resultSettleMs = battleshipAttackTimeline({ attack, after }).settleMs;
     const chain = [["wav-shoot", "authoritative-shot-launch", 0]];
     if (result === "miss") {
       chain.push(["wav-mis", "authoritative-miss", impactOffsetMs]);
@@ -3557,7 +3796,7 @@ function playTransitionSound(previous, current) {
       chain.push([
         terminal[0],
         terminal[1],
-        Math.max(Number(source.motion.audio.victoryStartMs), resultSettleMs, Number(pendingClassicMotion?.leadDurationMs || 0)),
+        resultSettleMs,
       ]);
     }
     playOrderedSoundChain(chain);
@@ -3593,9 +3832,12 @@ function playTransitionSound(previous, current) {
         : classification === "gammon" ? "wav-gammon" : "";
       supplementalResultDelayMs = leadDelayMs;
     } else if (context.extensionId === "acey-deucy" && move.to === "borne-off") {
+      const leadDelayMs=Number(pendingClassicMotion?.leadDurationMs||0);
       sequence.push(["wav-out", "terminal-bear-off", 0]);
-      const terminal = terminalSound(after);
-      sequence.push([terminal[0], terminal[1], Number(pendingClassicMotion?.leadDurationMs || 0)]);
+      sequence.push(["wav-victory","native-win-animation-begins",leadDelayMs]);
+      const classification=String(after.terminalClassification||"");
+      supplementalResultSlot=classification==="backgammon"?"wav-bkgamm":classification==="gammon"?"wav-gammon":"";
+      supplementalResultDelayMs=leadDelayMs;
     }
   }
   if (sequence.length === 0) {
@@ -3793,6 +4035,7 @@ async function syncMusic() {
 }
 
 function pauseAudio(reason) {
+  cancelOriginalAudio();
   for (const audio of audioPlayers.values()) { audio.pause(); audio.currentTime = 0; }
   stopMusic(reason);
   trace("all-audio-paused", null, { reason });
@@ -4976,14 +5219,14 @@ function persistentSourceStripNode(slot, strip, className, animate = true) {
   } else {
     host.dataset.looping = "true";
     image.style.top = "0";
-    const travel = ((frameCount - 1) / frameCount) * 100;
+    const travel = 100;
     image.animate([
       { transform:"translateY(0)" },
       { transform:`translateY(-${travel}%)` },
     ], {
       duration:frameCount * frameDurationMs,
       iterations:Infinity,
-      easing:`steps(${Math.max(1, frameCount - 1)}, end)`,
+      easing:`steps(${frameCount}, end)`,
     });
   }
   host.append(image);
@@ -5080,6 +5323,8 @@ function appendCheckersPromotion(stage, motion, targetBox, delayMs) {
 
 function appendSquareMoveMotion(stage, gameId, motion, motionType, delayMs = 0) {
   if (!motion.move) return;
+  // The original OCX casts by updating both squares directly; no king-only tween.
+  if (gameId === "chess" && chessCastlingRook(motion.before, motion.move, motion.after)) return;
   const source = classicSourceMap(gameId);
   const from = checkerCellBox(gameId, Number(motion.move.from?.[0]), Number(motion.move.from?.[1]));
   const to = checkerCellBox(gameId, Number(motion.move.to?.[0]), Number(motion.move.to?.[1]));
@@ -5153,6 +5398,83 @@ function pointFinalChecker(stage, location, actorUserId) {
   return stage.querySelector(`[data-point-key="point:${point}"] .classic-checker-pile[data-owner-user-id="${owner}"] .classic-checker:last-child`);
 }
 
+function appendNativePointStrip(stage, gameId, id, width, height, count, from, to, delayMs) {
+  const source = classicSourceMap(gameId);
+  const duration = count * 80;
+  const layer = make("div", "classic-source-motion-asset point-native-strip");
+  layer.style.overflow = "hidden";
+  layer.dataset.nativeSlot = `bitmap-${id}`;
+  layer.dataset.nativeFrames = String(count);
+  layer.dataset.motionDelayMs = String(delayMs);
+  layer.dataset.motionDurationMs = String(duration);
+  const artwork = mediaImage(`bitmap-${id}`, "point-native-strip-art", "");
+  Object.assign(artwork.style, { position:"absolute", left:"0", width:"100%", maxWidth:"none",
+    height:`${pointNativeDimensions[`bitmap-${id}`][1] / height * 100}%` });
+  layer.append(artwork);
+  const start = {x:Math.round(from.x), y:Math.round(from.y)};
+  const end = {x:Math.round(to.x), y:Math.round(to.y)};
+  const dx = Math.trunc((end.x-start.x)/(count-1));
+  const dy = Math.trunc((end.y-start.y)/(count-1));
+  const frames = Array.from({length:count+1},(_,i) => {
+    const tick = Math.min(i,count-1);
+    return {left:`${(start.x+tick*dx)/source.canvas.width*100}%`,
+      top:`${(start.y+tick*dy)/source.canvas.height*100}%`,offset:i/count,easing:"steps(1, end)"};
+  });
+  setSourceBox(layer,{...start,width,height},source.canvas.width,source.canvas.height);
+  stage.append(layer);
+  // Each callback phase has one visible owner, even after a state-preserving redraw.
+  layer.style.opacity = "0";
+  requestAnimationFrame(() => {
+    const timing={duration,delay:delayMs,easing:"linear",fill:"both"};
+    const elapsed=Math.max(0,performance.now()-Number(pendingClassicMotion?.startedAt || performance.now()));
+    const moving=layer.animate(frames,timing);
+    const changing=artwork.animate(frames.map((f,i)=>({top:`${-Math.min(i,count-1)*100}%`,offset:f.offset,easing:"steps(1, end)"})),timing);
+    moving.currentTime=elapsed; changing.currentTime=elapsed;
+    const visibility=layer.animate([{opacity:1,offset:0},{opacity:1,offset:.99999},{opacity:0,offset:1}],
+      {...timing,fill:"forwards"});
+    visibility.currentTime=elapsed;
+  });
+  return duration;
+}
+
+function appendNativePointMove(stage, gameId, motion, type, delayMs) {
+  const actor=Number(motion.move.actorUserId);
+  const index=motion.after.turnOrder.map(Number).indexOf(actor);
+  const source=classicSourceMap(gameId);
+  const from=sourceStackCheckerBox(gameId,motion.move.from,actor,motion.before);
+  const to=sourceStackCheckerBox(gameId,motion.move.to,actor,motion.after);
+  const shifted=(box,x,y)=>({x:box.x-x,y:box.y-y});
+  let elapsed=delayMs;
+  if(type==="point-hit") {
+    const victimIndex=1-index;
+    const victim=Number(motion.after.turnOrder[victimIndex]);
+    const victimFrom=sourceStackCheckerBox(gameId,motion.move.to,victim,motion.before);
+    const victimTo=sourceStackCheckerBox(gameId,"bar",victim,motion.after);
+    elapsed+=appendNativePointStrip(stage,gameId,501+victimIndex,25,25,7,victimFrom,victimFrom,elapsed);
+    const arrival=shifted(victimTo,3,6);
+    elapsed+=appendNativePointStrip(stage,gameId,505+victimIndex,30,37,12,arrival,arrival,elapsed);
+    revealAfterMotion(pointFinalChecker(stage,"bar",victim),elapsed);
+  }
+  // The moving player's checker remains at its origin during the capture phases.
+  if(elapsed>delayMs) {
+    const waiting=mediaImage(index===0?"gif-w":"gif-b","classic-source-motion-asset","");
+    setSourceBox(waiting,from,source.canvas.width,source.canvas.height);stage.append(waiting);
+    hideAfterMotion(waiting,elapsed);
+  }
+  if(type==="point-bear-off") {
+    const profile=source.borneOffCheckers.nativeSizes[index];
+    const rack={x:Math.round(to.x-(profile[0]-to.width)/2),y:Math.round(to.y-(profile[1]-to.height)/2)};
+    elapsed+=appendNativePointStrip(stage,gameId,507+index,32,32,8,shifted(from,4,16),shifted(rack,4,16),elapsed);
+    const landing=shifted(rack,4,23);
+    elapsed+=appendNativePointStrip(stage,gameId,511+index,32,32,6,landing,landing,elapsed);
+  } else {
+    const origin=shifted(from,3,3),destination=shifted(to,3,3);
+    elapsed+=appendNativePointStrip(stage,gameId,509+index,31,31,8,origin,destination,elapsed);
+    elapsed+=appendNativePointStrip(stage,gameId,513+index,31,31,4,destination,destination,elapsed);
+  }
+  revealAfterMotion(pointFinalChecker(stage,motion.move.to,actor),elapsed);
+}
+
 function appendPointBearOffMotion(stage, gameId, slot, from, to, playerIndex, durationMs, delayMs) {
   const source = classicSourceMap(gameId);
   const profile = source.borneOffCheckers.nativeSizes[playerIndex];
@@ -5223,6 +5545,7 @@ function appendPointBearOffMotion(stage, gameId, slot, from, to, playerIndex, du
 
 function appendPointMoveMotion(stage, gameId, motion, motionType, delayMs = 0) {
   if (!motion.move) return;
+  if (motion.pointNative) { appendNativePointMove(stage, gameId, motion, motionType, delayMs); return; }
   const source = classicSourceMap(gameId);
   const actor = Number(motion.move.actorUserId || 0);
   const playerIndex = Math.max(0, (motion.after.turnOrder || []).map(Number).indexOf(actor));
@@ -5286,6 +5609,30 @@ function appendPointMoveMotion(stage, gameId, motion, motionType, delayMs = 0) {
     source.motion.hitToBar.capturedDurationMs, source.motion.checkerSlide.easing, "is-hit-to-bar", delayMs + source.motion.hitToBar.capturedDelayMs);
 }
 
+// Original OCX callback order; these offsets also own sound and terminal handoff.
+function battleshipAttackTimeline(motion) {
+  const source = classicSourceMap("battleship").motion;
+  const attack = motion?.attack || {};
+  const result = String(attack.result || "miss");
+  const cell = String(attack.cell || `${attack.row}:${attack.column}`);
+  const fleet = motion?.after?.fleets?.[String(attack.targetUserId)] || {};
+  const ship = (fleet.ships || []).find(item => (item.cells || []).includes(cell));
+  const wreck = battleshipWreckDefinition(ship);
+  const impactMs = source.shot.projectile.frameCount * source.shot.frameDurationMs;
+  const aftermathMs = impactMs + (result === "miss" ? source.impacts.miss : source.impacts.explosion).frameCount * source.shot.frameDurationMs;
+  const settleMs = result === "miss"
+    ? aftermathMs + source.impacts.marker.initialDelayMs + source.impacts.marker.frameCount * source.impacts.marker.frameDurationMs
+    : result === "sunk" ? aftermathMs + (wreck?.frameCount || 35) * source.shot.frameDurationMs
+    : aftermathMs;
+  return { result, ship, wreck, impactMs, aftermathMs, settleMs };
+}
+
+function battleshipNativeAnchor(gridName, row, column) {
+  // Original integer coordinate functions; keep click hitboxes separate.
+  return { x:(gridName === "own" ? 12 : 227) + column * 18,
+    y:(gridName === "own" ? 16 : 123) + row * 18 };
+}
+
 function appendBattleshipAttackMotion(stage, motion, motionType, elapsed = 0) {
   if (!motion.attack) return;
   const source = classicSourceMap("battleship");
@@ -5293,85 +5640,61 @@ function appendBattleshipAttackMotion(stage, motion, motionType, elapsed = 0) {
   const column = Number(motion.attack.column ?? String(motion.attack.cell || "0:0").split(":")[1]);
   const actorIsViewer = Number(motion.attack.actorUserId || 0) === currentUserId();
   const gridName = actorIsViewer ? "target" : "own";
-  const edges = source.gridEdges[gridName];
-  const cell = { x: edges.x[column], y: edges.y[row], width: edges.x[column + 1] - edges.x[column], height: edges.y[row + 1] - edges.y[row] };
-  const result = motionType.endsWith("miss") ? "miss" : motionType.endsWith("sunk") ? "sunk" : "hit";
+  const anchor = battleshipNativeAnchor(gridName, row, column);
+  const timeline = battleshipAttackTimeline(motion);
+  const { result, impactMs, aftermathMs, settleMs } = timeline;
   const shot = source.motion.shot;
   const frameDurationMs = Number(shot.frameDurationMs);
-  const launch = shot.launchByPerspective[actorIsViewer ? "viewer" : "opponent"];
-  const launchHost = sourceStripNode("battleship", launch.slot, launch.region, {
-    frameCount:launch.frameCount, frameDurationMs,
-  }, 0, "classic-battleship-native-launch", elapsed);
-  launchHost.dataset.motionKind = "battleship-native-launch";
-  launchHost.dataset.sourceCell = `${gridName}:${row}:${column}`;
-  stage.append(launchHost);
-
-  const projectileEnd = centeredSourceBox(cell, shot.projectile.nativeSize);
-  const projectileDuration = Number(shot.projectile.frameCount) * frameDurationMs;
-  const projectile = sourceStripNode("battleship", shot.projectile.slot, launch.muzzle, {
-    frameCount:shot.projectile.frameCount, frameDurationMs,
-  }, Number(shot.launchLeadMs), "classic-battleship-projectile", elapsed);
-  projectile.dataset.motionKind = "battleship-native-projectile";
-  projectile.dataset.sourceCell = `${gridName}:${row}:${column}`;
-  stage.append(projectile);
-  requestAnimationFrame(() => animateSourceBox(
-    projectile, launch.muzzle, projectileEnd, source.canvas,
-    projectileDuration, shot.easing, Number(shot.launchLeadMs),
-  ));
-
-  const impactStart = Number(shot.launchLeadMs) + projectileDuration;
   const appendNative = (definition, targetBox, delayMs, className) => {
     const host = sourceStripNode("battleship", definition.slot, targetBox, {
-      frameCount:definition.frameCount, frameDurationMs,
+      frameCount:definition.frameCount, frameDurationMs:definition.frameDurationMs || frameDurationMs,
     }, delayMs, className, elapsed);
     host.dataset.sourceCell = `${gridName}:${row}:${column}`;
     stage.append(host);
-    return Number(definition.frameCount) * frameDurationMs;
+    return host;
   };
+  const launch = shot.launchByPerspective[actorIsViewer ? "viewer" : "opponent"];
+  const launchHost = appendNative(launch, launch.region, 0, "classic-battleship-native-launch");
+  launchHost.dataset.motionKind = "battleship-native-launch";
+  const projectile = appendNative(shot.projectile, launch.muzzle, 0, "classic-battleship-projectile");
+  projectile.dataset.motionKind = "battleship-native-projectile";
+  // Native movement advances once per frame using truncated integer increments.
+  const count = shot.projectile.frameCount;
+  const dx = Math.trunc((anchor.x - launch.muzzle.x) / (count - 1));
+  const dy = Math.trunc((anchor.y - launch.muzzle.y) / (count - 1));
+  const frames = Array.from({length:count}, (_, index) => ({
+    left:`${(launch.muzzle.x + index * dx) / source.canvas.width * 100}%`,
+    top:`${(launch.muzzle.y + index * dy) / source.canvas.height * 100}%`,
+    offset:index / count, easing:"steps(1, end)",
+  }));
+  frames.push({...frames[count - 1], offset:1});
+  projectile.animate(frames, {duration:impactMs, delay:-elapsed, fill:"both"});
 
-  const impactDefinition = source.motion.impacts[result === "miss" ? "miss" : "hit"];
-  const impactBox = centeredSourceBox(cell, impactDefinition.nativeSize);
-  const impactDuration = appendNative(
-    impactDefinition, impactBox, impactStart, `classic-battleship-native-impact is-${result}`,
-  );
-  const persistedResult = stage.querySelector(
-    `.classic-battle-grid.is-${gridName} .classic-battleship-persisted-result[data-source-cell="${gridName}:${row}:${column}"]`,
-  );
+  const impact = result === "miss" ? source.motion.impacts.miss : source.motion.impacts.explosion;
+  appendNative(impact, {...anchor, ...impact.nativeSize}, impactMs, `classic-battleship-native-impact is-${result}`);
+  const persisted = stage.querySelector(`.classic-battle-grid.is-${gridName} .classic-battleship-persisted-result[data-source-cell="${gridName}:${row}:${column}"]`);
   if (result === "miss") {
-    const markerDefinition = source.motion.impacts.marker;
-    const markerDuration = appendNative(
-      markerDefinition,
-      centeredSourceBox(cell, markerDefinition.nativeSize),
-      impactStart,
-      "classic-battleship-native-marker",
-    );
-    revealAfterMotion(persistedResult, impactStart + markerDuration);
+    const marker = source.motion.impacts.marker;
+    appendNative(marker, {x:anchor.x + 4, y:anchor.y + 4, ...marker.nativeSize},
+      aftermathMs + marker.initialDelayMs, "classic-battleship-native-marker");
+    revealAfterMotion(persisted, settleMs);
   } else if (result === "hit") {
-    revealAfterMotion(persistedResult, impactStart + impactDuration);
+    revealAfterMotion(persisted, aftermathMs);
   }
+  if (result !== "sunk" || !timeline.ship || !timeline.wreck) return;
+  const wreckBox = battleshipNativeWreckBox(timeline.ship, gridName);
+  appendNative(timeline.wreck, wreckBox, aftermathMs, "classic-battleship-native-wreck-sequence");
+  const persistedWreck = stage.querySelector(`.classic-native-wreck[data-ship-cells~="${CSS.escape(`${row}:${column}`)}"]`);
+  revealAfterMotion(persistedWreck, settleMs);
+}
 
-  if (result !== "sunk") return;
-  const explosionDefinition = source.motion.impacts.explosion;
-  const explosionStart = impactStart + impactDuration;
-  const explosionDuration = appendNative(
-    explosionDefinition,
-    centeredSourceBox(cell, explosionDefinition.nativeSize),
-    explosionStart,
-    "classic-battleship-native-explosion",
-  );
-  const targetUserId = Number(motion.attack.targetUserId || 0);
-  const fleet = motion.after?.fleets?.[String(targetUserId)] || {};
-  const ship = (fleet.ships || []).find(candidate => (candidate.cells || []).includes(`${row}:${column}`));
-  const wreck = battleshipWreckDefinition(ship);
-  const shipBox = battleshipShipSourceBox(ship, gridName);
-  if (!wreck || !shipBox) return;
-  const wreckStart = explosionStart + explosionDuration;
-  const wreckBox = centeredSourceBox(shipBox, wreck.nativeSize);
-  const wreckDuration = appendNative(wreck, wreckBox, wreckStart, "classic-battleship-native-wreck-sequence");
-  const persistedWreck = stage.querySelector(
-    `.classic-native-wreck[data-ship-cells~="${CSS.escape(`${row}:${column}`)}"]`,
-  );
-  revealAfterMotion(persistedWreck, wreckStart + wreckDuration);
+function battleshipNativeWreckBox(ship, gridName) {
+  const cells = (ship?.cells || []).map(cell => String(cell).split(":").map(Number));
+  const definition = battleshipWreckDefinition(ship);
+  if (!cells.length || !definition) return null;
+  const anchor = battleshipNativeAnchor(gridName, Math.min(...cells.map(c => c[0])), Math.min(...cells.map(c => c[1])));
+  const horizontal = cells.length > 1 && new Set(cells.map(c => c[0])).size === 1;
+  return {...anchor, y:anchor.y - (horizontal ? definition.nativeSize.height - 18 : 0), ...definition.nativeSize};
 }
 
 function battleshipWreckDefinition(ship) {
@@ -5750,28 +6073,51 @@ function classicTerminalSequence(gameId, settled = false, animationDelayMs = 0, 
     return host;
   }
   if (gameId === "battleship") {
-    const attack = terminalMotion?.attack;
+    if (!optionCategory("visualFxEnabled", true)) return null;
+    const attack = terminalMotion?.attack || latest(session.state?.attackHistory);
     if (!attack) return null;
     const row = Number(attack.row ?? String(attack.cell || "0:0").split(":")[0]);
     const column = Number(attack.column ?? String(attack.cell || "0:0").split(":")[1]);
     const gridName = Number(attack.actorUserId || 0) === currentUserId() ? "target" : "own";
-    const edges = source.gridEdges[gridName];
-    const cell = {
-      x:edges.x[column], y:edges.y[row],
-      width:edges.x[column + 1] - edges.x[column],
-      height:edges.y[row + 1] - edges.y[row],
-    };
     const definition = source.motion.victoryFlag;
-    const flag = sourceStripNode("battleship", definition.slot, centeredSourceBox(cell, definition.nativeSize), {
-      frameCount:definition.frameCount, frameDurationMs:definition.frameDurationMs,
-    }, animationDelayMs, "classic-battleship-native-terminal-flag", elapsed);
-    flag.dataset.motionKind = "fleet-sunk-native-dib9-sequence";
-    flag.dataset.motionSlot = definition.slot;
-    flag.dataset.sourceCell = `${gridName}:${row}:${column}`;
-    flag.dataset.terminalReason = "fleet-sunk";
-    flag.dataset.persistedFinal = "false";
+    const flag = make("div", "classic-source-strip-host classic-battleship-native-terminal-flag");
+    setSourceBox(flag, {...battleshipNativeAnchor(gridName, row, column), ...definition.nativeSize}, source.canvas.width, source.canvas.height);
+    Object.assign(flag.dataset, {motionKind:"fleet-sunk-native-dib9-sequence", motionSlot:definition.slot,
+      sourceCell:`${gridName}:${row}:${column}`, terminalReason:"fleet-sunk", persistedFinal:"true",
+      frameCount:String(definition.frameCount), frameDurationMs:String(definition.frameDurationMs),
+      loopStartFrame:String(definition.loopStartFrame)});
+    const image = mediaImage(definition.slot, "classic-source-strip-image", "");
+    image.style.height = `${definition.frameCount * 100}%`;
+    image.style.top = "0";
+    flag.append(image);
+    const animate = optionCategory("visualFxEnabled", true);
+    const keyframes = start => {
+      const count = definition.frameCount - start;
+      const frames = Array.from({length:count}, (_, index) => ({
+        transform:`translateY(-${(start + index) / definition.frameCount * 100}%)`,
+        offset:index / count, easing:"steps(1, end)",
+      }));
+      return [...frames, {...frames[count - 1], offset:1}];
+    };
+    if (!animate) image.style.top = `${-(definition.frameCount - 1) * 100}%`;
+    else {
+      const offset = settled ? definition.durationMs : Math.max(0, elapsed - animationDelayMs);
+      const wait = settled ? 0 : Math.max(0, animationDelayMs - elapsed);
+      if (!settled && offset < definition.durationMs) {
+        const intro = image.animate(keyframes(0), {duration:definition.durationMs, delay:wait, fill:"both"});
+        intro.currentTime = offset;
+      }
+      const loop = image.animate(keyframes(definition.loopStartFrame), {
+        duration:(definition.frameCount - definition.loopStartFrame) * definition.frameDurationMs,
+        delay:Math.max(0, definition.durationMs - offset) + wait, iterations:Infinity, fill:"forwards",
+      });
+      if (offset > definition.durationMs) loop.currentTime = offset - definition.durationMs;
+      // Keep the ending invisible until the final wreck has settled.
+      flag.animate([{visibility:"hidden"},{visibility:"visible"}], {duration:1, delay:wait, fill:"both"});
+    }
     return flag;
   }
+
   return null;
 }
 
@@ -5819,9 +6165,7 @@ function appendClassicMotion(stage, gameId) {
   if (["point-move", "point-hit", "point-bear-off"].includes(motion.type)) {
     appendPointMoveMotion(stage, gameId, motion, motion.type);
     if (motion.noLegalMove) {
-      const delayMs = motion.type === "point-hit"
-        ? pointHitMotionLength(source.motion.hitToBar)
-        : motion.type === "point-bear-off" ? source.motion.bearOff.durationMs : source.motion.checkerSlide.durationMs;
+      const delayMs = pointMoveDuration(gameId, motion.type, motion);
       appendPointNoLegalMotion(stage, gameId, motion.noLegalMove, elapsed, delayMs);
     }
     return;
@@ -5913,8 +6257,8 @@ let builtInModernEnhancementScheduled = false;
 let builtInCheckersSquareNumbersEnabled = false;
 let coreChatChessCoordinatesEnabled = false;
 try {
-  builtInCheckersSquareNumbersEnabled = window.localStorage.getItem("corechat-checkers-square-numbers") === "true";
-  coreChatChessCoordinatesEnabled = window.localStorage.getItem("corechat-chess-board-coordinates") === "true";
+  builtInCheckersSquareNumbersEnabled = gameViewStorage.getItem("corechat-checkers-square-numbers") === "true";
+  coreChatChessCoordinatesEnabled = gameViewStorage.getItem("corechat-chess-board-coordinates") === "true";
 } catch (_error) {
   builtInCheckersSquareNumbersEnabled = false;
   coreChatChessCoordinatesEnabled = false;
@@ -6123,10 +6467,12 @@ function builtInModernAppendMotion(board, gameId) {
 
   const fromVisual = builtInModernVisualSquare(gameId, from);
   const toVisual = builtInModernVisualSquare(gameId, to);
-  const actor = make("span", "built-in-modern-motion-actor " + gameId + "-motion-actor " + motion.type);
+  const castle = gameId === "chess" ? chessCastlingRook(motion.before, move, motion.after) : null;
+  const travelDuration = castle ? BUILT_IN_MODERN_MOTION_MS['chess-move'] : duration;
+  const actor = make("span", "built-in-modern-motion-actor " + gameId + "-motion-actor " + (castle ? "chess-move" : motion.type));
   actor.style.setProperty("--motion-dx", String(toVisual.column - fromVisual.column));
   actor.style.setProperty("--motion-dy", String(toVisual.row - fromVisual.row));
-  actor.style.setProperty("--motion-duration", duration + "ms");
+  actor.style.setProperty("--motion-duration", travelDuration + "ms");
   actor.style.setProperty("--motion-elapsed", elapsed + "ms");
   actor.append(builtInModernPiece(gameId, movingPiece, "built-in-modern-actor-piece"));
   const promotedPiece = afterBoard?.[to.row]?.[to.column];
@@ -6137,10 +6483,28 @@ function builtInModernAppendMotion(board, gameId) {
   sourceCell.append(actor);
   const targetPieceElement = targetCell.querySelector(".piece, .chess-piece");
   targetPieceElement?.classList.add("is-built-in-motion-hidden");
+  if (castle) {
+    const rookFrom = builtInModernSquare(castle.from);
+    const rookTo = builtInModernSquare(castle.to);
+    const rookSource = builtInModernCell(board, rookFrom);
+    const rookTarget = builtInModernCell(board, rookTo);
+    const start = builtInModernVisualSquare(gameId, rookFrom);
+    const end = builtInModernVisualSquare(gameId, rookTo);
+    const rookActor = make("span", "built-in-modern-motion-actor chess-motion-actor chess-move");
+    actor.dataset.castlingPiece = "king";
+    rookActor.dataset.castlingPiece = "rook";
+    rookActor.style.setProperty("--motion-dx", String(end.column - start.column));
+    rookActor.style.setProperty("--motion-dy", String(end.row - start.row));
+    rookActor.style.setProperty("--motion-duration", travelDuration + "ms");
+    rookActor.style.setProperty("--motion-elapsed", elapsed + "ms");
+    rookActor.append(builtInModernPiece(gameId, castle.piece, "built-in-modern-actor-piece"));
+    rookSource?.append(rookActor);
+    rookTarget?.querySelector(".chess-piece")?.classList.add("is-built-in-motion-hidden");
+  }
 
-  const isCapture = motion.type.includes("capture")
+  const isCapture = !castle && (motion.type.includes("capture")
     || motion.type === "checkers-win"
-    || motion.type === "chess-checkmate";
+    || motion.type === "chess-checkmate");
   if (gameId === "chess" && isCapture && targetPieceElement) {
     const renderedBoard = builtInModernBoardState(session?.state);
     const renderedTargetPiece = renderedBoard?.[to.row]?.[to.column];
@@ -6335,7 +6699,7 @@ function builtInModernEnhanceCheckersOptions(root) {
   toggle.addEventListener("click", () => {
     builtInCheckersSquareNumbersEnabled = !builtInCheckersSquareNumbersEnabled;
     try {
-      window.localStorage.setItem(
+      gameViewStorage.setItem(
         "corechat-checkers-square-numbers",
         builtInCheckersSquareNumbersEnabled ? "true" : "false",
       );
@@ -6505,9 +6869,10 @@ function renderCheckers() {
       const color = piece.toLowerCase() === "a" ? "b" : "w";
       const size = source.pieceSizeByRow[checkersSourceCoordinates(row, column).row];
       const slot = `gif-${piece === piece.toUpperCase() ? `k-${color}` : color}-${size}${selected ? "-h" : ""}`;
-      const image = mediaImage(slot, "classic-piece", "");
+      const restSlot = `gif-${piece === piece.toUpperCase() ? `k-${color}` : color}-${size}`;
+      const image = squareSelectionImage(slot, restSlot, "classic-piece");
       image.dataset.pieceSlot = slot;
-      fitClassicAssetToSourcePixels(image, cellGeometry, "center");
+      fitClassicAssetToSourcePixels(image, cellGeometry, "center", true);
       button.append(image);
     } else if (piece) button.append(make("span", `piece side-${piece.toLowerCase()}${piece === piece.toUpperCase() ? " king" : ""}`));
     if (classic && legalDestination) {
@@ -6623,18 +6988,18 @@ function renderChess() {
       const restSlot = `gif-${classicPiece[piece[1]]}-${piece[0]}-${size}`;
       const hiliteSlot = `gif-${classicPiece[piece[1]]}-${piece[0]}-h-${size}`;
       const slot = selected ? hiliteSlot : restSlot;
-      const image = mediaImage(slot, "classic-chess-piece", "");
+      const image = squareSelectionImage(slot, restSlot, "classic-chess-piece");
       image.dataset.pieceSlot = slot;
       image.dataset.restSlot = restSlot;
       image.dataset.hiliteSlot = hiliteSlot;
-      fitClassicAssetToSourcePixels(image, cellGeometry, "center-bottom");
+      fitClassicAssetToSourcePixels(image, cellGeometry, "center-bottom", true);
       button.append(image);
       if (selectableOrigin) {
         const showFocus = focused => {
           const focusSlot = focused || selected ? hiliteSlot : restSlot;
           if (image.dataset.pieceSlot === focusSlot) return;
           image.dataset.pieceSlot = focusSlot;
-          image.src = mediaUrl(focusSlot);
+          setSquarePieceArtwork(image, focusSlot);
         };
         button.addEventListener("focus", () => showFocus(true));
         button.addEventListener("blur", () => showFocus(false));
@@ -7006,7 +7371,7 @@ function renderPointGame(gameId) {
       const checkerSlot = borneProfile
         ? (borneProfile.slots?.[player.index] || `${player.slot}-s`)
         : `${player.slot}${selectedChecker ? "-h" : ""}`;
-      const checker = classic ? mediaImage(checkerSlot, "classic-checker", "") : make("span", `built-in-checker is-player-${player.index + 1}`);
+      const checker = classic ? pointSelectionImage(checkerSlot, borneProfile ? checkerSlot : player.slot, "classic-checker") : make("span", `built-in-checker is-player-${player.index + 1}`);
       checker.style.setProperty("--stack-index", String(index));
       if (cappedPointLane) checker.style.setProperty("--built-in-stack-offset", builtInPointStackOffset(index));
       if (classic) {
@@ -7411,7 +7776,8 @@ function renderBattleGrid(ownerUserId, target) {
           markerDefinition,
           "classic-battleship-persisted-result is-miss",
         );
-        setNestedSourceBox(persistedResult, centeredSourceBox(cellBox, markerDefinition.nativeSize), gridGeometry);
+        const anchor = battleshipNativeAnchor(gridName, row, column);
+        setNestedSourceBox(persistedResult, {x:anchor.x + 4, y:anchor.y + 4, ...markerDefinition.nativeSize}, gridGeometry);
       } else if (result === "hit" && !sunkCells.has(key)) {
         const hitDefinition = { ...source.motion.impacts.hit, frameDurationMs:source.motion.shot.frameDurationMs };
         persistedResult = persistentSourceStripNode(
@@ -7420,7 +7786,7 @@ function renderBattleGrid(ownerUserId, target) {
           "classic-battleship-persisted-result is-hit",
           shouldAnimate,
         );
-        setNestedSourceBox(persistedResult, centeredSourceBox(cellBox, hitDefinition.nativeSize), gridGeometry);
+        setNestedSourceBox(persistedResult, {...battleshipNativeAnchor(gridName, row, column), ...hitDefinition.nativeSize}, gridGeometry);
       }
       if (persistedResult) {
         persistedResult.dataset.attackResult = result;
@@ -7457,7 +7823,7 @@ function renderBattleGrid(ownerUserId, target) {
         if (!wreck) continue;
         shipImage = sourceStripFinalFrame(wreck.slot, wreck, `classic-native-wreck ${horizontal ? "is-horizontal" : "is-vertical"}`);
         shipImage.dataset.shipSlot = wreck.slot;
-        setNestedSourceBox(shipImage, centeredSourceBox(shipBox, wreck.nativeSize), gridGeometry);
+        setNestedSourceBox(shipImage, battleshipNativeWreckBox(ship, gridName), gridGeometry);
       } else {
         const slot = length === 1 ? "gif-1" : `gif-${length}-${horizontal ? "h" : "v"}`;
         shipImage = mediaImage(slot, `classic-battle-ship ${horizontal ? "is-horizontal" : "is-vertical"}`, "");
@@ -9557,6 +9923,8 @@ function renderViewerGameOptions() {
   const section = make("section", "viewer-game-options");
   section.append(make("h3", "", "Your options"));
   const grid = make("div", "game-settings-grid");
+  const originalAudioOptions = renderOriginalAudioOptions();
+  if (originalAudioOptions) section.append(originalAudioOptions);
   if (session?.presentation?.selectionOwner === "viewer") {
     const wrapper = make("div", "game-setting appearance-preference");
     const label = make("span", "game-setting-label", "Appearance");
@@ -9881,7 +10249,7 @@ function renderViewerGameOptions() {
     toggle.addEventListener("click", () => {
       coreChatChessCoordinatesEnabled = !coreChatChessCoordinatesEnabled;
       try {
-        window.localStorage.setItem(
+        gameViewStorage.setItem(
           "corechat-chess-board-coordinates",
           coreChatChessCoordinatesEnabled ? "true" : "false",
         );
@@ -10448,6 +10816,7 @@ function renderBoard() {
     host.dataset.boardAssetsReady = ready ? "true" : "false";
     host.dataset.boardSwapPending = "false";
     host.replaceChildren(board);
+    connectSquarePieceArtwork(board);
     installBuiltInBoardSize(board, host);
     if (!ready) trace("board-assets-incomplete", null, {
       imageCount: images.length,
@@ -10674,6 +11043,37 @@ function renderReceivedDrawProposalDialog() {
   requestAnimationFrame(() => accept.focus({ preventScroll:true }));
 }
 
+function showBotStatus(gameId, message, retry) {
+  if (context.extensionId !== gameId) return;
+  const statusId = gameId === "backgammon-first-party" ? "backgammon" : gameId;
+  let panel = document.getElementById(`${statusId}-bot-status`);
+  if (!panel) {
+    panel = make("div", `${statusId}-bot-status game-bot-status minor`);
+    panel.id = `${statusId}-bot-status`;
+    // Feedback belongs after every board control, never before the board.
+    el("surface")?.append(panel);
+  }
+  // Reserve the same slot through human turns; no idle message is necessary.
+  panel.hidden = !Object.keys(session?.state?.bots || {}).length;
+  const key = JSON.stringify([message || "", Boolean(retry)]);
+  if (panel.dataset.statusKey === key && panel.childNodes.length) {
+    const button = panel.querySelector("button");
+    if (button) button.onclick = retry;
+    return;
+  }
+  panel.dataset.statusKey = key;
+  panel.replaceChildren();
+  const status = make("span", "", message || "");
+  status.setAttribute("role", "status");
+  panel.append(status);
+  if (retry) {
+    const button = make("button", "btn", "Retry bot");
+    button.type = "button";
+    button.onclick = retry;
+    panel.append(button);
+  }
+}
+
 function createServerCardBot(gameId, gameName) { return createCardBotController({
   gameName,
   snapshot: () => ({
@@ -10682,20 +11082,7 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
     task: session?.state?.botTask,
   }),
   submit: payload => performAction(payload.action, {engine: payload.engine, positionKey: payload.positionKey}, payload.action === "bot-deal" ? `${gameId}-deal` : ""),
-  showStatus: (message, retry) => {
-    let panel = document.getElementById(`${gameId}-bot-status`);
-    if (!panel && context.extensionId === gameId) {
-      panel = make("div", "uno-bot-status minor"); panel.id = `${gameId}-bot-status`;
-      el("player-status-strip")?.insertAdjacentElement("afterend", panel);
-    }
-    if (!panel) return;
-    panel.hidden = (!message && !retry) || !Object.keys(session?.state?.bots || {}).length;
-    const key = JSON.stringify([message || "", Boolean(retry)]);
-    if (panel.dataset.statusKey === key && panel.childNodes.length) return;
-    panel.dataset.statusKey = key; panel.replaceChildren();
-    const status = make("span", "", message || ""); status.setAttribute("role", "status"); panel.append(status);
-    if (retry) { const button = make("button", "btn", "Retry bot"); button.type = "button"; button.addEventListener("click", retry); panel.append(button); }
-  },
+  showStatus: (message, retry) => showBotStatus(gameId, message, retry),
 }); }
 const unoBotController = createServerCardBot("uno", "UNO");
 const heartsBotController = createServerCardBot("hearts", "Hearts");
@@ -10710,24 +11097,7 @@ const chessBotController = createChessBotController({
     task: session?.state?.botTask,
   }),
   submit: payload => performAction("bot-step", payload),
-  showStatus: (message, retry) => {
-    let panel = document.getElementById("chess-bot-status");
-    if (!panel && context.extensionId === "chess") {
-      panel = make("div", "chess-bot-status minor");
-      panel.id = "chess-bot-status";
-      el("player-status-strip")?.insertAdjacentElement("afterend", panel);
-    }
-    if (!panel) return;
-    panel.hidden = (!message && !retry) || !Object.keys(session?.state?.bots || {}).length;
-    panel.replaceChildren();
-    const status = make("span", "", message || "");
-    status.setAttribute("role", "status");
-    panel.append(status);
-    if (retry) {
-      const button = make("button", "btn", "Retry bot");
-      button.type = "button"; button.addEventListener("click", retry); panel.append(button);
-    }
-  },
+  showStatus: (message, retry) => showBotStatus("chess", message, retry),
 });
 window.addEventListener("pagehide", () => chessBotController.stop());
 
@@ -10738,24 +11108,7 @@ const checkersBotController = createCheckersBotController({
     task: session?.state?.botTask,
   }),
   submit: payload => performAction("bot-step", payload),
-  showStatus: (message, retry) => {
-    let panel = document.getElementById("checkers-bot-status");
-    if (!panel && context.extensionId === "checkers") {
-      panel = make("div", "checkers-bot-status minor");
-      panel.id = "checkers-bot-status";
-      el("player-status-strip")?.insertAdjacentElement("afterend", panel);
-    }
-    if (!panel) return;
-    panel.hidden = (!message && !retry) || !Object.keys(session?.state?.bots || {}).length;
-    panel.replaceChildren();
-    const status = make("span", "", message || "");
-    status.setAttribute("role", "status");
-    panel.append(status);
-    if (retry) {
-      const button = make("button", "btn", "Retry bot");
-      button.type = "button"; button.addEventListener("click", retry); panel.append(button);
-    }
-  },
+  showStatus: (message, retry) => showBotStatus("checkers", message, retry),
 });
 window.addEventListener("pagehide", () => checkersBotController.stop());
 
@@ -10766,28 +11119,7 @@ const backgammonBotController = createBackgammonBotController({
     task: session?.state?.botTask,
   }),
   submit: payload => { const rolling = payload.action === "roll"; return performAction(rolling ? "bot-roll" : "bot-step", payload, rolling ? "backgammon-roll" : ""); },
-  showStatus: (message, retry) => {
-    let panel = document.getElementById("backgammon-bot-status");
-    if (!panel && context.extensionId === "backgammon-first-party") {
-      panel = make("div", "backgammon-bot-status minor");
-      panel.id = "backgammon-bot-status";
-      el("board-host")?.insertAdjacentElement("afterend", panel);
-    }
-    if (!panel) return;
-    // Keep a compact feedback slot during human turns too, without idle text.
-    panel.hidden = !Object.keys(session?.state?.bots || {}).length;
-    const statusKey = JSON.stringify([message || "", Boolean(retry)]);
-    if (panel.dataset.statusKey === statusKey && panel.childNodes.length) return;
-    panel.dataset.statusKey = statusKey;
-    panel.replaceChildren();
-    const status = make("span", "", message || "");
-    status.setAttribute("role", "status");
-    panel.append(status);
-    if (retry) {
-      const button = make("button", "btn", "Retry bot");
-      button.type = "button"; button.addEventListener("click", retry); panel.append(button);
-    }
-  },
+  showStatus: (message, retry) => showBotStatus("backgammon-first-party", message, retry),
 });
 window.addEventListener("pagehide", () => backgammonBotController.stop());
 
@@ -10824,6 +11156,7 @@ function render() {
   const pack = safe(session.presentation?.effectivePack || "built-in");
   document.body.dataset.appearance = pack;
   ensurePointBearOffMediaReady();
+  ensurePointPresentationMediaReady();
   ensureNativeClassicMediaReady();
   if (!session.state?.completed) nativeChessKingEpoch = null;
   if (pack === "classic" && ["checkers", "battleship"].includes(context.extensionId)) {
@@ -11078,6 +11411,7 @@ async function refreshSession(refreshRecords = false, providedSession = null, { 
   if (restoreFocusAfterOptionsClose && !deferRender) el("game-options-toggle")?.focus({ preventScroll: true });
   scheduleChessClockDeadline();
   scheduleSharedLifecycleDeadline();
+  scheduleOriginalVoices(previous,session);
   if (musicPlayer && options?.musicEnabled !== true) stopMusic("music-off");
   await reconnectVisibleSession();
   // Auxiliary records own their errors and panel updates. Never let them hold
@@ -11327,7 +11661,7 @@ void startSessionConnection();
   var material = 'wood';
 
   try {
-    var storedMaterial = window.localStorage.getItem(storageKey);
+    var storedMaterial = gameViewStorage.getItem(storageKey);
     if (allowedMaterials.indexOf(storedMaterial) !== -1) {
       material = storedMaterial;
     }
@@ -11355,7 +11689,7 @@ void startSessionConnection();
     refreshButtons(document.querySelector('.built-in-board-material-option'));
     if (persist) {
       try {
-        window.localStorage.setItem(storageKey, material);
+        gameViewStorage.setItem(storageKey, material);
       } catch (error) {
         // The selected finish still applies for this view when storage is unavailable.
       }

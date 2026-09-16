@@ -73,24 +73,23 @@
       "label": "Tetris Versus rules"
     }
   },
-  "integrity": {
-    "files": {
-      "includes/arcade_extension_support.php": "b9d60d657c2ace2a66a6b371b0ce4c7d49d268ed86a35a447ed812c886f897f1",
-      "includes/tetris_arcade_extension.php": "673a741e7f0c55955f7f7fc3dc3badae32cada4349d85841c7cdfb46b8e4c8e6",
-      "games/tetris-versus-first-party/index.html": "1da2d4d21804dbdb36c9d3702435fe83cb8c459eb6d9a714c737825742380edb",
-      "games/arcade-first-party/app.js": "84bfff3e3492d65eccdc7d9f5626599f77be7b15ae916d6ba3ff5a164f472651",
-      "games/arcade-first-party/style.css": "636901afd9d6116c3f054f8d63508088c40d3f68a217daef1ae8b8ab30fa9eb2",
-      "games/ocx-extension-game.js": "20842fe8b83f95b1dc1c2698245b3a9551875df562b3544440cd458721def5a9",
-      "games/ocx-extension-game.css": "a1f0eed3328e00cafaad850c4111648890caee435bd138101a9cc4d1eff46cee",
-      "games/classic-source-maps.js": "cf6201672747fa92b1c85323cee69b629a702fca83cd28058be66c2c1cc3d808",
-      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "assets/images/tetris-icon.png": "b7b1a2ef793fcb4690da7234dcf870f227bf873e7c0c9963442c2ee92ce2f1cb",
-      "games/arcade-first-party/space-view.js": "158d6a7e1281fb6e5756f2f6fd14cdaf33ec7b940b7f11b6ea709ae9fcc267dc",
-      "games/arcade-first-party/space-simulation.js": "194463e2259b0aab10c3adb2a508e035cb3d36f93fca9811801cb0f6001d32ed",
-      "games/arcade-first-party/space-frame-client.js": "751614b243952db36d21fa6723f1e88e912d636bdebe796136d8da9ec466bd63",
-      "games/arcade-first-party/tetris-view.js": "29fc86bae5b54c5c3a7a71a738a46ad9c92870cb545cd7f512cb2bfee3ccb57c",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
-    },
-    "algorithm": "sha256"
-  }
+  "requiredFiles": [
+    "includes/arcade_extension_support.php",
+    "includes/tetris_arcade_extension.php",
+    "games/tetris-versus-first-party/index.html",
+    "games/arcade-first-party/app.js",
+    "games/arcade-first-party/style.css",
+    "games/ocx-extension-game.js",
+    "games/ocx-extension-game.css",
+    "games/classic-source-maps.js",
+    "games/viewport-height-fit.js",
+    "assets/images/tetris-icon.png",
+    "games/arcade-first-party/space-view.js",
+    "games/arcade-first-party/space-simulation.js",
+    "games/arcade-first-party/space-frame-client.js",
+    "games/arcade-first-party/tetris-view.js",
+    "games/game-avatar.js",
+    "games/classic-game-audio.js",
+    "games/game-view-storage.js"
+  ]
 }

@@ -185,3 +185,23 @@ databases, credentials, logs, caches, Git metadata, and existing archives must
 not be included in a shared release package.
 
 macOS metadata such as `.DS_Store`, `__MACOSX`, `.AppleDouble`, and `._*` files are excluded from release packages.
+
+
+## Administrator game review and frozen references
+
+Administrators can open **Game review** from the room's Start a Game list. Choose a named example and appearance, then Start. Live actions use isolated practice state; they do not create matches, rankings, player records or shared game recordings. Reset repeats the prepared position.
+
+The frozen replay uses saved renderers, media and state sequences, independent of current game code. Its files are checked against the versioned reference manifest. A changed or missing file is reported instead of silently using current artwork. The rules comparison is separate from visual and sound review.
+
+Frozen replay packs and uploaded reference images/clips are installation-private. Preserve and back up the `game-review-snapshots` and `game-review-references` directories within the configured private storage root. The initial `v1` reference pack is supplied separately for an installation that owns its Classic media; original Classic media is not included in GitHub releases. Restore its `v1` directory under `game-review-snapshots`, retaining the exact bytes checked by `includes/game_review_snapshot_v1.json`. Do not expose this storage through the web server or regenerate version 1 when updating the games. Without the private pack, live examples and the frozen rules comparison remain available, with an explicit missing-reference notice.
+
+New verified image/clip references require an administrator's confirmation and note. Earlier revisions remain available. Technical checks do not replace administrator visual acceptance. Review view preferences are temporary and do not overwrite normal game preferences.
+
+
+## Editing installed files and release checksums
+
+You may edit installed extension and game source files without manually updating hashes. Extension manifests declare `requiredFiles`; release file checksums live together in `release-manifest.json`. Admin Settings > System > Release Checksums lists locally modified and unverified files. Required files must still exist and manifests must remain valid.
+
+“Require matching extension checksums” is off by default. Enable it only when you want extensions with changed or unverified files to be blocked. Turn it off while customizing. The running application never rewrites the checksum inventory. Maintainers regenerate it from reviewed release files during packaging; a new hash means the bytes changed, not that a change was approved or tested.
+
+Password and authorization hashes, game-record commitments, original-media identification, database recovery verification, and frozen administrator review references serve separate purposes and retain their existing checks. Updating a live release does not replace a frozen reference.

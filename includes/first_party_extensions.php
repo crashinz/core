@@ -206,6 +206,7 @@ function first_party_extension_subscription_catalog(): array {
 
 function first_party_extension_setting_defaults(): array {
     return [
+        'first_party_extension.strict_integrity' => '0',
         'first_party_extension.private-site-branding.enabled' => '1',
         'first_party_extension.private-site-branding.lifecycle_revision' => '1',
         'first_party_extension.private-site-branding.storage_schema' => '1',
@@ -346,11 +347,12 @@ function first_party_extension_validate_manifest(string $extensionId, array $dec
         || (string)($storage['uninstallPolicy'] ?? '') !== 'explicit-cleanup-only') {
         throw new RuntimeException('First-party extension storage policy is invalid.');
     }
-    $integrity = (array)($decoded['integrity'] ?? []);
-    $integrityFiles = (array)($integrity['files'] ?? []);
-    if (($integrity['algorithm'] ?? '') !== 'sha256' || !$integrityFiles) {
-        throw new RuntimeException('First-party extension integrity declaration is invalid.');
+    $requiredFiles = $decoded['requiredFiles'] ?? null;
+    if (!is_array($requiredFiles) || !array_is_list($requiredFiles) || !$requiredFiles
+        || count($requiredFiles) > 1024 || count(array_unique($requiredFiles, SORT_REGULAR)) !== count($requiredFiles)) {
+        throw new RuntimeException('First-party extension required-file declaration is invalid.');
     }
+    foreach ($requiredFiles as $relative) first_party_extension_required_path($relative);
     if (array_key_exists('game', $decoded)) {
         $game = $decoded['game'];
         if (!is_array($game)
@@ -433,9 +435,19 @@ function first_party_extension_validate_manifest(string $extensionId, array $dec
     return $decoded;
 }
 
+/** Required paths stay structural; only released-byte equality is optional. */
+function first_party_extension_required_path(mixed $relative): string {
+    if (!is_string($relative) || $relative === '' || strlen($relative) > 240
+        || str_starts_with($relative, '/') || str_contains($relative, '\\')
+        || str_contains($relative, ':') || preg_match('/[\x00-\x1f\x7f]/', $relative)
+        || preg_match('#(^|/)(\.\.?|)(/|$)#', $relative)) {
+        throw new RuntimeException('First-party extension required-file path is invalid.');
+    }
+    return $relative;
+}
+
 function first_party_extension_manifest(string $extensionId): array {
     static $cache = [];
-    static $integrityHashCache = [];
     if (isset($cache[$extensionId])) return $cache[$extensionId];
     $source = first_party_extension_sources()[$extensionId] ?? null;
     if (!$source) throw new RuntimeException('Unknown first-party extension.');
@@ -446,26 +458,52 @@ function first_party_extension_manifest(string $extensionId): array {
     $decoded = json_decode((string)file_get_contents($path), true, 64, JSON_THROW_ON_ERROR);
     if (!is_array($decoded)) throw new RuntimeException('First-party extension manifest is invalid.');
     $decoded = first_party_extension_validate_manifest($extensionId, $decoded);
-    $integrity = (array)($decoded['integrity'] ?? []);
-    foreach ((array)($integrity['files'] ?? []) as $relative => $expectedHash) {
-        $relative = str_replace('\\', '/', (string)$relative);
-        if ($relative === '' || str_starts_with($relative, '/') || str_contains($relative, '..')) {
-            throw new RuntimeException('First-party extension integrity path is invalid.');
-        }
+    $root = realpath(dirname(__DIR__));
+    foreach ($decoded['requiredFiles'] as $relative) {
         $absolute = dirname(__DIR__) . '/' . $relative;
-        if (!is_file($absolute) || !preg_match('/^[a-f0-9]{64}$/i', (string)$expectedHash)) {
-            throw new RuntimeException('First-party extension integrity verification failed.');
-        }
-        if (!array_key_exists($absolute, $integrityHashCache)) {
-            $integrityHashCache[$absolute] = hash_file('sha256', $absolute);
-        }
-        $actualHash = $integrityHashCache[$absolute];
-        if (!is_string($actualHash)
-            || !hash_equals(strtolower((string)$expectedHash), $actualHash)) {
-            throw new RuntimeException('First-party extension integrity verification failed.');
+        $resolved = realpath($absolute);
+        if (!is_file($absolute) || !is_readable($absolute) || is_link($absolute)
+            || $resolved === false || !str_starts_with($resolved, $root . DIRECTORY_SEPARATOR)) {
+            throw new RuntimeException('First-party extension required file is missing or unsafe: ' . $relative);
         }
     }
     return $cache[$extensionId] = $decoded;
+}
+
+/** Shared inventory, read once per request. Never rewrites or accepts changed bytes. */
+function first_party_extension_release_inventory(): ?array {
+    static $loaded = false, $inventory = null;
+    if ($loaded) return $inventory;
+    $loaded = true;
+    $path = dirname(__DIR__) . '/release-manifest.json';
+    if (!is_file($path) || !is_readable($path) || filesize($path) > 4194304) return null;
+    try {
+        $decoded = json_decode((string)file_get_contents($path), true, 64, JSON_THROW_ON_ERROR);
+        if (!is_array($decoded) || ($decoded['schema'] ?? '') !== 'corechat-deployed-release-v1'
+            || !is_array($decoded['files'] ?? null)) return null;
+        return $inventory = $decoded['files'];
+    } catch (Throwable) { return null; }
+}
+
+function first_party_extension_integrity(string $extensionId): array {
+    static $cache = [], $hashes = [];
+    if (isset($cache[$extensionId])) return $cache[$extensionId];
+    $manifest = first_party_extension_manifest($extensionId);
+    $inventory = first_party_extension_release_inventory();
+    $modified = []; $unverified = [];
+    foreach (array_unique(array_merge($manifest['requiredFiles'], ['extensions/' . $extensionId . '/extension.json'])) as $relative) {
+        $expected = $inventory[$relative]['sha256'] ?? null;
+        if (!is_string($expected) || !preg_match('/^[a-f0-9]{64}$/i', $expected)) {
+            $unverified[] = $relative; continue;
+        }
+        if (!array_key_exists($relative, $hashes)) $hashes[$relative] = hash_file('sha256', dirname(__DIR__) . '/' . $relative);
+        if (!is_string($hashes[$relative]) || !hash_equals(strtolower($expected), $hashes[$relative])) $modified[] = $relative;
+    }
+    return $cache[$extensionId] = [
+        'state' => $unverified ? 'unverified' : ($modified ? 'modified' : 'verified'),
+        'modifiedFiles' => $modified, 'unverifiedFiles' => $unverified,
+        'inventoryAvailable' => $inventory !== null,
+    ];
 }
 
 function first_party_extension_resolve_order(array $manifests): array {
@@ -516,9 +554,12 @@ function first_party_extension_enabled(PDO $pdo, string $extensionId, bool $safe
     return app_setting($pdo, "first_party_extension.{$extensionId}.enabled", $default) === '1';
 }
 
-function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeMode = false): array {
+function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeMode = false, bool $inspectIntegrity = false): array {
     try {
         $manifest = first_party_extension_manifest($extensionId);
+        $strict = app_setting($pdo, 'first_party_extension.strict_integrity', '0') === '1';
+        $integrity = ($strict || $inspectIntegrity) ? first_party_extension_integrity($extensionId) : null;
+        $integrityBlocked = $strict && ($integrity['state'] ?? '') !== 'verified';
         $displayName = (string)$manifest['name'];
         $displayNameSetting = trim((string)($manifest['game']['displayNameSettingKey'] ?? ''));
         if ($displayNameSetting !== '' && preg_match('/^[a-z0-9][a-z0-9._-]{2,127}$/', $displayNameSetting)) {
@@ -543,7 +584,10 @@ function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeM
         $state = !$enabled
             ? ($safeMode ? 'safe-mode-suppressed' : 'disabled')
             : ($storageReady ? 'enabled' : 'update-required');
+        if ($integrityBlocked) $state = 'integrity-blocked';
         return [
+            'integrity' => $integrity,
+            'strictIntegrity' => $strict,
             'id' => $extensionId,
             'name' => $displayName,
             'version' => (string)$manifest['version'],
@@ -557,7 +601,7 @@ function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeM
             'storagePolicy' => (string)($manifest['storage']['disablePolicy'] ?? 'preserve'),
             'storageSchema' => $actualStorageSchema,
             'expectedStorageSchema' => $expectedStorageSchema,
-            'failure' => '',
+            'failure' => $integrityBlocked ? 'Strict checksum verification blocked modified or unverified files.' : '',
         ];
     } catch (Throwable $error) {
         $fallbackName = trim((string)(first_party_extension_sources()[$extensionId]['publicFallbackName'] ?? 'Installed feature'));
@@ -575,7 +619,7 @@ function first_party_extension_status(PDO $pdo, string $extensionId, bool $safeM
             'storagePolicy' => 'preserve',
             'storageSchema' => null,
             'expectedStorageSchema' => null,
-            'failure' => 'Manifest, compatibility, dependency, or integrity validation failed.',
+            'failure' => 'Manifest, compatibility, dependency, or required-file validation failed.',
         ];
     }
 }
@@ -585,11 +629,11 @@ function first_party_extension_statuses(PDO $pdo, bool $safeMode = false): array
     try {
         $registry = first_party_extension_registry();
         foreach ($registry['loadOrder'] as $extensionId) {
-            $statuses[] = first_party_extension_status($pdo, $extensionId, $safeMode);
+            $statuses[] = first_party_extension_status($pdo, $extensionId, $safeMode, true);
         }
     } catch (Throwable) {
         foreach (array_keys(first_party_extension_sources()) as $extensionId) {
-            $statuses[] = first_party_extension_status($pdo, $extensionId, $safeMode);
+            $statuses[] = first_party_extension_status($pdo, $extensionId, $safeMode, true);
         }
     }
     return $statuses;

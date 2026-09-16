@@ -80,17 +80,16 @@
       "description": "Cover, reveal, and connect four with committed pieces in four nested sizes."
     }
   },
-  "integrity": {
-    "algorithm": "sha256",
-    "files": {
-      "assets/images/nested-four-first-party-icon.svg": "71bc36278c03d09be075b0784af0c7a113f57338aecbc5fc2c4b69988c82604f",
-      "games/nested-four-first-party/style.css": "4094cd7c340e5ec37e693f629d462c4bda2a4092cf4c47e9eae01fddcf218536",
-      "games/nested-four-first-party/app.js": "f3b910b2a946abfe3302b6a42f67d50b8c9c46bf7ba50d63c65b2c5e2d6582c8",
-      "games/ocx-extension-game.css": "a1f0eed3328e00cafaad850c4111648890caee435bd138101a9cc4d1eff46cee",
-      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "games/ocx-extension-game.js": "20842fe8b83f95b1dc1c2698245b3a9551875df562b3544440cd458721def5a9",
-      "games/nested-four-first-party/index.html": "c66290289d9cbf2f653c46e22ba4295575adf4da0231a7cd5ab05d7dbeec2bb3",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
-    }
-  }
+  "requiredFiles": [
+    "assets/images/nested-four-first-party-icon.svg",
+    "games/nested-four-first-party/style.css",
+    "games/nested-four-first-party/app.js",
+    "games/ocx-extension-game.css",
+    "games/viewport-height-fit.js",
+    "games/ocx-extension-game.js",
+    "games/nested-four-first-party/index.html",
+    "games/game-avatar.js",
+    "games/classic-game-audio.js",
+    "games/game-view-storage.js"
+  ]
 }

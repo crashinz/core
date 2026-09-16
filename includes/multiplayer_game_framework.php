@@ -109,7 +109,7 @@ function multiplayer_game_effective_display_name(PDO $pdo, array $definition): s
     return $value;
 }
 
-function multiplayer_game_presentation_projection(PDO $pdo, array $definition, int $viewerUserId = 0): array
+function multiplayer_game_presentation_projection(PDO $pdo, array $definition, int $viewerUserId = 0, ?string $reviewPack = null): array
 {
     $packs = array_column((array)($definition['presentationPacks'] ?? []), null, 'id');
     $packIds = array_keys($packs);
@@ -128,6 +128,7 @@ function multiplayer_game_presentation_projection(PDO $pdo, array $definition, i
         $saved = $stmt->fetchColumn();
         if ($saved !== false) $requested = (string)$saved;
     }
+    if ($reviewPack !== null) $requested = $reviewPack;
     if (!isset($packs[$requested])) $requested = $packIds[0];
     $projection = [
         'selectionOwner' => $selectionOwner,
@@ -1133,6 +1134,8 @@ function multiplayer_game_catalog_projection(PDO $pdo, ?int $userId = null): arr
             throw new MultiplayerGameException('A game presentation descriptor is invalid.', 'MULTIPLAYER_GAME_REGISTRY_INVALID', 500);
         }
         $extensionId = trim((string)($definition['extensionId'] ?? ''));
+        // Strict failures disable affected games without taking down the library.
+        if ($extensionId !== '' && first_party_extension_status($pdo, $extensionId)['state'] === 'integrity-blocked') continue;
         $enabled = $extensionId !== ''
             ? first_party_extension_enabled($pdo, $extensionId)
             : app_setting($pdo, multiplayer_game_setting_key($key), '1') === '1';
@@ -1152,6 +1155,45 @@ function multiplayer_game_catalog_projection(PDO $pdo, ?int $userId = null): arr
         ]);
     }
     return $projected;
+}
+
+/**
+ * Read only consent-linked earlier rounds in which this viewer was a player.
+ * UNION deduplicates votes and stops malformed cycles. Room/type and historical
+ * membership are checked on every edge; a newly joined spectator gets no history.
+ * Original message lobby and encryption envelope remain unchanged.
+ */
+function multiplayer_game_rematch_chat_history(PDO $pdo, string $publicId, int $userId, int $since): array
+{
+    $link = db_uses_mysql_syntax($pdo) ? "CONCAT('started:', h.public_id)" : "'started:' || h.public_id";
+    $stmt = $pdo->prepare(
+        "WITH RECURSIVE history (id,public_id,game_key,source_room_session_id) AS (
+            SELECT s.id,s.public_id,s.game_key,s.source_room_session_id
+              FROM multiplayer_game_sessions s
+              JOIN multiplayer_game_members m ON m.game_session_id=s.id
+             WHERE s.public_id=? AND m.user_id=? AND m.membership_status='active'
+            UNION
+            SELECT p.id,p.public_id,p.game_key,p.source_room_session_id
+              FROM history h
+              JOIN multiplayer_game_votes v ON v.vote_type='rematch' AND v.vote_value={$link}
+              JOIN multiplayer_game_sessions p ON p.id=v.game_session_id
+              JOIN multiplayer_game_members m ON m.game_session_id=p.id
+             WHERE p.game_key=h.game_key AND p.source_room_session_id=h.source_room_session_id
+               AND p.status IN ('completed','forfeited','abandoned')
+               AND m.user_id=? AND m.role IN ('master','player')
+               AND m.membership_status IN ('active','departed')
+        )
+        SELECT gcm.*, COALESCE(gcm.user_id,p.user_id) AS author_user_id,
+               COALESCE(NULLIF(gcm.display_name,''),p.display_name,'Player') AS author_display_name,
+               p.avatar_path,p.webcam_path,u.role,0 AS is_owner
+          FROM game_chat_messages gcm
+          JOIN history h ON h.public_id=gcm.lobby_code
+          LEFT JOIN participants p ON p.id=gcm.participant_id
+          LEFT JOIN users u ON u.id=COALESCE(gcm.user_id,p.user_id)
+         WHERE gcm.id>? ORDER BY gcm.id ASC LIMIT 100"
+    );
+    $stmt->execute([$publicId,$userId,$userId,max(0,$since)]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 function multiplayer_game_require_member(PDO $pdo, string $publicId, int $userId, array $roles = []): array

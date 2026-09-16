@@ -10,6 +10,61 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-15 - Continuous game rematches and conversation
+
+Play Again keeps the game view open and carries the conversation into consent-linked rematches. Earlier-round messages remain available after reload for authorized returning players, while new messages and game records stay attached to their own match. Testing is WIP.
+
+
+## 2026-09-15 - Editable extensions and central release checksums
+
+Extension manifests now list required files without duplicate hashes. Release checksums are centralized in release-manifest.json, with administrator modified-file diagnostics and optional strict checking disabled by default. Required-file, capability and frozen-reference checks remain enforced. Testing is WIP.
+
+
+## 2026-09-15 - Stable bot thinking feedback
+
+Chess, Checkers, Hearts, UNO and Backgammon share a reserved status area below the board controls. Thinking, completion and retry messages no longer move the board. Frozen administrator references remain unchanged. Testing is WIP.
+
+
+## 2026-09-15 - Permanent administrator game review
+
+Adds Game review to the administrator games list with 158 repeatable examples across all 15 games and supported Built-in/Classic appearances. Live practice examples compare against preserved renderer, media and rules references, with private reference backups and revision history. Review preferences stay isolated from regular games. Testing is WIP.
+
+
+## 2026-09-15 - Original game audio and optional voices
+
+Classic games add personal default-off controls for original turn reminders and extra voices, with sound previews. Chess move/capture and check cues, incoming draw offers, Battleship placement sounds, and Acey Deucy roll and victory reactions follow traced original events. Manual previews continue across routine game refreshes. Testing is WIP.
+
+
+## 2026-09-15 - Five Dice roll effects and original reactions
+
+Five Dice presents accepted rolls for every player, preserves held dice and prepares Classic sound with motion. Original Yahtzee, upper-bonus, repeat-Yahtzee and personal-record Cheers cues are connected. Idle voices have personal opt-in switches and audio previews, disabled by default. Optional Classic resources preserve compatibility with existing packs. Testing is WIP.
+
+
+## 2026-09-15 - Restore original Battleship sequences
+
+Classic Battleship follows original combat stages, timing and victory strip geometry. Spades retains the approved sliding card and original direct transitions. Game rules are unchanged. Testing is WIP.
+
+
+## 2026-09-15 - Correct Chess castling presentation
+
+Classic castling now places the king and rook together, following the original OCX board-update behavior. Built-in castling moves both pieces in one coordinated transition, including server confirmation and either board orientation. Game rules are unchanged. Testing is WIP.
+
+
+## 2026-09-15 — Keep selected Checkers and Chess pieces visible
+
+Classic Checkers and Chess now retain the visible piece until its selected artwork is decoded. Chess keyboard focus uses the same protection, and delayed, failed or cancelled image requests cannot replace a newer selection. Classic Checkers time expiration now receives the same colored-tile sequence as other decisive results. Existing game rules and source artwork are preserved. Testing is WIP.
+
+
+## 2026-09-15 — Keep point-game artwork visible during image loading
+
+Fixed the first selected checker briefly disappearing in Classic Backgammon and Acey Deucy, and the Acey Deucy board briefly disappearing on a winning move. Preload the replacement artwork and retain the visible checker or board until the replacement decodes, including safe fallback for failed loads and cancelled selections. Testing is WIP.
+
+
+## 2026-09-15 — Original checker sequences and rotating starters
+
+Made Rotate starter the default for new Backgammon and Acey Deucy games while preserving explicit starter choices. Added optional original Classic checker capture, bar arrival, spinning movement and landing sequences, including settling after bearing off before victory. Retained larger dice, corrected racks and fallback for older media packs. Verify now reports whether the complete checker artwork needs re-importing. Testing is WIP.
+
+
 ## 2026-09-15 — Original point-game rack alignment
 
 Corrected Classic Backgammon and Acey Deucy bear-off rack positions to match the original upper/lower baselines and alternating offsets. Corrected Acey Deucy resting checker widths and kept the animation destination aligned with the resting stack. Testing is WIP.

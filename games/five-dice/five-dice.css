@@ -3911,3 +3911,20 @@ body[data-appearance="classic"] .classic-score-choice:is(:hover, :focus-visible,
 /* Keep game art out of browser text selection. */
 .five-dice-approved-artboard { -webkit-user-select: none; user-select: none; }
 .five-dice-approved-artboard img { -webkit-user-drag: none; }
+
+.optional-voices { margin-block: 10px; max-width: 100%; }
+.optional-voices p { font-size: .875rem; }
+.optional-voice-row { display: flex; align-items: center; gap: .5rem; margin-block: .35rem; }
+.optional-voice-row label, .optional-voice-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.optional-voice-row button { padding: .25rem .6rem; min-height: 32px; }
+
+.classic-native-reaction { position:absolute; pointer-events:none; z-index:20; background-repeat:no-repeat; }
+.has-native-mouth-reaction #classic-microphone-motion { visibility:hidden; }
+
+.optional-voices { width: min(100%, 32rem); }
+.optional-voice-row button { background:#344563; color:#fff; border:1px solid #8193bb; border-radius:6px; cursor:pointer; }
+.optional-voice-row button:disabled { opacity:.5; cursor:default; }
+.optional-voice-row input { accent-color:#a3baff; }
+.optional-voice-row :focus-visible { outline:2px solid #cbd8ff; outline-offset:2px; }
+
+.game-option[hidden] { display:none !important; }

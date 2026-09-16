@@ -89,12 +89,19 @@ $gameRequestMark('bootstrap');
 
 $user = require_user();
 $gameRequestMark('auth');
+// Review state is session-owned and never enters the live-match dispatcher.
+$reviewSource = $_SERVER['REQUEST_METHOD'] === 'POST' ? input_json() : $_GET;
+if (is_string($reviewSource['game_session_id'] ?? null) && str_starts_with($reviewSource['game_session_id'], 'review-')) {
+    require_once __DIR__ . '/../includes/game_review.php';
+    try { json_out(game_review_dispatch(db(), $user, $reviewSource)); }
+    catch (MultiplayerGameException $error) { json_out(['error'=>$error->getMessage(), 'code'=>$error->errorCode], $error->httpStatus); }
+}
 if ($_SERVER['REQUEST_METHOD'] === 'GET') session_write_close();
 $pdo = db();
 $gameRequestMark('db');
 // Recover committed replay events left by interrupted requests; never expose archive data.
 game_recording_flush($pdo, 4);
-$source = $_SERVER['REQUEST_METHOD'] === 'POST' ? input_json() : $_GET;
+$source = $reviewSource;
 $action = trim((string)($source['action'] ?? ($_SERVER['REQUEST_METHOD'] === 'GET' ? 'catalog' : '')));
 
 try {

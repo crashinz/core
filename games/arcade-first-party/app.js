@@ -1,12 +1,13 @@
+import { gameViewStorage } from "../game-view-storage.js?v=1dd11e938aa8";
 // Presentation and bounded input transport only. Server reducers own all results.
-import { availableGameViewportHeight } from "../viewport-height-fit.js";
+import { availableGameViewportHeight } from "../viewport-height-fit.js?v=f9547db55052";
 import { SpaceFrameClient, SpaceCoopClient } from "./space-frame-client.js?v=751614b24395";
 import { TetrisBoardView } from "./tetris-view.js?v=29fc86bae5b5";
 const kind = document.body.dataset.extension === "tetris-versus" ? "tetris" : "space";
 const storageKey = `corechat.arcade.${kind}.presentation.v1`;
 let preferences = { size:100, fit:false };
 try {
-  const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+  const saved = JSON.parse(gameViewStorage.getItem(storageKey) || "null");
   if (saved && [50,75,100,125,150].includes(saved.size)) preferences.size = saved.size;
   if (typeof saved?.fit === "boolean") preferences.fit = saved.fit;
 } catch { /* Storage may be disabled without preventing play. */ }
@@ -77,7 +78,7 @@ if(kind === "space") {
   ship.src=new URL("../spaceinvasion/player1.png",import.meta.url).href;
   shipTwo.src=new URL("../spaceinvasion/player2.png",import.meta.url).href;
 }
-function savePreferences() { try { localStorage.setItem(storageKey,JSON.stringify(preferences)); } catch {} resize(); }
+function savePreferences() { try { gameViewStorage.setItem(storageKey,JSON.stringify(preferences)); } catch {} resize(); }
 function resize() {
   if(!stage.isConnected) return;
   const available=kind === "space" ? Math.max(0,stage.clientWidth-32) : (scroll.clientWidth || stage.clientWidth);

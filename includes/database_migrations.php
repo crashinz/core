@@ -840,8 +840,9 @@ function database_migrations_manifest(): array
             'accepted_prior_checksums' => [
                 '2BFEA00B9B257A1B589D7C62E05EF123DCDD7E68B6E69DC61270D6EB3E85D851',
                 '3A8211F5FAC4A489320BFFEEDB956B4707C2D6C28EE7651753BC8BAA57D72E18',
+                'F0BC0647FFEC5D3DC54F223376FA920E0CBCB622FE2CE6ABA82AE29CE196F003',
             ],
-            'expected_checksum' => 'F0BC0647FFEC5D3DC54F223376FA920E0CBCB622FE2CE6ABA82AE29CE196F003',
+            'expected_checksum' => '7EC9F4DB466C04BEAF6BE4BDAD2F1A913433D7AC1D681BB2C7048CC0EF5ABA75',
         ],
         [
             'id' => '2026-09-12-001-live-website-official-successors',

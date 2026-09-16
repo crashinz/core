@@ -73,29 +73,28 @@
       "label": "Space Invasion rules"
     }
   },
-  "integrity": {
-    "files": {
-      "includes/arcade_extension_support.php": "b9d60d657c2ace2a66a6b371b0ce4c7d49d268ed86a35a447ed812c886f897f1",
-      "includes/space_arcade_extension.php": "a8b4a7b3c4b44b661a0ba2aba73b2ca2246a480bfc43005bee6255690c75bd6e",
-      "games/space-invasion-first-party/index.html": "ded85d7e30cf033fe0fcf49cb2e4117e63f0b3dfab997931efb4ba8f30da2551",
-      "games/arcade-first-party/app.js": "84bfff3e3492d65eccdc7d9f5626599f77be7b15ae916d6ba3ff5a164f472651",
-      "games/arcade-first-party/style.css": "636901afd9d6116c3f054f8d63508088c40d3f68a217daef1ae8b8ab30fa9eb2",
-      "games/ocx-extension-game.js": "20842fe8b83f95b1dc1c2698245b3a9551875df562b3544440cd458721def5a9",
-      "games/ocx-extension-game.css": "a1f0eed3328e00cafaad850c4111648890caee435bd138101a9cc4d1eff46cee",
-      "games/classic-source-maps.js": "cf6201672747fa92b1c85323cee69b629a702fca83cd28058be66c2c1cc3d808",
-      "games/viewport-height-fit.js": "c2557c225fbc30e2fb1a5f39d12c9b640c06cb98e88fb253ecd62b8eba811481",
-      "assets/images/spaceinvasion-icon.png": "055b4fd0cad00e5cb029518e7c852ef61106826bfac4c7d9278fe854fdbe2ab4",
-      "games/spaceinvasion/enemy.png": "ca819dc60013bdeccf630b58f60c8f629fc9ed1963f95db975c1d728a360411c",
-      "games/spaceinvasion/player1.png": "dbc91f4351aa606849c657244c5fb41b8473aaa0d41fd7b9c5685cbbe57ac170",
-      "games/arcade-first-party/space-view.js": "158d6a7e1281fb6e5756f2f6fd14cdaf33ec7b940b7f11b6ea709ae9fcc267dc",
-      "games/arcade-first-party/space-simulation.js": "194463e2259b0aab10c3adb2a508e035cb3d36f93fca9811801cb0f6001d32ed",
-      "games/arcade-first-party/space-frame-client.js": "751614b243952db36d21fa6723f1e88e912d636bdebe796136d8da9ec466bd63",
-      "includes/space_arcade_frame_input.php": "a44d0dae2dc7100cd2afcf73e234d26a4ed2088988e68fd51ea62bd30e0960b4",
-      "games/arcade-first-party/tetris-view.js": "29fc86bae5b54c5c3a7a71a738a46ad9c92870cb545cd7f512cb2bfee3ccb57c",
-      "includes/space_arcade_coop.php": "07b7e76bed46a8aedbcfb3e3d8d794ea29231bd50662b5315247a7ab7e937921",
-      "games/spaceinvasion/player2.png": "436658d86300de09c6587f39e5413351b03b09373dbd901bc58b0928b6ab236d",
-      "games/game-avatar.js": "9c4b8f56f541fdc0f41d97a45cd49e4b065fab53acb967d49c5064922813937e"
-    },
-    "algorithm": "sha256"
-  }
+  "requiredFiles": [
+    "includes/arcade_extension_support.php",
+    "includes/space_arcade_extension.php",
+    "games/space-invasion-first-party/index.html",
+    "games/arcade-first-party/app.js",
+    "games/arcade-first-party/style.css",
+    "games/ocx-extension-game.js",
+    "games/ocx-extension-game.css",
+    "games/classic-source-maps.js",
+    "games/viewport-height-fit.js",
+    "assets/images/spaceinvasion-icon.png",
+    "games/spaceinvasion/enemy.png",
+    "games/spaceinvasion/player1.png",
+    "games/arcade-first-party/space-view.js",
+    "games/arcade-first-party/space-simulation.js",
+    "games/arcade-first-party/space-frame-client.js",
+    "includes/space_arcade_frame_input.php",
+    "games/arcade-first-party/tetris-view.js",
+    "includes/space_arcade_coop.php",
+    "games/spaceinvasion/player2.png",
+    "games/game-avatar.js",
+    "games/classic-game-audio.js",
+    "games/game-view-storage.js"
+  ]
 }

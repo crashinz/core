@@ -40,13 +40,10 @@
     "disablePolicy": "preserve",
     "uninstallPolicy": "explicit-cleanup-only"
   },
-  "integrity": {
-    "algorithm": "sha256",
-    "files": {
-      "includes/gesture_maker_extension.php": "9d50416bab6d268b4b2c7d7412d885b218ead74b6c65bf178875e4ec211c2d30",
-      "extensions/gesture-maker/assets/gesture-editor.css": "bb0c963b36358322c7eeceee1df43e5bb85d6aef0d596b8975433c201562e671",
-      "extensions/gesture-maker/assets/gesture-editor.js": "d0ec217be02fb3000c809203d72e2b7b5d644849c6c13ac3d18257bd7b19de9c",
-      "extensions/gesture-maker/assets/gesture-editor-state.js": "3fa84017401c8fdc5a8c26584d42d4899096dc145a751dac54fdcc90f3a9ea73"
-    }
-  }
+  "requiredFiles": [
+    "includes/gesture_maker_extension.php",
+    "extensions/gesture-maker/assets/gesture-editor.css",
+    "extensions/gesture-maker/assets/gesture-editor.js",
+    "extensions/gesture-maker/assets/gesture-editor-state.js"
+  ]
 }

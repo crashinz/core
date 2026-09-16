@@ -321,9 +321,9 @@
       const resultLabel = pack => (pack.classicComplete ?? pack.classicAvailable) ? 'Classic installed' : (pack.installedCount ? 'Incomplete Classic media' : 'Classic not installed');
       const bearOffLabel = pack => {
         if (!['backgammon-first-party', 'acey-deucy'].includes(pack.extensionId)) return '';
-        if (!Array.isArray(pack.optional)) return 'Bear-off animation: unverified — update site, then verify';
-        const installed = ['bitmap-507', 'bitmap-508'].every(slot => pack.optional.some(item => item.slot === slot && item.state === 'installed'));
-        return installed ? 'Bear-off animation: installed' : 'Bear-off animation: re-import needed';
+        if (!Array.isArray(pack.optional)) return 'Checker animations: unverified — update site, then verify';
+        const installed = [501,502,505,506,507,508,509,510,511,512,513,514].map(id => `bitmap-${id}`).every(slot => pack.optional.some(item => item.slot === slot && item.state === 'installed'));
+        return installed ? 'Checker animations: installed' : 'Checker animations: re-import needed';
       };
       const nativeAnimationLabel = pack => {
         const groups = pack.extensionId === 'chess' ? [['Capture animation',500,539],['King animation',600,607]]
@@ -338,7 +338,7 @@
       const verificationLabel = (pack, includeOptional = false) => {
         const missing = pack.missing?.length || 0;
         const invalid = pack.invalid?.length || 0;
-        const counts = `${pack.installedCount}/${pack.requiredCount} required files valid`;
+        const counts = `${pack.requiredInstalledCount ?? pack.installedCount}/${pack.requiredCount} required files valid`;
         const artwork = !pack.extensionId && pack.artworkSources;
         const sourceLabel = artwork ? (!artwork.original1x && !artwork.supplied2x ? 'Artwork: no valid artwork installed' : artwork.original1x && artwork.supplied2x
           ? `Artwork: mixed — ${artwork.supplied2x} images use 2× artwork; ${artwork.original1x} use Original OCX 1× artwork`

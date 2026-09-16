@@ -90,7 +90,7 @@ function five_dice_media_stage_source(string $slot, string $bytes, string $attem
             }
         }
         if (!rename($path, $attempt . DIRECTORY_SEPARATOR . $name)) throw new RuntimeException('The validated source could not be selected.');
-        $inventory[$slot] = ['rank' => $rank, 'sha256' => $validated['sha256']];
+        $inventory[$slot] = ['rank' => $rank, 'sha256' => $validated['sha256'], 'verifiedPixelSha256' => (string)($definition['requiredPixelSha256'] ?? '')];
         if (file_put_contents($attempt . DIRECTORY_SEPARATOR . '.source-selection.json', json_encode($inventory, JSON_THROW_ON_ERROR), LOCK_EX) === false) {
             throw new RuntimeException('The selected source could not be recorded.');
         }

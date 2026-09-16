@@ -52,11 +52,11 @@ function acey_deucy_settings_projection(array $settings, string $mode, array $de
             ],
         ], [
             'key' => 'starterMethod', 'type' => 'select', 'value' => $settings['starterMethod'],
-            'defaultValue' => 'roll-for-first', 'label' => 'Starter method',
+            'defaultValue' => 'rotate-starter', 'label' => 'Starter method',
             'description' => 'Choose how the first player is established for this game series.',
             'options' => [
-                ['value' => 'roll-for-first', 'label' => 'Roll for first — Default / CoreChat'],
-                ['value' => 'rotate-starter', 'label' => 'Rotate starter — Legacy OCX'],
+                ['value' => 'roll-for-first', 'label' => 'Roll for first — CoreChat'],
+                ['value' => 'rotate-starter', 'label' => 'Rotate starter — Default / Legacy OCX'],
             ],
         ]],
     ];
@@ -78,7 +78,7 @@ function acey_deucy_validate_settings(array $settings, string $mode, array $defi
     if (!in_array($rulesProfile, ['current', 'european-double-double'], true)) {
         throw new MultiplayerGameException('Choose a valid Acey Deucy rules profile.', 'ACEY_DEUCY_SETTINGS_INVALID', 422);
     }
-    $starterMethod = (string)($settings['starterMethod'] ?? 'roll-for-first');
+    $starterMethod = (string)($settings['starterMethod'] ?? 'rotate-starter');
     if (!in_array($starterMethod, ['roll-for-first', 'rotate-starter'], true)) {
         throw new MultiplayerGameException('Choose a valid Acey Deucy starter method.', 'ACEY_DEUCY_SETTINGS_INVALID', 422);
     }

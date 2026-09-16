@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Five Dice</title>
-  <link rel="stylesheet" href="five-dice.css?v=25c36a943a21">
+  <link rel="stylesheet" href="five-dice.css?v=4564596f07ca">
 </head>
 <body data-appearance="built-in">
   <main class="game" aria-labelledby="game-title">
@@ -20,7 +20,7 @@
       </div>
     </header>
 
-    <p id="game-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">Loading the gameâ€¦</p>
+    <p id="game-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">Loading the game...</p>
 
     <section id="game-options" class="game-options" tabindex="-1" aria-labelledby="game-options-heading" hidden>
       <h2 id="game-options-heading">Game Options</h2>
@@ -67,6 +67,13 @@
           When Off in Classic appearance, the board artwork controls remain available without reserving space for separate buttons.
         </div>
       </div>
+      <details id="optional-voices" class="optional-voices" hidden>
+        <summary>Optional voices</summary>
+        <p>Idle voices are off by default. These choices apply only to you. Sound FX must be on.</p>
+        <div id="optional-voice-choices"></div>
+        <details><summary>Other original clips</summary><div id="other-voice-previews"></div></details>
+        <p id="optional-voice-status" role="status"></p>
+      </details>
       <div id="shared-game-settings" class="shared-game-settings" aria-label="Shared game timing options"></div>
       <div id="settings-acceptance" class="settings-acceptance" aria-label="Player acceptance"></div>
       <button id="save-game-options" type="button" class="secondary">Save Game Options</button>
@@ -182,7 +189,7 @@
       </aside>
     </div>
   </main>
-  <script type="module" src="five-dice.js?v=9cd16aea1cec"></script>
+  <script type="module" src="five-dice.js?v=141f4e2d776b"></script>
 </body>
 </html>
 

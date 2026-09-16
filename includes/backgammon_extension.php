@@ -81,7 +81,7 @@ function backgammon_validate_settings(array $settings, string $mode, array $defi
         || (isset($settings['profile']) && $settings['profile'] !== 'standard-backgammon')) {
         throw new MultiplayerGameException('A Backgammon setting is not supported.', 'BACKGAMMON_SETTINGS_INVALID', 422);
     }
-    $starterMethod = (string)($settings['starterMethod'] ?? 'roll-for-first');
+    $starterMethod = (string)($settings['starterMethod'] ?? 'rotate-starter');
     $moveUseRule = (string)($settings['moveUseRule'] ?? 'standard');
     if (!in_array($starterMethod, ['roll-for-first', 'rotate-starter'], true)
         || !in_array($moveUseRule, ['standard', 'legacy-ocx'], true)) {

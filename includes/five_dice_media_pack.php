@@ -464,6 +464,30 @@ function five_dice_media_pack_slots(): array
     }
     unset($definition);
     return $slots + [
+        'reaction-524' => ['label' => 'Original reaction 524', 'installName' => 'reaction-524.png', 'sourceName' => '524@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 128, 'requiredHeight' => 3432, 'requiredForClassic' => false, 'requiredSha256' => '5726e920b07a9576306645fad1b9c2b1cc5571107be0c7159c9312881bf3ba81', 'requiredPixelSha256' => 'febf3b5ce3cf77cd60cf1b034bc87620106072f74b3946e00e0cb9ec60f1ec35'],
+        'reaction-525' => ['label' => 'Original reaction 525', 'installName' => 'reaction-525.png', 'sourceName' => '525@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 108, 'requiredHeight' => 1680, 'requiredForClassic' => false, 'requiredSha256' => 'b96c1679f4de883e018530196d717117d026c6c09a500e1555dd68d7ddeb2e85', 'requiredPixelSha256' => '04f0ea5afde0e35806f3f2849d05b59c858e528718a24a3f7cc9230acf459452'],
+        'reaction-526' => ['label' => 'Original reaction 526', 'installName' => 'reaction-526.png', 'sourceName' => '526@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 260, 'requiredForClassic' => false, 'requiredSha256' => '88dccccc3c37ba543686aeeaa3f3a8853728cc3ff9d36768df55db9a01c165cd', 'requiredPixelSha256' => '03d8126b81440a67f4cd7368edf58a3e577c2141f3e82adb192c617577cee07c'],
+        'reaction-527' => ['label' => 'Original reaction 527', 'installName' => 'reaction-527.png', 'sourceName' => '527@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 182, 'requiredForClassic' => false, 'requiredSha256' => '10969caf122cabc6c0344bb3ac9262e86e5afde8c035477e59773ff3ba349e84', 'requiredPixelSha256' => '68f4eabae8815ca1b84689c4f67cff45d7b2963916fab53ceff77a4772268524'],
+        'reaction-528' => ['label' => 'Original reaction 528', 'installName' => 'reaction-528.png', 'sourceName' => '528@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 286, 'requiredForClassic' => false, 'requiredSha256' => '7b1924b5bd21efa831a6188889c666c7ab9438657b16b05068ae238d540b131b', 'requiredPixelSha256' => 'e48a9f6a333f0a0c18adabf7c2444788cdcf9a8148b500efa3c7380a40432010'],
+        'reaction-529' => ['label' => 'Original reaction 529', 'installName' => 'reaction-529.png', 'sourceName' => '529@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 416, 'requiredForClassic' => false, 'requiredSha256' => 'f3a95cf107ed44b4ed0bf525e8ef350b51fd5c66cc7c1ff02b1c4f423dd19f11', 'requiredPixelSha256' => 'f2b2e8a197f52d8d15197e26fb6e9143a20607f7c9376b38c8dd8ad66910ee57'],
+        'reaction-530' => ['label' => 'Original reaction 530', 'installName' => 'reaction-530.png', 'sourceName' => '530@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 72, 'requiredHeight' => 2508, 'requiredForClassic' => false, 'requiredSha256' => '916c16c63a8c38619b2bf59f14ed97631de10e0426cbbe1da4c4d36a91167663', 'requiredPixelSha256' => 'a3307f7ce2a0d2c657820d9533a05e794f036596c41e76b45f710b0f656ad94d'],
+        'reaction-531' => ['label' => 'Original reaction 531', 'installName' => 'reaction-531.png', 'sourceName' => '531@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 520, 'requiredForClassic' => false, 'requiredSha256' => 'f3193835e9edbf2681765f6b739fded933eb308a4d25d3acfbcb69c8b35d80dc', 'requiredPixelSha256' => 'dae30b66bbf55f7f82a66a2165118430d61a2d7848f93a76ea1e05e052bb63ae'],
+        'reaction-532' => ['label' => 'Original reaction 532', 'installName' => 'reaction-532.png', 'sourceName' => '532@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 260, 'requiredForClassic' => false, 'requiredSha256' => '7f179fa793064835aadfe8115816c08d8e5179c361519237bd47ac20032f23b9', 'requiredPixelSha256' => '48ead37a7d8756a5850ec067a73cd38c559d61a52dbecdd1c9b8a831be11491b'],
+        'reaction-533' => ['label' => 'Original reaction 533', 'installName' => 'reaction-533.png', 'sourceName' => '533@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 208, 'requiredForClassic' => false, 'requiredSha256' => 'c844422f271e676211a37b9488286dc39279d619c602b253692a48a5ac69b16d', 'requiredPixelSha256' => 'e53cb4758c237b00e775f53cb8c4f2ea0352a74ee8388a872fd2c9b8a350302f'],
+        'reaction-534' => ['label' => 'Original reaction 534', 'installName' => 'reaction-534.png', 'sourceName' => '534@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 260, 'requiredForClassic' => false, 'requiredSha256' => '085d52977c6b048db6bc8402fc8771cf271a33be1bdff032a0d20df451fd6f35', 'requiredPixelSha256' => 'cddf2198da65f39a72bb77506e0034e867f7f5746a6d7fd37de9d86f09f478e0'],
+        'reaction-535' => ['label' => 'Original reaction 535', 'installName' => 'reaction-535.png', 'sourceName' => '535@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 68, 'requiredHeight' => 1920, 'requiredForClassic' => false, 'requiredSha256' => '54c0431d735d2234e83d3f11a8d2fc80e69ea26b6885ccdde769841864f7496a', 'requiredPixelSha256' => '0c56318923b1e90b769c1a2f1d5be40e3e8b07c2a38dbfca7d28bf4408142ac7'],
+
+        'upper-all-right-sound' => ['label' => 'Allright sound', 'installName' => 'upper-all-right-sound.wav', 'sourceName' => 'WAV_ALLRIGHT.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'upper-crash-sound' => ['label' => 'Crash sound', 'installName' => 'upper-crash-sound.wav', 'sourceName' => 'WAV_CRASH.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'idle-feeling-sound' => ['label' => 'Feeling sound', 'installName' => 'idle-feeling-sound.wav', 'sourceName' => 'WAV_FEELING.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'repeat-yahtzee-sound' => ['label' => 'Hipower sound', 'installName' => 'repeat-yahtzee-sound.wav', 'sourceName' => 'WAV_HIPOWER.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'low-power-sound' => ['label' => 'Lowpower sound', 'installName' => 'low-power-sound.wav', 'sourceName' => 'WAV_LOWPOWER.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'idle-roll-sound' => ['label' => 'Rollthe sound', 'installName' => 'idle-roll-sound.wav', 'sourceName' => 'WAV_ROLLTHE.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'idle-something-sound' => ['label' => 'Somethin sound', 'installName' => 'idle-something-sound.wav', 'sourceName' => 'WAV_SOMETHIN.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'yahtzee-way-to-go-sound' => ['label' => 'Waytogo sound', 'installName' => 'yahtzee-way-to-go-sound.wav', 'sourceName' => 'WAV_WAYTOGO.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'idle-yawn-sound' => ['label' => 'Yawn sound', 'installName' => 'idle-yawn-sound.wav', 'sourceName' => 'WAV_YAWN.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+        'yahtzee-your-on-sound' => ['label' => 'Youron sound', 'installName' => 'yahtzee-your-on-sound.wav', 'sourceName' => 'WAV_YOURON.wav', 'kind' => 'wav', 'mime' => 'audio/wav', 'maximumBytes' => 1048576, 'requiredForClassic' => false],
+
         'background-music' => [
             'label' => 'Background music',
             'installName' => 'background-music.mp3',
@@ -708,6 +732,12 @@ function five_dice_media_pack_validate_slot(string $slot, ?string $directory = n
     $dimensions = null;
     if ($definition['kind'] === 'image') {
         $image = @getimagesize($resolvedPath);
+        // The protected installer writes this only after full source validation.
+        // Reuse that proof only for identical bytes and the same approved pixels.
+        $sourceProof = five_dice_media_source_inventory($resolvedRoot)[$slot] ?? [];
+        $verifiedPixels = isset($definition['requiredPixelSha256'])
+            && hash_equals($sha256, (string)($sourceProof['sha256'] ?? ''))
+            && hash_equals((string)$definition['requiredPixelSha256'], (string)($sourceProof['verifiedPixelSha256'] ?? ''));
         $valid = str_starts_with($prefix, "\x89PNG\r\n\x1a\n")
             && is_array($image)
             && (string)($image['mime'] ?? '') === 'image/png'
@@ -718,7 +748,7 @@ function five_dice_media_pack_validate_slot(string $slot, ?string $directory = n
             && (!isset($definition['requiredWidth']) || (int)$image[0] === (int)$definition['requiredWidth'])
             && (!isset($definition['requiredHeight']) || (int)$image[1] === (int)$definition['requiredHeight'])
             && (!isset($definition['requiredSha256']) || hash_equals(strtoupper((string)$definition['requiredSha256']), $sha256)
-                || (isset($definition['requiredPixelSha256']) && hash_equals($definition['requiredPixelSha256'], five_dice_media_pixel_hash($resolvedPath))));
+                || $verifiedPixels || (isset($definition['requiredPixelSha256']) && hash_equals($definition['requiredPixelSha256'], five_dice_media_pixel_hash($resolvedPath))));
         if (is_array($image)) $dimensions = [(int)$image[0], (int)$image[1]];
     } elseif ($definition['kind'] === 'wav') {
         $valid = five_dice_wav_signature_valid($resolvedPath);
@@ -1127,7 +1157,7 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
     $missing = [];
     $invalid = [];
     $artwork = ['supplied2x' => 0, 'original1x' => 0, 'required' => count(array_filter(
-        five_dice_media_pack_slots(), static fn(array $slot): bool => $slot['kind'] === 'image'
+        five_dice_media_pack_slots(), static fn(array $slot): bool => $slot['kind'] === 'image' && !empty($slot['requiredForClassic'])
     ))];
     $sourceInventory = five_dice_media_source_inventory($directory);
     foreach (array_keys(five_dice_media_pack_slots()) as $slot) {
@@ -1145,10 +1175,11 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
             'label' => (string)$result['label'],
             'installName' => (string)$result['installName'],
             'state' => (string)$result['state'],
+            'requiredForClassic' => !empty($result['requiredForClassic']),
         ];
         if ($result['state'] === 'installed') {
             $installed[] = $public;
-            if ($result['kind'] === 'image') $artwork[five_dice_media_source_rank($result, $sourceInventory) === 1 ? 'original1x' : 'supplied2x']++;
+            if ($result['kind'] === 'image' && !empty($result['requiredForClassic'])) $artwork[five_dice_media_source_rank($result, $sourceInventory) === 1 ? 'original1x' : 'supplied2x']++;
         }
         elseif ($result['state'] === 'missing') $missing[] = $public;
         else $invalid[] = $public + ['guidance' => 'Replace this file with a supported file that matches the listed slot.'];
@@ -1173,7 +1204,7 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
         static fn(array $definition): bool => !empty($definition['requiredForClassic'])
     ));
     $installedSlots = array_fill_keys(array_column($installed, 'slot'), true);
-    $classicComplete = $invalid === [];
+    $classicComplete = array_filter($invalid, static fn(array $item): bool => !empty($item['requiredForClassic']) || $item['slot'] === 'unrecognized') === [];
     foreach ($requiredSlots as $requiredSlot) {
         if (!isset($installedSlots[$requiredSlot])) {
             $classicComplete = false;
@@ -1184,6 +1215,8 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
         'gameKey' => FIVE_DICE_GAME_KEY,
         'presentationOnly' => true,
         'installedCount' => count($installed),
+        'requiredInstalledCount' => count(array_intersect($requiredSlots, array_keys($installedSlots))),
+        'optionalInstalledCount' => count(array_diff(array_keys($installedSlots), $requiredSlots)),
         'missingCount' => count($missing),
         'invalidCount' => count($invalid),
         'requiredCount' => count($requiredSlots),
@@ -1192,7 +1225,7 @@ function five_dice_media_pack_status(?PDO $pdo = null): array
         'installed' => $installed,
         'missing' => $missing,
         'invalid' => $invalid,
-        'guidance' => 'Use the protected Installation Owner action to select the original source folder or a prepared pack. Classic becomes available only after all ' . count(five_dice_media_pack_slots()) . ' slots pass validation; otherwise the complete Built-in appearance is used.',
+        'guidance' => 'Use the protected Installation Owner action to select the original source folder or a prepared pack. Classic becomes available only after all ' . count($requiredSlots) . ' required slots pass validation; otherwise the complete Built-in appearance is used.',
         'fallbackComplete' => true,
         'midiRequired' => false,
         'acceptedOriginalNames' => array_keys(five_dice_media_pack_original_filename_map()),
@@ -1231,6 +1264,7 @@ function five_dice_presentation_status(
         'effectivePack' => $effective,
         'classicAvailable' => !empty($pack['classicAvailable']),
         'fallbackApplied' => $requested === 'classic' && $effective !== 'classic',
+        'availableMediaSlots' => array_column($pack['installed'], 'slot'),
         'scoreRecordsSurface' => [
             'label' => 'Score & Records',
             'separate' => true,
@@ -1407,7 +1441,7 @@ function five_dice_media_pack_attempt_progress(string $attempt): array
     }
     return [
         'stagedCount' => $installed,
-        'requiredCount' => count(five_dice_media_pack_slots()),
+        'requiredCount' => count(array_filter(five_dice_media_pack_slots(), static fn(array $d): bool => !empty($d['requiredForClassic']))),
         'stagedBytes' => $bytes,
     ];
 }
@@ -1491,11 +1525,12 @@ function five_dice_media_pack_activate_attempt(PDO $pdo, int $actorUserId, strin
         $attemptRoot = security_private_storage_directory(FIVE_DICE_MEDIA_PACK_ATTEMPTS_CATEGORY);
         try {
             $progress = five_dice_media_pack_attempt_progress($attempt);
-            if ((int)$progress['stagedCount'] !== count(five_dice_media_pack_slots())) {
-                throw new RuntimeException('The selected pack does not cover all ' . count(five_dice_media_pack_slots()) . ' required media slots.');
+            if ((int)$progress['stagedCount'] < (int)$progress['requiredCount']) {
+                throw new RuntimeException('The selected pack does not cover all required media slots.');
             }
             foreach (array_keys(five_dice_media_pack_slots()) as $slot) {
                 $validation = five_dice_media_pack_validate_slot($slot, $attempt);
+                if (($validation['state'] ?? '') === 'missing' && empty($validation['requiredForClassic'])) continue;
                 if (($validation['state'] ?? '') !== 'installed') {
                     throw new RuntimeException((string)($validation['reason'] ?? 'A selected pack file did not pass validation.'));
                 }
@@ -1515,7 +1550,7 @@ function five_dice_media_pack_activate_attempt(PDO $pdo, int $actorUserId, strin
                 set_app_setting($pdo, FIVE_DICE_MEDIA_PACK_GENERATION_SETTING, $generation);
                 set_app_setting($pdo, SETTINGS_REGISTRY_REVISION_SETTING, (string)(settings_registry_revision($pdo) + 1));
                 $hadActivePack = !empty($metadata['hadActivePack']);
-                $slotCount = count(five_dice_media_pack_slots());
+                $slotCount = (int)$progress['stagedCount'];
                 log_tool($pdo, $actorUserId, $hadActivePack ? 'five_dice_classic_pack_replace' : 'five_dice_classic_pack_install', null, null, "Validated {$slotCount}/{$slotCount} installation-private media slots.");
                 if ($transaction) $pdo->commit();
             } catch (Throwable $error) {
@@ -1557,8 +1592,9 @@ function five_dice_media_pack_install(PDO $pdo, int $actorUserId): array
         $hadActivePack = (int)$priorStatus['installedCount'] > 0;
         $files = five_dice_media_pack_uploaded_files();
         $slots = five_dice_media_pack_slots();
-        if (count($files) !== count($slots)) {
-            throw new RuntimeException('Choose the complete ' . count($slots) . '-file Classic artwork and sound pack.');
+        $required = array_keys(array_filter($slots, static fn(array $d): bool => !empty($d['requiredForClassic'])));
+        if (count($files) < count($required) || count($files) > count($slots)) {
+            throw new RuntimeException('Choose the complete required Classic artwork and sound pack, with any optional files.');
         }
         $total = array_sum(array_column($files, 'bytes'));
         if ($total < 1 || $total > FIVE_DICE_MEDIA_PACK_MAX_UPLOAD_BYTES) {
@@ -1590,8 +1626,8 @@ function five_dice_media_pack_install(PDO $pdo, int $actorUserId): array
                 }
                 five_dice_media_stage_source($slot, (string)file_get_contents($file['tmpName']), $attempt);
             }
-            if (count($seen) !== count($slots)) throw new RuntimeException('The selected pack does not cover all ' . count($slots) . ' required media slots.');
-            foreach (array_keys($slots) as $slot) {
+            if (array_diff($required, array_keys($seen))) throw new RuntimeException('The selected pack does not cover all required media slots.');
+            foreach (array_keys($seen) as $slot) {
                 $validation = five_dice_media_pack_validate_slot($slot, $attempt);
                 if (($validation['state'] ?? '') !== 'installed') {
                     throw new RuntimeException((string)($validation['reason'] ?? 'A selected pack file did not pass validation.'));
@@ -1611,7 +1647,7 @@ function five_dice_media_pack_install(PDO $pdo, int $actorUserId): array
                 if ($transaction) $pdo->beginTransaction();
                 set_app_setting($pdo, FIVE_DICE_MEDIA_PACK_GENERATION_SETTING, $generation);
                 set_app_setting($pdo, SETTINGS_REGISTRY_REVISION_SETTING, (string)(settings_registry_revision($pdo) + 1));
-                $slotCount = count($slots);
+                $slotCount = count($seen);
                 log_tool($pdo, $actorUserId, $previous === '' ? 'five_dice_classic_pack_install' : 'five_dice_classic_pack_replace', null, null, "Validated {$slotCount}/{$slotCount} installation-private media slots.");
                 if ($transaction) $pdo->commit();
             } catch (Throwable $error) {

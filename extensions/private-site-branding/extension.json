@@ -33,10 +33,7 @@
     "disablePolicy": "preserve",
     "uninstallPolicy": "explicit-cleanup-only"
   },
-  "integrity": {
-    "algorithm": "sha256",
-    "files": {
-      "includes/private_site_branding.php": "cb447b3062b5a4764c01081d87a95be2e6f54e92c6686b5c03ee98d29b639a8f"
-    }
-  }
+  "requiredFiles": [
+    "includes/private_site_branding.php"
+  ]
 }
