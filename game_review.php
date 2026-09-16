@@ -12,7 +12,8 @@ header('X-Content-Type-Options: nosniff');
 $pdo=db();$catalog=game_review_catalog();$caseId=(string)($_GET['example']??array_key_first($catalog));
 if(!isset($catalog[$caseId])){http_response_code(404);exit('Example not found.');}
 $case=$catalog[$caseId];$def=game_review_definition($pdo,$case['game']);$packs=array_column($def['presentationPacks'],null,'id');
-$pack=(string)($_GET['pack']??array_key_first($packs));if(!isset($packs[$pack]))$pack=array_key_first($packs);
+$defaultPack=isset($packs['classic'])?'classic':array_key_first($packs);
+$pack=(string)($_GET['pack']??$defaultPack);if(!isset($packs[$pack]))$pack=$defaultPack;
 $references=game_review_references($caseId,$pack);
 if(isset($_GET['reference'])){
     foreach($references as $ref)if(hash_equals($ref['id'],(string)$_GET['reference'])){
@@ -61,7 +62,7 @@ $url=null;if($review){$path=$def['path']??'';$entry=$def['entry']??'index.html';
     $url='games/'.$path.'/'.$entry.'?'.http_build_query(['game_session_id'=>$review['id'],'participant_id'=>1,'user'=>1,'csrf'=>csrf_token()]);}
 ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administrator game review</title><link rel="stylesheet" href="assets/css/game-review.css"></head><body>
 <main><header><p class="eyebrow">Administrator tools</p><h1>Game review</h1><p>Repeat a known example and compare the live game with a saved, verified reference.</p></header>
-<form method="get" class="selector"><label>Game / example<select name="example" id="review-example"><?php foreach($catalog as $id=>$item):?><option value="<?=e($id)?>" <?=$id===$caseId?'selected':''?>><?=e($item['label'])?></option><?php endforeach?></select></label><label>Appearance<select name="pack"><?php foreach($packs as $id=>$item):?><option value="<?=e($id)?>" <?=$id===$pack?'selected':''?>><?=e($item['label']??ucfirst($id))?></option><?php endforeach?></select></label><button>Choose example</button></form>
+<form method="get" class="selector" id="review-selector"><label>Game / example<select name="example" id="review-example"><?php foreach($catalog as $id=>$item):?><option value="<?=e($id)?>" <?=$id===$caseId?'selected':''?>><?=e($item['label'])?></option><?php endforeach?></select></label><label>Appearance<select name="pack"><?php foreach($packs as $id=>$item):?><option value="<?=e($id)?>" <?=$id===$pack?'selected':''?>><?=e($item['label']??ucfirst($id))?></option><?php endforeach?></select></label></form>
 <?php if($error):?><p class="error" role="alert"><?=e($error)?></p><?php endif?><?php if($notice):?><p role="status"><?=e($notice)?></p><?php endif?>
 <h2><?=e($case['label'])?> — <?=e($packs[$pack]['label']??ucfirst($pack))?></h2>
 <p><?=e($review['instruction']??$case['instruction'])?></p><p class="expected"><strong>Expected:</strong> <?=e($review['expected']??$case['expected'])?></p>

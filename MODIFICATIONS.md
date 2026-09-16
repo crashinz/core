@@ -10,6 +10,21 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## 2026-09-16 — Immediate administrator game-review selection
+
+Administrator Game Review now defaults to Classic where supported. Changing the example or appearance applies immediately; the Choose example button is removed. Explicit appearance choices, Built-in-only games, Start/Reset and independent frozen references remain supported. Testing is WIP.
+
+
+## 2026-09-16 — Bulk selection for unused-file cleanup
+
+Added Select this page, Select all results, Clear selection, and a selected count/size summary to administrator unused-file review. Selections persist across result pages and reset when changing scan categories. Batch confirmation includes total count/size; progress reports completed and skipped/failed files. Stop after current file lets an in-flight request finish and retains unprocessed selections for review or retry. Existing per-file reference/identity checks and recoverable trash remain in force. Nothing is automatically selected. Testing is WIP.
+
+
+## 2026-09-16 — Administrator unused media cleanup
+
+Added Admin → Storage Management → Find unused files for avatars, nameplates, gesture files, imported-room media and room backgrounds. The compact, cancellable review protects saved private/community libraries, selected media, retained gesture versions and database history/room references without exposing protected files. Files younger than 24 hours and unsupported or unverifiable files are skipped. Administrators select candidates and confirm a move into private recoverable trash; restore never overwrites another file. Permanent deletion requires a separate confirmation and another reference check. Custom emoji files remain excluded so historical messages keep working. No automatic deletion or database migration. Testing is WIP.
+
+
 ## 2026-09-15 - Continuous game rematches and conversation
 
 Play Again keeps the game view open and carries the conversation into consent-linked rematches. Earlier-round messages remain available after reload for authorized returning players, while new messages and game records stay attached to their own match. Testing is WIP.

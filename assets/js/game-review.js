@@ -1,3 +1,8 @@
+const reviewSelector = document.getElementById('review-selector');
+for (const select of reviewSelector?.querySelectorAll('select') || []) {
+  select.addEventListener('change', () => reviewSelector.requestSubmit());
+}
+
 let actionGeneration = 0;
 for (const form of document.querySelectorAll('.review-action')) form.addEventListener('submit', async event => {
   event.preventDefault();

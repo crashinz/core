@@ -97,6 +97,7 @@ $rooms = $roomsStmt->fetchAll();
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/room-access.css')) ?>">
   <?php if ($canvasAvailable): ?><link rel="stylesheet" href="<?= e(app_url('/extensions/canvas/assets/canvas.css?v=20260828-checklist-r2')) ?>"><?php endif; ?>
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=e365788d6f6d')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/unused-image-cleanup.css?v=20260915')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/library-duplicate-review.css?v=20260914')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-user-id="<?= (int)$user['id'] ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
@@ -836,6 +837,26 @@ $rooms = $roomsStmt->fetchAll();
           <div class="admin-section-title">Storage Management</div>
           <div class="admin-section-sub">Review authenticated server files, their references, retention, risk classification, and cleanup state.</div>
           <?php if (($user['role'] ?? '') === 'admin'): ?>
+          <details class="admin-panel" id="admin-unused-images">
+            <summary>Find unused files</summary>
+            <p class="minor">Review unused avatars, nameplates, gesture files, imported-room media and backgrounds. Saved private/community libraries, retained gesture versions and room references are protected without displaying private contents. Files less than 24 hours old and unverifiable files are skipped. Custom emoji files are never included.</p>
+            <div class="cleanup-toolbar">
+              <label>Scan<select data-cleanup-kind aria-label="Cleanup folders"><option value="all">All cleanup folders</option><option value="avatar">Avatars</option><option value="nameplate">Nameplates</option><option value="gesture">Gesture files</option><option value="room">Imported-room files</option><option value="background">Room backgrounds</option></select></label>
+              <button type="button" class="btn btn-primary" data-cleanup-scan>Find unused files</button>
+              <button type="button" class="btn" data-cleanup-cancel hidden>Cancel scan</button>
+              <button type="button" class="btn" data-cleanup-trash>View cleanup trash</button>
+            </div>
+            <p class="minor" role="status" aria-live="polite" data-cleanup-status>Nothing is removed automatically. Select candidates to move into recoverable trash.</p>
+            <div class="cleanup-toolbar" role="group" aria-label="Cleanup selection">
+              <button type="button" class="btn" data-cleanup-select-page disabled>Select this page</button>
+              <button type="button" class="btn" data-cleanup-select-all disabled>Select all results</button>
+              <button type="button" class="btn" data-cleanup-clear disabled>Clear selection</button>
+              <span class="minor" role="status" aria-live="polite" data-cleanup-selection>0 files selected · 0 B</span>
+            </div>
+            <div class="cleanup-toolbar"><button type="button" class="btn" data-cleanup-stop hidden>Stop after current file</button></div>
+            <div data-cleanup-results></div><div class="cleanup-toolbar" data-cleanup-pages aria-label="Cleanup result pages"></div>
+            <div class="cleanup-toolbar"><button type="button" class="btn" data-cleanup-move disabled>Move selected to trash</button><button type="button" class="btn" data-cleanup-restore hidden disabled>Restore selected</button><button type="button" class="btn danger" data-cleanup-purge hidden disabled>Permanently delete selected</button></div>
+          </details>
           <details class="admin-panel" id="admin-library-duplicates">
             <summary>Find duplicates</summary>
             <p class="minor">Scan shared libraries and your own personal items for exact matches. Other members' private libraries are excluded. Gesture text, sound and poster must also match.</p>
@@ -1033,6 +1054,7 @@ $rooms = $roomsStmt->fetchAll();
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260913-clear-warning-box')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=e0ccdc9f5c28')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/lobby.js?v=20260913-compact-admin')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/unused-image-cleanup.js?v=20260915')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260914')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>
 </body>
