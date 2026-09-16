@@ -165,7 +165,7 @@
   }
   function schedulePendingSettlement(context, state, viewerId) {
     const pending = state?.pendingAction;
-    const isOwner = state?.phase === "pending-action"
+    const isOwner = !state?.botTask && state?.phase === "pending-action"
       && pending
       && String(pending.actorUserId || "") === String(viewerId);
     if (!isOwner) {
@@ -623,6 +623,17 @@
     chaosPanel(context, root, state, viewerId, hand);
     privateChoicePanel(context, root, state, viewerId, hand);
     if (state.phase === "deal" || state.phase === "setup" || state.phase === "waiting") { const setup = make("section", "pp-setup"), heading = make("h2", "", context.options?.displayName || "Puppy Panic!"); setup.append(heading, make("p", "", state.settings?.mischiefPack === "mischief" ? "Mischief Pack enabled" : "Core deck")); const deal = make("button", "pp-primary", "Deal puppies"); deal.disabled = !legalActions.includes("deal"); deal.addEventListener("click", () => act(context, "deal")); setup.append(deal); puppyPresentationOwners.get(root)?.popup(setup, heading, null, null, undefined, true); root.append(setup); }
+    const last = state.lastAction;
+    const recent = make('p', 'pp-recent-action');
+    recent.setAttribute('role', 'status');
+    if (last) {
+      const effectNames = { 'pile-on': 'Puppy Pile-On', nap: 'Nap Time', peek: 'Puppy Cam', shuffle: 'Squirrel!', favor: 'Puppy Eyes', reorder: "Trainer's Plan", 'target-attack': 'Fetch This!', flip: 'Toy Basket Flip', 'bottom-draw': 'Under the Couch', 'pair-steal': 'a matching pair', 'trio-request': 'a matching trio', 'discard-retrieve': 'five different titles' };
+      const who = Number(last.userId) ? context.memberName(String(last.userId)) : '';
+      recent.textContent = last.type === 'action-pending'
+        ? `${who} played ${effectNames[last.effect] || 'an action'}.`
+        : `${who ? who + ': ' : ''}${last.summary || ''}`;
+    }
+    root.append(recent);
     return root;
   }
   window.CoreChatPuppyPanic = { render };

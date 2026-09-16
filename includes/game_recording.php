@@ -4,7 +4,7 @@ declare(strict_types=1);
 /** Multiplayer Game Framework replay owner. Never included in player projections. */
 const GAME_RECORDING_FORMAT = 'corechat-game-replay';
 const GAME_RECORDING_VERSION = 1;
-const GAME_RECORDING_GAMES = ['spades', 'hearts', 'checkers', 'chess', 'backgammon', 'acey-deucy', 'battleship', 'chinese-checkers', 'uno'];
+const GAME_RECORDING_GAMES = ['spades', 'hearts', 'checkers', 'chess', 'backgammon', 'acey-deucy', 'battleship', 'chinese-checkers', 'uno', 'nested-four', 'blackjack', 'puppy-panic', 'five-dice'];
 const GAME_RECORDING_EVENT_BYTES = 4194304;
 const GAME_RECORDING_QUEUE_BYTES = 33554432;
 
@@ -91,7 +91,8 @@ function game_recording_step(string $game, array $before, int $actor, string $ac
     $step = ['actorId' => $actor, 'actorType' => $actor < 0 ? 'bot' : 'human', 'action' => $action,
         'payload' => game_recording_pick($payload, $adapter['payloadKeys'] ?? []),
         'before' => game_recording_state($game, $before), 'after' => game_recording_state($game, $after)];
-    $step['randomness'] = game_recording_pick((array)($context['authoritativeRandomness'] ?? []), ['deck', 'dice', 'bytes', 'initialDealerIndex', 'dealerIndex', 'seed', 'reshuffleSeed', 'starterIndex', 'openingRolls']);
+    $step['randomness'] = game_recording_pick((array)($context['authoritativeRandomness'] ?? []), ['deck', 'dice', 'bytes', 'initialDealerIndex', 'dealerIndex', 'seed', 'reshuffleSeed', 'starterIndex', 'openingRolls', 'shoe', 'readySeed', 'starterOffset']);
+    if ($game === 'five-dice' && isset($context['randomnessRequestId'])) $step['randomness']['requestId'] = (string)$context['randomnessRequestId'];
     if (isset($context['nowUnixMs'])) $step['nowUnixMs'] = (int)$context['nowUnixMs'];
     if ($trace !== null) $step['botDecision'] = game_recording_pick($trace,
         ['engine', 'difficulty', 'legal', 'selected', 'reason', 'candidateScores', 'publicObservation', 'elapsedMs', 'bid', 'candidates', 'returning', 'cardCount']);
@@ -140,7 +141,12 @@ function game_recording_capture_core(PDO $pdo, string $publicId, string $kind, a
             if (in_array($game, ['spades','battleship'], true)) $files[] = 'paced_bot_support.php';
             if ($game === 'chess') $files[] = 'chess_bot_support.php';
             if ($game === 'checkers') $files[] = 'checkers_bot_support.php';
+            if ($game === 'five-dice') $files[] = 'five_dice_bot_support.php';
+            if ($game === 'puppy-panic') $files[] = 'puppy_panic_bot_support.php';
+            if ($game === 'blackjack') $files = array_merge($files, ['blackjack_bot_support.php','blackjack_expert.php']);
+            if ($game === 'acey-deucy') $files[] = 'acey_deucy_bot_support.php';
             if ($game === 'backgammon') $files[] = 'backgammon_bot_support.php';
+            if ($game === 'nested-four') $files[] = 'nested_four_bot_support.php';
             $hashes = [];
             foreach ($files as $file) $hashes[$file] = hash_file('sha256', __DIR__ . '/' . $file);
             $metadata = ['format' => GAME_RECORDING_FORMAT, 'formatVersion' => GAME_RECORDING_VERSION,

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/puppy_panic_bot_support.php';
 
 const PUPPY_PANIC_EXTENSION_ID = 'puppy-panic';
 const PUPPY_PANIC_STATE_SCHEMA_VERSION = 1;
@@ -11,6 +12,8 @@ function puppy_panic_extension_adapter(): array
 {
     return [
         'id' => PUPPY_PANIC_EXTENSION_ID,
+        'recordingAdapter'=>'puppy_panic_recording_adapter',
+        'projectVirtualMembers'=>'puppy_panic_project_virtual_members',
         'initialState' => 'puppy_panic_initial_state',
         'applyAction' => 'puppy_panic_apply_action',
         'validateSettings' => 'puppy_panic_validate_settings',
@@ -19,6 +22,8 @@ function puppy_panic_extension_adapter(): array
         'projectState' => 'puppy_panic_project_state',
         'randomnessPurposes' => [
             'deal' => 'puppy-panic-deal',
+            'bot-deal'=>'puppy-panic-deal',
+            'bot-settle-random'=>'puppy-panic-random-effect',
             'settle-random' => 'puppy-panic-random-effect',
         ],
         'deriveRandomness' => 'puppy_panic_derive_randomness',
@@ -42,14 +47,22 @@ function puppy_panic_presentation_status(PDO $pdo, ?string $requestedPack = null
 
 function puppy_panic_validate_settings(array $settings, string $mode, array $definition = []): array
 {
-    if (array_diff(array_keys($settings), ['mischiefPack'])) {
+    $allowed=['mischiefPack'];for($seat=1;$seat<=5;$seat++)$allowed[]='botSeat'.$seat.'Difficulty';
+    if (array_diff(array_keys($settings), $allowed)) {
         throw new MultiplayerGameException('A game option is not supported.', 'PUPPY_PANIC_SETTINGS_INVALID', 422);
     }
     $pack = strtolower(trim((string)($settings['mischiefPack'] ?? 'core')));
     if (!in_array($pack, ['core', 'mischief'], true)) {
         throw new MultiplayerGameException('Choose the Core deck or Mischief Pack.', 'PUPPY_PANIC_SETTINGS_INVALID', 422);
     }
-    return ['mischiefPack' => $pack];
+    $out=['mischiefPack'=>$pack];
+    for($seat=1;$seat<=5;$seat++){
+        $key='botSeat'.$seat.'Difficulty';$level=$settings[$key]??'none';
+        if(!is_string($level)||!in_array($level,['none','easy','normal','expert'],true))throw new MultiplayerGameException('Choose a listed bot difficulty.','PUPPY_PANIC_SETTINGS_INVALID',422);
+        if($mode!=='practice'&&$level!=='none')throw new MultiplayerGameException('Games with bots are Practice only.','MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY',422);
+        if($mode==='practice')$out[$key]=$level;
+    }
+    return $out;
 }
 
 function puppy_panic_settings_projection(array $settings, string $mode, array $definition = []): array
@@ -57,7 +70,7 @@ function puppy_panic_settings_projection(array $settings, string $mode, array $d
     $settings = puppy_panic_validate_settings($settings, $mode, $definition);
     return [
         'label' => 'Game Options',
-        'description' => 'Two through five human players. Last puppy wrangler still in the game wins.',
+        'description' => 'Two through five players, including optional Practice bots. Last puppy wrangler still in the game wins.',
         'classificationLabel' => 'Accepted deck options',
         'controls' => [[
             'key' => 'mischiefPack',
@@ -128,6 +141,8 @@ function puppy_panic_card_specs(bool $includeMischief = true): array
 
 function puppy_panic_catalog(bool $includeMischief = true): array
 {
+    static $cache=[];
+    if(isset($cache[(int)$includeMischief]))return $cache[(int)$includeMischief];
     $catalog = [];
     foreach (puppy_panic_card_specs($includeMischief) as [$slug, $title, $kind, $effect, $count]) {
         for ($copy = 1; $copy <= $count; $copy++) {
@@ -135,7 +150,7 @@ function puppy_panic_catalog(bool $includeMischief = true): array
             $catalog[$id] = compact('id', 'slug', 'title', 'kind', 'effect');
         }
     }
-    return $catalog;
+    return $cache[(int)$includeMischief]=$catalog;
 }
 
 function puppy_panic_card(array $state, string $cardId): array
@@ -163,14 +178,17 @@ function puppy_panic_derive_randomness(string $canonicalReveal, string $actionTy
         array_intersect_key((array)($context['settings'] ?? []), ['mischiefPack' => true]),
         (string)($context['mode'] ?? 'practice')
     );
+    $actionType=match($actionType){'bot-deal'=>'deal','bot-settle-random'=>'settle-random',default=>$actionType};
     $seed = hash('sha256', $canonicalReveal . '|puppy-panic|' . $actionType);
     if ($actionType === 'deal') {
         $deck = array_keys(puppy_panic_catalog($settings['mischiefPack'] === 'mischief'));
         $players = array_values(array_filter((array)($context['members'] ?? []), static fn(array $member): bool => in_array((string)($member['role'] ?? ''), ['master', 'player'], true) && (string)($member['membershipStatus'] ?? '') === 'active'));
+        $ids=array_map(static fn($m)=>(int)$m['userId'],$players);$seats=[];foreach($players as$m)$seats[(int)$m['seat']]=(int)$m['userId'];
+        [$allPlayers]=puppy_panic_bot_fill_seats($ids,(array)($context['settings']??[]),(string)($context['mode']??'practice'),$seats);
         return [
             'deck' => ocx_game_random_permutation($seed, $deck, 'puppy-panic-deal'),
             'readySeed' => hash('sha256', $seed . '|ready'),
-            'starterOffset' => $players ? hexdec(substr($seed, 0, 8)) % count($players) : 0,
+            'starterOffset' => $allPlayers ? hexdec(substr($seed, 0, 8)) % count($allPlayers) : 0,
         ];
     }
     return ['seed' => $seed];
@@ -179,10 +197,13 @@ function puppy_panic_derive_randomness(string $canonicalReveal, string $actionTy
 function puppy_panic_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) < 2 || count($players) > 5 || min($players) < 1) throw new MultiplayerGameException('This game requires two through five authenticated players.', 'PUPPY_PANIC_PLAYER_SET_INVALID', 422);
+    if (count($players) < 1 || count($players) > 5 || min($players) < 1) throw new MultiplayerGameException('This game requires two through five authenticated players.', 'PUPPY_PANIC_PLAYER_SET_INVALID', 422);
     $settings = puppy_panic_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    [$players,$bots]=puppy_panic_bot_fill_seats($players,$settings,(string)($context['mode']??'practice'),(array)($context['humanSeats']??[]));
+    if(count($players)<2||count($players)>5)throw new MultiplayerGameException('Puppy Panic needs two through five players or Practice bots.','PUPPY_PANIC_PLAYER_SET_INVALID',422);
     return [
         'schemaVersion' => PUPPY_PANIC_STATE_SCHEMA_VERSION,
+        'bots'=>$bots,'botSequence'=>0,
         'settings' => $settings,
         'turnOrder' => $players,
         'turnIndex' => 0,
@@ -381,12 +402,12 @@ function puppy_panic_settle_pending(array $state, int $actorUserId, string $acti
     if ($effect === 'shuffle') {
         $seed = (string)($context['authoritativeRandomness']['seed'] ?? '');
         if (!preg_match('/^[a-f0-9]{64}$/', $seed)) throw new MultiplayerGameException('Verified shuffle authority is unavailable.', 'PUPPY_PANIC_RANDOMNESS_INVALID', 409);
-        $state['drawPile'] = ocx_game_random_permutation($seed, $state['drawPile'], 'puppy-panic-shuffle'); puppy_panic_add_history($state, 'shuffle', $owner, 'The draw pile was shuffled.'); return ['state' => $state, 'turnUserId' => $owner];
+        $state['privatePeek']=null; $state['drawPile'] = ocx_game_random_permutation($seed, $state['drawPile'], 'puppy-panic-shuffle'); puppy_panic_add_history($state, 'shuffle', $owner, 'The draw pile was shuffled.'); return ['state' => $state, 'turnUserId' => $owner];
     }
-    if ($effect === 'favor') { $target = (int)$payload['targetUserId']; $state['phase'] = 'favor'; $state['pendingChoice'] = ['kind' => 'favor', 'actorUserId' => $owner, 'targetUserId' => $target]; return ['state' => $state, 'turnUserId' => $target]; }
+    if ($effect === 'favor') { $target = (int)$payload['targetUserId']; if(empty($state['hands'][(string)$target])) { puppy_panic_add_history($state,'favor-complete',$target,'No card was available to give.',['targetUserId'=>$owner]); return ['state'=>$state,'turnUserId'=>$owner]; } $state['phase'] = 'favor'; $state['pendingChoice'] = ['kind' => 'favor', 'actorUserId' => $owner, 'targetUserId' => $target]; return ['state' => $state, 'turnUserId' => $target]; }
     if ($effect === 'reorder') { $state['phase'] = 'reorder'; $state['pendingChoice'] = ['kind' => 'reorder', 'actorUserId' => $owner, 'cards' => array_reverse(array_slice($state['drawPile'], -3))]; return ['state' => $state, 'turnUserId' => $owner]; }
     if ($effect === 'target-attack') { $target = (int)$payload['targetUserId']; $owed = max(1, (int)$state['owedTurns']) + 2; puppy_panic_add_history($state, 'fetch-this', $owner, 'A chosen player now owes extra turns.', ['targetUserId' => $target]); $turnUserId = puppy_panic_advance($state, $owed, $target); return ['state' => $state, 'turnUserId' => $turnUserId]; }
-    if ($effect === 'flip') { if (count($state['drawPile']) > 1) { $bottom = array_shift($state['drawPile']); $top = array_pop($state['drawPile']); array_unshift($state['drawPile'], $top); $state['drawPile'][] = $bottom; } puppy_panic_add_history($state, 'flip', $owner, 'The top and bottom cards traded places.'); return ['state' => $state, 'turnUserId' => $owner]; }
+    if ($effect === 'flip') { $state['privatePeek']=null; if (count($state['drawPile']) > 1) { $bottom = array_shift($state['drawPile']); $top = array_pop($state['drawPile']); array_unshift($state['drawPile'], $top); $state['drawPile'][] = $bottom; } puppy_panic_add_history($state, 'flip', $owner, 'The top and bottom cards traded places.'); return ['state' => $state, 'turnUserId' => $owner]; }
     if ($effect === 'bottom-draw') return puppy_panic_draw($state, $owner, true);
     if ($effect === 'pair-steal') {
         $target = (int)$payload['targetUserId']; $hand = array_values((array)$state['hands'][(string)$target]);
@@ -407,7 +428,7 @@ function puppy_panic_settle_pending(array $state, int $actorUserId, string $acti
     throw new MultiplayerGameException('The pending action is unsupported.', 'PUPPY_PANIC_ACTION_INVALID', 422);
 }
 
-function puppy_panic_project_state(array $state, int $viewerUserId, array $context): array
+function puppy_panic_project_state_core(array $state, int $viewerUserId, array $context): array
 {
     $hands = (array)($state['hands'] ?? []);
     $drawPile = (array)($state['drawPile'] ?? []);
@@ -437,11 +458,11 @@ function puppy_panic_project_state(array $state, int $viewerUserId, array $conte
         $choice = $pendingChoice; $projection['pendingChoice'] = ['kind' => (string)$choice['kind'], 'actorUserId' => (int)($choice['actorUserId'] ?? 0), 'targetUserId' => (int)($choice['targetUserId'] ?? 0)];
         if (((string)$choice['kind'] === 'chaos' || (string)$choice['kind'] === 'reorder') && (int)$choice['actorUserId'] === $viewerUserId) $projection['pendingChoice'] = $choice;
     }
-    if (is_array($pendingAction)) $projection['pendingAction'] = array_diff_key($pendingAction, ['payload' => true, 'cardIds' => true]);
+    if (is_array($pendingAction)) $projection['pendingAction'] = array_diff_key($pendingAction, ['payload' => true, 'cardIds' => true]) + ['targetUserId'=>(int)($pendingAction['payload']['targetUserId']??0)];
     return $projection;
 }
 
-function puppy_panic_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function puppy_panic_apply_action_rules(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== PUPPY_PANIC_STATE_SCHEMA_VERSION || !empty($state['completed'])) throw new MultiplayerGameException('The game state is unavailable.', 'PUPPY_PANIC_STATE_INVALID', 409);
     if (!in_array($actorUserId, array_map('intval', $state['turnOrder']), true) || !empty($state['eliminated'][(string)$actorUserId])) throw new MultiplayerGameException('Only an active player may act.', 'PUPPY_PANIC_PLAYER_INVALID', 403);
@@ -470,7 +491,7 @@ function puppy_panic_apply_action(array $state, int $actorUserId, string $action
     if ($action === 'reorder') {
         $choice = (array)($state['pendingChoice'] ?? []); if ((string)$state['phase'] !== 'reorder' || (int)($choice['actorUserId'] ?? 0) !== $actorUserId) throw new MultiplayerGameException('There are no cards to reorder.', 'PUPPY_PANIC_REORDER_INVALID', 409);
         $order = array_values(array_map('strval', (array)($payload['cards'] ?? []))); $cards = array_values(array_map('strval', (array)$choice['cards'])); $a = $order; $b = $cards; sort($a); sort($b); if ($a !== $b || count($order) !== count($cards)) throw new MultiplayerGameException('Return every viewed card exactly once.', 'PUPPY_PANIC_REORDER_INVALID', 422);
-        for ($i = 0; $i < count($cards); $i++) array_pop($state['drawPile']); foreach (array_reverse($order) as $cardId) $state['drawPile'][] = $cardId; $state['phase'] = 'playing'; $state['pendingChoice'] = null; puppy_panic_add_history($state, 'reorder', $actorUserId, 'The next cards were reordered privately.'); return ['state' => $state, 'turnUserId' => $actorUserId];
+        for ($i = 0; $i < count($cards); $i++) array_pop($state['drawPile']); foreach (array_reverse($order) as $cardId) $state['drawPile'][] = $cardId; $state['phase'] = 'playing'; $state['pendingChoice'] = null; $state['privatePeek']=['userId'=>$actorUserId,'cards'=>$order]; puppy_panic_add_history($state, 'reorder', $actorUserId, 'The next cards were reordered privately.'); return ['state' => $state, 'turnUserId' => $actorUserId];
     }
     if ((string)$state['phase'] !== 'playing') throw new MultiplayerGameException('Finish the current private decision first.', 'PUPPY_PANIC_ACTION_BLOCKED', 409);
     ocx_game_assert_turn($state, $actorUserId);

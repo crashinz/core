@@ -4,14 +4,14 @@ declare(strict_types=1);
 function game_review_snapshot_manifest(): array
 {
     static $manifest;
-    return $manifest ??= json_decode((string)file_get_contents(__DIR__.'/game_review_snapshot_v1.json'),true,512,JSON_THROW_ON_ERROR);
+    return $manifest ??= json_decode((string)file_get_contents(__DIR__.'/game_review_snapshot_v2.json'),true,512,JSON_THROW_ON_ERROR);
 }
 
 function game_review_snapshot_file(string $key): array
 {
     $manifest=game_review_snapshot_manifest();$entry=$manifest['files'][$key]??null;
     if(!$entry)throw new MultiplayerGameException('Reference file not found.','GAME_REVIEW_REFERENCE_MISSING',404);
-    $root=security_private_storage_directory('game-review-snapshots').'/v1';$path=$root.'/'.$key;
+    $root=security_private_storage_directory('game-review-snapshots').'/v2';$path=$root.'/'.$key;
     if(!is_file($path))throw new MultiplayerGameException(str_starts_with($key,'media/')?'Classic reference media is not installed for this game. Use Copy installed Classic media in Game Review.':'The optional reference pack is not installed completely. Download and install it in Game Review.','GAME_REVIEW_REFERENCE_MISSING',409);
     if(!hash_equals($entry['sha256'],hash_file('sha256',$path)))throw new MultiplayerGameException('The frozen reference has changed. Restore its private backup.','GAME_REVIEW_REFERENCE_INTEGRITY',409);
     return $entry+['path'=>$path];

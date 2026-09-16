@@ -4,7 +4,7 @@ require __DIR__.'/includes/base.php';require_once __DIR__.'/includes/game_review
 $user=require_user();security_protect_private_response();
 try {
     game_review_assert_admin($user);$path=(string)($_SERVER['PATH_INFO']??'');
-    if(!str_starts_with($path,'/v1/'))throw new MultiplayerGameException('Reference version not found.','GAME_REVIEW_REFERENCE_MISSING',404);
+    if(!str_starts_with($path,'/v2/'))throw new MultiplayerGameException('Reference version not found.','GAME_REVIEW_REFERENCE_MISSING',404);
     $key=substr($path,4);
     if($key==='api/game_framework.php')json_out(game_review_snapshot_dispatch($user,$_SERVER['REQUEST_METHOD']==='POST'?input_json():$_GET));
     if(in_array($key,['api/game_media.php','api/five_dice_media.php'],true)){

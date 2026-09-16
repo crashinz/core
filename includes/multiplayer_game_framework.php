@@ -2188,7 +2188,7 @@ function multiplayer_game_shared_progress_completed(
     if ($extensionId === 'chess') return $action === 'move';
     if ($extensionId === 'checkers') return $action === 'move' && ($beforeTurn !== $afterTurn || !empty($after['completed']));
     if ($extensionId === 'battleship') return in_array($action, ['attack','bot-step'], true);
-    if ($extensionId === 'five-dice') return $action === 'score';
+    if ($extensionId === 'five-dice') return $action === 'score' || ($action === 'bot-step' && ($beforeTurn !== $afterTurn || !empty($after['completed'])));
     if ($extensionId === 'spades') return in_array($action, ['bid', 'offer-partner-pass', 'respond-partner-pass', 'play', 'bot-step'], true);
     if ($extensionId === 'blackjack') return in_array($action, ['bet', 'insurance', 'hit', 'stand', 'double', 'split', 'surrender', 'next-round'], true);
     if (in_array($extensionId, ['backgammon-first-party', 'acey-deucy'], true)) {
@@ -2201,7 +2201,7 @@ function multiplayer_game_shared_progress_completed(
     }
     if (in_array($extensionId, ['chinese-checkers', 'nested-four'], true)) {
         // Nested Four selection commits a piece but does not complete its move.
-        return ($action === 'move' || ($extensionId === 'chinese-checkers' && $action === 'bot-step'))
+        return ($action === 'move' || (in_array($extensionId,['chinese-checkers','nested-four'],true) && $action === 'bot-step'))
             && (int)($after['moveNumber'] ?? 0) > (int)($before['moveNumber'] ?? 0);
     }
     if ($extensionId === 'hearts' && $action === 'bot-step') return (int)($after['playSequence'] ?? 0) > (int)($before['playSequence'] ?? 0) || ($before['phase'] ?? '') !== ($after['phase'] ?? '');
@@ -2216,7 +2216,7 @@ function multiplayer_game_shared_progress_completed(
             && (int)($after['playSequence'] ?? 0) > (int)($before['playSequence'] ?? 0);
     }
     if ($extensionId === 'puppy-panic') {
-        return in_array($action, ['deal', 'draw', 'play', 'combo', 'counter', 'settle-action', 'settle-random', 'calm', 'eliminate', 'give-card', 'reorder', 'resign'], true)
+        return in_array($action, ['bot-step','bot-deal','bot-settle','bot-settle-random','deal', 'draw', 'play', 'combo', 'counter', 'settle-action', 'settle-random', 'calm', 'eliminate', 'give-card', 'reorder', 'resign'], true)
             && (int)($after['actionSequence'] ?? 0) > (int)($before['actionSequence'] ?? 0);
     }
     return false;

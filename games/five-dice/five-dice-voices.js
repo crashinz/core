@@ -64,7 +64,9 @@ export function classicRecordReaction(before, after, viewerUserId) {
   const categories = ["ones","twos","threes","fours","fives","sixes","three-kind","four-kind","full-house","small-straight","large-straight","chance","yahtzee"];
   if (!Number.isFinite(oldBest) || !Number.isFinite(best) || best <= oldBest || best !== b.total
       || !categories.every(k => Number.isFinite(b.scorecard?.[k]))) return null;
-  for (const player of Object.values(after.state.players)) {
+  for (const [playerId, player] of Object.entries(after.state.players)) {
+    // Practice bots have no account records; they must not suppress a human record cue.
+    if (Number(playerId) < 0 && after.state.bots?.[playerId]?.userId === Number(playerId)) continue;
     if (player.personalBest?.mode !== after.mode) return null;
     const other = player.personalBest.score == null ? 0 : player.personalBest.score;
     if (!Number.isFinite(other) || other > best) return null;

@@ -477,3 +477,7 @@ body[data-extension="nested-four"] .game-settings-grid > .nf-board-size-option >
     white-space: nowrap;
   }
 }
+
+.nf-cell.nf-last-destination { outline:2px solid #f2d795; outline-offset:-4px; }
+.nf-cell:has(.nf-traveling) { z-index:15; overflow:visible; }
+.nf-traveling { pointer-events:none; z-index:16; }

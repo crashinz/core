@@ -10,6 +10,54 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Game Review reference pack v2 - 2026-09-16
+
+- Add the approved Five Dice blank, tumbling and smooth-landing presentation to a new frozen reference pack, preserving all other game references and sequences.
+- Add v2 installation alongside the private v1 backup and verified reuse of its Classic media, with an updated optional download.
+- Testing is WIP.
+
+## Five Dice smooth roll landing - 2026-09-16
+
+- Add a gradual landing transition from tumbling dice into the original resting artwork, completing before the rolling view clears. Keep held dice still and retain existing roll results and timing.
+- Testing is WIP.
+
+## Five Dice edge-over-edge rolling - 2026-09-16
+
+- Add six-sided Built-in dice that tip over their edges during rolls, with fixed face numbers and the real result at rest. Preserve kept dice, Classic motion and existing timing.
+- Testing is WIP.
+
+## Five Dice rolling motion - 2026-09-16
+
+- Add visible Built-in dice rotations and changing faces during rolls, settling on the actual result while kept dice remain still. Preserve Classic rolling artwork and existing sound/timing.
+- Testing is WIP.
+
+## Five Dice unrolled dice - 2026-09-16
+
+- Add blank Built-in dice before the first roll so placeholder values cannot look like a Yahtzee. Preserve Classic unrolled presentation, real rolled faces and all game/bot rules.
+- Testing is WIP.
+
+## Five Dice full-scorecard Expert - 2026-09-16
+Added full-scorecard planning to Five Dice Expert with generated strategy values for the existing Joker and bonus rules, preserved Easy/Normal play and readable pacing, and added a safe fallback when strategy data is unavailable. Added reproducible first-party table generation and research attribution in the consolidated notices. Testing is WIP.
+
+## Five Dice Practice bots - 2026-09-16
+Added Easy, Normal and Expert Five Dice bots in optional empty lobby seats, with Practice-only play, visible holds and rolls, and below-board thinking and retry controls. Added scorecard-aware probability search, bot-aware outcomes, protected game recordings and save/rematch coverage while preserving solo play. Testing is WIP.
+
+## Puppy Panic Practice bots - 2026-09-16
+Added Easy, Normal and Expert Practice bots for the Core deck and Mischief Pack, selectable in empty lobby seats. Added paced turns and counters, below-table thinking and last-move feedback, protected game recordings and save/rematch coverage. Added safeguards for private card views and empty-hand card requests, plus a rectangular default avatar that fits the Puppy Panic portrait frame. Testing is WIP.
+
+## Blackjack Expert - 2026-09-16
+Added a qualified Expert Practice bot with exposed-card memory, count-informed hand decisions and betting based on public standings and rounds remaining. Added shuffle/legacy-memory safeguards and recording/save/rematch coverage. Existing Easy and Normal play is preserved. Testing is WIP.
+
+## Blackjack Practice bots - 2026-09-16
+Added optional Easy and Normal Blackjack players in empty lobby seats, Practice-only play, exact-rule basic strategy, readable per-action pacing and bottom thinking/retry feedback. Added shared Blackjack move/score recordings and bot decision traces, with saves/rematches and hidden-card protection. Testing is WIP.
+
+## Acey Deucy Practice bots - 2026-09-16
+Added optional Easy, Normal and Expert Acey Deucy bots for Current and European Double-Double rules, with Practice-only lobby seats, variant-aware dice-sequence and reply search, verified rolls, paced individual checker moves, bottom thinking/retry feedback, recordings, saves and rematches. Added visible Built-in checker travel and registered bot win/hit presentation. Testing is WIP.
+
+## Nested Four Practice bots - 2026-09-16
+
+Added optional Easy, Normal and Expert Nested Four bots for both reserve-covering rules, with remembered public moves, committed-piece search, Practice-only lobby seats, authoritative move validation and shared game recordings. Added paced visible selection and movement for humans and bots, saved-game memory, rematch support and reserved bottom thinking/retry feedback. Testing is WIP.
+
 ## Chinese Checkers guide colors - 2026-09-16
 
 Added matching marble colors to the goal triangle, labels and direction arrow. Testing is WIP.

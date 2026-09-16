@@ -10,16 +10,25 @@ function multiplayer_game_has_seat_choices(array $definition): bool
 function multiplayer_game_bot_slots(array $definition): array
 {
     return match ((string)($definition['extensionId'] ?? '')) {
-        'spades', 'hearts' => [1, 2, 3, 4],
+        'spades', 'hearts', 'five-dice' => [1, 2, 3, 4],
         'uno' => range(1, 10),
+        'blackjack', 'puppy-panic' => range(1,5),
         'chinese-checkers' => range(1,6),
-        'battleship', 'chess', 'checkers', 'backgammon-first-party' => [2],
+        'battleship', 'chess', 'checkers', 'backgammon-first-party', 'nested-four', 'acey-deucy' => [2],
         default => [],
     };
 }
 
 function multiplayer_game_bot_choices(array $definition): array
 {
+    if (($definition['extensionId'] ?? '') === 'five-dice') { require_once __DIR__ . '/five_dice_bot_support.php'; return five_dice_bot_choices(); }
+    if (($definition['extensionId'] ?? '') === 'puppy-panic') { require_once __DIR__ . '/puppy_panic_bot_support.php'; return puppy_panic_bot_choices(); }
+    if (($definition['extensionId'] ?? '') === 'blackjack') { require_once __DIR__ . '/blackjack_bot_support.php'; return blackjack_bot_choices(); }
+    if (($definition['extensionId'] ?? '') === 'acey-deucy') { require_once __DIR__ . '/acey_deucy_bot_support.php'; return acey_deucy_bot_choices(); }
+    if (($definition['extensionId'] ?? '') === 'nested-four') {
+        require_once __DIR__ . '/nested_four_bot_support.php';
+        return nested_four_bot_choices();
+    }
     if (($definition['extensionId'] ?? '') === 'chinese-checkers') {
         require_once __DIR__ . '/chinese_checkers_bot_support.php';
         return chinese_checkers_bot_choices();
@@ -81,11 +90,11 @@ function multiplayer_game_bot_lobby_projection(array $definition, array $session
             'difficulty' => $difficulty, 'editable' => $isHost && !$occupied];
     }
     return ['choices' => multiplayer_game_bot_choices($definition),
-        'strengthNote' => match ($definition['extensionId'] ?? '') { 'chinese-checkers' => 'Practice bots use classical JumpStar-derived evaluation. Difficulty names are relative levels, not Elo ratings.', 'hearts' => 'Easy uses simple legal play; Normal considers passing, played cards and shooting the moon; Expert adds a short lookahead. Practice only.', 'uno' => 'Easy uses simple legal play; Normal manages colors and action cards. Practice only.', 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), 'backgammon-first-party' => backgammon_bot_strength_note(), default => '' },
+        'strengthNote' => match ($definition['extensionId'] ?? '') { 'five-dice'=>'Easy keeps matching dice. Normal compares one reroll; Expert plans both remaining rerolls. Both consider the scorecard and bonuses. Practice only.', 'puppy-panic'=>'Practice bots use their own hand and permitted private views. Easy draws simply; Normal uses survival cards and counters; Expert manages danger and turn debt more carefully. Both decks supported.', 'blackjack' => 'Easy uses simple hit/stand choices. Normal uses basic strategy. Expert remembers exposed cards and adjusts bets to the standings and rounds left. Bots use only visible cards. Practice only.', 'acey-deucy' => 'Practice bots follow the selected Acey Deucy rules. Easy is forgiving; Normal plans dice sequences; Expert also considers replies. These are relative levels, not ratings.', 'nested-four' => 'Practice bots remember observed pieces. Normal plans replies; Expert searches farther. Difficulty names are relative, not ratings.', 'chinese-checkers' => 'Practice bots use classical JumpStar-derived evaluation. Difficulty names are relative levels, not Elo ratings.', 'hearts' => 'Easy uses simple legal play; Normal considers passing, played cards and shooting the moon; Expert adds a short lookahead. Practice only.', 'uno' => 'Easy uses simple legal play; Normal manages colors and action cards. Practice only.', 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), 'backgammon-first-party' => backgammon_bot_strength_note(), default => '' },
         'options' => $options, 'isHost' => $isHost, 'mode' => $session['mode'],
         'settingsSha256' => $session['settings_sha256'], 'playerSetSha256' => $playerSetSha,
         'showStart' => $isHost && !multiplayer_game_has_seat_choices($definition),
-        'canStart' => $isHost && (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : (($definition['extensionId'] ?? '') === 'hearts' ? in_array($readyCount, [2,4], true) : (($definition['extensionId'] ?? '') === 'chinese-checkers' ? $readyCount>=2 && $readyCount<=6 : $readyCount === (int)$definition['maxPlayers']))) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
+        'canStart' => $isHost && (($definition['extensionId'] ?? '') === 'five-dice' ? $readyCount >= (int)($session['mode']==='practice'?1:2) && $readyCount<=4 : (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : (($definition['extensionId'] ?? '') === 'hearts' ? in_array($readyCount, [2,4], true) : (in_array($definition['extensionId'] ?? '', ['chinese-checkers','blackjack','puppy-panic'], true) ? $readyCount>=2 && $readyCount<=(int)$definition['maxPlayers'] : $readyCount === (int)$definition['maxPlayers']))) ) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
 }
 
 /** Update one empty slot atomically with mode/acceptance; never start or displace a person. */

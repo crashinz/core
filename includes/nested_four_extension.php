@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/nested_four_bot_support.php';
 
 const NESTED_FOUR_EXTENSION_ID = 'nested-four';
 const NESTED_FOUR_STATE_SCHEMA_VERSION = 1;
@@ -19,6 +20,7 @@ function nested_four_extension_adapter(): array
         'settingsProjection' => 'nested_four_settings_projection',
         'rulesProjection' => 'nested_four_rules_projection',
         'projectState' => 'nested_four_project_state',
+        'projectVirtualMembers' => 'nested_four_project_virtual_members',
         'presentationStatus' => 'nested_four_presentation_status',
         'openingProcedure' => 'fixed-seats-first-player-starts',
         'rematchSeatRotation' => true,
@@ -46,9 +48,13 @@ function nested_four_validate_settings(array $settings, string $mode, array $def
     if (!in_array($rule, [NESTED_FOUR_RESERVE_COVER_ORIGINAL, NESTED_FOUR_RESERVE_COVER_CUSTOM], true)) {
         throw new MultiplayerGameException('Choose Original Gobblet rule or Custom covering rule.', 'NESTED_FOUR_SETTINGS_INVALID', 422);
     }
-    unset($settings['reserveCoveringRule']);
+    $difficulty=$settings['botSeat2Difficulty'] ?? 'none';
+    if (!in_array($difficulty,array_column(nested_four_bot_choices(),'value'),true)) throw new MultiplayerGameException('Choose a listed bot level.','NESTED_FOUR_SETTINGS_INVALID',422);
+    if ($difficulty!=='none' && $mode!=='practice') throw new MultiplayerGameException('Games with bots are Practice only.','MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY',422);
+    unset($settings['reserveCoveringRule'], $settings['botSeat2Difficulty']);
     $validated = nested_four_validate_settings_legacy($settings, $mode, $definition);
     $validated['reserveCoveringRule'] = $rule;
+    if ($mode==='practice') $validated['botSeat2Difficulty']=$difficulty;
     return $validated;
 }
 function nested_four_validate_settings_legacy(array $settings, string $mode, array $definition = []): array
@@ -80,7 +86,7 @@ function nested_four_settings_projection(array $settings, string $mode, array $d
     nested_four_validate_settings($settings, $mode, $definition);
     return [
         'label' => 'Game Options',
-        'description' => 'Nested Four for exactly two authenticated human players.',
+        'description' => 'Nested Four for two players. Add an optional Practice bot to the empty second seat in the waiting lobby.',
         'classificationLabel' => 'Accepted Nested Four options',
         'controls' => [[
             'key' => 'reserveCoveringRule',
@@ -266,7 +272,14 @@ function nested_four_position_key(array $state): string
 function nested_four_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) !== 2 || min($players) < 1) {
+    $mode=(string)($context['mode'] ?? 'practice');
+    $settings=nested_four_validate_settings((array)($context['settings'] ?? []),$mode);
+    $bots=[];
+    if (count($players)===1 && $players[0]>0 && ($settings['botSeat2Difficulty'] ?? 'none')!=='none' && $mode==='practice') {
+        $level=$settings['botSeat2Difficulty'];$players[]=-6902;
+        $bots['-6902']=['userId'=>-6902,'seat'=>2,'difficulty'=>$level,'displayName'=>ucfirst($level).' Bot','engine'=>NESTED_FOUR_BOT_ENGINE];
+    }
+    if (count($players) !== 2 || ($bots===[] && min($players) < 1)) {
         throw new MultiplayerGameException('Nested Four requires exactly two authenticated players.', 'NESTED_FOUR_PLAYER_SET_INVALID', 422);
     }
     nested_four_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
@@ -283,6 +296,7 @@ function nested_four_initial_state(array $playerUserIds, array $context = []): a
     }
     $state = [
         'schemaVersion' => NESTED_FOUR_STATE_SCHEMA_VERSION,
+        'bots'=>$bots, 'settings'=>$settings,
         'reserveCoveringRule' => ((string)(($context['settings'] ?? [])['reserveCoveringRule'] ?? NESTED_FOUR_RESERVE_COVER_ORIGINAL) === NESTED_FOUR_RESERVE_COVER_CUSTOM ? NESTED_FOUR_RESERVE_COVER_CUSTOM : NESTED_FOUR_RESERVE_COVER_ORIGINAL),
         'turnOrder' => $players,
         'turnIndex' => 0,
@@ -301,6 +315,7 @@ function nested_four_initial_state(array $playerUserIds, array $context = []): a
         'terminalReason' => null,
     ];
     $state['positionCounts'][nested_four_position_key($state)] = 1;
+    if ($bots!==[]) $state['botMemory']=nested_four_memory_initial($players);
     return $state;
 }
 
@@ -461,6 +476,7 @@ function nested_four_project_state(...$arguments): array
     $projection = nested_four_project_state_legacy(...$arguments);
     $state = is_array($arguments[0] ?? null) ? $arguments[0] : [];
     $projection['reserveCoveringRule'] = nested_four_reserve_covering_rule($state);
+    $projection['botTask']=nested_four_bot_task($state,(int)($arguments[1] ?? 0),(array)($arguments[2] ?? []));
     return $projection;
 }
 function nested_four_project_state_legacy(array $state, int $viewerUserId, array $context): array
@@ -489,7 +505,7 @@ function nested_four_project_state_legacy(array $state, int $viewerUserId, array
         }
     }
     $projection = $state;
-    unset($projection['board'], $projection['reserves'], $projection['positionCounts']);
+    unset($projection['board'], $projection['reserves'], $projection['positionCounts'], $projection['botMemory']);
     $projection['board'] = [];
     for ($cell = 0; $cell < NESTED_FOUR_BOARD_CELLS; $cell++) {
         $piece = nested_four_sanitize_piece(nested_four_visible_piece($state, $cell));
@@ -562,7 +578,7 @@ function nested_four_finish(array $state, ?int $winnerUserId, string $reason): a
     ];
 }
 
-function nested_four_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function nested_four_apply_action_core(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== NESTED_FOUR_STATE_SCHEMA_VERSION
         || !empty($state['completed'])

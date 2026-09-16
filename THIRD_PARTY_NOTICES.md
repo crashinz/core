@@ -1,5 +1,12 @@
 # Third-Party Notices
 
+## Five Dice Expert strategy research
+
+Five Dice Expert uses a first-party full-scorecard expected-value solver informed by public Yahtzee dynamic-programming research, including Tom Verhoeff and Erik Scheffers' [Optimal Solitaire Yahtzee project](https://www-set.win.tue.nl/~wstomv/misc/yahtzee/) and James Glenn's *An Optimal Strategy for Yahtzee*. The implementation and strategy values were independently authored/generated for CoreChat's existing forced-Joker rules. No YahtzeeTrainer source, executable or strategy table is bundled, and no endorsement is implied.
+
+The first-party generator and reproduction instructions are in `games/five-dice/strategy/`. The strategy maximizes expected total score, not the probability of beating particular opponents. Easy and Normal keep their existing policies.
+
+
 ## Direct file and gesture transfer concepts
 
 CoreChat's `corechat-p2p-transfer/1` adaptation was informed by concepts in the following projects. CoreChat did not copy their application source, use their hosted service, or bundle their bandwidth or TURN service.

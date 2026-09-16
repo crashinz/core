@@ -42,7 +42,7 @@
     "icon": "nested-four-first-party-icon.svg",
     "profile": "versus",
     "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 2,
     "seats": [
@@ -91,6 +91,10 @@
     "games/game-avatar.js",
     "games/classic-game-audio.js",
     "games/game-view-storage.js",
-    "games/bot-pacing.js"
+    "games/bot-pacing.js",
+    "includes/nested_four_bot_support.php",
+    "games/nested-four-engine.js",
+    "games/nested-four-worker.js",
+    "games/nested-four-bot-controller.js"
   ]
 }

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/blackjack_bot_support.php';
 
 const BLACKJACK_EXTENSION_ID = 'blackjack';
 const BLACKJACK_STATE_SCHEMA_VERSION = 1;
@@ -12,13 +13,15 @@ function blackjack_extension_adapter(): array
 {
     return [
         'id' => BLACKJACK_EXTENSION_ID,
+        'recordingAdapter' => 'blackjack_recording_adapter',
+        'projectVirtualMembers' => 'blackjack_project_virtual_members',
         'initialState' => 'blackjack_initial_state',
         'applyAction' => 'blackjack_apply_action',
         'validateSettings' => 'blackjack_validate_settings',
         'settingsProjection' => 'blackjack_settings_projection',
         'rulesProjection' => 'blackjack_rules_projection',
         'projectState' => 'blackjack_project_state',
-        'randomnessPurposes' => ['deal' => 'blackjack-shoe'],
+        'randomnessPurposes' => ['deal' => 'blackjack-shoe', 'bot-deal' => 'blackjack-shoe'],
         'deriveRandomness' => 'blackjack_derive_randomness',
         'openingProcedure' => 'viewer-centered-table-with-clockwise-player-order',
         'rematchSeatRotation' => false,
@@ -28,6 +31,7 @@ function blackjack_extension_adapter(): array
 function blackjack_validate_settings(array $settings, string $mode, array $definition = []): array
 {
     $allowed = ['startingChips', 'rounds'];
+    for ($seat=1;$seat<=5;$seat++) $allowed[]='botSeat'.$seat.'Difficulty';
     if (array_diff(array_keys($settings), $allowed)) {
         throw new MultiplayerGameException('A Blackjack setting is not supported.', 'BLACKJACK_SETTINGS_INVALID', 422);
     }
@@ -39,7 +43,14 @@ function blackjack_validate_settings(array $settings, string $mode, array $defin
     if (!in_array($rounds, [5, 10, 20], true)) {
         throw new MultiplayerGameException('Choose 5, 10, or 20 rounds.', 'BLACKJACK_ROUNDS_INVALID', 422);
     }
-    return ['startingChips' => $startingChips, 'rounds' => $rounds];
+    $out=['startingChips'=>$startingChips,'rounds'=>$rounds];
+    for($seat=1;$seat<=5;$seat++) {
+        $key='botSeat'.$seat.'Difficulty';$level=$settings[$key]??'none';
+        if(!is_string($level)||!in_array($level,['none','easy','normal','expert'],true))throw new MultiplayerGameException('Choose a listed bot difficulty.','BLACKJACK_SETTINGS_INVALID',422);
+        if($mode!=='practice'&&$level!=='none')throw new MultiplayerGameException('Games with bots are Practice only.','MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY',422);
+        if($mode==='practice')$out[$key]=$level;
+    }
+    return $out;
 }
 
 function blackjack_settings_projection(array $settings, string $mode, array $definition = []): array
@@ -137,10 +148,12 @@ function blackjack_new_hand(int $bet, array $cards = [], bool $split = false): a
 function blackjack_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) < 2 || count($players) > 5 || min($players) < 1) {
+    if (count($players) < 1 || count($players) > 5 || min($players) < 1) {
         throw new MultiplayerGameException('Blackjack requires two to five authenticated players.', 'BLACKJACK_PLAYER_SET_INVALID', 422);
     }
     $settings = blackjack_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    [$players,$bots]=blackjack_bot_fill_seats($players,$settings,(string)($context['mode']??'practice'),(array)($context['humanSeats']??[]));
+    if(count($players)<2||count($players)>5)throw new MultiplayerGameException('Blackjack needs two through five players or Practice bots.','BLACKJACK_PLAYER_SET_INVALID',422);
     $bankrolls = [];
     $hands = [];
     foreach ($players as $userId) {
@@ -149,6 +162,8 @@ function blackjack_initial_state(array $playerUserIds, array $context = []): arr
     }
     return [
         'schemaVersion' => BLACKJACK_STATE_SCHEMA_VERSION,
+        'bots'=>$bots, 'botSequence'=>0,
+        'publicCardMemory'=>['seen'=>array_fill(2,13,0),'complete'=>true,'wagers'=>[],'lastWagers'=>[]],
         'settings' => $settings,
         'turnOrder' => $players,
         'turnIndex' => 0,
@@ -326,7 +341,7 @@ function blackjack_public_card(string $card): string
     return blackjack_card_parts($card)['public'];
 }
 
-function blackjack_project_state(array $state, int $viewerUserId, array $context): array
+function blackjack_project_state_core(array $state, int $viewerUserId, array $context): array
 {
     $projection = $state;
     $projection['shoeCount'] = count((array)($state['shoe'] ?? []));
@@ -373,7 +388,7 @@ function blackjack_project_state(array $state, int $viewerUserId, array $context
     return $projection;
 }
 
-function blackjack_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function blackjack_apply_action_rules(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== BLACKJACK_STATE_SCHEMA_VERSION || !empty($state['completed'])) {
         throw new MultiplayerGameException('The Blackjack state is unavailable.', 'BLACKJACK_STATE_INVALID', 409);
@@ -513,4 +528,8 @@ function blackjack_apply_action(array $state, int $actorUserId, string $action, 
     unset($hand);
     $next = blackjack_activate_next_hand($state, $playerIndex, $handIndex);
     return ['state' => $state, 'turnUserId' => $next];
+}
+
+function blackjack_recording_adapter(): array {
+    return ['schemaVersion'=>1,'stateKeys'=>['schemaVersion','settings','turnOrder','turnIndex','phase','round','bankrolls','hands','dealer','shoe','shoeCount','currentHandIndex','insuranceDecisions','insuranceBets','completed','terminalReason','lastSettlement','bots','botSequence','publicCardMemory'],'payloadKeys'=>['amount','take']];
 }

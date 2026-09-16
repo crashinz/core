@@ -18,6 +18,9 @@ const NestedFour = (() => {
     }
   })();
   let lastHeardVersion = null;
+  let motionSession=null, motionSequence=null, motionMoveNumber=null, activeMotion=null, motionTimer=0;
+  const isAnimating=()=>Boolean(activeMotion && performance.now()-activeMotion.started<800);
+
 
   function makeNode(tag, className = "", text = "") {
     const node = document.createElement(tag);
@@ -127,7 +130,7 @@ const NestedFour = (() => {
   }
 
   function render(api) {
-    const { session, options, currentUserId, memberAvatar, memberName, performAction, optionCategory, setStatus, busy } = api;
+    const { session, options, currentUserId, memberAvatar, memberName, performAction, optionCategory, setStatus, busy, rerender } = api;
     const state = session?.state || {};
     const viewerUserId = Number(currentUserId());
     const turnUserId = Number(session?.turnUserId || 0);
@@ -136,6 +139,25 @@ const NestedFour = (() => {
     const effectsEnabled = options?.effectsEnabled !== false;
     const masterVolume = Number(options?.masterVolume ?? 100) / 100;
     const showLegalMoves = optionCategory("showLegalMoves", true);
+    const enabled=optionCategory("visualFxEnabled",true) && typeof Element!=="undefined" && typeof Element.prototype.animate==="function";
+    const sequence=Number(state.actionSequence||0), moveNumber=Number(state.moveNumber||0), id=String(session?.publicId||"");
+    if(id!==motionSession){motionSession=id;motionSequence=sequence;motionMoveNumber=moveNumber;activeMotion=null;}
+    else if(sequence!==motionSequence){
+      const previousMove=motionMoveNumber;motionSequence=sequence;motionMoveNumber=moveNumber;activeMotion=null;
+      const a=state.lastAction;
+      if(enabled && moveNumber===previousMove+1 && a?.type==="move"){
+        const selector=a.sourceType==="board"?`.nf-cell[data-cell="${Number(a.sourceIndex)}"]`:`.nf-reserve-stack[data-user="${Number(a.userId)}"][data-stack="${Number(a.sourceIndex)}"]`;
+        const origin=document.querySelector(selector)?.getBoundingClientRect();
+        if(origin){
+          const covered=a.covered?document.querySelector(`.nf-cell[data-cell="${Number(a.destination)}"] > .nf-piece`):null;
+          activeMotion={started:performance.now(),destination:Number(a.destination),x:origin.x+origin.width/2,y:origin.y+origin.height/2,covered:covered?.cloneNode(true)||null};
+        }
+      }
+    }
+    if(!enabled)activeMotion=null;
+    const motion=isAnimating()?activeMotion:null;
+    clearTimeout(motionTimer);
+    if(motion)motionTimer=setTimeout(rerender,Math.max(1,800-(performance.now()-motion.started))+20);
     const selected = state.selected || null;
     const legalSources = state.legalSources || {};
     const legalDestinations = new Set((state.legalDestinations || []).map(Number));
@@ -151,7 +173,7 @@ const NestedFour = (() => {
       playCue("error", effectsEnabled, masterVolume);
     });
 
-    const statusTitle = state.completed ? (Number.isSafeInteger(Number(state.winnerUserId)) && Number(state.winnerUserId) > 0 ? (memberName(Number(state.winnerUserId)) || "A player") + " wins" : state.winnerUserId === null ? "Game drawn" : "Game complete") : (state.phase === "lobby"
+    const statusTitle = state.completed ? (Number.isSafeInteger(Number(state.winnerUserId)) && Number(state.winnerUserId) !== 0 ? (memberName(Number(state.winnerUserId)) || "A player") + " wins" : state.winnerUserId === null ? "Game drawn" : "Game complete") : (state.phase === "lobby"
         ? "Starting layout preview"
         : (memberName(turnUserId) || "A player") + " to move");
     const statusDetail = state.completed ? "Game complete. No further moves are available." : (selected
@@ -179,7 +201,7 @@ const NestedFour = (() => {
       copy.append(
         makeNode("strong", "", safeText(member.displayName || memberName(userId) || "Player " + String(playerIndex + 1))),
         makeNode("span", "", (playerIndex === 0 ? "Coral" : "Ocean") + " pieces - " + String(remaining) + " reserved"),
-        makeNode("small", connected === false ? "is-offline" : "", connected === true ? "Connected" : connected === false ? "Disconnected" : "Connection unknown"),
+        makeNode("small", connected === false ? "is-offline" : "", state.bots?.[String(userId)] ? "Practice bot" : connected === true ? "Connected" : connected === false ? "Disconnected" : "Connection unknown"),
       );
       plaque.append(memberAvatar(member, "nf-avatar"), copy);
       playerRail.append(plaque);
@@ -211,7 +233,8 @@ const NestedFour = (() => {
           : null;
         const button = makeNode("button", "nf-reserve-stack");
         button.type = "button";
-        button.disabled = busy || !source;
+        button.disabled = busy || Boolean(motion) || !source;
+        button.dataset.user=String(userId);button.dataset.stack=String(stackIndex);
         button.classList.toggle("is-selectable", Boolean(source));
         button.classList.toggle("is-risky", Boolean(source) && Number(source.legalDestinationCount || 0) === 0);
         if (group.piece) button.append(pieceNode(group.piece, playerIndex));
@@ -220,8 +243,8 @@ const NestedFour = (() => {
         const label = group.piece ? safeText(group.piece.label) + " exposed" : "Empty";
         button.setAttribute("aria-label", label + " in reserve stack " + String(stackIndex + 1) + (source ? ". Selecting commits this piece." : ""));
         button.addEventListener("click", async () => {
-          if (!source || busy) return;
-          setStatus(safeText(group.piece?.label) + " selected and committed.");
+          if (!source || busy || isAnimating()) return;
+
           await performAction("select", { sourceType: "reserve", sourceIndex: stackIndex });
         });
         tray.append(button);
@@ -242,10 +265,15 @@ const NestedFour = (() => {
       button.type = "button";
       button.setAttribute("role", "gridcell");
       button.dataset.cell = String(cell);
+      button.classList.toggle("nf-last-destination",state.lastAction?.type==="move" && Number(state.lastAction.destination)===cell);
       button.classList.toggle("has-piece", Boolean(piece));
       button.classList.toggle("is-source", Boolean(source));
       button.classList.toggle("is-legal", legalDestination);
       button.classList.toggle("is-legal-visible", legalDestination && showLegalMoves);
+      // Keep the previously visible target until the covering piece arrives.
+      if(motion?.destination===cell && motion.covered){
+        const covered=motion.covered.cloneNode(true);covered.classList.add("nf-covered-during-motion");covered.setAttribute("aria-hidden","true");button.append(covered);
+      }
       if (piece) button.append(pieceNode(piece, ownerIndex));
       const name = piece
         ? (memberName(Number(piece.ownerUserId)) || "Player") + " visible " + safeText(piece.label) + " piece"
@@ -256,11 +284,11 @@ const NestedFour = (() => {
           ? ". Legal destination for committed " + safeText(selected?.piece?.label)
           : "";
       button.setAttribute("aria-label", "Row " + String(Math.floor(cell / 4) + 1) + ", column " + String((cell % 4) + 1) + ". " + name + actionLabel);
-      button.disabled = busy || (!source && !legalDestination);
+      button.disabled = busy || Boolean(motion) || (!source && !legalDestination);
       button.addEventListener("click", async () => {
-        if (busy) return;
+        if (busy || isAnimating()) return;
         if (source) {
-          setStatus(safeText(piece?.label) + " selected and committed.");
+
           await performAction("select", { sourceType: "board", sourceIndex: cell });
         } else if (legalDestination) {
           await performAction("move", { destination: cell });
@@ -280,10 +308,18 @@ const NestedFour = (() => {
     live.setAttribute("aria-live", "polite");
     live.textContent = statusTitle + ". " + statusDetail;
     shell.append(live);
+    if(motion)requestAnimationFrame(()=>{
+      if(!shell.isConnected || activeMotion!==motion)return;
+      const piece=shell.querySelector(`.nf-cell[data-cell="${motion.destination}"] > .nf-piece:not(.nf-covered-during-motion)`);
+      if(!piece)return;const r=piece.getBoundingClientRect(),dx=motion.x-(r.x+r.width/2),dy=motion.y-(r.y+r.height/2);
+      piece.classList.add("nf-traveling");
+      const a=piece.animate([{transform:`translate(-50%, -50%) translate(${dx}px, ${dy}px) scale(1.08)`},{transform:"translate(-50%, -50%) translate(0px, 0px) scale(1)"}],{duration:800,easing:"ease-in-out",fill:"both"});
+      a.currentTime=Math.max(0,performance.now()-motion.started);
+    });
     return shell;
   }
 
-  return Object.freeze({ render, appendBoardSizeOption, boardScale });
+  return Object.freeze({ render, appendBoardSizeOption, boardScale, isAnimating });
 })();
 
 window.CoreChatNestedFour = NestedFour;

@@ -1,3 +1,6 @@
+import { appendAceyMove, aceyMoveAnimating } from "./acey-deucy-motion.js?v=1e269499c30e";
+import { createAceyDeucyBotController } from "./acey-deucy-bot-controller.js?v=a16519af3c5b";
+import { createNestedFourBotController } from "./nested-four-bot-controller.js?v=c541ed8907b2";
 import { createChineseCheckersBotController } from "./chinese-checkers-bot-controller.js?v=c1460ca5a716";
 import { gameViewStorage } from "./game-view-storage.js?v=1dd11e938aa8";
 import { originalAudioCatalog, originalVoiceEnabled, originalRollAnnouncement, originalPlacementCue, originalReminderPlan, originalPointRoll } from "./classic-game-audio.js?v=b0d39dcd022c";
@@ -8,7 +11,7 @@ import { createChessBotController } from "./chess-bot-controller.js?v=45b22e9ad5
 import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=f69e083b7fee";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=f9547db55052";
 
-import { bindGameAvatar } from "./game-avatar.js?v=20260913-room-avatars";
+import { bindGameAvatar } from "./game-avatar.js?v=2611117d49fd";
 import { renderGameSeatControls, renderGameBotControls } from "../assets/js/runtime/game/renderers/game-seat-controls.js?v=8829b14ae801";
 
 const params = new URLSearchParams(location.search);
@@ -426,7 +429,7 @@ function memberAvatar(member, className = "") {
   const fallbackUrl = appMediaUrl(member?.avatarFallbackUrl) || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='32' fill='%230f2e33'/%3E%3Ccircle cx='32' cy='23' r='11' fill='%23808f97'/%3E%3Cpath d='M17 54c0-10 9-17 15-17s15 7 15 17' fill='%23808f97'/%3E%3C/svg%3E";
   image.alt = "";
   image.decoding = "sync";
-  bindGameAvatar(image, { ...member, avatarFallbackUrl: fallbackUrl });
+  bindGameAvatar(image, { ...member, avatarFallbackUrl: fallbackUrl }, { rectangularFallback: context.extensionId === "puppy-panic" });
   return image;
 }
 
@@ -1190,7 +1193,7 @@ function scheduleBlackjackAutomaticAction() {
       ? await performAction("deal", {}, "blackjack-shoe")
       : await performAction("dealer-play");
     if (!succeeded && pendingBlackjackAutomaticKey === key) pendingBlackjackAutomaticKey = "";
-  }, phase === "dealer" ? 420 : 0);
+  }, Object.keys(session.state?.bots || {}).length ? 2000 : (phase === "dealer" ? 420 : 0));
   blackjackAutomaticTimer = timerId;
 }
 
@@ -1245,7 +1248,7 @@ function gameTerminalOutcome(value = session, extensionId = context.extensionId)
   const state = value?.state || {};
   const status = String(value?.status || "");
   const eligibleParticipant = id => Number.isSafeInteger(id) && (id > 0
-    || (id < 0 && value?.mode === "practice" && ["checkers", "chess", "backgammon-first-party"].includes(extensionId)
+    || (id < 0 && value?.mode === "practice" && ["checkers", "chess", "backgammon-first-party", "acey-deucy", "blackjack"].includes(extensionId)
       && state.bots?.[String(id)]?.userId === id));
   const participants = Array.isArray(state.turnOrder)
     ? state.turnOrder.filter(eligibleParticipant)
@@ -1377,6 +1380,7 @@ function gameLifecycleAvailable() {
 }
 
 function canAct() {
+  if (context.extensionId === "acey-deucy" && aceyMoveAnimating()) return false;
   return gameLifecycleAvailable() && Number(session?.turnUserId || 0) === currentUserId();
 }
 
@@ -2513,7 +2517,7 @@ function classifyClassicMotion(previous, current) {
   const before = previous.state || {};
   const after = current.state || {};
   const base = { pointNative: pointNativeReady(), gameId: context.extensionId, version: Number(current.stateVersion), before, after, startedAt: performance.now() };
-  if (!before.completed && after.completed && (Number(after.winnerUserId || 0) > 0 || (["backgammon-first-party", "uno", "hearts"].includes(context.extensionId) && Number(after.winnerUserId || 0) < 0 && after.bots?.[String(after.winnerUserId)]?.userId === after.winnerUserId))) {
+  if (!before.completed && after.completed && (Number(after.winnerUserId || 0) > 0 || (["backgammon-first-party", "acey-deucy", "uno", "hearts"].includes(context.extensionId) && Number(after.winnerUserId || 0) < 0 && after.bots?.[String(after.winnerUserId)]?.userId === after.winnerUserId))) {
     const latestMove = listLength(after.history) > listLength(before.history) ? latest(after.history) : null;
     const terminalReason = String(after.terminalReason || "").toLowerCase();
     if (context.extensionId === "chess" && terminalReason.includes("checkmate")) return {
@@ -7570,6 +7574,7 @@ function renderPointGame(gameId) {
     appendClassicMotion(board, gameId);
     appendClassicPlayerAvatars(board, gameId, classicMembersBySourceIdentity(gameId));
   }
+  if (isAcey && !classic) appendAceyMove(board, pendingClassicMotion, session.publicId, optionCategory("visualFxEnabled", true), render);
   if (isAcey) appendAceyDoubletDialog(board, state);
   return board;
 }
@@ -7600,7 +7605,7 @@ function classifyBuiltInPointWin(previous, current) {
   const before = previous.state || {};
   const after = current.state || {};
   const winnerUserId = Number(after.winnerUserId || 0);
-  if (winnerUserId <= 0 && !(gameId === "backgammon-first-party" && after.bots?.[String(winnerUserId)]?.userId === winnerUserId)) return null;
+  if (winnerUserId <= 0 && !(["backgammon-first-party", "acey-deucy"].includes(gameId) && after.bots?.[String(winnerUserId)]?.userId === winnerUserId)) return null;
   const latestMove = listLength(after.history) > listLength(before.history) ? latest(after.history) : null;
   const borneOffWin = gameId === "backgammon-first-party"
     ? safe(after.terminalCause).toLowerCase() === "bear-off"
@@ -11092,15 +11097,17 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
-  submit: payload => performAction(payload.action, {engine: payload.engine, positionKey: payload.positionKey}, payload.action === "bot-deal" ? `${gameId}-deal` : ""),
+  submit: payload => performAction(payload.action, {engine: payload.engine, positionKey: payload.positionKey}, payload.action === "bot-deal" ? (gameId === "blackjack" ? "blackjack-shoe" : `${gameId}-deal`) : (gameId === "puppy-panic" && payload.action === "bot-settle-random" ? "puppy-panic-random-effect" : "")),
   showStatus: (message, retry) => showBotStatus(gameId, message, retry),
 }); }
+const puppyBotController = createServerCardBot("puppy-panic", "Puppy Panic");
+const blackjackBotController = createServerCardBot("blackjack", "Blackjack");
 const unoBotController = createServerCardBot("uno", "UNO");
 const heartsBotController = createServerCardBot("hearts", "Hearts");
 const spadesBotController = createServerCardBot("spades", "Spades");
 const battleshipBotController = createServerCardBot("battleship", "Battleship");
-window.addEventListener("pagehide", () => { unoBotController.stop(); heartsBotController.stop(); spadesBotController.stop(); battleshipBotController.stop(); });
-const cardBotTimer = setInterval(() => { if (context.extensionId === "uno") unoBotController.sync(); if (context.extensionId === "hearts") heartsBotController.sync(); if (context.extensionId === "spades") spadesBotController.sync(); if (context.extensionId === "battleship") battleshipBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => { puppyBotController.stop(); blackjackBotController.stop(); unoBotController.stop(); heartsBotController.stop(); spadesBotController.stop(); battleshipBotController.stop(); });
+const cardBotTimer = setInterval(() => { if (context.extensionId === "puppy-panic") puppyBotController.sync(); if (context.extensionId === "blackjack") blackjackBotController.sync(); if (context.extensionId === "uno") unoBotController.sync(); if (context.extensionId === "hearts") heartsBotController.sync(); if (context.extensionId === "spades") spadesBotController.sync(); if (context.extensionId === "battleship") battleshipBotController.sync(); }, 250);
 window.addEventListener("pagehide", () => clearInterval(cardBotTimer));
 
 const chineseCheckersBotController = createChineseCheckersBotController({
@@ -11115,6 +11122,19 @@ const chineseCheckersBotController = createChineseCheckersBotController({
 window.addEventListener("pagehide", () => chineseCheckersBotController.stop());
 const chineseBotTimer = setInterval(() => { if (context.extensionId === "chinese-checkers") chineseCheckersBotController.sync(); }, 250);
 window.addEventListener("pagehide", () => clearInterval(chineseBotTimer));
+
+const nestedFourBotController = createNestedFourBotController({
+  snapshot: () => ({
+    enabled: context.extensionId === "nested-four" && gameSurfaceVisible && gameLifecycleAvailable() && !window.CoreChatNestedFour?.isAnimating(),
+    key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
+    task: session?.state?.botTask,
+  }),
+  submit: payload => performAction("bot-step", payload),
+  showStatus: (message, retry) => showBotStatus("nested-four", message, retry),
+});
+window.addEventListener("pagehide", () => nestedFourBotController.stop());
+const nestedBotTimer = setInterval(() => { if (context.extensionId === "nested-four") nestedFourBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => clearInterval(nestedBotTimer));
 
 const chessBotController = createChessBotController({
   snapshot: () => ({
@@ -11151,6 +11171,20 @@ window.addEventListener("pagehide", () => backgammonBotController.stop());
 
 const backgammonBotTimer = setInterval(() => { if (context.extensionId === "backgammon-first-party") backgammonBotController.sync(); }, 250);
 window.addEventListener("pagehide", () => clearInterval(backgammonBotTimer));
+
+const aceyDeucyBotController = createAceyDeucyBotController({
+  snapshot: () => ({
+    enabled: context.extensionId === "acey-deucy" && gameSurfaceVisible && gameLifecycleAvailable() && !aceyMoveAnimating() && !(pendingClassicMotion && performance.now() - pendingClassicMotion.startedAt < motionLength(pendingClassicMotion.gameId, pendingClassicMotion.type)),
+    key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
+    task: session?.state?.botTask,
+  }),
+  submit: payload => { const rolling = payload.action === "roll"; return performAction(rolling ? "bot-roll" : payload.action === "choose-double" ? "bot-double" : "bot-step", payload, rolling ? "acey-deucy-roll" : ""); },
+  showStatus: (message, retry) => showBotStatus("acey-deucy", message, retry),
+});
+window.addEventListener("pagehide", () => aceyDeucyBotController.stop());
+
+const aceyDeucyBotTimer = setInterval(() => { if (context.extensionId === "acey-deucy") aceyDeucyBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => clearInterval(aceyDeucyBotTimer));
 
 function render() {
   document.body.dataset.visualFx = optionCategory("visualFxEnabled", true) ? "on" : "off";
@@ -11232,12 +11266,16 @@ function render() {
   scheduleBlackjackAutomaticAction();
   scheduleHeartsAutomaticAction();
   scheduleUnoAutomaticAction();
+  puppyBotController.sync();
+  blackjackBotController.sync();
   unoBotController.sync();
   heartsBotController.sync();
   chineseCheckersBotController.sync();
+  nestedFourBotController.sync();
   chessBotController.sync();
   checkersBotController.sync();
   backgammonBotController.sync();
+  aceyDeucyBotController.sync();
   scheduleSurfaceReachability(() => {
     syncSurfaceReachability();
     if (openCheckersDrawer) {

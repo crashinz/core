@@ -1162,8 +1162,10 @@ body[data-appearance="built-in"] .die::before {
 }
 
 body[data-appearance="built-in"] .die[data-face="0"]::before {
-  opacity: .2;
-  filter: grayscale(1);
+  inset: 4%;
+  background: linear-gradient(145deg, #fffdf5, #eee9dc 65%, #cec6b6);
+  border: 1px solid #c9c0ad;
+  box-shadow: inset 2px 2px 3px #ffffff, inset -3px -4px 5px #b8ad97;
 }
 
 body[data-appearance="built-in"] .die[data-face="1"]::before { background-position-x: 0%; }
@@ -1205,7 +1207,7 @@ body[data-appearance="built-in"] .die[aria-pressed="true"]::after {
 }
 
 body[data-appearance="built-in"] .die.is-rolling {
-  animation: modern-five-dice-roll 630ms cubic-bezier(.2,.72,.28,1) infinite alternate;
+  animation: modern-five-dice-roll 1260ms linear both;
 }
 
 body[data-appearance="built-in"] .built-in-roll {
@@ -1422,10 +1424,74 @@ body[data-appearance="built-in"] .play-surface.is-built-in-winning::after {
   animation: modern-five-dice-confetti 3.9s ease-out both;
 }
 
+/* Lift and bounce the die while a six-sided cube turns over its edges. */
 @keyframes modern-five-dice-roll {
-  0% { transform: translate(-5px, -10px) rotate(-12deg) scale(.92); filter: brightness(.84); }
-  55% { transform: translate(7px, 3px) rotate(18deg) scale(1.04); filter: brightness(1.18); }
-  100% { transform: translate(-2px, 8px) rotate(40deg) scale(.96); filter: brightness(.94); }
+  0%, 95%, 100% { translate: 0 0; scale: 1; }
+  20% { translate: -8% -30%; scale: 1.06; }
+  43% { translate: 10% 4%; scale: .98; }
+  64% { translate: -5% -17%; scale: 1.03; }
+  85% { translate: 3% 1%; scale: 1; }
+}
+body[data-appearance="built-in"] .die.is-rolling {
+  container-type: inline-size;
+  perspective: 400px;
+}
+body[data-appearance="built-in"] .die.is-rolling::before {
+  /* Finish the artwork handoff before the rolling DOM is removed. */
+  animation: five-dice-rest-settle 1260ms linear both;
+  animation-delay: inherit;
+}
+@keyframes five-dice-rest-settle {
+  0%, 76% { opacity: 0; }
+  96%, 100% { opacity: 1; }
+}
+@keyframes five-dice-face-settle {
+  0%, 76% { opacity: 1; }
+  96%, 100% { opacity: 0; }
+}
+.five-dice-roll-cube {
+  position: absolute;
+  inset: 15%;
+  transform-style: preserve-3d;
+  pointer-events: none;
+  animation: five-dice-cube-tumble 1260ms linear both;
+}
+.five-dice-cube-face {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  gap: 8%;
+  padding: 16%;
+  border: 1px solid #b8aa8b;
+  border-radius: 12%;
+  background: linear-gradient(145deg, #fff5d9, #d9c69c);
+  box-shadow: inset 0 0 3px #fff9eb;
+  backface-visibility: hidden;
+  /* Fade each face, not the preserve-3d parent (which would flatten it). */
+  animation: five-dice-face-settle 1260ms linear both;
+  animation-delay: inherit;
+}
+.five-dice-cube-face i {
+  display: block;
+  border-radius: 50%;
+  background: #211c14;
+  box-shadow: inset 0 1px 1px #080704, 0 1px 0 #fff8df;
+}
+.cube-front { transform: translateZ(35cqw); }
+.cube-back { transform: rotateY(180deg) translateZ(35cqw); }
+.cube-top { transform: rotateX(90deg) translateZ(35cqw); background: linear-gradient(#fff9e9, #eee0bd); }
+.cube-bottom { transform: rotateX(-90deg) translateZ(35cqw); background: #c0aa7c; }
+.cube-right { transform: rotateY(90deg) translateZ(35cqw); background: linear-gradient(#e8d9b5, #bfa573); }
+.cube-left { transform: rotateY(-90deg) translateZ(35cqw); }
+@keyframes five-dice-cube-tumble {
+  0% { transform: rotateX(-738deg) rotateY(-1102deg); }
+  25% { transform: rotateX(-455deg) rotateY(-700deg); }
+  50% { transform: rotateX(-225deg) rotateY(-390deg); }
+  75% { transform: rotateX(-65deg) rotateY(-135deg); }
+  86% { transform: rotateX(18deg) rotateY(0deg); }
+  96%, 100% { transform: rotateX(18deg) rotateY(0deg); }
 }
 
 @keyframes modern-five-dice-drum-active { 50% { filter: drop-shadow(0 0 22px rgba(93,225,221,.65)); } }
@@ -3928,3 +3994,7 @@ body[data-appearance="classic"] .classic-score-choice:is(:hover, :focus-visible,
 .optional-voice-row :focus-visible { outline:2px solid #cbd8ff; outline-offset:2px; }
 
 .game-option[hidden] { display:none !important; }
+
+/* Reserve bot feedback below the board throughout a Practice match. */
+#five-dice-bot-status { min-height: 3.2em; line-height: 1.5; padding: .45rem .7rem; box-sizing: border-box; overflow-wrap: anywhere; }
+#five-dice-bot-status[hidden] { display: none; }

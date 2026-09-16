@@ -42,7 +42,7 @@
     "icon": "blackjack-first-party-icon.svg",
     "profile": "versus",
     "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 5,
     "seats": [
@@ -110,6 +110,9 @@
     "games/game-avatar.js",
     "games/classic-game-audio.js",
     "games/game-view-storage.js",
-    "games/bot-pacing.js"
+    "games/bot-pacing.js",
+    "includes/blackjack_bot_support.php",
+    "games/uno-bot-controller.js",
+    "includes/blackjack_expert.php"
   ]
 }

@@ -4,9 +4,11 @@ import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } 
 
 import { bindGameAvatar } from "../game-avatar.js?v=20260913-room-avatars";
 
-import { optionalVoices, originalVoices, voiceEnabled, classicScoreReaction, classicRecordReaction, chooseIdleVoice } from "./five-dice-voices.js?v=8d931646bee3";
+import { optionalVoices, originalVoices, voiceEnabled, classicScoreReaction, classicRecordReaction, chooseIdleVoice } from "./five-dice-voices.js?v=c2894603811a";
 
 import { reactionStrips, reactionFrame } from "./five-dice-reactions.js?v=8b09bca30632";
+
+import { renderGameBotControls } from "../../assets/js/runtime/game/renderers/game-seat-controls.js?v=8829b14ae801";
 
 const params = new URLSearchParams(location.search);
 const context = Object.freeze({
@@ -43,6 +45,10 @@ let recordsRequest = null;
 let recordsScope = "";
 let recordsCompletionKey = "";
 let recordsError = "";
+let botTimer = 0;
+let botScheduledKey = "";
+let botFailedKey = "";
+let botError = "";
 let busy = false;
 let actionFailureStatusMessage = "";
 let pollTimer = 0;
@@ -458,10 +464,10 @@ function fiveDiceWinnerUserIds(state = {}) {
   const players = state.players || {};
   if (state.winnerUserId !== null && state.winnerUserId !== undefined) {
     const winner = Number(state.winnerUserId);
-    return Number.isSafeInteger(winner) && winner > 0 && Object.hasOwn(players, String(winner)) ? [winner] : [];
+    return Number.isSafeInteger(winner) && (winner > 0 || state.bots?.[String(winner)]?.userId === winner) && Object.hasOwn(players, String(winner)) ? [winner] : [];
   }
   const reason = String(state.terminalReason || "");
-  const entries = Object.entries(players).filter(([userId]) => Number(userId) > 0);
+  const entries = Object.entries(players).filter(([userId]) => Number(userId) > 0 || state.bots?.[userId]?.userId === Number(userId));
   if (reason === "resignation") {
     const resignedUserId = Number(state.resignedUserId || 0);
     if (!Number.isSafeInteger(resignedUserId) || resignedUserId < 1) return [];
@@ -539,6 +545,14 @@ function observeSessionTransition(before, after, present = true) {
       fromStatus: String(before.status || ""),
       toStatus: String(after.status || ""),
     });
+  }
+  const botScore = after.state?.lastBotAction;
+  if (present && documentVisible && gameSurfaceVisible && !document.hidden
+      && before.publicId === after.publicId && Number(after.stateVersion) === Number(before.stateVersion) + 1
+      && botScore?.action === "score" && after.state?.bots?.[String(botScore.actor)]
+      && before.state?.players?.[String(botScore.actor)]?.scorecard?.[botScore.category] === null
+      && Number.isFinite(after.state?.players?.[String(botScore.actor)]?.scorecard?.[botScore.category])) {
+    presentFiveDiceScore(before, after, botScore.actor, botScore.category);
   }
   const beforeTurnOrder = Array.isArray(before.state?.turnOrder) ? before.state.turnOrder : [];
   const afterTurnOrder = Array.isArray(after.state?.turnOrder) ? after.state.turnOrder : [];
@@ -992,7 +1006,7 @@ function renderDice(state, canAct) {
   const elapsed = presentation?.startedAt == null ? 0 : Math.max(0,performance.now()-presentation.startedAt);
   (state.dice || [1,1,1,1,1]).forEach((value, index) => {
     const classic = session?.presentation?.effectivePack === "classic";
-    const displayValue = classic && Number(state.rollsThisTurn || 0) < 1 ? 0 : Number(value);
+    const displayValue = Number(state.rollsThisTurn || 0) < 1 ? 0 : Number(value);
     const button = document.createElement("button");
     button.type = "button";
     const isRollingDie = rolling && !state.held?.[index];
@@ -1000,7 +1014,7 @@ function renderDice(state, canAct) {
     if (isRollingDie) button.style.animationDelay = `-${elapsed}ms`;
     button.dataset.face = String(displayValue);
     button.dataset.held = state.held?.[index] ? "true" : "false";
-    button.textContent = displayValue === 0 ? "·" : diceGlyphs[Math.max(1, Math.min(6, displayValue)) - 1];
+    button.textContent = displayValue === 0 ? "" : diceGlyphs[Math.max(1, Math.min(6, displayValue)) - 1];
     button.setAttribute("aria-label", displayValue === 0
       ? `Die ${index + 1}: not rolled`
       : `Die ${index + 1}: ${displayValue}, ${state.held?.[index] ? "kept" : "not kept"}`);
@@ -1042,6 +1056,32 @@ function renderDice(state, canAct) {
           button.append(image);
         }
       }
+    }
+    if (!classic && isRollingDie) {
+      // Each number stays on its own face while the cube tips over its edges.
+      const front = Math.max(1, Math.min(6, Number(value)));
+      const top = [1, 2, 3, 4, 5, 6].find(face => face !== front && face !== 7 - front);
+      const right = [1, 2, 3, 4, 5, 6].find(face => ![front, 7-front, top, 7-top].includes(face));
+      const values = [front, 7-front, top, 7-top, right, 7-right];
+      const positions = ['front', 'back', 'top', 'bottom', 'right', 'left'];
+      const pips = {1:[4], 2:[0,8], 3:[0,4,8], 4:[0,2,6,8], 5:[0,2,4,6,8], 6:[0,2,3,5,6,8]};
+      const cube = document.createElement('span');
+      cube.className = 'five-dice-roll-cube';
+      cube.setAttribute('aria-hidden', 'true');
+      cube.style.animationDelay = `-${elapsed}ms`;
+      values.forEach((faceValue, faceIndex) => {
+        const face = document.createElement('span');
+        face.className = `five-dice-cube-face cube-${positions[faceIndex]}`;
+        face.dataset.value = String(faceValue);
+        for (const cell of pips[faceValue]) {
+          const pip = document.createElement('i');
+          pip.style.gridRow = String(Math.floor(cell / 3) + 1);
+          pip.style.gridColumn = String(cell % 3 + 1);
+          face.append(pip);
+        }
+        cube.append(face);
+      });
+      button.append(cube);
     }
     button.disabled = !canAct || Number(state.rollsThisTurn) < 1 || Number(state.rollsThisTurn) >= 3 || busy;
     button.addEventListener("click", async () => {
@@ -1242,7 +1282,14 @@ async function chooseScore(category) {
     playOptionalSound("invalid-sound");
     return;
   }
-  const afterPlayer = result.after?.state?.players?.[String(currentUserId())] || {};
+  presentFiveDiceScore(result.before, result.after, currentUserId(), category);
+}
+
+function presentFiveDiceScore(before, after, actor, category) {
+  const result = {before, after};
+  const beforePlayer = before?.state?.players?.[String(actor)] || {};
+  const beforeDice = Array.isArray(before?.state?.dice) ? before.state.dice.map(Number) : [];
+  const afterPlayer = result.after?.state?.players?.[String(actor)] || {};
   const categoryScore = Number(afterPlayer.scorecard?.[category] || 0);
   const repeatBonus = Number(afterPlayer.yahtzeeBonus || 0) - Number(beforePlayer.yahtzeeBonus || 0);
   const upperBonus = Number(afterPlayer.upperBonus || 0) - Number(beforePlayer.upperBonus || 0);
@@ -1879,8 +1926,7 @@ function renderGameOptions() {
   const host = el("game-options");
   const select = el("appearance-select");
   const appearanceAvailable = presentation.selectionOwner === "viewer" && Array.isArray(presentation.packs);
-  const sharedReviewRequired = session?.status === "lobby"
-    && (session?.members || []).filter(member => ["master", "player"].includes(member.role)).length > 1;
+  const sharedReviewRequired = session?.status === "lobby";
   if (!gameOptionsInitialStateResolved && sharedReviewRequired) {
     gameOptionsVisible = true;
     gameOptionsInitialStateResolved = true;
@@ -1925,6 +1971,13 @@ function renderGameOptions() {
   el("save-game-options").hidden = !editable;
   el("save-game-options").disabled = busy;
   renderSharedGameSettings(editable, locked);
+  const botControls = renderGameBotControls(document, session.botSeats, async (action, payload) => {
+    if (busy) return;
+    busy = true;
+    try { await post(action, payload); replaceSession(await getSession()); }
+    finally { busy = false; render(); }
+  });
+  el("five-dice-bot-seats").replaceChildren(...(botControls ? [botControls] : []));
 
   const viewer = (session.members || []).find(member => Number(member.userId) === currentUserId());
   el("settings-acceptance").replaceChildren(...(session.members || [])
@@ -1934,7 +1987,7 @@ function renderGameOptions() {
       item.className = locked
         ? (member.acceptanceStatus === "accepted-at-start" ? "is-accepted" : "")
         : (member.accepted ? "is-accepted" : "is-pending");
-      item.textContent = `${member.displayName}: ${fiveDiceAcceptanceLabel(member, locked)}`;
+      item.textContent = `${member.displayName}: ${session.state?.bots?.[String(member.userId)] ? "Practice bot" : fiveDiceAcceptanceLabel(member, locked)}`;
       return item;
     }));
   const canAccept = !locked && ["master", "player"].includes(session.viewerRole);
@@ -2926,7 +2979,54 @@ function fiveDiceMinimumScoreTargetScale(artboard) {
   return Number.isFinite(minimumDimension) ? Math.max(0.75, 24 / minimumDimension) : 0.75;
 }
 
+function syncFiveDiceBot() {
+  const task = session?.state?.botTask;
+  const key = task ? `${session.publicId}:${task.positionKey}` : "";
+  const available = Boolean(task && gameLifecycleAvailable() && documentVisible && gameSurfaceVisible && !document.hidden && !fiveDiceRollPresentation && !terminalSessionError);
+  if (botScheduledKey !== key || !available) { clearTimeout(botTimer); botTimer = 0; botScheduledKey = ""; }
+  if (botFailedKey !== key) { botFailedKey = ""; botError = ""; }
+  const host = el("five-dice-bot-status");
+  host.hidden = !Object.keys(session?.state?.bots || {}).length;
+  const label = host.querySelector("span");
+  const retry = host.querySelector("button");
+  const last = session?.state?.lastBotAction;
+  const member = (session?.members || []).find(m => Number(m.userId) === Number(last?.actor));
+  label.textContent = botError || (task ? `${task.displayName} is ${task.action === "bot-roll" ? "preparing to roll" : "thinking"}…` : last ? `${member?.displayName || "Bot"} ${last.action === "score" ? `scored ${categoryLabels[last.category] || last.category}` : last.action === "set-holds" ? "selected dice to keep" : "rolled the dice"}.` : "");
+  retry.hidden = !botError;
+  if (!available || botTimer || botFailedKey === key) return;
+  botScheduledKey = key;
+  botTimer = setTimeout(() => { botTimer = 0; void runFiveDiceBot(task, key); }, Math.max(2000, Number(task.delayMs) || 0));
+}
+
+async function runFiveDiceBot(task, key) {
+  if (!gameLifecycleAvailable() || !documentVisible || !gameSurfaceVisible || document.hidden || fiveDiceRollPresentation || `${session.publicId}:${session.state.botTask?.positionKey}` !== key) return;
+  const gameId = activeGameSessionId;
+  const expectedVersion = Number(session.stateVersion);
+  busy = true;
+  try {
+    let receipt = "";
+    if (task.action === "bot-roll") {
+      receipt = randomId("five-dice-bot-roll");
+      const reveal = {dice:randomPracticeDice(), nonce:crypto.randomUUID()};
+      await post("randomness", {request_id:receipt, commitment_sha256:await sha256Canonical(reveal), purpose:"five-dice-roll"});
+      await post("reveal-practice-randomness", {request_id:receipt, reveal});
+    }
+    if (gameId !== activeGameSessionId || !documentVisible || !gameSurfaceVisible || document.hidden) return;
+    const result = await post("extension-action", {request_id:randomId("five-dice-bot"), expected_version:expectedVersion, action_type:task.action, payload:{engine:task.engine, positionKey:task.positionKey}, randomness_request_id:receipt});
+    if (gameId !== activeGameSessionId) return;
+    replaceSession(result?.session || await getSession());
+    if (fiveDiceRollPresentation?.done) await fiveDiceRollPresentation.done;
+  } catch (error) {
+    if (gameId !== activeGameSessionId || terminalSessionError) return;
+    try { replaceSession(await getSession()); } catch { /* Keep the current board for retry. */ }
+    if (`${session?.publicId}:${session?.state?.botTask?.positionKey}` === key) {
+      botFailedKey = key; botError = "The bot move could not be saved. Retry when the connection is available.";
+    }
+  } finally { busy = false; botScheduledKey = ""; if (!terminalSessionError) render(); }
+}
+
 function render() {
+  syncFiveDiceBot();
   scheduleIdleVoice();
   renderClassicReaction();
   document.body.dataset.visualFx = fiveDiceVisualFxEnabled() ? "on" : "off";
@@ -3423,6 +3523,7 @@ async function toggleMusic() {
   }
 }
 
+el("five-dice-bot-retry").addEventListener("click", () => { botError = ""; botFailedKey = ""; syncFiveDiceBot(); });
 el("roll").addEventListener("click", roll);
 el("nroll-hotspot").addEventListener("click", roll);
 el("start-new-game-hotspot").addEventListener("click", requestNewGame);
@@ -3593,6 +3694,7 @@ addEventListener("message", event => {
     playOptionalBackgroundMusic();
   }
   renderMicrophoneMotion();
+  syncFiveDiceBot();
 });
 document.addEventListener("visibilitychange", () => {
   if (terminalSessionError) return;
@@ -3601,6 +3703,7 @@ document.addEventListener("visibilitychange", () => {
   if (!documentVisible) { suppressNextFiveDiceRoll = true; cancelFiveDiceRoll(); pauseAllAudio("document-hidden"); }
   else playOptionalBackgroundMusic();
   renderMicrophoneMotion();
+  syncFiveDiceBot();
 });
 addEventListener("pagehide", () => {
   if (terminalSessionError) return;
@@ -3613,6 +3716,7 @@ addEventListener("pagehide", () => {
   gameSurfaceVisible = false;
   renderMicrophoneMotion();
   clearTimeout(pollTimer);
+  clearTimeout(botTimer);
   clearTimeout(sharedLifecycleDeadlineTimer);
   clearTimeout(sharedLifecycleRenderTimer);
   clearTimeout(builtInOpeningTimer);

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ocx_game_extension_support.php';
+require_once __DIR__ . '/acey_deucy_bot_support.php';
 
 const ACEY_DEUCY_EXTENSION_ID = 'acey-deucy';
 const ACEY_DEUCY_STATE_SCHEMA_VERSION = 1;
@@ -9,7 +10,7 @@ const ACEY_DEUCY_STATE_SCHEMA_VERSION = 1;
 function acey_deucy_recording_adapter(): array
 {
     return ['schemaVersion' => 1,
-        'stateKeys' => ['starterMethod', 'usedRandomnessRequestIds', 'aceyStage', 'bar', 'borneOff', 'completed', 'dice', 'europeanSequence', 'history', 'lastNoLegalMove', 'meaningfulPlay', 'off', 'openingCoordinatorUserId', 'openingRollAttempts', 'points', 'remainingDice', 'resignedUserId', 'roundNumber', 'rulesProfile', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'startingIndex', 'terminalClassification', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
+        'stateKeys' => ['bots', 'starterMethod', 'usedRandomnessRequestIds', 'aceyStage', 'bar', 'borneOff', 'completed', 'dice', 'europeanSequence', 'history', 'lastNoLegalMove', 'meaningfulPlay', 'off', 'openingCoordinatorUserId', 'openingRollAttempts', 'points', 'remainingDice', 'resignedUserId', 'roundNumber', 'rulesProfile', 'schemaVersion', 'settings', 'starterIndex', 'starterReason', 'starterUserId', 'startingIndex', 'terminalClassification', 'terminalReason', 'turnIndex', 'turnOrder', 'winnerUserId'],
         'payloadKeys' => ['die', 'from', 'value']];
 }
 
@@ -24,7 +25,8 @@ function acey_deucy_extension_adapter(): array
         'settingsProjection' => 'acey_deucy_settings_projection',
         'rulesProjection' => 'acey_deucy_rules_projection',
         'projectState' => 'acey_deucy_project_state',
-        'randomnessPurposes' => ['roll' => 'acey-deucy-roll'],
+        'projectVirtualMembers' => 'acey_deucy_project_virtual_members',
+        'randomnessPurposes' => ['roll' => 'acey-deucy-roll', 'bot-roll' => 'acey-deucy-roll'],
         'deriveRandomness' => 'acey_deucy_derive_randomness',
         'presentationStatus' => 'acey_deucy_presentation_status',
         'openingProcedure' => 'settings-owned-high-roll-or-legacy-rotating-starter',
@@ -69,6 +71,10 @@ function acey_deucy_presentation_status(PDO $pdo, ?string $requestedPack = null)
 
 function acey_deucy_validate_settings(array $settings, string $mode, array $definition = []): array
 {
+    $difficulty = $settings['botSeat2Difficulty'] ?? 'none';
+    if (!in_array($difficulty, array_column(acey_deucy_bot_choices(), 'value'), true)) throw new MultiplayerGameException('Choose a listed bot level.', 'ACEY_DEUCY_SETTINGS_INVALID', 422);
+    if ($difficulty !== 'none' && $mode !== 'practice') throw new MultiplayerGameException('Games with bots are Practice only.', 'MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY', 422);
+    unset($settings['botSeat2Difficulty']);
     $allowed = ['profile', 'rulesProfile', 'starterMethod'];
     if (array_diff(array_keys($settings), $allowed)
         || (isset($settings['profile']) && $settings['profile'] !== 'standard-acey-deucy')) {
@@ -83,6 +89,7 @@ function acey_deucy_validate_settings(array $settings, string $mode, array $defi
         throw new MultiplayerGameException('Choose a valid Acey Deucy starter method.', 'ACEY_DEUCY_SETTINGS_INVALID', 422);
     }
     return [
+        ...($mode === 'practice' ? ['botSeat2Difficulty' => $difficulty] : []),
         'profile' => 'standard-acey-deucy',
         'rulesProfile' => $rulesProfile,
         'starterMethod' => $starterMethod,
@@ -123,9 +130,15 @@ function acey_deucy_derive_randomness(string $canonicalReveal, string $actionTyp
 function acey_deucy_initial_state(array $playerUserIds, array $context = []): array
 {
     $players = array_values(array_unique(array_map('intval', $playerUserIds)));
-    if (count($players) !== 2 || min($players) < 1) throw new MultiplayerGameException('Acey Deucy requires two authenticated players.', 'ACEY_DEUCY_PLAYER_SET_INVALID', 422);
     $roundContext = (array)($context['roundContext'] ?? []);
     $settings = acey_deucy_validate_settings((array)($context['settings'] ?? []), (string)($context['mode'] ?? 'practice'));
+    $bots = [];
+    if (count($players) === 1 && $players[0] > 0 && ($settings['botSeat2Difficulty'] ?? 'none') !== 'none') {
+        $players[] = ACEY_DEUCY_BOT_ID; $level = $settings['botSeat2Difficulty'];
+        $bots[(string)ACEY_DEUCY_BOT_ID] = ['userId'=>ACEY_DEUCY_BOT_ID, 'seat'=>2, 'difficulty'=>$level, 'displayName'=>ucfirst($level).' Bot', 'engine'=>ACEY_DEUCY_BOT_ENGINE];
+    }
+    if (count($players)!==2 || ($bots===[] && min($players)<1)) throw new MultiplayerGameException('Acey Deucy requires two players.', 'ACEY_DEUCY_PLAYER_SET_INVALID', 422);
+
     $rematchContinues = !empty($roundContext['rematchContinues']);
     $roundNumber = $rematchContinues
         ? max(1, (int)($roundContext['previousRoundNumber'] ?? 1) + (!empty($roundContext['advancesSeries']) ? 1 : 0))
@@ -149,6 +162,7 @@ function acey_deucy_initial_state(array $playerUserIds, array $context = []): ar
         $startingIndex = $previousIndex === false ? 0 : (1 - (int)$previousIndex);
     }
     return [
+        'bots' => $bots, 'settings' => $settings,
         'schemaVersion' => ACEY_DEUCY_STATE_SCHEMA_VERSION,
         'turnOrder' => $players,
         'turnIndex' => $startingIndex,
@@ -362,6 +376,7 @@ function acey_deucy_project_state(array $state, int $viewerUserId, array $contex
         unset($destinations);
     }
     $projection['interaction'] = $interaction;
+    $projection['botTask'] = acey_deucy_bot_task($state, $viewerUserId, $context);
     return $projection;
 }
 
@@ -531,12 +546,12 @@ function acey_deucy_terminal(array &$state, int $winner): array
     return ['state' => $state, 'turnUserId' => null, 'terminal' => true, 'result' => ocx_game_result_from_scores([(string)$winner => $multiplier, (string)$opponent => 0])];
 }
 
-function acey_deucy_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function acey_deucy_apply_action_core(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     if ((int)($state['schemaVersion'] ?? 0) !== ACEY_DEUCY_STATE_SCHEMA_VERSION || !empty($state['completed'])) throw new MultiplayerGameException('The Acey Deucy state is unavailable.', 'ACEY_DEUCY_STATE_INVALID', 409);
     if ($action === 'resign') {
         $players = array_values(array_map('intval', (array)($state['turnOrder'] ?? [])));
-        if (count($players) !== 2 || count(array_unique($players)) !== 2 || min($players) < 1) {
+        if (count($players) !== 2 || count(array_unique($players)) !== 2 || (min($players) < 1 && empty($state['bots']))) {
             throw new MultiplayerGameException('Acey Deucy requires two authenticated players.', 'ACEY_DEUCY_PLAYER_SET_INVALID', 422);
         }
         if ($actorUserId < 1 || !in_array($actorUserId, $players, true)) {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Five Dice</title>
-  <link rel="stylesheet" href="five-dice.css?v=4564596f07ca">
+  <link rel="stylesheet" href="five-dice.css?v=2026091605">
 </head>
 <body data-appearance="built-in">
   <main class="game" aria-labelledby="game-title">
@@ -75,6 +75,7 @@
         <p id="optional-voice-status" role="status"></p>
       </details>
       <div id="shared-game-settings" class="shared-game-settings" aria-label="Shared game timing options"></div>
+      <div id="five-dice-bot-seats"></div>
       <div id="settings-acceptance" class="settings-acceptance" aria-label="Player acceptance"></div>
       <button id="save-game-options" type="button" class="secondary">Save Game Options</button>
       <button id="accept-game-options" type="button" class="secondary">Accept current Game Options</button>
@@ -139,6 +140,7 @@
         </div>
       </section>
       </div>
+      <div id="five-dice-bot-status" role="status" aria-live="polite" hidden><span></span> <button id="five-dice-bot-retry" type="button" hidden>Retry bot</button></div>
       <div class="roll-actions" aria-label="Below-board Dice actions">
         <div id="five-dice-lifecycle" class="five-dice-lifecycle" aria-label="Game pause and reconnect controls"></div>
         <button id="roll" type="button" hidden>Roll dice</button>
@@ -189,7 +191,7 @@
       </aside>
     </div>
   </main>
-  <script type="module" src="five-dice.js?v=141f4e2d776b"></script>
+  <script type="module" src="five-dice.js?v=2026091604"></script>
 </body>
 </html>
 

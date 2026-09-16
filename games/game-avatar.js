@@ -21,15 +21,17 @@ function synchronize(image, binding) {
     catch { /* Standalone/cross-origin games keep their server projection. */ }
   }
   const hidden = room?.hidden === true || binding.member?.avatarHidden === true;
-  const candidate = hidden ? binding.fallback
+  let candidate = hidden ? binding.fallback
     : mediaUrl(room?.url) || mediaUrl(binding.member?.avatarUrl) || binding.fallback;
+  if (binding.rectangularFallback && candidate === binding.originalFallback) candidate = binding.fallback;
   if (candidate === binding.requested) return;
   binding.requested = candidate;
   image.src = candidate;
 }
 
-export function bindGameAvatar(image, member) {
-  const binding = { member, fallback: mediaUrl(member?.avatarFallbackUrl) || generic, requested: null };
+export function bindGameAvatar(image, member, { rectangularFallback = false } = {}) {
+  const originalFallback = mediaUrl(member?.avatarFallbackUrl);
+  const binding = { member, originalFallback, rectangularFallback, fallback: rectangularFallback ? generic : originalFallback || generic, requested: null };
   bindings.set(image, binding);
   image.draggable = false;
   image.addEventListener('error', () => {

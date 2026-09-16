@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/five_dice_identity.php';
+require_once __DIR__ . '/five_dice_bot_support.php';
 
 /**
  * Independently authored Five Dice rules adapter.
@@ -22,6 +23,9 @@ function five_dice_extension_adapter(): array
         'projectState' => 'five_dice_project_state',
         'projectMemberMetadata' => 'five_dice_project_member_metadata',
         'randomnessPurpose' => 'five-dice-roll',
+        'randomnessPurposes' => ['roll'=>'five-dice-roll','bot-roll'=>'five-dice-roll'],
+        'projectVirtualMembers' => 'five_dice_project_virtual_members',
+        'recordingAdapter' => 'five_dice_recording_adapter',
         'presentationStatus' => 'five_dice_presentation_status',
         'validateSettings' => 'five_dice_validate_settings',
         'rulesProjection' => 'five_dice_rules_projection',
@@ -33,6 +37,7 @@ function five_dice_extension_adapter(): array
 function five_dice_project_state(array $state, int $viewerUserId, array $context): array
 {
     $projection = $state;
+    $projection['botTask'] = five_dice_bot_task($state, $viewerUserId, $context);
     $projection['personalBests'] = is_array($context['memberMetadata']['personalBests'] ?? null)
         ? $context['memberMetadata']['personalBests']
         : [];
@@ -130,7 +135,15 @@ function five_dice_validate_settings(array $settings, string $mode, array $defin
     if (!in_array($mode, ['practice', 'recorded'], true)) {
         throw new MultiplayerGameException('Choose Practice or Recorded Play.', 'MULTIPLAYER_GAME_MODE_INVALID', 422);
     }
-    return [];
+    $out=[];$allowed=[];
+    for($seat=1;$seat<=4;$seat++){
+        $key='botSeat'.$seat.'Difficulty';$allowed[]=$key;$level=$settings[$key]??'none';
+        if(!is_string($level)||!in_array($level,array_column(five_dice_bot_choices(),'value'),true))throw new MultiplayerGameException('Choose a listed bot difficulty.','FIVE_DICE_SETTINGS_INVALID',422);
+        if($mode!=='practice'&&$level!=='none')throw new MultiplayerGameException('Games with bots are Practice only.','MULTIPLAYER_GAME_BOTS_PRACTICE_ONLY',422);
+        if($mode==='practice')$out[$key]=$level;
+    }
+    if(array_diff(array_keys($settings),$allowed))throw new MultiplayerGameException('A Five Dice setting is not supported.','FIVE_DICE_SETTINGS_INVALID',422);
+    return $out;
 }
 
 function five_dice_rules_projection(array $settings, string $mode, array $definition = []): array
@@ -175,6 +188,8 @@ function five_dice_initial_state(array $playerUserIds, array $context = []): arr
             422
         );
     }
+    $settings=five_dice_validate_settings((array)($context['settings']??[]),(string)($context['mode']??'practice'));
+    [$playerUserIds,$bots]=five_dice_bot_fill_seats($playerUserIds,$settings,(string)($context['mode']??'practice'),(array)($context['humanSeats']??[]));
     $players = [];
     foreach ($playerUserIds as $userId) {
         $players[(string)$userId] = [
@@ -187,6 +202,7 @@ function five_dice_initial_state(array $playerUserIds, array $context = []): arr
     }
     return [
         'schemaVersion' => FIVE_DICE_STATE_SCHEMA_VERSION,
+        'bots'=>$bots, 'botSequence'=>0, 'botRollPending'=>false, 'lastBotAction'=>null,
         'turnOrder' => $playerUserIds,
         'turnIndex' => 0,
         'dice' => [1, 1, 1, 1, 1],
@@ -232,7 +248,7 @@ function five_dice_validate_state(array $state): void
         $expectedKeys = five_dice_categories();
         sort($scorecardKeys, SORT_STRING);
         sort($expectedKeys, SORT_STRING);
-        if ($userId < 1 || !is_array($player) || !is_array($player['scorecard'] ?? null)
+        if (($userId < 1 && (!isset($state['bots'][(string)$userId]) || (int)$state['bots'][(string)$userId]['userId']!==$userId)) || !is_array($player) || !is_array($player['scorecard'] ?? null)
             || $scorecardKeys !== $expectedKeys) {
             throw new MultiplayerGameException('The player scorecard state is invalid.', 'FIVE_DICE_PLAYER_STATE_INVALID', 409);
         }
@@ -407,7 +423,7 @@ function five_dice_terminal_result(array $state, ?int $resignedUserId = null): a
     return $result;
 }
 
-function five_dice_apply_action(array $state, int $actorUserId, string $action, array $payload, array $context): array
+function five_dice_apply_action_rules(array $state, int $actorUserId, string $action, array $payload, array $context): array
 {
     five_dice_validate_state($state);
     if (!empty($state['completed'])) {
@@ -452,6 +468,10 @@ function five_dice_apply_action(array $state, int $actorUserId, string $action, 
         }
         $state['rollsThisTurn']++;
         $state['usedRandomnessRequestIds'][] = $requestId;
+    } elseif ($action === 'set-holds') {
+        $held=$payload['held']??null;
+        if(!isset($state['bots'][(string)$actorUserId])||!is_array($held)||!array_is_list($held)||count($held)!==5||count(array_filter($held,'is_bool'))!==5||!in_array(false,$held,true)||(int)$state['rollsThisTurn']<1||(int)$state['rollsThisTurn']>=3)throw new MultiplayerGameException('These holds are unavailable.','FIVE_DICE_HOLD_INVALID',422);
+        $state['held']=$held;
     } elseif ($action === 'toggle-hold') {
         $index = filter_var($payload['index'] ?? null, FILTER_VALIDATE_INT);
         if ($index === false || $index < 0 || $index > 4

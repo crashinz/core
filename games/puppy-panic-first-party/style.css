@@ -1670,3 +1670,4 @@
   .pp-history-toggle > .pp-table-caption,
   .pp-deck > .pp-table-caption { bottom:-18px!important; }
 }
+.pp-recent-action { min-height: 2.5em; margin: 8px 12px 0; text-align: center; font-size: 14px; line-height: 1.25; }

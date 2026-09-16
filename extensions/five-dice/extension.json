@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "id": "five-dice",
   "name": "Five Dice",
-  "version": "1.0.7",
+  "version": "1.0.13",
   "repositoryOwned": true,
   "trustedFirstParty": true,
   "compatibility": {
@@ -53,7 +53,7 @@
       "Player 3",
       "Player 4"
     ],
-    "adaptationVersion": "1.0.4",
+    "adaptationVersion": "1.0.6",
     "presentationSelectionOwner": "viewer",
     "presentationPackSettingKey": "multiplayer_game_appearance_g_4f8c2d71",
     "defaultPresentationPack": "classic",
@@ -134,6 +134,10 @@
     "includes/five_dice_media_sources.php",
     "games/five-dice/five-dice-voices.js",
     "games/five-dice/five-dice-reactions.js",
-    "games/game-view-storage.js"
+    "games/game-view-storage.js",
+    "includes/five_dice_bot_support.php",
+    "assets/js/runtime/game/renderers/game-seat-controls.js",
+    "assets/css/game-seat-controls.css",
+    "includes/five_dice_expert_support.php"
   ]
 }
