@@ -260,7 +260,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
     <div id="account-reports" class="admin-scroll-list"></div>
   </section>
 </main>
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260916-r1')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260917-recovery')) ?>"></script>
 <script src="<?= e($assetVersion('/assets/js/account.js')) ?>"></script>
 </body>
 </html>

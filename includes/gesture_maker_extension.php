@@ -38,6 +38,7 @@ function gesture_maker_extension_render_editor(array $view): void {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title><?= e($title) ?> - ChatSpace CE</title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/popup-behavior.css')) ?>">
   <link rel="stylesheet" href="<?= e(app_url('/extensions/gesture-maker/assets/gesture-editor.css')) ?>">
 </head>
 <body class="gesture-editor-body"
@@ -95,6 +96,7 @@ function gesture_maker_extension_render_editor(array $view): void {
     </div>
   </form>
 </main>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260917')) ?>"></script>
 <script type="module" src="<?= e(app_url('/extensions/gesture-maker/assets/gesture-editor.js?v=20260914-duplicates')) ?>"></script>
 </body>
 </html>

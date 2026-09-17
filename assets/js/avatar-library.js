@@ -19,9 +19,9 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
   actions.append(local, mine, privateAvatars, community, folder);
   titleBar.appendChild(close);
   const filters = el('div'); filters.className = 'avatar-library-actions';
-  const sort = el('select'); sort.setAttribute('aria-label', kindText('Sort avatars'));
+  const sort = el('select'); sort.dataset.popupNoDraft = ''; sort.setAttribute('aria-label', kindText('Sort avatars'));
   for (const [value, label] of [['uploaded','Newest uploads'],['modified','Last modified'],['name','File name'],['oldest','Oldest uploads']]) { const option = el('option', label); option.value = value; sort.appendChild(option); }
-  const section = el('select'); section.setAttribute('aria-label', kindText('Avatar section'));
+  const section = el('select'); section.dataset.popupNoDraft = ''; section.setAttribute('aria-label', kindText('Avatar section'));
   const allSections = el('option', 'All sections'); allSections.value = ''; section.appendChild(allSections);
   const sectionNames = el('datalist'); sectionNames.id = `${kind}-library-sections-${userId}`;
   const uploadSection = el('input'); uploadSection.placeholder = 'Optional section'; uploadSection.maxLength = 80; uploadSection.setAttribute('list', sectionNames.id);
@@ -146,10 +146,10 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
           const category = el('input'); category.value = avatar.section; category.maxLength = 80; category.placeholder = 'Section name'; category.setAttribute('list', sectionNames.id); category.setAttribute('aria-label', kindText('Avatar section name'));
           const save = el('button', 'Save name & section'); save.type = 'button'; save.className = 'btn';
           save.addEventListener('click', async () => {
-            if (busy) return; save.disabled = true;
-            try { await requestForm({ action: 'organize', id: avatar.id, name: name.value, section: category.value }); await load(); }
+            if (busy) return; busy = true; dialog.dataset.popupBusy = 'true'; save.disabled = true;
+            try { await requestForm({ action: 'organize', id: avatar.id, name: name.value, section: category.value }); window.CoreChatPopups?.markSaved(dialog, [name, category]); status.textContent = 'Saved.'; }
             catch (error) { status.textContent = kindText(error.message); }
-            finally { save.disabled = false; }
+            finally { busy = false; delete dialog.dataset.popupBusy; save.disabled = false; }
           });
           edit.append(name, category, save); card.appendChild(edit);
         }
@@ -190,6 +190,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
         }
         gallery.appendChild(card);
       }
+      window.CoreChatPopups?.markSaved(dialog);
       more.hidden = !data.hasMore; status.textContent = gallery.childElementCount ? '' : kindText('No avatars in this collection yet.');
     } catch (error) { if (current === generation) status.textContent = kindText(error.message); }
     finally { if (current === generation) { more.disabled = false; clampPicker(); } }

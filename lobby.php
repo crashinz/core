@@ -1050,7 +1050,7 @@ $rooms = $roomsStmt->fetchAll();
   </div>
 </div>
 <?php endif; ?>
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260916-r1')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260917-recovery')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/game-recordings.js?v=20260914')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260916-popups')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260916-retry')) ?>"></script>

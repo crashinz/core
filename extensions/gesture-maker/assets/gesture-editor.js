@@ -256,7 +256,7 @@ byId("gesture-download-package").addEventListener("click", () => {
 byId("gesture-editor-delete")?.addEventListener("click", async () => {
     const gesture = state.gesture();
     if (!admin || !gesture || saveButton.disabled) return;
-    if (!window.confirm(`Delete "${gesture.title || gesture.text}" for everyone? This removes it from the Server Gesture catalog.`)) return;
+    if (!await window.CoreChatPopups.confirm(`Delete "${gesture.title || gesture.text}" for everyone? This removes it from the Server Gesture catalog.`, {title:"Delete gesture",accept:"Delete gesture"})) return;
     const button = byId("gesture-editor-delete");
     button.disabled = true; saveButton.disabled = true;
     try {

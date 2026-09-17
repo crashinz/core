@@ -224,6 +224,9 @@ json_out(corechat_create_rate_limited_message($pdo, 'game', 'text', [
         ? $source['protection_envelope']
         : null,
 ]));
+} catch (GestureCatalogException $error) {
+    while (ob_get_level() > 0) ob_end_clean();
+    json_out(['error' => $error->getMessage(), 'code' => $error->errorCode], $error->httpStatus);
 } catch (CorechatChatPostRateException $error) {
     limit_event_record_reached($pdo, 'chat_posts_per_second', 'member', 'user:' . $error->userId,
         'throttled', ['channel' => $error->channel]);

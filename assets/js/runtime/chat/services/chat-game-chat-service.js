@@ -271,51 +271,20 @@ export class ChatGameChatService {
      *
      * @returns {Promise<Object|null>}
      */
-    async sendMessage(content) {
+    captureTextTarget(lobby = this.#requireContext().getActiveGame()?.lobby_code) {
+        if (!lobby || this.isChatClosed(lobby)) throw new Error('This game chat has ended. Your message was not sent.');
+        const config = this.#requireContext().getConfig();
+        return Object.freeze({action:'message', session_id:config.sessionId, join_token:config.myJoinToken, lobby_code:lobby});
+    }
 
-        const context =
-            this.#requireContext();
-
-        const activeGame =
-            context.getActiveGame();
-
-        if (!activeGame) return null;
-        if (this.isChatClosed(activeGame.lobby_code)) {
-            const error = new Error("This game chat has ended. Your message was not sent.");
-            error.code = "GAME_CHAT_CLOSED";
-            throw error;
-        }
-
-        const config =
-            context.getConfig();
-
-        const message =
-            await context.apiPost(
-                "/api/game_chat.php",
-                {
-                    action:
-                        "message",
-
-                    session_id:
-                        config.sessionId,
-
-                    join_token:
-                        config.myJoinToken,
-
-                    lobby_code:
-                        activeGame.lobby_code,
-
-                    content
-                }
-            );
-
-        this.addMessage(
-            message,
-            false
-        );
-
+    async sendMessage(content, options = {}) {
+        const context = this.#requireContext();
+        const target = options.target || this.captureTextTarget();
+        const message = await context.apiPost('/api/game_chat.php', {
+            ...target, content, client_message_id: options.clientMessageId || crypto.randomUUID(),
+        });
+        context.addMessageToChannel(message, `game:${target.lobby_code}`, false);
         return message;
-
     }
 
     /**

@@ -48,6 +48,21 @@ export class ChatEventDeliveryContract {
     }
 
     accept(batch = {}) {
+        const prepared = this.prepare(batch);
+        for (const event of prepared.events) this.acknowledge('room', event);
+        for (const event of prepared.communityEvents) this.acknowledge('community', event);
+        return Object.freeze({...prepared, cursors:this.cursors()});
+    }
+
+    acknowledge(stream, event) {
+        const id = Number(event.id);
+        if (!Number.isSafeInteger(id) || id <= 0 || !['room', 'community'].includes(stream)) throw new TypeError('Invalid acknowledgement.');
+        if (stream === 'room') this.#roomCursor = Math.max(this.#roomCursor, id);
+        else this.#communityCursor = Math.max(this.#communityCursor, id);
+        this.#remember(`${stream}:${id}`);
+    }
+
+    prepare(batch = {}) {
 
         if (!batch || typeof batch !== "object") {
             throw new TypeError("Event delivery batch must be an object.");
@@ -68,16 +83,6 @@ export class ChatEventDeliveryContract {
                     : [],
                 this.#communityCursor
             );
-
-        if (roomEvents.length) {
-            this.#roomCursor =
-                Number(roomEvents[roomEvents.length - 1].id);
-        }
-
-        if (communityEvents.length) {
-            this.#communityCursor =
-                Number(communityEvents[communityEvents.length - 1].id);
-        }
 
         return Object.freeze({
 
@@ -115,8 +120,8 @@ export class ChatEventDeliveryContract {
 
     #acceptStream(stream, events, cursor) {
 
-        let previous =
-            cursor;
+        let previous = 0;
+        const localSeen = new Set();
 
         const accepted =
             [];
@@ -140,11 +145,11 @@ export class ChatEventDeliveryContract {
             const identity =
                 `${stream}:${id}`;
 
-            if (id <= cursor || this.#seen.has(identity)) {
+            if (id <= cursor || this.#seen.has(identity) || localSeen.has(identity)) {
                 continue;
             }
 
-            this.#remember(identity);
+            localSeen.add(identity);
 
             accepted.push(event);
 

@@ -1538,7 +1538,7 @@ $roomAssetVersion = static function (string $path): string {
 <?php endif; ?>
 <script src="https://www.youtube.com/iframe_api"></script>
 
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260916-r1')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260917-recovery')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/avatar-processing.js')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/core/recent-authentication.js')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/room.js')) ?>"></script>

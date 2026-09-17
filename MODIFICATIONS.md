@@ -10,6 +10,15 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Reliability corrections - 2026-09-17
+
+- Bind pending sends and replies to their original conversations. Keep failed text recoverable and retry ordinary, protected and game messages with the same request identity.
+- Acknowledge room/community events after processing; recover failed handlers without skipping subsequent updates.
+- Compare popup edits against saved values, make discard truthful, preserve other library edits when saving one row, guard pending saves, restore focus and use the shared gesture deletion confirmation.
+- Verify final private/public package contents and exact identities with isolated installation and upgrade checks. End-user source edits remain permitted by default.
+- Testing is WIP; local technical checks do not replace owner acceptance.
+
+
 ## Dominos and shared popup improvements - 2026-09-17
 
 - Add Dominos (All Fives) for two, three and four players or teams, with selectable seats, adjustable targets, fair starter rotation, a four-ended spinner and round scoring.

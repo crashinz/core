@@ -6,7 +6,7 @@ import {
 
     ChatEventDeliveryContract
 
-} from "./chat-event-delivery-contract.js";
+} from "./chat-event-delivery-contract.js?v=20260917-ack";
 
 import {
 
@@ -29,6 +29,8 @@ import {
 export class ChatTransportCoordinator {
 
     #context = null;
+    #deliveryTail = Promise.resolve();
+    #deliveryGeneration = 0;
 
     #contract = new ChatEventDeliveryContract();
 
@@ -63,6 +65,7 @@ export class ChatTransportCoordinator {
     }
 
     seed(ids = {}) {
+        this.#deliveryGeneration += 1;
 
         this.#contract.seed(ids);
 
@@ -85,6 +88,7 @@ export class ChatTransportCoordinator {
     }
 
     stop() {
+        this.#deliveryGeneration += 1;
 
         this.#running =
             false;
@@ -348,38 +352,31 @@ export class ChatTransportCoordinator {
 
     }
 
-    async #acceptBatch(batch, adapter) {
-
-        if (!this.#running || adapter !== this.#active) {
-            return;
-        }
-
-        const accepted =
-            this.#contract.accept(batch);
-
-        this.#context.handleProjection?.(
-            Object.freeze({
-
-                avatar_visibility_preferences:
-                    accepted.projection.avatarVisibilityPreferences,
-
-                gesture_preferences:
-                    accepted.projection.gesturePreferences,
-
-                gesture_capabilities:
-                    accepted.projection.gestureCapabilities
-
-            })
-        );
-
-        for (const event of accepted.events) {
-            this.#context.handleRoomEvent?.(event);
-        }
-
-        for (const event of accepted.communityEvents) {
-            this.#context.handleCommunityEvent?.(event);
-        }
-
+    #acceptBatch(batch, adapter) {
+        const generation = this.#deliveryGeneration;
+        const current = () => this.#running && adapter === this.#active && generation === this.#deliveryGeneration;
+        const delivery = this.#deliveryTail.catch(() => {}).then(async () => {
+            if (!current()) return;
+            const accepted = this.#contract.prepare(batch);
+            await this.#context.handleProjection?.(Object.freeze({
+                avatar_visibility_preferences: accepted.projection.avatarVisibilityPreferences,
+                gesture_preferences: accepted.projection.gesturePreferences,
+                gesture_capabilities: accepted.projection.gestureCapabilities,
+            }));
+            for (const [stream, events, handler] of [
+                ['room', accepted.events, this.#context.handleRoomEvent],
+                ['community', accepted.communityEvents, this.#context.handleCommunityEvent],
+            ]) {
+                for (const event of events) {
+                    if (!current()) return;
+                    await handler?.(event);
+                    if (!current()) return;
+                    this.#contract.acknowledge(stream, event);
+                }
+            }
+        });
+        this.#deliveryTail = delivery;
+        return delivery;
     }
 
     #handleFailure(error, detail = {}) {

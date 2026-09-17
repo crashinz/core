@@ -666,9 +666,9 @@ async function initializeAvatarRuntime() {
   if (avatarRuntime) return avatarRuntime;
   initializeEmojiComposer();
 
-  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }, ServerClock] = await Promise.all([
+  const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }, ServerClock, { ChatOutbox }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
-    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260915-rematch-chat')),
+    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260917-send-recovery')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
     import(appUrl('/assets/js/runtime/game/game-runtime.js?v=20260916-dominos')),
@@ -683,6 +683,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js?v=20260914-gesture-actions')),
     import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js?v=20260913-server-clock')),
     import(appUrl('/assets/js/core/animation-server-clock.js?v=20260913-r2')),
+    import(appUrl('/assets/js/runtime/chat/services/chat-outbox.js?v=20260917')),
   ]);
   roomServerClock = ServerClock;
 
@@ -770,6 +771,7 @@ async function initializeAvatarRuntime() {
   chatRuntimeCore = new Core();
   chatRuntimeCore.registerService('runtime-diagnostics', runtimeDiagnostics);
   chatRuntimeCore.registerService('runtime-request-client', runtimeRequestClient);
+  messageOutbox = new ChatOutbox(renderMessageOutbox);
   chatRuntime = new ChatRuntime();
   roomRuntime = new RoomRuntime();
   voiceRuntime = new VoiceRuntime();
@@ -1950,7 +1952,11 @@ async function messageProtectionDecryptMessage(message, chatKey) {
   };
 }
 
-async function sendProtectedTextMessage(content, chatKey) {
+async function sendProtectedTextMessage(content, chatKey, options = {}) {
+  // Capture all routing and reply data before policy/key refresh can yield.
+  const target = options.target || chatComposer().captureTextTarget(chatKey);
+  if (options.operation?.standardFallback) return chatComposer().sendTextMessage(content, chatKey, {...options,target});
+  if (options.operation?.prepared) return finishProtectedTextSend(options.operation.prepared, target, chatKey);
   const conversation = messageProtectionConversation(chatKey);
   if (!conversation || !['dm', 'link'].includes(conversation.kind)) {
     throw new Error('E2EE is available only in direct and active relationship chats.');
@@ -1958,13 +1964,14 @@ async function sendProtectedTextMessage(content, chatKey) {
   const latest = await messageProtectionFetchContext(conversation, '', true);
   const policy = latest.conversation?.policy;
   if (policy?.mode !== 'e2ee-private') {
+    if (options.operation) options.operation.standardFallback = true;
     messageProtectionUpdatePolicy(policy);
-    return chatComposer().sendTextMessage(content, chatKey);
+    return chatComposer().sendTextMessage(content, chatKey, { ...options, target });
   }
   const { key, device } = await messageProtectionContentKey(conversation, Number(policy.keyEpoch));
-  const clientMessageId = crypto.randomUUID();
+  const clientMessageId = options.clientMessageId || crypto.randomUUID();
   const sequence = (Date.now() * 1000) + crypto.getRandomValues(new Uint16Array(1))[0];
-  const reply = chatReply().draftForChat(chatKey);
+  const reply = target.replyDraft;
   const packageData = {
     content,
     originalContent: null,
@@ -2006,40 +2013,21 @@ async function sendProtectedTextMessage(content, chatKey) {
     device.signingPrivateKey,
     new TextEncoder().encode(`${aadJson}\n${envelope.nonce}.${envelope.ciphertext}.${envelope.tag}`)
   ));
-  let payload = chatReply().appendReplyPayload({
-    session_id: cfg.sessionId,
-    join_token: cfg.myJoinToken,
-    channel: chatKey,
+  let payload = {
+    ...target.payload,
     content: '',
     client_message_id: clientMessageId,
     protection_envelope: envelope,
-  }, chatKey);
-  const relationship = activeRelationshipRequest();
-  const dmUserId = activeDmUserId();
-  if (relationship) {
-    payload = {
-      ...payload,
-      channel: 'link',
-      relationship_id: relationship.relationship_id,
-      conversation_id: relationship.conversation_id,
-    };
-  } else if (dmUserId) {
-    payload = { ...payload, channel: 'dm', target_user_id: dmUserId };
-  }
+  };
+  if (options.operation) options.operation.prepared = payload;
+  return finishProtectedTextSend(payload, target, chatKey);
+}
+
+async function finishProtectedTextSend(payload, target, chatKey) {
+  const relationship = target.relationship, dmUserId = target.dmUserId;
   stopTypingNow();
-  let message;
-  if (conversation.kind === 'game') {
-    message = await apiPost('/api/game_chat.php', {
-      ...payload,
-      action: 'message',
-      channel: 'game',
-      lobby_code: conversation.key,
-    });
-    chatGameChat().addMessage(message, false);
-  } else {
-    message = await apiPost('/api/messages.php', payload);
-  }
-  chatReply().clearDraft();
+  const message = await apiPost('/api/messages.php', payload);
+  chatReply().clearDraftIfCurrent(target.replyDraft);
   if (message.channel === 'link') {
     addMessageToChannel(message, relationship?.chatKey || chatKey, false);
   } else if (message.channel === 'dm') {
@@ -4292,8 +4280,8 @@ function activeLinkPartnerId() {
   return chatPrivateChats().activeLinkPartnerId(activeChatKey());
 }
 
-function activeRelationshipRequest() {
-  return chatPrivateChats().relationshipRequest(activeChatKey());
+function activeRelationshipRequest(chatKey = activeChatKey()) {
+  return chatPrivateChats().relationshipRequest(chatKey);
 }
 
 function activeDmUserId() {
@@ -5714,12 +5702,15 @@ function closeAuraModal() {
 }
 
 async function setCurrentAura() {
+  if (auraModal.dataset.popupBusy === 'true') return;
+  auraModal.dataset.popupBusy = 'true';
   try {
     await avatarRuntime?.aura?.setCurrentAura();
+    window.CoreChatPopups?.markSaved(auraModal);
     closeAuraModal();
   } catch (err) {
     showWarning(err.message || 'Could not set aura.');
-  }
+  } finally { delete auraModal.dataset.popupBusy; }
 }
 
 function waitForVideoEvent(video, eventName, timeoutMs = 3000) {
@@ -6035,37 +6026,54 @@ function updateComposerState() {
   counter.style.color = heat <= 0 ? '#ffffff' : `hsl(${Math.round(8 - (8 * Math.min(1, heat)))} 86% ${Math.round(72 - (22 * Math.min(1, heat)))}%)`;
 }
 
-document.getElementById('composer').addEventListener('submit', async e => {
+let messageOutbox = null;
+let messageOutboxView;
+function renderMessageOutbox() {
+  if (!messageOutboxView) {
+    messageOutboxView = document.createElement('div');
+    messageOutboxView.className = 'chat-send-recovery';
+    Object.assign(messageOutboxView.style, {maxHeight:'10rem',overflow:'auto',overflowWrap:'anywhere'});
+    messageOutboxView.setAttribute('aria-live', 'polite');
+    document.getElementById('composer').after(messageOutboxView);
+  }
+  messageOutboxView.replaceChildren();
+  for (const entry of messageOutbox.entries()) {
+    if (!entry.error && entry.pending) continue;
+    const row = document.createElement('div'), label = document.createElement('span');
+    label.textContent = `${entry.chatKey}: ${entry.content} — ${entry.pending ? 'Retrying…' : entry.error}`;
+    row.append(label);
+    const retry = document.createElement('button'); retry.type = 'button';
+    retry.textContent = 'Retry original chat'; retry.disabled = entry.pending;
+    retry.addEventListener('click', () => messageOutbox.retry(entry.id)); row.append(retry);
+    const discard = document.createElement('button'); discard.type = 'button';
+    discard.textContent = 'Dismiss'; discard.disabled = entry.pending;
+    discard.addEventListener('click', async () => {
+      if (await window.CoreChatPopups.confirm('Remove this recovery copy? A lost response may mean the original message was already delivered.', {title:'Dismiss message recovery',accept:'Dismiss'})) messageOutbox.discard(entry.id);
+    }); row.append(discard); messageOutboxView.append(row);
+  }
+}
+window.addEventListener('beforeunload', event => {
+  if (messageOutbox?.entries().length) { event.preventDefault(); event.returnValue = ''; }
+});
+document.getElementById('composer').addEventListener('submit', e => {
   e.preventDefault();
   const input = document.getElementById('chat-input');
-  const content = input.value.trim();
+  const content = input.value.trim(), activeChat = activeChatKey();
   if (!content) return;
-  const activeChat = activeChatKey();
-  if (activeChat.startsWith('game:') && chatGameChat().isChatClosed(activeChat.slice(5))) {
-    showWarning('This game chat has ended. Your message was not sent.');
-    return;
-  }
-  input.value = '';
-  updateComposerState();
-  const important = Boolean(importantMessageToggle?.checked)
-    && Boolean(cfg?.importantMessagePermissions?.[activeChat]);
-  if (importantMessageToggle) importantMessageToggle.checked = false;
-  if (activeChat.startsWith('game:')) {
-    stopGameTypingNow();
-    const policy = messageProtectionPolicyFor(activeChat);
-    (policy?.mode === 'e2ee-private'
-      ? sendProtectedTextMessage(content, activeChat)
-      : sendGameMessage(content)
-    ).catch(err => alert(err.message || err));
-    return;
-  }
-  const policy = messageProtectionPolicyFor(activeChat);
   try {
-    if (policy?.mode === 'e2ee-private') await sendProtectedTextMessage(content, activeChat);
-    else await chatComposer().sendTextMessage(content, activeChat, { important });
-  } catch (error) {
-    showWarning(error.message || 'Message could not be sent.');
-  }
+    const isGame = activeChat.startsWith('game:');
+    const target = isGame ? chatGameChat().captureTextTarget(activeChat.slice(5)) : chatComposer().captureTextTarget(activeChat);
+    const important = Boolean(importantMessageToggle?.checked) && Boolean(cfg?.importantMessagePermissions?.[activeChat]);
+    const protectedSend = messageProtectionPolicyFor(activeChat)?.mode === 'e2ee-private';
+    messageOutbox.enqueue(content, activeChat, operation => {
+      const options = {target, important, operation, clientMessageId: operation.id};
+      if (isGame) { stopGameTypingNow(); return chatGameChat().sendMessage(content, options); }
+      return protectedSend ? sendProtectedTextMessage(content, activeChat, options)
+        : chatComposer().sendTextMessage(content, activeChat, options);
+    });
+    input.value = ''; updateComposerState();
+    if (importantMessageToggle) importantMessageToggle.checked = false;
+  } catch (error) { showWarning(error.message || 'Message could not be sent.'); }
 });
 
 function renderLatency(ms) {
@@ -6906,6 +6914,7 @@ async function saveAvatarSizePreferences(options = {}) {
     if (!setWebcamSizeInputs(resolution, { status: false })) return;
   }
   avatarSizePending = true;
+  avatarSizeModal.dataset.popupBusy = 'true';
   const saveButton = document.getElementById('avatar-size-save');
   saveButton.disabled = true;
   setAvatarSizeStatus('Saving...', 'working');
@@ -6937,6 +6946,7 @@ async function saveAvatarSizePreferences(options = {}) {
     window.ChatSpaceAvatar?.configure?.(cfg.avatarSizePolicy || {});
     applyLocalDisplayPreferences(response.preferences, 'local-display-size-save');
     const startWebcam = avatarSizeStartWebcam;
+    window.CoreChatPopups?.markSaved(avatarSizeModal);
     closeAvatarSizeModal();
     if (startWebcam) {
       avatarSizeStartConfirmed = true;
@@ -6972,6 +6982,7 @@ async function saveAvatarSizePreferences(options = {}) {
     });
   } finally {
     avatarSizePending = false;
+    delete avatarSizeModal.dataset.popupBusy;
     saveButton.disabled = false;
   }
 }
@@ -8523,6 +8534,7 @@ async function openReportProblem() {
 }
 
 function closeReportProblem() {
+  if (window.CoreChatPopups?.consumeDiscardApproval(reportProblemModal)) { reportProblemSummary.value = ''; reportProblemScreenshot.checked = false; }
   reportProblemModal?.classList.remove('open');
   reportProblemModal?.setAttribute('aria-hidden', 'true');
 }
@@ -9529,7 +9541,7 @@ document.getElementById('tab-manage-relationship')?.addEventListener('click', ()
 document.getElementById('ctx-change-avatar').addEventListener('click', async () => {
   closeContextMenu();
   try {
-    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260916-popups`);
+    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260917-recovery`);
     await openAvatarLibrary({
       userId: cfg.myUserId,
       base: APP_BASE,
@@ -9560,7 +9572,7 @@ ctxChangeNameplate?.addEventListener('click', async () => {
   closeContextMenu();
   try {
     const [{ openAvatarLibrary }, { prepareNameplateFile }, policy] = await Promise.all([
-      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260916-popups`),
+      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260917-recovery`),
       import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
       runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
     ]);
@@ -11737,6 +11749,9 @@ document.getElementById('room-effects-form')?.addEventListener('submit', async e
   e.preventDefault();
   const select = document.getElementById('room-effect-select');
   if (!select.value) return;
+  const form = document.getElementById('room-effects-form');
+  if (form.getAttribute('aria-busy') === 'true') return;
+  form.setAttribute('aria-busy', 'true');
   try {
     const data = await apiPost('/api/room_admin.php', {
       action: 'effect_start',
@@ -11748,13 +11763,17 @@ document.getElementById('room-effects-form')?.addEventListener('submit', async e
     cfg.activeRoomEffect = data.current || null;
     await roomEffectsRuntime?.effects?.apply(cfg.activeRoomEffect, false);
     renderRoomEffectsModal();
+    window.CoreChatPopups?.markSaved(document.getElementById('room-effects-modal'));
     document.getElementById('room-effects-modal').classList.remove('open');
   } catch (err) {
     alert(err.message || err);
-  }
+  } finally { form.removeAttribute('aria-busy'); }
 });
 
 document.getElementById('room-effect-stop')?.addEventListener('click', async () => {
+  const form = document.getElementById('room-effects-form');
+  if (form.getAttribute('aria-busy') === 'true') return;
+  form.setAttribute('aria-busy', 'true');
   try {
     await apiPost('/api/room_admin.php', {
       session_id: cfg.sessionId,
@@ -11764,9 +11783,10 @@ document.getElementById('room-effect-stop')?.addEventListener('click', async () 
     cfg.activeRoomEffect = null;
     await roomEffectsRuntime?.effects?.apply(null, false);
     renderRoomEffectsModal();
+    window.CoreChatPopups?.markSaved(document.getElementById('room-effects-modal'));
   } catch (err) {
     alert(err.message || err);
-  }
+  } finally { form.removeAttribute('aria-busy'); }
 });
 
 document.getElementById('room-edit-close')?.addEventListener('click', () => {

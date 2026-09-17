@@ -4,9 +4,48 @@
   const records = new Map();
   const selector = '.modal, .game-start-menu, #media-picker, dialog';
   const draftIds = new Set(['admin-modal', 'room-edit-modal', 'lobby-room-edit-modal', 'room-effects-modal', 'aura-modal', 'avatar-size-modal', 'webcam-audience-modal', 'message-protection-dialog', 'report-problem-modal', 'p2p-transfer-compose-modal', 'host-warn-modal', 'host-kick-modal', 'community-eject-modal', 'game-mode-modal']);
+  let lastOutsideFocus = null, titleSequence = 0;
   let order = 0, permittedButton = null, suppressOutsideClick = false;
   const visible = el => el.isConnected && !el.hidden && !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
   const focusables = box => [...box.querySelectorAll('button, input, select, textarea, a[href], [tabindex]')].filter(el => visible(el) && !el.disabled && el.tabIndex >= 0);
+  const tracksDraft = record => draftIds.has(record.root.id) || record.root.matches('.avatar-library-dialog');
+  function snapshot(record) {
+    const fields = [...record.box.querySelectorAll('input,textarea,select')].filter(el =>
+      !['password','file','search','submit','button'].includes(el.type) && !/search|filter/.test(el.id || '') && !el.closest('[data-popup-no-draft]'));
+    return fields.map(el => ({el, value:el.value, checked:el.checked, selected:el.tagName === 'SELECT' ? [...el.options].map(o=>o.selected) : null}));
+  }
+  const extras = record => [...record.box.querySelectorAll('.aura-option.selected')].map(el=>el.dataset.auraKey).join('|');
+  function markSaved(root, fields = null) {
+    if (!root) return;
+    if (!records.has(root)) enhance(root);
+    const record = records.get(root);
+    if (fields && record.baseline) { const current=snapshot(record); for(const field of fields){const updated=current.find(item=>item.el===field);const index=record.baseline.findIndex(item=>item.el===field);if(updated&&index>=0)record.baseline[index]=updated;}return; }
+    record.baseline = snapshot(record); record.extraBaseline = extras(record); record.dirty = false;
+  }
+  function isDirty(record) {
+    if (!tracksDraft(record) || !record.baseline) return false;
+    const current = snapshot(record);
+    return current.length !== record.baseline.length || current.some((field,i)=> {
+      const before=record.baseline[i];
+      return field.el!==before.el || field.value!==before.value || field.checked!==before.checked || JSON.stringify(field.selected)!==JSON.stringify(before.selected);
+    }) || extras(record)!==record.extraBaseline;
+  }
+  function discardChanges(record) {
+    for (const field of record.baseline || []) {
+      if (!field.el.isConnected) continue;
+      field.el.value=field.value;
+      if (field.checked!==undefined) field.el.checked=field.checked;
+      if (field.selected) [...field.el.options].forEach((o,i)=>o.selected=field.selected[i]);
+    }
+    record.root.dispatchEvent(new Event('corechat:popup-discard'));
+  }
+  function restoreFocus(record) {
+    const other=[...records.values()].some(r=>r!==record && visible(r.root));
+    if (other) return;
+    const target=[record.returnFocus,lastOutsideFocus,document.getElementById('chat-input'),document.querySelector('main button,main a[href],button')]
+      .find(el=>el && visible(el) && !el.disabled && !record.root.contains(el));
+    target?.focus({preventScroll:true});
+  }
   function buttonFor(root) {
     if (root.id === 'media-picker') return null;
     const special = {
@@ -72,6 +111,13 @@
       box.prepend(header);
     }
     header.classList.add('cc-popup-header');box.classList.add('cc-popup-box');
+    const heading=header.querySelector('h2,h3,strong');
+    if (heading && !root.hasAttribute('aria-labelledby')) {
+      if (!heading.id) heading.id=`cc-popup-title-${++titleSequence}`;
+      root.setAttribute('aria-labelledby',heading.id);
+    }
+    if (root.matches('.modal') && !box.matches('[role=dialog],[role=alertdialog]')) {root.setAttribute('role','dialog');if(!root.hasAttribute('aria-modal'))root.setAttribute('aria-modal','true');}
+
     const record={root,box,header,native,button:buttonFor(root),active:false,dirty:false,order:0,moved:false,closing:false,returnFocus:null};
     records.set(root,record);
     let close=header.querySelector('.window-close,[id$="-close"],[data-close],.cc-popup-close') || (record.button && header.contains(record.button) ? record.button : null);
@@ -108,7 +154,7 @@
     box.addEventListener('change',event=>{
       if (draftIds.has(root.id) && !/search|filter/.test(event.target.id||'')) record.dirty=true;
     });
-    box.addEventListener('reset',()=>{record.dirty=false;});
+    box.addEventListener('reset',()=>{queueMicrotask(()=>markSaved(root));});
     // Game pickers and music already own pointer dragging; do not double-bind it.
     dragHeader(record, !root.matches('.game-start-menu,#vp-music-modal,.avatar-library-dialog'));
     sync(record);
@@ -117,11 +163,12 @@
     const active=visible(record.root);
     if (active && !record.active) {
       record.reopen?.remove();record.reopen=null;
-      record.order=++order;record.dirty=false;record.returnFocus=document.activeElement;
+      record.order=++order;record.dirty=false;record.returnFocus=record.root.contains(document.activeElement)?lastOutsideFocus:document.activeElement;
+      markSaved(record.root);
       if(record.native)record.box.style.setProperty('--cc-popup-inset',getComputedStyle(record.box).paddingTop);
       if (record.moved) {const r=record.box.getBoundingClientRect();clamp(record,r.left,r.top);}
     }
-    if (!active && record.active) {record.dirty=false;record.closing=false;}
+    if (!active && record.active) {record.dirty=false;record.closing=false;queueMicrotask(()=>restoreFocus(record));}
     record.active=active;
   }
   // Independently managed dialogs keep their own event ownership.
@@ -144,14 +191,15 @@
   async function requestClose(record, ownerButton=record.button) {
     if (!record.active || record.closing) return;
     // Never dismiss a pending password/submission behind a disabled Cancel control.
-    if (ownerButton?.disabled || record.box.getAttribute('aria-busy')==='true' || [...record.box.querySelectorAll('form[aria-busy="true"], [data-popup-busy="true"]')].some(visible)) return;
+    if (record.root.dataset.popupBusy==='true' || ownerButton?.disabled || record.box.getAttribute('aria-busy')==='true' || [...record.box.querySelectorAll('form[aria-busy="true"], [data-popup-busy="true"]')].some(visible)) return;
     record.closing=true;
     try {
       if (record.root.id==='voice-note-modal') {
         if (!await ask('Discard this voice recording? It will not be sent.',{title:'Cancel recording',accept:'Discard recording'})) return;
-      } else if (record.dirty || (record.root.id==='admin-modal' && record.root.querySelector('.is-dirty'))) {
+      } else if (isDirty(record)) {
         if (!await ask('This window has changes that may not have been saved. Keep editing, or close and discard those changes?',{title:'Unsaved changes',accept:'Discard and close',cancel:'Keep editing'})) return;
         record.root.dataset.popupDiscardApproved='1';
+        discardChanges(record);
       }
       if (!visible(record.root)) return;
       if (record.root.id==='p2p-transfer-offer-modal') {
@@ -190,7 +238,7 @@
       enhance(dialog);dialog.showModal();sync(records.get(dialog));(input||no).focus();input?.select();
     });
   }
-  window.CoreChatPopups=Object.freeze({confirm:(message,options)=>ask(message,options),prompt:(message,value='')=>ask(message,{title:'Enter details',value,accept:'Save'}),
+  window.CoreChatPopups=Object.freeze({markSaved, isDirty:root=>records.has(root)&&isDirty(records.get(root)), confirm:(message,options)=>ask(message,options),prompt:(message,value='')=>ask(message,{title:'Enter details',value,accept:'Save'}),
     clearDismissed(root){const record=records.get(root);record?.reopen?.remove();if(record)record.reopen=null;},
     consumeDiscardApproval(root){const approved=root?.dataset.popupDiscardApproved==='1';if(root)delete root.dataset.popupDiscardApproved;return approved;}});
   document.querySelectorAll(selector).forEach(enhance);
@@ -202,12 +250,14 @@
     for(const [root,record]of records)if(!root.isConnected){record.reopen?.remove();records.delete(root);}
   }).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class','hidden','open']});
   document.addEventListener('pointerdown',event=>{
+    if (![...records.values()].some(r=>visible(r.root)&&r.root.contains(event.target))) lastOutsideFocus=event.target.closest('button,a[href],input,[tabindex]') || document.activeElement;
     suppressOutsideClick=false;
     const record=top();if(!record || inside(record,event) || (independentDialog(event.target) || event.target.closest('.cc-popup-return')))return;
     suppressOutsideClick=true;event.preventDefault();event.stopImmediatePropagation();requestClose(record);
   },true);
   // Suppress backdrop click handlers too, including when the guard stays open.
   document.addEventListener('click',event=>{if(permittedButton && permittedButton.contains(event.target))return;if(suppressOutsideClick){suppressOutsideClick=false;event.preventDefault();event.stopImmediatePropagation();return;}const record=top();if(record && !inside(record,event) && !(independentDialog(event.target) || event.target.closest('.cc-popup-return'))){event.preventDefault();event.stopImmediatePropagation();}},true);
+  document.addEventListener('focusin',event=>{if(![...records.values()].some(r=>visible(r.root)&&r.root.contains(event.target)))lastOutsideFocus=event.target;});
   document.addEventListener('keydown',event=>{
     if(independentDialog(document.activeElement))return;
     const record=top();if(!record)return;

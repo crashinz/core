@@ -113,13 +113,13 @@ import {
 
     ChatReplyService
 
-} from "./services/chat-reply-service.js";
+} from "./services/chat-reply-service.js?v=20260917-send-recovery";
 
 import {
 
     ChatComposerService
 
-} from "./services/chat-composer-service.js";
+} from "./services/chat-composer-service.js?v=20260917-send-recovery";
 
 import {
 
@@ -143,13 +143,13 @@ import {
 
     ChatGameChatService
 
-} from "./services/chat-game-chat-service.js?v=20260915-rematch-chat";
+} from "./services/chat-game-chat-service.js?reliability=20260917&v=20260915-rematch-chat";
 
 import {
 
     ChatPollService
 
-} from "./services/chat-poll-service.js?v=20260913-background-chime";
+} from "./services/chat-poll-service.js?v=20260917-recovery";
 
 import {
 

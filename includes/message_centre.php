@@ -2,6 +2,7 @@
 require_once __DIR__ . '/base.php';
 
 function create_message(PDO $pdo, string $channel, string $type, array $payload): array {
+    if ($type === 'text' && trim((string)($payload['client_message_id'] ?? '')) !== '') return create_idempotent_text_message($pdo, $channel, $payload);
     if ($type !== 'gesture') return create_message_record($pdo, $channel, $type, $payload);
     $participant = $payload['participant'] ?? [];
     $actorUserId = (int)($payload['user_id'] ?? $participant['user_id'] ?? 0);
@@ -260,4 +261,38 @@ function create_message_record(PDO $pdo, string $channel, string $type, array $p
     $msg = ['id' => (int)$pdo->lastInsertId(), 'channel' => 'room'] + $baseMsg;
     emit_event($pdo, $sessionId, 'message', message_protection_event_payload($msg, 'messages'));
     return $msg;
+}
+
+// Reuse the installed transactional operation ledger. Store references, never a
+// second plaintext copy of protected content. API owners authorize every retry.
+function create_idempotent_text_message(PDO $pdo, string $channel, array $payload): array {
+    $userId = (int)($payload['user_id'] ?? $payload['participant']['user_id'] ?? 0);
+    $key = trim((string)$payload['client_message_id']);
+    $intent = ['channel' => $channel];
+    foreach (['session_id', 'link_key', 'dm_key', 'target_user_id', 'lobby_code', 'content', 'protection_envelope', 'important'] as $field) {
+        $intent[$field] = $payload[$field] ?? null;
+    }
+    // Reply projections may change after an edit; the intended message id must not.
+    $intent['reply_id'] = $payload['reply_to']['id'] ?? null;
+    $table = $channel === 'game' ? 'game_chat_messages' : (in_array($channel, ['community','link','dm'], true) ? 'community_messages' : 'messages');
+    $created = null;
+    $receipt = gesture_catalog_idempotent($pdo, $userId, 'chat-text-v1', $key, $intent,
+        function () use ($pdo, $channel, $payload, &$created): array {
+            $created = create_message_record($pdo, $channel, 'text', $payload);
+            $receipt = $created;
+            foreach (['content','original_content','url_preview','reply_to','protection_envelope'] as $field) unset($receipt[$field]);
+            return $receipt;
+        });
+    if ($created !== null) return $created;
+    $stmt = $pdo->prepare("SELECT * FROM {$table} WHERE id = ? AND user_id = ? AND client_message_id = ?");
+    $stmt->execute([(int)$receipt['id'], $userId, $key]);
+    $row = $stmt->fetch();
+    // A retained receipt must not resurrect a deleted message or emit it again.
+    if (!$row) return $receipt + ['content' => '', 'deleted' => true];
+    $row = message_protection_project_row($row);
+    $receipt['content'] = $row['content'];
+    $receipt['url_preview'] = message_url_preview($row['url_preview_json'] ?? null);
+    $receipt['reply_to'] = message_url_preview($row['reply_to_json'] ?? null);
+    $receipt['protection_envelope'] = $row['protection_envelope'] ?? null;
+    return $receipt;
 }

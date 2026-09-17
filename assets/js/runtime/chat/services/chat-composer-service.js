@@ -146,6 +146,36 @@ export class ChatComposerService {
      *
      * @returns {Promise<Object|null>}
      */
+    captureTextTarget(activeChat) {
+        const context = this.#requireContext();
+        const chatKey = String(activeChat || "");
+        if (!['room', 'community'].includes(chatKey) && !/^(dm|link):.+$/.test(chatKey)) {
+            throw new Error("This conversation is unavailable. Your message was not sent.");
+        }
+        const config = context.getConfig();
+        const relationship = chatKey.startsWith('link:')
+            ? context.activeRelationshipRequest?.(chatKey) : null;
+        const dmUserId = chatKey.startsWith('dm:') ? Number(chatKey.slice(3)) : null;
+        if ((chatKey.startsWith('link:') && !relationship?.conversation_id)
+            || (chatKey.startsWith('dm:') && (!Number.isSafeInteger(dmUserId) || dmUserId <= 0))) {
+            throw new Error("This conversation is unavailable. Your message was not sent.");
+        }
+        const replyDraft = this.#runtime.reply.draftForChat(chatKey);
+        const payload = this.#runtime.reply.appendReplyPayload({
+            session_id: config.sessionId,
+            join_token: config.myJoinToken,
+            channel: relationship ? 'link' : (dmUserId ? 'dm' : chatKey),
+        }, chatKey);
+        if (relationship) Object.assign(payload, {
+            relationship_id: relationship.relationship_id,
+            conversation_id: relationship.conversation_id,
+        });
+        if (dmUserId) payload.target_user_id = dmUserId;
+        return Object.freeze({chatKey, replyDraft, dmUserId,
+            relationship: relationship ? Object.freeze({...relationship, chatKey}) : null,
+            payload: Object.freeze(payload)});
+    }
+
     async sendTextMessage(content, activeChat, options = {}) {
 
         const text =
@@ -162,55 +192,9 @@ export class ChatComposerService {
 
             context.stopTypingNow?.();
 
-            const config =
-                context.getConfig();
-
-            const payload =
-                this.#runtime.reply.appendReplyPayload({
-
-                    session_id:
-                        config.sessionId,
-
-                    join_token:
-                        config.myJoinToken,
-
-                    content:
-                        text,
-
-                    channel:
-                        activeChat,
-
-                    important:
-                        Boolean(options.important)
-
-                }, activeChat);
-
-            const relationship =
-                context.activeRelationshipRequest?.();
-
-            const dmUserId =
-                context.activeDmUserId();
-
-            if (relationship) {
-
-                payload.channel =
-                    "link";
-
-                payload.relationship_id =
-                    relationship.relationship_id;
-
-                payload.conversation_id =
-                    relationship.conversation_id;
-
-            } else if (dmUserId) {
-
-                payload.channel =
-                    "dm";
-
-                payload.target_user_id =
-                    dmUserId;
-
-            }
+            const target = options.target || this.captureTextTarget(activeChat);
+            if (target.chatKey !== activeChat) throw new Error("The message target changed.");
+            const payload = {...target.payload, content: text, important: Boolean(options.important), client_message_id: options.clientMessageId || crypto.randomUUID()};
 
             const message =
                 await context.apiPost(
@@ -218,27 +202,17 @@ export class ChatComposerService {
                     payload
                 );
 
-            this.#runtime.reply.clearDraft();
+            this.#runtime.reply.clearDraftIfCurrent(target.replyDraft);
 
             this.#routeSentMessage(
                 message,
-                relationship,
-                dmUserId
+                target.relationship,
+                target.dmUserId
             );
 
             return message;
 
         } catch (error) {
-
-            if (context.alertError) {
-
-                context.alertError(
-                    error
-                );
-
-                return null;
-
-            }
 
             throw error;
 
@@ -305,7 +279,7 @@ export class ChatComposerService {
 
             context.addMessageToChannel(
                 message,
-                relationship?.chatKey || context.activeRelationshipRequest?.()?.chatKey || "room",
+                relationship.chatKey,
                 false
             );
 

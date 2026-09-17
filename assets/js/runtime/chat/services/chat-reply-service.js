@@ -232,6 +232,13 @@ export class ChatReplyService {
 
     }
 
+    /** Clear only the reply captured by a completed send, never a newer choice. */
+    clearDraftIfCurrent(draft) {
+        if (!draft || this.#draft !== draft) return false;
+        this.clearDraft();
+        return true;
+    }
+
     /**
      * Appends reply metadata to an outgoing payload.
      *
