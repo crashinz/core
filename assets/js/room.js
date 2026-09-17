@@ -671,7 +671,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260915-rematch-chat')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
-    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=20260915-rematch-chat')),
+    import(appUrl('/assets/js/runtime/game/game-runtime.js?v=20260916-dominos')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
     import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js?v=20260913-regression')),
     import(`${appUrl('/assets/js/runtime/avatar/avatar-runtime.js?v=20260914-bubble-emojis')}?v=20260913-away-layout`),
@@ -7202,6 +7202,8 @@ function closeRoomActionMenu() {
   roomActionMenu?.classList.remove('visible');
 }
 
+mediaPicker?.addEventListener('corechat:popup-dismiss', () => closeMediaPicker());
+
 function closeMediaPicker() {
   gestureCatalogController?.closeActionMenu();
   const emojiMenu = document.getElementById('custom-emoji-action-menu');
@@ -7525,7 +7527,7 @@ function renderGameModeRules(game) {
         currentValue = Math.max(minimum, Math.min(maximum, Math.round((Number(next) - minimum) / step) * step + minimum));
         input.dataset.gameSettingValue = String(currentValue);
         output.value = String(currentValue);
-        output.textContent = String(currentValue);
+        output.textContent = control.key === 'winningScore' && currentValue === 0 ? 'Auto' : String(currentValue);
         output.setAttribute('aria-label', `${String(control.label || 'Game rule')} ${currentValue}`);
         decrease.disabled = currentValue <= minimum;
         increase.disabled = currentValue >= maximum;
@@ -7533,6 +7535,11 @@ function renderGameModeRules(game) {
       };
       decrease.addEventListener('click', () => setValue(currentValue - step));
       increase.addEventListener('click', () => setValue(currentValue + step));
+      if(control.key === 'winningScore') for(const [button,delta] of [[decrease,-step],[increase,step]]) {
+        let timer;const stop=()=>{clearTimeout(timer);};
+        button.addEventListener('pointerdown',e=>{if(e.button!==0)return;button.setPointerCapture(e.pointerId);timer=setTimeout(function repeat(){if(!button.isConnected||button.disabled)return stop();setValue(currentValue+delta);timer=setTimeout(repeat,130);},400);});
+        for(const event of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(event,stop);
+      }
       input.append(decrease, output, increase);
       for (const shortcut of Array.isArray(control.shortcuts) ? control.shortcuts : []) {
         const button = document.createElement('button');
@@ -8527,6 +8534,8 @@ reportProblemModal?.addEventListener('click', event => {
 });
 reportProblemForm?.addEventListener('submit', async event => {
   event.preventDefault();
+  if (reportProblemForm.getAttribute('aria-busy') === 'true') return;
+  reportProblemForm.setAttribute('aria-busy', 'true');
   reportProblemStatus.textContent = 'Submitting…';
   try {
     await runtimeIssueCaptureService.report({ summary: reportProblemSummary.value, includeScreenshot: reportProblemScreenshot.checked });
@@ -8534,6 +8543,8 @@ reportProblemForm?.addEventListener('submit', async event => {
     reportProblemForm.reset();
   } catch (error) {
     reportProblemStatus.textContent = error?.message || 'Report could not be submitted.';
+  } finally {
+    reportProblemForm.removeAttribute('aria-busy');
   }
 });
 
@@ -8699,7 +8710,7 @@ function insertEmoji(emoji) {
 let customEmojiPickerPromise = null;
 function openCustomEmojiPicker() {
   if (!customEmojiPickerPromise) {
-    customEmojiPickerPromise = import(appUrl('/assets/js/custom-emojis.js?v=20260914-duplicates'))
+    customEmojiPickerPromise = import(appUrl('/assets/js/custom-emojis.js?v=20260916-popups'))
       .then(({ CustomEmojiPicker }) => new CustomEmojiPicker({
         root: document.getElementById('custom-emoji-picker'),
         appUrl,
@@ -9518,7 +9529,7 @@ document.getElementById('tab-manage-relationship')?.addEventListener('click', ()
 document.getElementById('ctx-change-avatar').addEventListener('click', async () => {
   closeContextMenu();
   try {
-    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-duplicates`);
+    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260916-popups`);
     await openAvatarLibrary({
       userId: cfg.myUserId,
       base: APP_BASE,
@@ -9549,7 +9560,7 @@ ctxChangeNameplate?.addEventListener('click', async () => {
   closeContextMenu();
   try {
     const [{ openAvatarLibrary }, { prepareNameplateFile }, policy] = await Promise.all([
-      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260914-duplicates`),
+      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260916-popups`),
       import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
       runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
     ]);
@@ -10227,6 +10238,7 @@ async function openIncomingTransferOffer(offer) {
 }
 
 function closeIncomingTransferOffer(restoreFocus = true) {
+  window.CoreChatPopups?.clearDismissed(p2pTransferOfferModal);
   p2pTransferOfferModal?.classList.remove('open');
   p2pTransferOfferModal?.setAttribute('aria-hidden', 'true');
   p2pTransferIncomingOffer = null;
@@ -10306,6 +10318,7 @@ function renderP2PTransferStatus({offer, state, detail, progress}) {
   p2pTransferStatusDrawer.hidden = false;
   const effectiveState = state || offer.status || 'unknown';
   const terminal = TRANSFER_TERMINAL_STATES.has(effectiveState) || TRANSFER_TERMINAL_STATES.has(offer.status);
+  if (terminal && String(p2pTransferIncomingOffer?.id || '') === String(offer.id)) closeIncomingTransferOffer(false);
   let row = p2pTransferStatusDrawer.querySelector(`[data-transfer-id="${CSS.escape(offer.id)}"]`);
   if (!row) {
     row = document.createElement('article');
@@ -10720,6 +10733,7 @@ p2pTransferComposeForm?.addEventListener('submit', async event => {
   const gesture = transferGestureCatalog.get(document.getElementById('p2p-transfer-gesture')?.value || '');
   let files = [...p2pTransferSelectedFiles];
   try {
+    p2pTransferComposeForm.setAttribute('aria-busy', 'true');
     p2pTransferComposeForm.querySelector('button[type="submit"]').disabled = true;
     setTransferComposeStatus(delivery === 'p2p' ? 'Preparing direct offer…' : 'Sending through authenticated server delivery…', 'working');
     if (kind === 'gesture') {
@@ -10749,6 +10763,7 @@ p2pTransferComposeForm?.addEventListener('submit', async event => {
   } catch (error) {
     setTransferComposeStatus(error.message || 'The transfer could not be started.', 'error');
   } finally {
+    p2pTransferComposeForm.removeAttribute('aria-busy');
     const submit = p2pTransferComposeForm.querySelector('button[type="submit"]');
     if (submit) submit.disabled = false;
   }
@@ -10929,7 +10944,7 @@ async function applyAvatarFile(file) {
         participants.update(cfg.myParticipantId, previousAvatarState);
         renderParticipant(me);
       }
-      if (window.confirm(`Already uploaded as "${data.existing.name}". Use the existing avatar?`)) {
+      if (await window.CoreChatPopups.confirm(`Already uploaded as "${data.existing.name}". Use the existing avatar?`)) {
         await applyLibraryAsset('avatar', data.existing.id);
       }
       return;
@@ -10996,7 +11011,7 @@ async function applyNameplateFile(file) {
     endpointCategory: 'avatar',
   });
   if (response.duplicate) {
-    if (window.confirm(`Already uploaded as "${response.existing.name}". Use the existing nameplate?`)) {
+    if (await window.CoreChatPopups.confirm(`Already uploaded as "${response.existing.name}". Use the existing nameplate?`)) {
       await applyLibraryAsset('nameplate', response.existing.id);
     }
     return;
@@ -12898,7 +12913,7 @@ async function bootRoom() {
     warnRuntimeRequest(error);
   }
   if (cfg.liveWebsiteRoom) {
-    const { LiveWebsiteRoomRuntime } = await import(appUrl('/assets/js/runtime/live-website-room/live-website-room-runtime.js?v=20260913-youtube-sidebar'));
+    const { LiveWebsiteRoomRuntime } = await import(appUrl('/assets/js/runtime/live-website-room/live-website-room-runtime.js?v=20260916-popups'));
     liveWebsiteRoomRuntime = new LiveWebsiteRoomRuntime();
     liveWebsiteRoomRuntime.start({
       projection: cfg.liveWebsiteRoom,

@@ -17,3 +17,6 @@
 .recent-authentication-dialog input { box-sizing: border-box; width: 100%; }
 .recent-authentication-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .recent-authentication-dialog [hidden] { display: none !important; }
+
+.recent-authentication-retry { margin-inline-start: 10px; padding: 5px 10px; cursor: pointer; }
+.recent-authentication-retry:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

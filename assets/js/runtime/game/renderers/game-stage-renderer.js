@@ -55,6 +55,7 @@ const SINGLE_SCROLL_GAME_PATHS = Object.freeze({
     "g_b63c0a04": "/games/chinese-checkers-first-party/index.html",
     "g_b63c0a05": "/games/nested-four-first-party/index.html",
     "g_b63c0a06": "/games/puppy-panic-first-party/index.html",
+    "g_dominos01": "/games/dominos/index.html",
     "g_b61c0a01": "/games/backgammon-first-party/index.html",
     "g_4f8c2d71": "/games/five-dice/index.html"
 });
@@ -100,7 +101,7 @@ export function releaseGameFrameSingleScroll(frameEl) {
 export function gameFrameContentHeight(documentOwner) {
     const documentElement = documentOwner?.documentElement;
     const body = documentOwner?.body;
-    const usesIntrinsicHeight = /\/games\/(?:five-dice|uno-first-party|puppy-panic-first-party|battleship-first-party|chess-first-party|checkers-first-party|spades-first-party|hearts-first-party|tetris-versus-first-party|space-invasion-first-party)\/(?:index\.html)?$/i.test(String(documentOwner?.location?.pathname || ""));
+    const usesIntrinsicHeight = /\/games\/(?:dominos|five-dice|uno-first-party|puppy-panic-first-party|battleship-first-party|chess-first-party|checkers-first-party|spades-first-party|hearts-first-party|tetris-versus-first-party|space-invasion-first-party)\/(?:index\.html)?$/i.test(String(documentOwner?.location?.pathname || ""));
     if (usesIntrinsicHeight && body) {
         const finite = value => Number.isFinite(Number(value)) ? Number(value) : 0;
         const bodyBox = body.getBoundingClientRect?.() || {};

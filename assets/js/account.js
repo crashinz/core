@@ -472,7 +472,7 @@ document.getElementById('account-password-form').addEventListener('submit', asyn
 });
 
 document.getElementById('account-recovery-generate').addEventListener('click', async () => {
-  if (!confirm('Create a new recovery code? Any previous code will stop working.')) return;
+  if (!await window.CoreChatPopups.confirm('Create a new recovery code? Any previous code will stop working.')) return;
   try {
     const data = await post('/api/recovery.php', { action: 'generate' });
     document.getElementById('account-recovery-card').textContent = `Store this code safely: ${data.recovery_code}`;

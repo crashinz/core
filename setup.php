@@ -916,6 +916,7 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Setup - ChatSpace CE</title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css?v=20260824-settings-cards-r1')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/popup-behavior.css?v=20260916-r1')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>">
 <main class="setup-shell">
@@ -1077,7 +1078,8 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
   </section>
 </main>
 <script src="<?= e(app_url('/assets/js/avatar-processing.js')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260915-central-checksums')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260916-r1')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260916-popups')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/setup.js')) ?>"></script>
 </body>
 </html>

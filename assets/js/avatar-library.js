@@ -175,7 +175,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
             const message = avatar.mine
               ? 'Delete this avatar from your library and stop sharing it? Images already in use and copies already acquired by other people will remain available. No image files will be deleted.'
               : 'Remove this avatar from the community library? The owner\'s private copy, images already in use, and copies already acquired will remain available. No image files will be deleted.';
-            if (!window.confirm(kindText(message))) return;
+            if (!await window.CoreChatPopups.confirm(kindText(message))) return;
             busy = true; remove.disabled = true;
             try {
               await requestForm({ action: avatar.mine ? 'delete' : 'remove_community', id: avatar.id });
@@ -215,7 +215,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
     if (busy) return;
     const files = [...folderInput.files].filter(file => /\.(gif|webp|png|jpe?g)$/i.test(file.name));
     if (!files.length) { status.textContent = 'No supported images found in that folder.'; return; }
-    if (!window.confirm(kindText(`Publish ${files.length} images to the community avatar library? Your current avatar will not change.`))) return;
+    if (!await window.CoreChatPopups.confirm(kindText(`Publish ${files.length} images to the community avatar library? Your current avatar will not change.`))) return;
     busy = true; folder.disabled = true;
     let uploaded = 0, duplicates = 0; const failures = [];
     let batch = [], batchBytes = 0, blocked = false;

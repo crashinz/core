@@ -121,7 +121,7 @@ export class CustomEmojiPicker {
 
   async rename(emoji, target) {
     if (!this.canManage || this.busy) return;
-    const answer = window.prompt(`Rename :${emoji.name}: (1-32 lowercase letters, numbers, hyphens or underscores):`, emoji.name);
+    const answer = await window.CoreChatPopups.prompt(`Rename :${emoji.name}: (1-32 lowercase letters, numbers, hyphens or underscores):`, emoji.name);
     if (answer === null || answer.trim() === emoji.name) { target.focus(); return; }
     const name = answer.trim();
     if (!/^[a-z0-9_-]{1,32}$/.test(name)) {
@@ -146,7 +146,7 @@ export class CustomEmojiPicker {
 
   async remove(emoji, target) {
     if (!this.canManage || this.busy) return;
-    if (!window.confirm(`Delete :${emoji.name}: from the custom emoji picker? Existing messages will keep their image.`)) {
+    if (!await window.CoreChatPopups.confirm(`Delete :${emoji.name}: from the custom emoji picker? Existing messages will keep their image.`)) {
       target.focus(); return;
     }
     this.busy = true; this.uploadButton.disabled = true;

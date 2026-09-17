@@ -131,6 +131,7 @@ function first_party_extension_sources(): array {
             'introducedStorageSchema' => 1,
             'publicFallbackName' => 'Chinese Checkers',
         ],
+        'dominos' => ['manifest'=>dirname(__DIR__).'/extensions/dominos/extension.json','adapter'=>__DIR__.'/dominos_extension.php','factory'=>'dominos_extension_adapter','activationCapability'=>'game.rules.authoritative','introducedStorageSchema'=>1,'publicFallbackName'=>'Dominos'],
         'nested-four' => [
             'manifest' => dirname(__DIR__) . '/extensions/nested-four/extension.json',
             'adapter' => __DIR__ . '/nested_four_extension.php',
@@ -259,6 +260,7 @@ function first_party_extension_setting_defaults(): array {
         'first_party_extension.chinese-checkers.lifecycle_revision' => '1',
         'first_party_extension.chinese-checkers.storage_schema' => '1',
         'first_party_extension.chinese-checkers.last_failure' => '',
+        'first_party_extension.dominos.enabled'=>'1', 'first_party_extension.dominos.lifecycle_revision'=>'1', 'first_party_extension.dominos.storage_schema'=>'1', 'first_party_extension.dominos.last_failure'=>'',
         'first_party_extension.nested-four.enabled' => '1',
         'first_party_extension.nested-four.lifecycle_revision' => '1',
         'first_party_extension.nested-four.storage_schema' => '1',

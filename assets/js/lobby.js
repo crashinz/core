@@ -992,7 +992,7 @@ document.addEventListener('keydown', event => {
 
 recoveryGenerate?.addEventListener('click', async () => {
   const recreate = recoveryGenerate.textContent.includes('Recreate');
-  if (recreate && !confirm('Recreate your recovery code? The old code will stop working.')) return;
+  if (recreate && !await window.CoreChatPopups.confirm('Recreate your recovery code? The old code will stop working.')) return;
   recoveryGenerate.disabled = true;
   setRecoveryStatus('Generating...', 'working');
   try {
@@ -1158,9 +1158,9 @@ function focusAdminExactDestination(targetSelector) {
   });
 }
 
-function showAdminExactDestination(destinationId, pushHistory = true) {
+async function showAdminExactDestination(destinationId, pushHistory = true) {
   const destination = adminExactDestinations[destinationId];
-  if (!destination || !showAdminSection(destination.section)) return false;
+  if (!destination || !await showAdminSection(destination.section)) return false;
   if (pushHistory) {
     const url = new URL(window.location.href);
     url.hash = destination.fragment;
@@ -1170,28 +1170,28 @@ function showAdminExactDestination(destinationId, pushHistory = true) {
   return true;
 }
 
-function restoreAdminLocationFromHash() {
+async function restoreAdminLocationFromHash() {
   const hash = String(window.location.hash || '').replace(/^#/, '');
   const adminDestination = Object.keys(adminExactDestinations)
     .find(id => adminExactDestinations[id].fragment === hash);
-  if (adminDestination) return showAdminExactDestination(adminDestination, false);
-  if (hash === 'settings-errors') return showAdminSection('errors');
+  if (adminDestination) return await showAdminExactDestination(adminDestination, false);
+  if (hash === 'settings-errors') return await showAdminSection('errors');
   if (hash.startsWith('settings-')) {
     const settingsView = hash.replace(/^settings-/, '');
     const hasSettingsView = Array.from(document.querySelectorAll('[data-settings-view]'))
       .some(control => control.dataset.settingsView === settingsView);
-    if (hasSettingsView && showAdminSection('settings')) {
+    if (hasSettingsView && await showAdminSection('settings')) {
       window.requestAnimationFrame(() => adminSettingsRegistryUI?.selectView?.(settingsView));
       return true;
     }
   }
   const directSection = hash.replace(/^admin-/, '');
   if (directSection && document.getElementById(`admin-section-${directSection}`)) {
-    return showAdminSection(directSection);
+    return await showAdminSection(directSection);
   }
   if (!hash.startsWith('manage-users-')) return false;
   const sectionId = hash.replace(/^manage-users-/, '');
-  if (!showAdminSection('users')) return false;
+  if (!await showAdminSection('users')) return false;
   return restoreManageUsersSection(sectionId);
 }
 
@@ -1305,18 +1305,18 @@ function initializeAdminInformationArchitecture() {
   showManageUsersSection(activeManageUsersSection, false);
 }
 
-window.addEventListener('popstate', event => {
-  if (restoreAdminLocationFromHash()) return;
+window.addEventListener('popstate', async event => {
+  if (await restoreAdminLocationFromHash()) return;
   const hash = String(window.location.hash || '').replace(/^#/, '');
   const adminDestination = event.state?.adminDestination
     || Object.keys(adminExactDestinations).find(id => adminExactDestinations[id].fragment === hash);
   if (adminDestination) {
-    showAdminExactDestination(adminDestination, false);
+    await showAdminExactDestination(adminDestination, false);
     return;
   }
   const value = event.state?.manageUsersSection || String(window.location.hash || '').replace(/^#manage-users-/, '');
   if (value) {
-    showAdminSection('users');
+    await showAdminSection('users');
     restoreManageUsersSection(value);
   }
 });
@@ -1341,10 +1341,10 @@ function setAdminFormStatus(form, message, type = '') {
   status.className = `${status.classList.contains('admin-form-status') ? 'admin-form-status' : 'admin-row-status'} ${type}`.trim();
 }
 
-function showAdminSection(id) {
+async function showAdminSection(id) {
   const active = document.querySelector('.admin-section.active')?.id || '';
   const leavingGestures = active === 'admin-section-gestures' && id !== 'gestures';
-  if (leavingGestures && !confirmAdminGestureDiscard(`Opening the ${id} Admin section`)) return false;
+  if (leavingGestures && !await confirmAdminGestureDiscard(`Opening the ${id} Admin section`)) return false;
   if (leavingGestures) clearAdminGestureDirtyState();
   document.querySelectorAll('.admin-section').forEach(section => {
     section.classList.toggle('active', section.id === `admin-section-${id}`);
@@ -1382,19 +1382,19 @@ function filterAdminOverviewDirectory() {
 
 adminOverviewSearch?.addEventListener('input', filterAdminOverviewDirectory);
 
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
   const nav = e.target.closest('.admin-nav-item[data-admin-section]');
   if (nav) {
-    showAdminSection(nav.dataset.adminSection);
+    await showAdminSection(nav.dataset.adminSection);
     return;
   }
   const jump = e.target.closest('[data-admin-jump]');
   if (jump) {
     if (jump.dataset.adminDestination) {
-      showAdminExactDestination(jump.dataset.adminDestination);
+      await showAdminExactDestination(jump.dataset.adminDestination);
       return;
     }
-    if (!showAdminSection(jump.dataset.adminJump)) return;
+    if (!await showAdminSection(jump.dataset.adminJump)) return;
     const settingsView = jump.dataset.settingsView;
     if (settingsView) {
       window.requestAnimationFrame(() => adminSettingsRegistryUI?.selectView?.(settingsView));
@@ -1552,9 +1552,9 @@ function renderAdminNetworkPolicy(data) {
         remove.textContent = 'Remove Ban';
         remove.addEventListener('click', async () => {
           if (!adminSettingsUnlock?.requireUnlocked()) return;
-          const reason = window.prompt('Reason for removing this manual network ban:') || '';
+          const reason = await window.CoreChatPopups.prompt('Reason for removing this manual network ban:') || '';
           if (!reason.trim()) return;
-          if (!window.confirm('Remove this manual network ban after reviewing the reason?')) return;
+          if (!await window.CoreChatPopups.confirm('Remove this manual network ban after reviewing the reason?')) return;
           try {
             await adminNetworkRequest({
               action: 'remove_manual_ban',
@@ -3143,10 +3143,10 @@ function hasDirtyAdminGestures() {
   return adminGestureState.dirtyRows.size > 0;
 }
 
-function confirmAdminGestureDiscard(reason) {
+async function confirmAdminGestureDiscard(reason) {
   if (!hasDirtyAdminGestures()) return true;
   const count = adminGestureState.dirtyRows.size;
-  return window.confirm(
+  return await window.CoreChatPopups.confirm(
     `${count} Server Gesture row${count === 1 ? ' has' : 's have'} unsaved changes. `
     + `${reason} will discard them. Continue?`
   );
@@ -3368,8 +3368,8 @@ function renderAdminGestureCatalog(data) {
     review.textContent = 'Review latest';
     review.dataset.adminGestureReview = '';
     review.hidden = true;
-    review.addEventListener('click', () => {
-      if (!confirmAdminGestureDiscard('Reviewing the latest authoritative row')) return;
+    review.addEventListener('click', async () => {
+      if (!await confirmAdminGestureDiscard('Reviewing the latest authoritative row')) return;
       loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message, 'error'));
     });
     const status = document.createElement('p');
@@ -3399,8 +3399,8 @@ function renderAdminGestureCatalog(data) {
   previous.className = 'btn';
   previous.textContent = 'Previous';
   previous.disabled = adminGestureState.page <= 1;
-  previous.addEventListener('click', () => {
-    if (!confirmAdminGestureDiscard('Changing pages')) return;
+  previous.addEventListener('click', async () => {
+    if (!await confirmAdminGestureDiscard('Changing pages')) return;
     adminGestureState.page = Math.max(1, adminGestureState.page - 1);
     loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message, 'error'));
   });
@@ -3416,8 +3416,8 @@ function renderAdminGestureCatalog(data) {
   next.className = 'btn';
   next.textContent = 'Next';
   next.disabled = adminGestureState.page >= adminGestureState.pages;
-  next.addEventListener('click', () => {
-    if (!confirmAdminGestureDiscard('Changing pages')) return;
+  next.addEventListener('click', async () => {
+    if (!await confirmAdminGestureDiscard('Changing pages')) return;
     adminGestureState.page = Math.min(adminGestureState.pages, adminGestureState.page + 1);
     loadAdminGestures({ allowDiscard: true }).catch(error => setAdminGestureStatus(error.message, 'error'));
   });
@@ -3426,7 +3426,7 @@ function renderAdminGestureCatalog(data) {
 
 async function loadAdminGestures({ allowDiscard = false, reason = 'Refreshing the Server Gesture catalog' } = {}) {
   if (!adminGestureCatalog || !adminSettingsRegistry) return false;
-  if (!allowDiscard && !confirmAdminGestureDiscard(reason)) return false;
+  if (!allowDiscard && !await confirmAdminGestureDiscard(reason)) return false;
   renderAdminGestureFeatureSummary();
   const limitsSummary = document.getElementById('admin-summary-limits');
   if (limitsSummary) {
@@ -3531,7 +3531,7 @@ async function loadAdminLinkIcons() {
       }
     });
     row.querySelector('.btn-danger')?.addEventListener('click', async () => {
-      if (!confirm(`Delete ${icon.label}? Existing pairs using it will switch to Plus.`)) return;
+      if (!await window.CoreChatPopups.confirm(`Delete ${icon.label}? Existing pairs using it will switch to Plus.`)) return;
       const fd = new FormData();
       fd.append('action', 'delete');
       fd.append('icon_name', icon.icon_name);
@@ -4345,14 +4345,14 @@ async function loadAdminDashboard() {
 async function openCanonicalAdmin() {
   lobbyMenu?.classList.remove('visible');
   adminModal.classList.add('open');
-  if (!restoreAdminLocationFromHash()) showAdminSection('overview');
+  if (!await restoreAdminLocationFromHash()) await showAdminSection('overview');
   await loadAdminDashboard();
 }
 
 document.getElementById('admin-open')?.addEventListener('click', openCanonicalAdmin);
 
-document.getElementById('admin-gesture-open-settings')?.addEventListener('click', () => {
-  if (!showAdminSection('settings')) return;
+document.getElementById('admin-gesture-open-settings')?.addEventListener('click', async () => {
+  if (!await showAdminSection('settings')) return;
   const search = document.getElementById('lobby-admin-settings-search');
   if (!search) return;
   search.value = 'gesture';
@@ -4362,8 +4362,8 @@ document.getElementById('admin-gesture-open-settings')?.addEventListener('click'
 
 adminGestureSearch?.addEventListener('input', () => {
   window.clearTimeout(adminGestureSearchTimer);
-  adminGestureSearchTimer = window.setTimeout(() => {
-    if (!confirmAdminGestureDiscard('Searching the Server Gesture catalog')) {
+  adminGestureSearchTimer = window.setTimeout(async () => {
+    if (!await confirmAdminGestureDiscard('Searching the Server Gesture catalog')) {
       adminGestureSearch.value = adminGestureState.query;
       return;
     }
@@ -4372,8 +4372,8 @@ adminGestureSearch?.addEventListener('input', () => {
   }, 180);
 });
 
-adminGestureSort?.addEventListener('change', () => {
-  if (!confirmAdminGestureDiscard('Sorting the Server Gesture catalog')) {
+adminGestureSort?.addEventListener('change', async () => {
+  if (!await confirmAdminGestureDiscard('Sorting the Server Gesture catalog')) {
     adminGestureSort.value = adminGestureState.sort;
     return;
   }
@@ -4393,8 +4393,8 @@ window.addEventListener('message', event => {
 
 window.addEventListener('pagehide', () => adminGestureChannel?.close(), { once: true });
 
-document.getElementById('admin-close')?.addEventListener('click', () => {
-  if (!confirmAdminGestureDiscard('Closing Admin')) return;
+document.getElementById('admin-close')?.addEventListener('click', async () => {
+  if (!window.CoreChatPopups.consumeDiscardApproval(adminModal) && !await confirmAdminGestureDiscard('Closing Admin')) return;
   clearAdminGestureDirtyState();
   adminSettingsUnlock?.relock('Settings changes locked because the Admin interface closed.', 'closure');
   const params = new URLSearchParams(window.location.search);
@@ -4739,7 +4739,7 @@ async function mutateLobbyAdminSettings(operation, details = {}) {
     if (error?.data?.code === 'NETWORK_MANUAL_BANS_DISABLE_CONFIRMATION_REQUIRED'
         && !details.network_manual_bans_disable_confirmed) {
       const activeCount = Number(error.data.networkModerationPolicy?.activeBanCount || 0);
-      const confirmed = window.confirm(
+      const confirmed = await window.CoreChatPopups.confirm(
         `Disabling Manual Network Bans stops enforcement for ${activeCount} active ban`
         + `${activeCount === 1 ? '' : 's'}. Review and confirm this impact.`
       );
@@ -5115,6 +5115,7 @@ function renderLobbyTransferStatus({offer, state, detail, progress}) {
   drawer.hidden = false;
   const effectiveState = state || offer.status || 'unknown';
   const terminal = lobbyTransferTerminalStates.has(effectiveState) || lobbyTransferTerminalStates.has(offer.status);
+  if (terminal && String(lobbyIncomingTransfer?.id || '') === String(offer.id)) closeLobbyIncomingTransfer();
   let row = drawer.querySelector(`[data-transfer-id="${CSS.escape(offer.id)}"]`);
   if (!row) {
     row = document.createElement('article');
@@ -5235,6 +5236,7 @@ async function openLobbyIncomingTransfer(offer) {
 
 function closeLobbyIncomingTransfer() {
   const modal = document.getElementById('p2p-transfer-offer-modal');
+  window.CoreChatPopups?.clearDismissed(modal);
   modal?.classList.remove('open');
   modal?.setAttribute('aria-hidden', 'true');
   lobbyIncomingTransfer = null;

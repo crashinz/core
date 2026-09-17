@@ -1999,7 +1999,7 @@ function multiplayer_game_shared_disconnect_eligibility(array $state, array $con
     $extensionId = (string)($context['extensionId'] ?? '');
     $eligibility = ['winByUserIds' => [], 'drawByUserIds' => [], 'targetUserIds' => array_keys($disconnected)];
     if ($disconnected === []) return $eligibility;
-    if ($extensionId !== 'spades') {
+    if ($extensionId !== 'spades' && !($extensionId === 'dominos' && ($state['settings']['tableMode'] ?? '') === 'teams')) {
         if (count(multiplayer_game_shared_player_ids($state)) === 2
             && count($disconnected) === 1
             && !empty(current($disconnected)['exhausted'])) {
@@ -2135,7 +2135,7 @@ function multiplayer_game_apply_shared_action(
             $winners = array_values(array_filter($players, static function(int $id) use ($state): bool {
                 return !empty($state['fleets'][(string)$id]['accepted']);
             }));
-        } elseif ((string)($context['extensionId'] ?? '') === 'spades' && $expiredUserId > 0) {
+        } elseif (((string)($context['extensionId'] ?? '') === 'spades' || ((string)($context['extensionId'] ?? '') === 'dominos' && ($state['settings']['tableMode'] ?? '') === 'teams')) && $expiredUserId > 0) {
             $expiredTeam = multiplayer_game_shared_team_for_user($context, $expiredUserId);
             $winners = array_values(array_filter($players, static function(int $id) use ($context, $expiredTeam): bool {
                 return multiplayer_game_shared_team_for_user($context, $id) > 0
@@ -2185,6 +2185,7 @@ function multiplayer_game_shared_progress_completed(
     ?int $beforeTurn,
     ?int $afterTurn
 ): bool {
+    if ($extensionId === 'dominos') return (int)($after['sequence']??0) > (int)($before['sequence']??0);
     if ($extensionId === 'chess') return $action === 'move';
     if ($extensionId === 'checkers') return $action === 'move' && ($beforeTurn !== $afterTurn || !empty($after['completed']));
     if ($extensionId === 'battleship') return in_array($action, ['attack','bot-step'], true);
@@ -3067,7 +3068,7 @@ function multiplayer_game_complete_session(
     }
     $highest = max($scores);
     $leaders = array_keys(array_filter($scores, static fn(float $score): bool => $score === $highest));
-    $spadesTeamResult = $extensionAuthorized && (string)($definition['extensionId'] ?? '') === 'spades';
+    $spadesTeamResult = $extensionAuthorized && ((string)($definition['extensionId'] ?? '') === 'spades' || ((string)($definition['extensionId'] ?? '') === 'dominos' && (json_decode((string)$session['settings_json'],true)['tableMode']??'') === 'teams')); 
     $normalizedMembers = [];
     if ($spadesTeamResult) {
         $outcomes = [];
@@ -4040,7 +4041,7 @@ function multiplayer_game_supports_reducer_resignation(array $session): bool
     return in_array($extensionId, [
         'five-dice', 'chess', 'checkers', 'battleship', 'nested-four',
         'spades', 'blackjack', 'hearts', 'uno', 'chinese-checkers',
-        'puppy-panic', 'acey-deucy', 'backgammon-first-party', 'space-invasion',
+        'puppy-panic', 'acey-deucy', 'backgammon-first-party', 'space-invasion', 'dominos',
     ], true);
 }
 

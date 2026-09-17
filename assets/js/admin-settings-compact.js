@@ -374,7 +374,7 @@
           button.disabled = !pack.canManage || this.readOnly || this.locked;
           button.addEventListener('click', async () => {
             if (rowBusy || busy || this.locked || this.readOnly || !pack.canManage) return;
-            if (action === 'remove' && !window.confirm(`Remove Classic media for ${pack.displayName || 'Five Dice'}? Built-in presentation will be used; game state and scores are unchanged.`)) return;
+            if (action === 'remove' && !await window.CoreChatPopups.confirm(`Remove Classic media for ${pack.displayName || 'Five Dice'}? Built-in presentation will be used; game state and scores are unchanged.`)) return;
             rowBusy = true;
             actions.querySelectorAll('button').forEach(control => { control.disabled = true; });
             feedback.textContent = action === 'verify' ? 'Verifying…' : 'Removing Classic media…';

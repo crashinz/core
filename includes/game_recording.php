@@ -4,7 +4,7 @@ declare(strict_types=1);
 /** Multiplayer Game Framework replay owner. Never included in player projections. */
 const GAME_RECORDING_FORMAT = 'corechat-game-replay';
 const GAME_RECORDING_VERSION = 1;
-const GAME_RECORDING_GAMES = ['spades', 'hearts', 'checkers', 'chess', 'backgammon', 'acey-deucy', 'battleship', 'chinese-checkers', 'uno', 'nested-four', 'blackjack', 'puppy-panic', 'five-dice'];
+const GAME_RECORDING_GAMES = ['spades', 'hearts', 'checkers', 'chess', 'backgammon', 'acey-deucy', 'battleship', 'chinese-checkers', 'uno', 'nested-four', 'blackjack', 'puppy-panic', 'five-dice', 'dominos'];
 const GAME_RECORDING_EVENT_BYTES = 4194304;
 const GAME_RECORDING_QUEUE_BYTES = 33554432;
 

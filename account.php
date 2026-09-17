@@ -21,6 +21,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e(branded_page_title('Account', $pdo, 'other')) ?></title>
   <link rel="stylesheet" href="<?= e($assetVersion('/assets/css/styles.css')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/popup-behavior.css?v=20260916-r1')) ?>">
 </head>
 <body class="shared-surface-body" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="shared-surface">
@@ -259,6 +260,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
     <div id="account-reports" class="admin-scroll-list"></div>
   </section>
 </main>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260916-r1')) ?>"></script>
 <script src="<?= e($assetVersion('/assets/js/account.js')) ?>"></script>
 </body>
 </html>

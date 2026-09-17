@@ -99,6 +99,7 @@ $rooms = $roomsStmt->fetchAll();
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=e365788d6f6d')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/unused-image-cleanup.css?v=20260915')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/library-duplicate-review.css?v=20260914')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/popup-behavior.css?v=20260916-r1')) ?>">
 </head>
 <body data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-user-id="<?= (int)$user['id'] ?>" data-is-admin="<?= ($user['role'] ?? '') === 'admin' ? 'true' : 'false' ?>" data-is-installation-owner="<?= $isInstallationOwner ? 'true' : 'false' ?>" data-canonical-admin-launch="<?= $canonicalAdminLaunch ? 'true' : 'false' ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="picker-shell">
@@ -1049,13 +1050,14 @@ $rooms = $roomsStmt->fetchAll();
   </div>
 </div>
 <?php endif; ?>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260916-r1')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/game-recordings.js?v=20260914')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260915-central-checksums')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260913-clear-warning-box')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=e0ccdc9f5c28')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/lobby.js?v=20260913-compact-admin')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260916-popups')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260916-retry')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260916-popups')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/lobby.js?v=20260916-popups')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/unused-image-cleanup.js?v=20260915')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260914')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260916-popups')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>
 </body>
 </html>

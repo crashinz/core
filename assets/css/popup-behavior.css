@@ -1,0 +1,20 @@
+.cc-popup-box { box-sizing:border-box; max-width:calc(100vw - 16px); overscroll-behavior:contain; }
+.cc-popup-box > .cc-popup-header { position:sticky; top:-18px; z-index:6; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; background:#12141d; padding:10px 0; margin-top:-10px; cursor:grab; touch-action:none; user-select:none; }
+.cc-popup-header.cc-popup-dragging { cursor:grabbing; }
+.cc-popup-header:focus-visible { outline:2px solid #b4a5ff; outline-offset:-2px; }
+.cc-popup-header h2,.cc-popup-header h3 { margin:0; font-size:1.1rem; }
+.cc-popup-close { flex-shrink:0; padding:0 5px; min-width:28px; min-height:28px; border:0; background:transparent; color:inherit; font-size:24px; cursor:pointer; }
+.admin-box > .cc-popup-header { position:relative; top:0; }
+.game-start-menu > .cc-popup-header { top:0; margin:0; padding:14px 16px 14px 20px; background:#102033; }
+#media-picker.cc-popup-box { display:flex; flex-direction:column; }
+#media-picker[hidden] { display:none!important; }
+#media-picker > .cc-popup-header { position:relative; top:0; margin-top:-8px; padding:4px 0 8px; }
+#media-picker .media-panel { flex:1; min-height:0; height:auto; overflow-y:auto; }
+#media-picker .media-picker-tabs,#media-picker .media-search-row { flex-shrink:0; }
+dialog.cc-popup-box { box-sizing:border-box; max-width:calc(100vw - 16px); max-height:calc(100dvh - 16px); overflow:auto; }
+dialog.cc-popup-box > .cc-popup-header { top:calc(0px - var(--cc-popup-inset,24px)); padding:10px 0; background:#151823; }
+.cc-prompt { box-sizing:border-box; width:min(440px,calc(100vw - 16px)); padding:24px; border:1px solid #69778f; border-radius:12px; color:#f1f3fa; background:#151823; }
+.cc-prompt::backdrop { background:#0009; }
+.cc-prompt input { box-sizing:border-box; width:100%; }
+.cc-prompt-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:10px; margin-top:18px; }
+.cc-popup-return { position:fixed; bottom:16px; right:16px; z-index:10030; padding:10px 16px; border:1px solid #9c8ae8; border-radius:8px; background:#211d35; color:white; }

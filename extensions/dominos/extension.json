@@ -1,0 +1,102 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "dominos",
+  "name": "Dominos",
+  "version": "1.0.0",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_dominos01",
+    "name": "Dominos",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_dominos01",
+    "gameId": 70,
+    "path": "dominos",
+    "entry": "index.html",
+    "icon": "dominos-icon.svg",
+    "profile": "versus",
+    "minPlayers": 2,
+    "practiceMinPlayers": 1,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 4,
+    "seats": [
+      "Seat 1",
+      "Seat 2",
+      "Seat 3",
+      "Seat 4"
+    ],
+    "adaptationVersion": "1.0.0",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_dominos01",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": false,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.72,
+      "minimumReadableWidth": 600,
+      "minimumReadableHeight": 380
+    },
+    "rulesHelp": {
+      "label": "All Fives rules",
+      "description": "Double-six All Fives with one spinner and rotating starters."
+    }
+  },
+  "requiredFiles": [
+    "includes/dominos_extension.php",
+    "includes/dominos_bot_support.php",
+    "games/dominos/index.html",
+    "games/dominos/app.js",
+    "games/dominos/style.css",
+    "games/ocx-extension-game.js",
+    "games/ocx-extension-game.css",
+    "assets/images/dominos-icon.svg",
+    "assets/audio/dominos/placement-1.wav",
+    "assets/audio/dominos/placement-2.wav",
+    "assets/audio/dominos/placement-3.wav",
+    "assets/audio/dominos/shuffle.mp3",
+    "games/dominos/art.js",
+    "games/dominos/layout.js",
+    "includes/dominos_bot_search.php"
+  ]
+}

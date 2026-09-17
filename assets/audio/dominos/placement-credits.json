@@ -1,0 +1,25 @@
+{
+  "title": "Domino pieces 1",
+  "creator": "Macif",
+  "source": "https://freesound.org/people/Macif/sounds/329099/",
+  "license": "CC0-1.0",
+  "input": "Freesound HQ MP3 preview, not original WAV",
+  "changes": "Three excerpts, DC removal, peak normalization, short edge fades",
+  "clips": [
+    {
+      "file": "placement-1.wav",
+      "start": 1.045,
+      "duration": 0.34
+    },
+    {
+      "file": "placement-2.wav",
+      "start": 2.485,
+      "duration": 0.34
+    },
+    {
+      "file": "placement-3.wav",
+      "start": 4.345,
+      "duration": 0.34
+    }
+  ]
+}

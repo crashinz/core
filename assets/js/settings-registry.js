@@ -2441,7 +2441,7 @@
           }
           const remove = element('button', 'btn btn-danger', 'Delete'); remove.type = 'button'; remove.disabled = this.readOnly || this.locked;
           remove.addEventListener('click', async () => {
-            if (!window.confirm('Delete this privacy-safe Limit Event record?')) return;
+            if (!await window.CoreChatPopups.confirm('Delete this privacy-safe Limit Event record?')) return;
             const csrf = document.querySelector('input[name="csrf"]')?.value || '';
             const response = await fetch(`${base}/api/limit_events.php`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ action: 'delete', public_id: item.publicId, csrf }) });
             if (!response.ok) throw new Error('Limit Event could not be deleted.');

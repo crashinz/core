@@ -69,7 +69,7 @@
     const consequence = item.kind === 'gesture' ? 'This removes the gesture from its catalog. Older messages may no longer play it.'
       : item.action === 'remove_community' ? 'This removes the shared listing. The uploader keeps their private copy; chosen images stay in use.'
       : item.kind === 'emoji' ? 'Existing messages keep their emoji image.' : 'This removes the library listing. Images already in use stay unchanged.';
-    if (!window.confirm(`Delete "${item.name}" (${item.owner}) and keep "${keep.name}" (${keep.owner})?\n\n${consequence}`)) { trigger.focus(); return; }
+    if (!await window.CoreChatPopups.confirm(`Delete "${item.name}" (${item.owner}) and keep "${keep.name}" (${keep.owner})?\n\n${consequence}`)) { trigger.focus(); return; }
     busy = true; controls(); render(); status.textContent = 'Checking both copies…';
     try {
       const review = {target:{id:item.id,snapshot:item.snapshot},keep:{id:keep.id,snapshot:keep.snapshot}};

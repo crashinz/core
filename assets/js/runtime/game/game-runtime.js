@@ -46,7 +46,7 @@ import {
 
     GameStageRenderer
 
-} from "./renderers/game-stage-renderer.js?v=a45a7cff474e";
+} from "./renderers/game-stage-renderer.js?v=20260916-dominos";
 
 import {
 

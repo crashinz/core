@@ -3146,3 +3146,67 @@ public licenses.
 Creative Commons may be contacted at creativecommons.org.
 
 ```
+
+
+## Dominos placement and shuffle sounds
+
+- **Domino pieces 1**, Macif: https://freesound.org/people/Macif/sounds/329099/
+  Licensed under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+  Three 340 ms placement excerpts were made from the Freesound HQ MP3 preview,
+  with DC removal, peak normalization and short edge fades, and exported as WAV.
+  These are not lossless extracts from the original upload.
+- **Domino Shuffle**, Millavsb: https://freesound.org/people/Millavsb/sounds/197868/
+  Licensed under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+  The bundled MP3 is the Freesound HQ preview; playback uses a short excerpt.
+
+The Dominos rules and bot implementation are first-party code. No third-party
+bot engine or model is bundled. All Fives rule reference:
+https://www.pagat.com/domino/cross/all_fives.html . The game describes its chosen
+starter, deal and scoring variation in its Rules panel.
+
+
+## Dominos Expert search and All Fives strategy
+
+The All Fives scoring/blocking/low-board-total strategy in
+`includes/dominos_bot_search.php` is adapted from
+[Press-Play-On-Tape/Dominoes](https://github.com/Press-Play-On-Tape/Dominoes),
+revision c094998ae445f24d7fead4d5f51e36e458704cc4, under BSD-3-Clause.
+The adaptation uses this project's All Fives rules and includes no upstream media.
+
+Search ideas were informed by [abw333/dominoes](https://github.com/abw333/dominoes)
+and the [DominAI research report](https://angeris.github.io/papers/dominai.pdf).
+No source code or model was copied from those two references. Hidden-hand samples
+use only the bot's own hand and public information; they do not reveal actual
+opponent tiles. These references do not imply endorsement or optimal strength.
+
+### BSD-3-Clause license for the adapted All Fives strategy
+
+BSD 3-Clause License
+
+Copyright (c) 2017, 
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

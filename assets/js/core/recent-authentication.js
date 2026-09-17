@@ -4,11 +4,46 @@
   const base = String(document.body.dataset.appBase || '').replace(/\/$/, '');
   const stylesheet = document.createElement('link');
   stylesheet.rel = 'stylesheet';
-  stylesheet.href = `${base}/assets/css/recent-authentication.css?v=20260913-r1`;
+  stylesheet.href = `${base}/assets/css/recent-authentication.css?v=20260916-retry`;
   document.head.append(stylesheet);
   let dialog;
   let previousFocus;
   let pending = false;
+  const staleWarning = 'Please sign in again before performing this sensitive action.';
+  const warningSelector = '[role="alert"], [role="status"], .admin-form-status, .error, [id$="-error"], [id$="-status"], [id$="-msg"]';
+  const retryButtons = new Map();
+  function refreshRetryButtons() {
+    for (const [container, button] of retryButtons) {
+      if (!container.isConnected || !container.textContent.includes(staleWarning) || !container.contains(button)) {
+        button.remove();
+        retryButtons.delete(container);
+      }
+    }
+    document.querySelectorAll(warningSelector).forEach(container => {
+      if (container.closest('.recent-authentication-dialog') || !container.textContent.includes(staleWarning)) return;
+      // Put the action on the innermost warning, not each matching ancestor.
+      if ([...container.querySelectorAll(warningSelector)].some(child => child.textContent.includes(staleWarning))) return;
+      if (retryButtons.has(container)) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'recent-authentication-retry';
+      button.dataset.confirmIdentity = '';
+      button.textContent = 'Confirm Identity';
+      container.append(button);
+      retryButtons.set(container, button);
+    });
+  }
+  // Error messages are rendered after the request raises the authentication event.
+  // Watch warning regions so asynchronous Admin and chat errors get the same retry.
+  const warningObserver = new MutationObserver(records => {
+    if (records.some(record => {
+      const element = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
+      return element?.closest(warningSelector) || [...record.addedNodes].some(node =>
+        node.nodeType === Node.ELEMENT_NODE && (node.matches(warningSelector) || node.querySelector(warningSelector)));
+    })) refreshRetryButtons();
+  });
+  warningObserver.observe(document.body, {childList: true, subtree: true, characterData: true});
+  refreshRetryButtons();
   function open() {
     if (dialog?.open) return;
     previousFocus = document.activeElement;
@@ -64,8 +99,9 @@
               ? 'Your sign-in session has expired. Password confirmation cannot restore an expired session.'
               : String(data.error || 'Unable to confirm your identity. Please try again.'));
           }
-          const staleWarning = 'Please sign in again before performing this sensitive action.';
-          document.querySelectorAll('[role="alert"], [role="status"], .admin-form-status, .error, [id$="-error"], [id$="-status"], [id$="-msg"]').forEach(container => {
+          for (const button of retryButtons.values()) button.remove();
+          retryButtons.clear();
+          document.querySelectorAll(warningSelector).forEach(container => {
             const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
             let node;
             let cleared = false;

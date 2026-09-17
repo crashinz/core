@@ -551,6 +551,7 @@ root.innerHTML = `
   </div>`;
 
 const el = id => document.getElementById(id);
+if (context.extensionId === "dominos") el("surface").append(el("game-action-error"));
 const safe = value => String(value ?? "");
 const make = (tag, className = "", text = "") => {
   const node = document.createElement(tag);
@@ -4720,6 +4721,9 @@ function publicGameLiveSummary(extensionId, state, userId) {
   const count = value => Number.isSafeInteger(value) && value >= 0;
   const label = (name, value, valid = score) => valid(value)
     ? `${name}: ${value.toLocaleString()}` : `${name} unavailable`;
+  if (extensionId === "dominos") {
+    return [label("Points", state?.scores?.[String(state?.teams?.[key])]), label("Tiles", state?.handCounts?.[key], count)].join(" \u00b7 ");
+  }
   if (extensionId === "hearts") {
     return [
       label("Total points", state?.scores?.[key]),
@@ -10089,7 +10093,7 @@ function renderViewerGameOptions() {
     wrapper.append(label, toggle);
     grid.append(wrapper);
   }
-  if (["checkers", "chess", "acey-deucy", "battleship", "backgammon-first-party", "spades", "chinese-checkers", "nested-four"].includes(context.extensionId)) {
+  if (["checkers", "chess", "acey-deucy", "battleship", "backgammon-first-party", "spades", "chinese-checkers", "nested-four", "dominos"].includes(context.extensionId)) {
     const wrapper = make("div", "game-setting viewer-effect-option");
     const label = make("span", "game-setting-label", "Visual FX");
     label.id = "game-options-visual-fx-label";
@@ -10570,7 +10574,7 @@ function renderGameSettings() {
       const setStepperValue = next => {
         currentValue = Math.max(minimum, Math.min(maximum, Math.round((Number(next) - minimum) / step) * step + minimum));
         value.value = String(currentValue);
-        value.textContent = String(currentValue);
+        value.textContent = context.extensionId === "dominos" && key === "winningScore" && currentValue === 0 ? "Auto" : String(currentValue);
         value.setAttribute("aria-label", `${safe(control.label)} ${currentValue}`);
         minus.disabled = !editable || busy || currentValue <= minimum;
         plus.disabled = !editable || busy || currentValue >= maximum;
@@ -10586,6 +10590,12 @@ function renderGameSettings() {
       plus.dataset.settingKey = key;
       plus.dataset.settingDelta = String(step);
       plus.addEventListener("click", () => setStepperValue(currentValue + step));
+      if(context.extensionId === "dominos" && key === "winningScore") for(const [button,delta] of [[minus,-step],[plus,step]]) {
+        let timer=0; const stop=()=>{clearTimeout(timer);timer=0;};
+        button.addEventListener("pointerdown",e=>{if(e.button!==0)return;button.setPointerCapture(e.pointerId);timer=setTimeout(function repeat(){if(!button.isConnected)return stop();setStepperValue(currentValue+delta);timer=setTimeout(repeat,130);},400);});
+        for(const event of ["pointerup","pointercancel","lostpointercapture"])button.addEventListener(event,stop);
+        window.addEventListener("blur",stop,{once:true});
+      }
       choiceGroup.append(minus, value, plus);
       for (const shortcut of control.shortcuts || []) {
         const button = make("button", "setting-choice-button setting-stepper-shortcut", safe(shortcut.label));
@@ -10747,6 +10757,7 @@ function renderBoard() {
     blackjack:renderBlackjack,
     hearts:renderHearts,
     uno:renderUno,
+    "dominos":()=>window.CoreChatDominos?.render({session,options,busy,currentUserId,memberAvatar,memberName,performAction,optionCategory,rerender:render})||make("p","","Dominos is loading."),
     "puppy-panic":()=>window.CoreChatPuppyPanic?.render({session,options,busy,currentUserId,memberAvatar,memberName,performAction,optionCategory,rerender:render,setStatus:(message)=>{actionStatusError=String(message||"");const statusNode=el("status");if(statusNode)statusNode.textContent=actionStatusError;}})||make("p","","Puppy Panic is loading."),
     "chinese-checkers":() => window.CoreChatChineseCheckers?.render({
       session,
@@ -10782,7 +10793,7 @@ function renderBoard() {
     }) || make("p", "", "Nested Four is loading."),
   }[context.extensionId];
   const board = renderer ? renderer() : make("p", "", "This game surface is unavailable.");
-  if (["tetris-versus", "space-invasion"].includes(context.extensionId)) {
+  if (["tetris-versus", "space-invasion", "dominos"].includes(context.extensionId)) {
     // Retain the canvas and focused controls across high-frequency snapshots.
     if (host.firstElementChild !== board) host.replaceChildren(board);
     return;
@@ -11093,6 +11104,7 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
   gameName,
   snapshot: () => ({
     enabled: context.extensionId === gameId && gameSurfaceVisible && gameLifecycleAvailable()
+      && !(gameId === "dominos" && window.CoreChatDominos?.isAnimating())
       && !(pendingClassicMotion?.gameId === gameId && performance.now() - pendingClassicMotion.startedAt < motionLength(gameId, pendingClassicMotion.type)),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
@@ -11100,14 +11112,15 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
   submit: payload => performAction(payload.action, {engine: payload.engine, positionKey: payload.positionKey}, payload.action === "bot-deal" ? (gameId === "blackjack" ? "blackjack-shoe" : `${gameId}-deal`) : (gameId === "puppy-panic" && payload.action === "bot-settle-random" ? "puppy-panic-random-effect" : "")),
   showStatus: (message, retry) => showBotStatus(gameId, message, retry),
 }); }
+const dominosBotController = createServerCardBot("dominos", "Dominos");
 const puppyBotController = createServerCardBot("puppy-panic", "Puppy Panic");
 const blackjackBotController = createServerCardBot("blackjack", "Blackjack");
 const unoBotController = createServerCardBot("uno", "UNO");
 const heartsBotController = createServerCardBot("hearts", "Hearts");
 const spadesBotController = createServerCardBot("spades", "Spades");
 const battleshipBotController = createServerCardBot("battleship", "Battleship");
-window.addEventListener("pagehide", () => { puppyBotController.stop(); blackjackBotController.stop(); unoBotController.stop(); heartsBotController.stop(); spadesBotController.stop(); battleshipBotController.stop(); });
-const cardBotTimer = setInterval(() => { if (context.extensionId === "puppy-panic") puppyBotController.sync(); if (context.extensionId === "blackjack") blackjackBotController.sync(); if (context.extensionId === "uno") unoBotController.sync(); if (context.extensionId === "hearts") heartsBotController.sync(); if (context.extensionId === "spades") spadesBotController.sync(); if (context.extensionId === "battleship") battleshipBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => { dominosBotController.stop(); puppyBotController.stop(); blackjackBotController.stop(); unoBotController.stop(); heartsBotController.stop(); spadesBotController.stop(); battleshipBotController.stop(); });
+const cardBotTimer = setInterval(() => { if (context.extensionId === "dominos") dominosBotController.sync(); if (context.extensionId === "puppy-panic") puppyBotController.sync(); if (context.extensionId === "blackjack") blackjackBotController.sync(); if (context.extensionId === "uno") unoBotController.sync(); if (context.extensionId === "hearts") heartsBotController.sync(); if (context.extensionId === "spades") spadesBotController.sync(); if (context.extensionId === "battleship") battleshipBotController.sync(); }, 250);
 window.addEventListener("pagehide", () => clearInterval(cardBotTimer));
 
 const chineseCheckersBotController = createChineseCheckersBotController({
@@ -11213,6 +11226,7 @@ function render() {
   const name = session.displayName || context.fallbackName;
   document.title = name;
   el("game-title").textContent = name;
+  if(context.extensionId === "dominos") el("game-title").append(make("small","dominos-variant"," (All Fives)"));
   const pack = safe(session.presentation?.effectivePack || "built-in");
   document.body.dataset.appearance = pack;
   ensurePointBearOffMediaReady();
@@ -11266,6 +11280,7 @@ function render() {
   scheduleBlackjackAutomaticAction();
   scheduleHeartsAutomaticAction();
   scheduleUnoAutomaticAction();
+  dominosBotController.sync();
   puppyBotController.sync();
   blackjackBotController.sync();
   unoBotController.sync();

@@ -167,6 +167,7 @@ $roomAssetVersion = static function (string $path): string {
   <link rel="stylesheet" href="<?= e($innerTranquillityPlayer['assets']['css']) ?>">
   <?php endif; ?>
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/avatar-library.css?v=20260914-movable')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/popup-behavior.css?v=20260916-r1')) ?>">
 </head>
 <body data-room-id="<?= e($room['public_id']) ?>" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e($csrfToken) ?>" data-branding-name="<?= e($branding['effective_name']) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>" data-inner-tranquillity-player-relevant="<?= $innerTranquillityPlayer['relevant'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-available="<?= $innerTranquillityPlayer['available'] ? 'true' : 'false' ?>" data-inner-tranquillity-player-reason="<?= e($innerTranquillityPlayer['reason']) ?>" data-runtime-diagnostics-enabled="<?= $runtimeDiagnostics['enabled'] ? 'true' : 'false' ?>" data-runtime-diagnostics-mode="<?= e($runtimeDiagnostics['mode']) ?>" data-runtime-verification-controls="<?= $runtimeDiagnostics['verification_controls'] ? 'true' : 'false' ?>">
 <div class="room-layout">
@@ -1537,6 +1538,7 @@ $roomAssetVersion = static function (string $path): string {
 <?php endif; ?>
 <script src="https://www.youtube.com/iframe_api"></script>
 
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260916-r1')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/avatar-processing.js')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/core/recent-authentication.js')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/room.js')) ?>"></script>

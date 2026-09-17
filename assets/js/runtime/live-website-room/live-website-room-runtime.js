@@ -207,7 +207,7 @@ export class LiveWebsiteRoomRuntime {
 
   async makeOfficial() {
     if (!this.projection?.canMakeOfficial) return;
-    if (!window.confirm('Keep this Live Website Room as a permanent room? The temporary room will remain separate until it expires.')) return;
+    if (!await window.CoreChatPopups.confirm('Keep this Live Website Room as a permanent room? The temporary room will remain separate until it expires.')) return;
     this.elements.makeOfficial.disabled = true;
     this.setStatus('Creating the permanent Live Website Room...', 'busy');
     try {

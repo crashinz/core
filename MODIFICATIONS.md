@@ -10,6 +10,15 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Dominos and shared popup improvements - 2026-09-17
+
+- Add Dominos (All Fives) for two, three and four players or teams, with selectable seats, adjustable targets, fair starter rotation, a four-ended spinner and round scoring.
+- Add responsive domino artwork, on-board avatars and scores, team glows, legal placement previews, drag-to-play, drawing and move animations, placement sounds and a victory sequence.
+- Add Normal and qualified Expert Practice bots, public-information search, readable turn pacing, bottom thinking/retry messages, recordings, saves and rematches. Preserve Normal behavior.
+- Add shared movable popup headings, visible close controls, outside/Escape dismissal, draft and pending-action safeguards, and a retry for canceled password confirmation.
+- Testing is WIP.
+
+
 ## Game Review reference pack v2 - 2026-09-16
 
 - Add the approved Five Dice blank, tumbling and smooth-landing presentation to a new frozen reference pack, preserving all other game references and sequences.
