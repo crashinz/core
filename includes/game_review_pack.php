@@ -5,7 +5,7 @@ require_once __DIR__.'/game_review_snapshots.php';
 function game_review_pack_descriptor(): array
 {
     static $value;
-    return $value ??= json_decode((string)file_get_contents(__DIR__.'/game_review_pack_v2.json'),true,512,JSON_THROW_ON_ERROR);
+    return $value ??= json_decode((string)file_get_contents(__DIR__.'/game_review_pack_v3.json'),true,512,JSON_THROW_ON_ERROR);
 }
 
 function game_review_pack_files(): array
@@ -19,7 +19,7 @@ function game_review_pack_path(string $key): string
 {
     if(!preg_match('~\A(?:[a-zA-Z0-9_ .-]+/)*[a-zA-Z0-9_ .-]+\z~D',$key)||in_array('..',explode('/',$key),true)||(!isset(game_review_snapshot_manifest()['files'][$key])&&!isset(game_review_pack_descriptor()['files'][$key])))throw new RuntimeException('Invalid reference path.');
     $path=security_private_storage_directory('game-review-snapshots');
-    foreach(explode('/','v2/'.$key) as $part){$path.='/'.$part;if(is_link($path))throw new RuntimeException('A reference path is linked. Restore it as a regular file.');}
+    foreach(explode('/','v3/'.$key) as $part){$path.='/'.$part;if(is_link($path))throw new RuntimeException('A reference path is linked. Restore it as a regular file.');}
     return $path;
 }
 
@@ -37,7 +37,7 @@ function game_review_pack_status(): array
         if(str_starts_with($key,'media/')){$game=explode('/',$key)[1];$media[$game]??=['ready'=>0,'missing'=>0,'changed'=>0];$media[$game][$state]++;}
         else $base[$state]++;
     }
-    return ['version'=>'v2','base'=>$base,'classic'=>$media];
+    return ['version'=>'v3','base'=>$base,'classic'=>$media];
 }
 
 /** Lock serializes installation and local-media copy; existing files are never replaced. */
@@ -72,7 +72,7 @@ function game_review_pack_install(string $archive): array
 {
     $d=game_review_pack_descriptor();
     if(!class_exists('ZipArchive'))throw new RuntimeException('Enable the PHP ZIP extension to install a reference pack.');
-    if(!game_review_pack_matches($archive,$d))throw new RuntimeException('This ZIP does not match reference pack v2. Download the linked ZIP and try again.');
+    if(!game_review_pack_matches($archive,$d))throw new RuntimeException('This ZIP does not match reference pack v3. Download the linked ZIP and try again.');
     return game_review_pack_locked(static function()use($archive){
         $expected=game_review_pack_files();$zip=new ZipArchive();
         if($zip->open($archive)!==true)throw new RuntimeException('The reference ZIP could not be opened.');
@@ -89,8 +89,8 @@ function game_review_pack_install(string $archive): array
             }
             $added=0;
             foreach($expected as $key=>$entry){$stream=$zip->getStream($key);if(!$stream)throw new RuntimeException('A reference file could not be read.');try{$added+=(int)game_review_pack_copy_stream($stream,$key,$entry);}finally{fclose($stream);}}
-            // Keep v1 intact; reuse only independently verified local Classic reference media.
-            $classicCopied=0;$oldRoot=security_private_storage_directory('game-review-snapshots').'/v1';
+            // Keep v2 intact; reuse only independently verified local Classic reference media.
+            $classicCopied=0;$oldRoot=security_private_storage_directory('game-review-snapshots').'/v2';
             foreach(game_review_snapshot_manifest()['files'] as $key=>$entry){
                 if(!str_starts_with($key,'media/')||file_exists(game_review_pack_path($key)))continue;
                 $old=$oldRoot;$linked=is_link($oldRoot);foreach(explode('/',$key) as $part){$old.='/'.$part;$linked=$linked||is_link($old);}
@@ -130,7 +130,7 @@ function game_review_pack_upload(array $actor,string $action,array $input,array 
     try{
         $metaPath=$prefix.'.json';$path=$prefix.'.zip';$meta=is_file($metaPath)?json_decode((string)file_get_contents($metaPath),true):null;
         if($action==='begin'){
-            if(($input['size']??0)!==game_review_pack_descriptor()['bytes'])throw new RuntimeException('Choose the linked reference pack v2 ZIP.');
+            if(($input['size']??0)!==game_review_pack_descriptor()['bytes'])throw new RuntimeException('Choose the linked reference pack v3 ZIP.');
             $meta=['token'=>bin2hex(random_bytes(24)),'expires'=>time()+7200];
             if(file_put_contents($path,'')===false||file_put_contents($metaPath,json_encode($meta,JSON_THROW_ON_ERROR))===false)throw new RuntimeException('Upload storage is unavailable.');
             return $meta+['offset'=>0];

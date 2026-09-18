@@ -1,0 +1,106 @@
+{
+  "schema": "chatspace.first-party-extension",
+  "schemaVersion": 1,
+  "id": "eight-ball",
+  "name": "Pool",
+  "version": "1.0.0",
+  "repositoryOwned": true,
+  "trustedFirstParty": true,
+  "compatibility": {
+    "applicationVersionPrefix": "ChatSpace Community Edition v1."
+  },
+  "dependencies": [],
+  "conflicts": [],
+  "capabilities": [
+    "game.registry.describe",
+    "game.session.use",
+    "game.rules.authoritative",
+    "game.presentation.pack",
+    "game.rules.help"
+  ],
+  "subscriptions": [
+    "presentation.games"
+  ],
+  "services": [
+    "game.registry.projection",
+    "game.framework.sessions",
+    "game.rules.authoritative"
+  ],
+  "storage": {
+    "schemaVersion": 1,
+    "quotaBytes": 8192,
+    "disablePolicy": "preserve",
+    "uninstallPolicy": "explicit-cleanup-only"
+  },
+  "game": {
+    "key": "g_eightball01",
+    "name": "Pool",
+    "displayNameSettingKey": "multiplayer_game_display_name_g_eightball01",
+    "gameId": 71,
+    "path": "eight-ball",
+    "entry": "index.html",
+    "icon": "eight-ball-icon.svg",
+    "profile": "versus",
+    "minPlayers": 2,
+    "practiceMinPlayers": 1,
+    "recordedMinPlayers": 2,
+    "maxPlayers": 2,
+    "seats": [
+      "Player 1",
+      "Player 2"
+    ],
+    "adaptationVersion": "1.0.0",
+    "presentationSelectionOwner": "viewer",
+    "presentationPackSettingKey": "multiplayer_game_appearance_g_eightball01",
+    "defaultPresentationPack": "built-in",
+    "presentationPacks": [
+      {
+        "id": "built-in",
+        "label": "Built-in"
+      }
+    ],
+    "scoreRecordsSurface": {
+      "label": "Score & Records",
+      "separate": true,
+      "presentationOnly": true
+    },
+    "soundDefaults": {
+      "masterVolume": 100,
+      "musicEnabled": false,
+      "voiceEnabled": false,
+      "effectsEnabled": true
+    },
+    "presentationSizing": {
+      "preferredAspectRatio": 1.72,
+      "minimumReadableWidth": 600,
+      "minimumReadableHeight": 380
+    },
+    "rulesHelp": {
+      "label": "Pool rules",
+      "description": "8 Ball or 9 Ball, two-player matches or Solo free shooting."
+    }
+  },
+  "requiredFiles": [
+    "includes/eight_ball_extension.php",
+    "includes/eight_ball_physics.php",
+    "games/eight-ball/index.html",
+    "games/eight-ball/table.html",
+    "games/eight-ball/app.js",
+    "games/eight-ball/pool.js",
+    "games/eight-ball/table.js",
+    "games/eight-ball/motion.js",
+    "games/eight-ball/collision.js",
+    "games/eight-ball/style.css",
+    "games/ocx-extension-game.js",
+    "games/ocx-extension-game.css",
+    "assets/images/eight-ball-icon.svg",
+    "games/eight-ball/practice.js",
+    "includes/eight_ball_practice_library.php",
+    "api/pool_practice_setups.php",
+    "games/eight-ball/ball-art.js",
+    "games/eight-ball/playback.js",
+    "games/eight-ball/audio.js",
+    "includes/nine_ball_rules.php",
+    "games/eight-ball/bank-setups.json"
+  ]
+}

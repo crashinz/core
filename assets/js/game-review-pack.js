@@ -37,7 +37,7 @@ if (packPanel) {
   form.addEventListener('submit',event=>{
     event.preventDefault();run(async()=>{
       const file=form.elements.pack_file.files[0];if(!file)throw new Error('Choose the downloaded reference ZIP.');
-      if(file.size!==Number(form.dataset.bytes))throw new Error('Choose the linked reference pack v1 ZIP.');
+      if(file.size!==Number(form.dataset.bytes))throw new Error('Choose the linked reference pack ZIP.');
       const {token}=await request('begin',{size:file.size});progress.hidden=false;progress.max=file.size;progress.value=0;
       try{
         const chunkSize=Number(form.dataset.chunk);

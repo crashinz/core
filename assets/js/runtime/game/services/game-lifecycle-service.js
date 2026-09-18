@@ -512,6 +512,44 @@ export class GameLifecycleService {
     return successor;
   }
 
+  _viewedGameStorageKey() {
+    const config = this._config();
+    const location = this.#context?.window?.location;
+    if (!location?.pathname || !config?.sessionId || !config?.myParticipantId) return null;
+    const directory = location.pathname.slice(0, location.pathname.lastIndexOf('/') + 1);
+    return `corechat:viewed-game:${directory}:${config.sessionId}:${config.myUserId || ''}:${config.myParticipantId}`;
+  }
+
+  _rememberViewedGame(game) {
+    // A tab-local navigation hint, never a cached game or an access grant.
+    try {
+      const key = this._viewedGameStorageKey();
+      if (!key) return;
+      if (game?.lobby_code) this.#context.window.sessionStorage?.setItem(key, String(game.lobby_code));
+      else this.#context.window.sessionStorage?.removeItem(key);
+    } catch { /* Storage may be disabled; ordinary game play remains available. */ }
+  }
+
+  _rememberedResult(recentGames) {
+    try {
+      const key = this._viewedGameStorageKey();
+      const lobby = key && this.#context.window.sessionStorage?.getItem(key);
+      if (!lobby) return null;
+      const game = recentGames.find(item => item?.lobby_code === lobby);
+      const framework = game?.framework;
+      const participant = Number(this._config()?.myParticipantId);
+      // Use only the fresh, authorized room projection. Other room games must
+      // not displace this tab's result; explicit selection replaces the hint.
+      return framework?.publicId === lobby
+        && ['completed', 'forfeited', 'abandoned'].includes(framework.status)
+        && ['master', 'player'].includes(framework.viewerRole)
+        && framework.viewerMembershipStatus !== 'departed'
+        && framework.members?.some(member => Number(member.participantId) === participant
+          && member.membershipStatus === 'active' && ['master', 'player'].includes(member.role))
+        ? game : null;
+    } catch { return null; }
+  }
+
   async loadGames({ includeCatalog = false } = {}) {
         // An in-flight explicit Close wins over passive reconciliation.
         if (this.__pendingCloseGameIntent?.context === this.#context
@@ -607,6 +645,7 @@ export class GameLifecycleService {
         if (!this.#autoOpenCurrentGameResolved && !this.#activeGame) {
 
             const currentGame =
+                this._rememberedResult(recentGames) ||
                 this.gameForParticipant(
                     this._config()?.myParticipantId
                 );
@@ -615,6 +654,7 @@ export class GameLifecycleService {
 
                 this.#activeGame =
                     Object.assign({}, currentGame);
+                this._rememberViewedGame(currentGame);
                 this.#autoOpenCurrentGameResolved = true;
                 autoOpenedCurrentGame = true;
                 this.#context?.switchChat?.(
@@ -1139,6 +1179,7 @@ export class GameLifecycleService {
      * Hides the active game overlay.
      */
     hideGameOverlay() {
+        this._rememberViewedGame(null);
         this.__openGameIntentRevision = Number(this.__openGameIntentRevision || 0) + 1;
 
         this.__gamesLoadRevision = Number(this.__gamesLoadRevision || 0) + 1;
@@ -1614,6 +1655,7 @@ export class GameLifecycleService {
 
         if (!game?.lobby_code) return false;
         this.#activeGame = Object.assign({}, game);
+        this._rememberViewedGame(game);
         this.#stage?.showStage(this.#activeGame, this._buildStageContext());
         this.updateStagePlayers();
         this.#context?.switchChat?.(

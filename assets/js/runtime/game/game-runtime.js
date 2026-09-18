@@ -40,7 +40,7 @@ import {
 
     GameLifecycleService
 
-} from "./services/game-lifecycle-service.js?v=20260915-rematch-chat";
+} from "./services/game-lifecycle-service.js?v=20260918-result-reload";
 
 import {
 

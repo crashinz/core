@@ -46,5 +46,14 @@ function game_review_catalog(): array
         $name=['uno'=>'UNO','tetris-versus'=>'Tetris Versus'][$game]??ucwords(str_replace('-',' ',$game));
         foreach($modes as $mode=>$label) $add($game,"$name — $label",$mode);
     }
+    foreach(['eight-ball'=>'8 Ball','nine-ball'=>'9 Ball'] as $variant=>$name){
+        $modes=['break'=>'Break','pot'=>'Pocket a ball','scratch'=>'Scratch and ball in hand','no-rail'=>'No rail after contact'];
+        if($variant==='eight-ball')$modes+=['win'=>'Final 8 and victory','called-win'=>'Call the winning pocket','wrong-pocket'=>'8 in an uncalled pocket','early-eight'=>'Early 8 loses'];
+        else $modes+=['win'=>'Final 9 and victory','combo'=>'1 into 9 combination','wrong-first'=>'Wrong first ball','foul-nine'=>'Scratch with 9, then re-spot','push-take'=>'Push out and take shot','push-return'=>'Push out and return shot','third-foul'=>'Third consecutive foul'];
+        foreach($modes as $mode=>$label)$add('eight-ball',"Pool — $name: $label",$variant.'-'.$mode,['variant'=>$variant,'poolMode'=>$mode,'pocketCalls'=>in_array($mode,['called-win','wrong-pocket'],true)?'eight':'none']);
+        foreach(['practice'=>'Edit, shoot and rewind','rack'=>'Rack and switch variant'] as $mode=>$label)$add('eight-ball',"Pool — $name practice: $label",$variant.'-'.$mode,['variant'=>$variant,'poolMode'=>$mode,'tableMode'=>'solo']);
+    }
+    foreach(['draw'=>'Backspin','follow'=>'Topspin','left'=>'Left sidespin','right'=>'Right sidespin'] as $mode=>$label)$add('eight-ball',"Pool — $label",'spin-'.$mode,['variant'=>'eight-ball','poolMode'=>'spin-'.$mode,'tableMode'=>'solo']);
+    foreach(range(1,10) as $bank)$add('eight-ball','Pool — Bank '.str_pad((string)$bank,2,'0',STR_PAD_LEFT),'bank-'.$bank,['variant'=>'eight-ball','poolMode'=>'bank','bank'=>$bank,'tableMode'=>'solo']);
     return $cases;
 }

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pool — 8 Ball</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<main class="game-shell">
+ <header class="page-heading"><div><span class="eyebrow">THE GAMES ROOM</span><h1>Pool</h1></div><span class="preview-tag">8 Ball</span></header>
+ <section class="pool-room" aria-label="8 Ball table">
+  <div class="match-strip">
+   <div class="player you active"><div class="portrait"><img src="../../assets/images/eight-ball-icon.svg" alt="Your avatar"></div><div class="player-info"><div class="player-title"><strong>You</strong><span class="turn" id="yourTurn">At the table</span></div><div class="ball-list" id="solids" aria-label="Your solid balls"></div><small class="player-cue" id="yourCueLabel">Crimson eclipse</small></div></div>
+   <div class="shot-tools"><div class="board-spin" role="group" aria-label="Cue ball spin"><span class="spin-heading">SPIN</span><div class="board-spin-ball"><span class="spin-side left">L</span><button id="spinTarget" aria-label="Spin position. Drag the dot; arrow keys adjust; Home centers." aria-describedby="spinReadout"><i id="spinMark"></i></button><span class="spin-side right">R</span></div><div class="spin-caption"><output id="spinReadout">Center hit</output><button id="resetSpin" aria-label="Reset spin to center">Reset</button></div></div><div class="power-control board-power"><label class="control-label" for="power">POWER <output id="powerValue">45%</output></label><div class="power-row"><input id="power" type="range" min="0" max="100" value="45" aria-label="Shot power" aria-orientation="vertical"><div class="power-steps"><button data-adjust="power-up" aria-label="Increase power">+</button><button data-adjust="power-down" aria-label="Decrease power">−</button></div></div></div></div>
+   <div class="player opponent"><div class="player-info"><div class="player-title"><span class="turn" id="partnerTurn" hidden>At the table</span><strong>Practice partner</strong></div><div class="ball-list" id="stripes" aria-label="Partner's striped balls"></div><small class="player-cue" id="partnerCueLabel">Crimson eclipse</small></div><div class="portrait"><img src="../../assets/images/eight-ball-icon.svg" alt="Opponent avatar"></div></div>
+  </div>
+  <div id="practiceEditor" class="practice-editor" hidden>
+   <strong>Edit practice table</strong><span>Choose a ball, then click or drag it onto the cloth. Drag balls to move them.</span>
+   <div id="practicePalette" class="practice-palette" aria-label="Choose a practice ball"></div>
+   <div class="practice-edit-actions"><button id="removePracticeBall">Remove selected ball</button><button id="clearPractice">Clear table</button><button id="applyPractice">Done editing</button><button id="cancelPractice">Cancel</button><output id="practiceEditStatus" role="status"></output></div>
+  </div>
+  <div class="table-wrap"><canvas id="table" width="2080" height="1120" tabindex="0" aria-label="Pool table. Left and right arrows aim, up and down arrows change power, Space shoots, Escape cancels a pull-back. Drag near the cue or aiming line to aim, and hold right mouse while pulling backward for power. When placing the cue ball, drag or click to position the cue ball, arrow keys adjust it; double-click or Enter confirms. Your cue ball is ivory white."></canvas><div class="table-badge">INNER TRANQUILLITY</div></div>
+  <div id="matchActions" class="match-actions"></div><div class="controls">
+   <button class="cue-open" id="openCues" aria-haspopup="dialog"><span class="cue-symbol"></span><span><small id="cueOwner">YOUR CUE</small><strong id="cueName">Crimson eclipse</strong></span><span class="chevron">⌃</span></button>
+   <div class="aim-controls"><span class="control-label">AIM <output id="angleValue">0°</output></span><div class="button-pair"><button data-adjust="aim-left" aria-label="Aim left">←</button><button data-adjust="aim-right" aria-label="Aim right">→</button></div></div>
+
+   <button class="shoot" id="placeBall" hidden>Place ball <kbd>ENTER</kbd></button><button class="shoot" id="shoot">Shoot <kbd>SPACE</kbd></button>
+
+   <button class="settings-open" id="openSettings" aria-haspopup="dialog">Options</button>
+  </div>
+  <div id="practiceControls" class="practice-controls" hidden><button id="editPractice">Edit table</button><button id="rewindPractice">Rewind shot</button><button id="replayPractice" disabled>Replay shot</button><button id="replaySlow" disabled>Slow replay</button><button id="stopReplay" hidden>Stop replay</button><button id="openPracticeSaves" aria-haspopup="dialog">Saved setups</button><button id="practiceRack">Rack 8-ball</button><button id="practiceRackNine">Rack 9-ball</button></div>
+  <div class="status-bar"><span class="status-dot"></span><span id="status" role="status">Your shot. Click the cloth to aim, or use the arrow keys.</span><span class="shot-number" id="shotCount">SHOT 01</span></div>
+  <div id="nineBallNotice" role="status" hidden style="min-height:1.5em;padding:0 20px 8px;color:#ffd58a;font-size:12px"></div>
+ </section>
+ <footer><span><kbd>←</kbd> <kbd>→</kbd> aim <i>·</i> <kbd>↑</kbd> <kbd>↓</kbd> power <i>·</i> <kbd>SHIFT</kbd> fine aim</span><span>Left-drag near the cue or aiming line; hold right mouse and pull backward for power. Release to shoot. Esc cancels.</span></footer>
+
+</main>
+<section class="floating-panel" id="cuePanel" role="dialog" aria-modal="false" aria-labelledby="cueTitle" hidden>
+ <header class="panel-head"><div><small>MAKE IT YOURS</small><h2 id="cueTitle">Choose your cue</h2></div><button data-close aria-label="Close cue chooser">×</button></header><div class="panel-body"><p class="panel-hint">Seven finishes. The same playing strength.</p><div id="cueChoices"></div></div>
+</section>
+<section class="floating-panel" id="settingsPanel" role="dialog" aria-modal="false" aria-labelledby="settingsTitle" hidden>
+ <header class="panel-head"><div><small>YOUR TABLE</small><h2 id="settingsTitle">Table options</h2></div><button data-close aria-label="Close table options">×</button></header><div class="panel-body">
+  <label class="setting-row">Repeatable shot <select id="physicsExample"><option value="practice">Practice table</option><option value="custom" disabled>Current custom layout</option><option value="center">Center hit</option><option value="follow">Top spin / follow</option><option value="draw">Backspin / draw</option><option value="left">Left side spin / cushion</option><option value="right">Right side spin / cushion</option><option value="pocket">Pocket shot</option><option value="break">Full break</option></select></label><label class="setting-row">Preview player <select id="previewPlayer"><option value="0">You</option><option value="1">Practice partner</option></select></label><p class="panel-hint">Try each sample player's separate cue choice.</p>
+  <label class="setting-row">Aim guide <input id="guideToggle" type="checkbox" checked></label>
+  <label class="setting-row">Always highlight my playable balls <input id="alwaysHighlightTargets" type="checkbox"></label>
+  <label class="setting-row">Table sounds <input id="soundToggle" type="checkbox"></label>
+  <p class="panel-hint">Frame and cloth change only your view and are remembered in this browser.</p>
+  <label class="setting-row">Table frame <select id="tableFinish"><option value="walnut">Classic walnut</option><option value="rosewood">Polished rosewood</option><option value="maple">Light maple</option><option value="carbon" selected>Carbon fiber</option><option value="steel">Brushed steel</option><option value="midnight">Midnight lacquer</option></select></label>
+  <label class="setting-row">Cloth <select id="cloth"><option value="teal">Deep teal</option><option value="blue">Royal blue</option><option value="green">Club green</option><option value="red" selected>Burgundy red</option></select></label>
+  <label class="setting-row" for="boardSize">Table size <output id="sizeValue">100%</output></label><div class="size-row"><button data-size="-10" aria-label="Smaller table">−</button><input id="boardSize" type="range" min="50" max="200" step="10" value="100"><button data-size="10" aria-label="Larger table">+</button></div><p class="panel-hint">Large tables stay fitted to your window.</p>
+  <button id="placeBeforeBreak" class="wide-button">Place cue ball behind the line</button><button id="placeAfterFoul" class="wide-button">Place cue ball anywhere</button><button id="resetShot" class="wide-button">Reset this layout</button><button id="rackBalls" class="wide-button">Rack a new table</button><button id="pocketLayout" class="wide-button">Pocket-shot layout</button>
+ </div>
+</section>
+<section class="floating-panel" id="practiceSavesPanel" role="dialog" aria-modal="false" aria-labelledby="practiceSavesTitle" hidden>
+ <header class="panel-head"><h2 id="practiceSavesTitle">Saved practice setups</h2><button data-close aria-label="Close saved setups">×</button></header>
+ <div class="panel-body"><p class="panel-hint">Personal setups follow your account across devices. Shared setups are available to everyone signed in. Both include aim, power and spin.</p>
+ <label class="setting-row">Setup name <input id="practiceSetupName" maxlength="60" placeholder="For example: Left corner bank"></label><button id="savePracticeSetup" class="wide-button">Save current table</button><button id="publishPracticeSetup" class="wide-button" hidden>Publish current table for everyone</button>
+ <label class="setting-row">Saved setup <select id="practiceSavedList" aria-label="Saved setup"></select></label>
+ <section id="practiceTestingValues" class="practice-testing-values" aria-labelledby="practiceTestingTitle" hidden><h3 id="practiceTestingTitle">Admin testing values</h3><dl id="practiceTestingNumbers"></dl><p>Load restores these saved values exactly. Spin values in parentheses range from −1 to 1.</p></section>
+ <canvas id="practiceSetupPreview" width="600" height="340" role="img" aria-label="Selected practice setup" hidden></canvas><label class="practice-deleted-option"><input type="checkbox" id="showDeletedSetups"> Show deleted setups</label><div class="practice-save-actions"><button id="loadPracticeSetup">Load</button><button id="updatePracticeSetup">Update selected</button><button id="renamePracticeSetup">Rename</button><button id="deletePracticeSetup">Delete</button><button id="restorePracticeSetup" hidden>Restore</button><button id="undoPracticeDelete" hidden>Undo delete</button><button id="reloadPracticeSetups">Reload list</button></div><output id="practiceSaveStatus" role="status"></output></div>
+</section>
+<script type="module" src="boot.js"></script></body></html>

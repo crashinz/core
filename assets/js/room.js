@@ -107,7 +107,8 @@ function stopRoomForDocumentExit(reason) {
   avatarRuntime?.coordinator?.cancelPendingLinkChoice(reason);
 }
 window.addEventListener('pagehide', () => stopRoomForDocumentExit('page-hide'), { once: true });
-window.addEventListener('beforeunload', () => stopRoomForDocumentExit('before-unload'), { once: true });
+// beforeunload can be cancelled by the message-recovery warning. Keep the
+// current room alive until pagehide confirms that the document is leaving.
 let frameQueued = false;
 let pendingLayout = false;
 let layoutLocked = false;

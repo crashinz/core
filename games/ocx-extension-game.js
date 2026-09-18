@@ -10757,6 +10757,7 @@ function renderBoard() {
     blackjack:renderBlackjack,
     hearts:renderHearts,
     uno:renderUno,
+    "eight-ball":()=>window.CoreChatEightBall?.render({session,options,busy,currentUserId,memberAvatar,memberName,performAction})||make("p","","8 Ball is loading."),
     "dominos":()=>window.CoreChatDominos?.render({session,options,busy,currentUserId,memberAvatar,memberName,performAction,optionCategory,rerender:render})||make("p","","Dominos is loading."),
     "puppy-panic":()=>window.CoreChatPuppyPanic?.render({session,options,busy,currentUserId,memberAvatar,memberName,performAction,optionCategory,rerender:render,setStatus:(message)=>{actionStatusError=String(message||"");const statusNode=el("status");if(statusNode)statusNode.textContent=actionStatusError;}})||make("p","","Puppy Panic is loading."),
     "chinese-checkers":() => window.CoreChatChineseCheckers?.render({
@@ -10793,7 +10794,7 @@ function renderBoard() {
     }) || make("p", "", "Nested Four is loading."),
   }[context.extensionId];
   const board = renderer ? renderer() : make("p", "", "This game surface is unavailable.");
-  if (["tetris-versus", "space-invasion", "dominos"].includes(context.extensionId)) {
+  if (["tetris-versus", "space-invasion", "dominos", "eight-ball"].includes(context.extensionId)) {
     // Retain the canvas and focused controls across high-frequency snapshots.
     if (host.firstElementChild !== board) host.replaceChildren(board);
     return;

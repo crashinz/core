@@ -4,7 +4,7 @@ declare(strict_types=1);
 /** Multiplayer Game Framework replay owner. Never included in player projections. */
 const GAME_RECORDING_FORMAT = 'corechat-game-replay';
 const GAME_RECORDING_VERSION = 1;
-const GAME_RECORDING_GAMES = ['spades', 'hearts', 'checkers', 'chess', 'backgammon', 'acey-deucy', 'battleship', 'chinese-checkers', 'uno', 'nested-four', 'blackjack', 'puppy-panic', 'five-dice', 'dominos'];
+const GAME_RECORDING_GAMES = ['spades', 'hearts', 'checkers', 'chess', 'backgammon', 'acey-deucy', 'battleship', 'chinese-checkers', 'uno', 'nested-four', 'blackjack', 'puppy-panic', 'five-dice', 'dominos', 'eight-ball'];
 const GAME_RECORDING_EVENT_BYTES = 4194304;
 const GAME_RECORDING_QUEUE_BYTES = 33554432;
 
@@ -92,6 +92,7 @@ function game_recording_step(string $game, array $before, int $actor, string $ac
         'payload' => game_recording_pick($payload, $adapter['payloadKeys'] ?? []),
         'before' => game_recording_state($game, $before), 'after' => game_recording_state($game, $after)];
     $step['randomness'] = game_recording_pick((array)($context['authoritativeRandomness'] ?? []), ['deck', 'dice', 'bytes', 'initialDealerIndex', 'dealerIndex', 'seed', 'reshuffleSeed', 'starterIndex', 'openingRolls', 'shoe', 'readySeed', 'starterOffset']);
+    if ($game === 'eight-ball') $step['randomness'] = game_recording_pick((array)($context['authoritativeRandomness'] ?? []), ['order','starter']);
     if ($game === 'five-dice' && isset($context['randomnessRequestId'])) $step['randomness']['requestId'] = (string)$context['randomnessRequestId'];
     if (isset($context['nowUnixMs'])) $step['nowUnixMs'] = (int)$context['nowUnixMs'];
     if ($trace !== null) $step['botDecision'] = game_recording_pick($trace,

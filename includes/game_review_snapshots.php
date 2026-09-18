@@ -4,14 +4,14 @@ declare(strict_types=1);
 function game_review_snapshot_manifest(): array
 {
     static $manifest;
-    return $manifest ??= json_decode((string)file_get_contents(__DIR__.'/game_review_snapshot_v2.json'),true,512,JSON_THROW_ON_ERROR);
+    return $manifest ??= json_decode((string)file_get_contents(__DIR__.'/game_review_snapshot_v3.json'),true,512,JSON_THROW_ON_ERROR);
 }
 
 function game_review_snapshot_file(string $key): array
 {
     $manifest=game_review_snapshot_manifest();$entry=$manifest['files'][$key]??null;
     if(!$entry)throw new MultiplayerGameException('Reference file not found.','GAME_REVIEW_REFERENCE_MISSING',404);
-    $root=security_private_storage_directory('game-review-snapshots').'/v2';$path=$root.'/'.$key;
+    $root=security_private_storage_directory('game-review-snapshots').'/v3';$path=$root.'/'.$key;
     if(!is_file($path))throw new MultiplayerGameException(str_starts_with($key,'media/')?'Classic reference media is not installed for this game. Use Copy installed Classic media in Game Review.':'The optional reference pack is not installed completely. Download and install it in Game Review.','GAME_REVIEW_REFERENCE_MISSING',409);
     if(!hash_equals($entry['sha256'],hash_file('sha256',$path)))throw new MultiplayerGameException('The frozen reference has changed. Restore its private backup.','GAME_REVIEW_REFERENCE_INTEGRITY',409);
     return $entry+['path'=>$path];
@@ -32,6 +32,15 @@ function game_review_snapshot_projection(array $review): array
     $frame['createdAt']=$review['created'];$frame['expiresAt']=gmdate('c',$review['expires']);
     // Clocks do not consume the historical reference while the administrator compares it.
     if(isset($frame['state']['settlement']['settleAfterUnixMs']))$frame['state']['settlement']['settleAfterUnixMs']=(int)($review['referenceChangedAt']??$frame['nowUnixMs'])+1200;
+    if(($review['case']['game']??'')==='eight-ball'){
+        $now=$frame['nowUnixMs']/1000;$frame['state']['serverNow']=$now;
+        if(isset($frame['state']['lastShot']['startedAt'])){
+            $id=$frame['state']['lastShot']['id'];$previous=$saved['frames'][$cursor-1]['state']['lastShot']['id']??null;
+            $start=$id!==$previous?($review['referenceChangedAt']??$frame['nowUnixMs'])/1000:$now-60;
+            $frame['state']['lastShot']['startedAt']=$start;
+            $frame['state']['animationUntil']=$start+$frame['state']['lastShot']['duration'];
+        }
+    }
     $frame['review']=true;$frame['frozenReference']=true;
     return $frame;
 }

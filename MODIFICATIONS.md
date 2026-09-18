@@ -10,6 +10,95 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Pool permanent review and reference pack v3 - 2026-09-18
+
+- Add 37 permanent administrator Pool examples for 8 Ball, 9 Ball, banks, spin, fouls, wins, push-out, ball-in-hand and solo editing/rewind.
+- Preserve all 316 previous frozen sequences and resources; isolate the new Pool renderer and rebase replay clocks without changing saved trajectories.
+- Fit Pool within the review page, keep account setup libraries outside isolated examples, and install v3 alongside private v2 with verified Classic-media reuse.
+- Complete a 17-shot uninterrupted browser 9-ball match, with banks, fouls, re-spotting and a legal win.
+- Testing is WIP.
+
+## 8 Ball Pool - 2026-09-17
+
+Pool ball numbers are larger and sharper, with the gloss highlight moved away from the number patch. Both 8 Ball and 9 Ball retain their ball size, natural rolling orientation and existing physics.
+
+Pool now offers 8 Ball and 9 Ball matches plus both solo practice racks, with lowest-ball guidance, combinations, push-outs, foul warnings and variant-aware saved layouts. The ten verified bank setups install into the shared library without a test database; existing edits/deletions are preserved. Accepted 8-ball physics is unchanged.
+
+Pool saved practice setups now show an administrator-only testing readout with stored power, directional spin, and aim values. Loading a setup continues to restore its exact saved inputs automatically; ordinary players retain the existing library view.
+
+Pool now starts with the owner-selected Carbon fiber table, Burgundy red cloth and Crimson eclipse cue; saved appearance and valid rematch cue choices remain available. Room connections stay active when a reload/leave warning is cancelled, with cleanup delayed until the document actually exits. Verified ten repeatable bank setups in local practice and two-player finish/reconnect/rematch behavior.
+
+Pool simultaneous multi-ball impacts now preserve contact geometry before resolving the group. Numerical contact rounding no longer changes the impulse calculation at different simulation time steps. Dense racks and symmetric split hits are stable across ball ordering and time steps; browser/server agreement, banks and spin remain checked. Power, spin controls and cushion settings are unchanged.
+
+Pool pocket calls can now be selected directly on the table or with the keyboard-accessible list. A red marker is shared with the opponent and spectators. Required calls must be confirmed before shooting; the server rejects shots that contradict the displayed selection. Calls clear after each shot, with the marker retained during shot playback. New games still default to No calls; physics is unchanged.
+
+Pool now defaults new games to No calls, as requested. Every shot and 8 ball only remain optional; existing game states retain their selected calling rule and older states without the setting keep their original every-shot rules. This supersedes the earlier default; physics is unchanged.
+
+Pool matches now offer pocket-calling choices: Every shot, 8 ball only, or No calls. Existing games and the default retain Every shot. Non-called modes assign groups from the first legal post-break pot and retain the turn for legal own-group pots; early eight, scratch, wrong-contact and no-rail fouls remain enforced. Solo practice is unchanged. The new Android match has been inventoried separately; no new speed or spin tuning is adopted.
+
+Pool rolling slowdown now follows the two clear center-hit mobile practice flights more closely. Rolling friction is reduced by 12.5%; launch power, sliding/spin loss, cushion and collision coefficients are unchanged. Bank pots, spin controls and browser/server agreement remain verified; exact Miniclip trajectory parity is not claimed.
+
+Reloading a game result restores the game and Play Again controls in the same browser tab. Explicit exit and switching games clear or replace the remembered view; server membership remains authoritative.
+
+Pool adds distinct strength-sensitive cue, ball, cushion and pocket sounds; saved ball-surface orientations across reconnects; and read-only normal or slow last-shot replay in solo practice. Full rack-to-finish match and rematch checks pass.
+
+Pool corner openings and angled cushions now match the approved larger-ball proportions. Visible cushions and aiming boundaries use the collision geometry. Table size, ball size, shot power, spin and pocket capture radius stay unchanged. Added Crimson eclipse, a full-shaft red-and-black cosmetic cue, visible to other players and retained for rematches.
+
+Pool practice setups now follow the signed-in account, with automatic idempotent import of prior browser saves. Personal and administrator shared setups support updating, visual previews, and recoverable deletion. Shared editing remains administrator-only, and stale edits are rejected. Pool aiming guides now shorten the target line on thin cuts while retaining the angle-dependent cue departure, matching the Android reference behavior.
+
+Pool now uses larger balls on new tables, with unchanged table dimensions and cosmetic decoration along each cue shaft. Solo practice includes a ball editor, clear/rack controls, shot rewind, and named personal setups with load/rename/delete. Administrators can publish named practice setups for everyone to load; shared changes require administrator permission. Existing tables retain their original ball geometry until reset. Nine-ball remains a disabled Coming soon choice.
+
+Pool gentle shots now use a softer minimum that blends into the existing power curve at 20%; medium and full power remain unchanged. The target-ball direction guide is shorter, with a separate short cue-ball departure guide at contact.
+
+Pool balls now keep their final rolling orientation when stopped and between consecutive shots, instead of automatically turning numbers upward. The pocketed-ball display stays readable. Shot physics are unchanged.
+
+Pool adds personal table frames: walnut, rosewood, maple, carbon fiber, brushed steel and midnight lacquer, with an independent burgundy-red cloth option. Appearance stays in your browser and does not change other players or game physics.
+
+Pool adopts the measured medium/high power curve in browser and server. Gentle shots through 35% are unchanged; cue finishes remain cosmetic. Spin, friction and collision rules are unchanged.
+
+Pool vertical power increases when dragged upward and decreases downward. Keyboard power, cue pullback and held plus/minus controls remain unchanged.
+
+Pool power now sits beside spin above the board as a vertical pull-down meter. Mouse cue pullback, keyboard power and held plus/minus controls remain available; the table size and game physics are unchanged.
+
+Pool turn outlines now last three seconds. Table options can keep playable targets highlighted throughout your turn; default is the brief reminder. Highlights stay hidden during movement, placement and opponents turns.
+
+Pool briefly outlines legal target balls before every playable shot, including continued turns, and places routine shot status below the controls. Reminder waits for movement/placement to finish and does not restart on duplicate updates.
+
+Pool aiming now marks predicted illegal first contact with a red crossed circle, matching server group and 8-ball rules while preserving solo free shooting and break exemptions. Testing remains WIP pending owner acceptance.
+
+- Refine Pool aim buttons and arrow keys to 0.05-degree taps, with delayed hold repeat and finer Shift-arrow adjustments.
+
+- Keep Pool horizontal scrolling accessible at the viewport edge in narrow chat layouts, using the same page owner for both axes.
+
+- Name the game Pool in the games room; retain 8 Ball as the current rules variant.
+
+- Preserve each player's selected cue across rematches, including rotated seats.
+
+- Refresh game script cache tags and update regression coverage for the central release inventory, current dice animation lifecycle, and native module imports.
+
+- Add scrollable side clearance without shrinking the pool table; preserve the full cue length and consistent power pullback at corners.
+
+- Allow picking up the cue ball directly over a pocket after scratching, and use the framework's single game scrollbar with wheel support over the table.
+
+- Add cue space above and below the pool table while preserving its original displayed width; keep cue grabbing and ball placement aligned when resized.
+
+- Restore the first-contact aiming guide regardless of shot power, removing the short stopping-distance marker introduced during physics integration.
+
+- Restore mouse placement after a cue-ball scratch; dragging and double-click confirmation work while the cue ball is pocketed.
+
+- Roll numbered and striped ball artwork around the visible sphere during travel, then ease numbers toward the viewer when stopped. Shot physics is unchanged.
+
+- Correct tight-rack contact response for wider breaks at the existing calibrated power, and show the complete cue-ball approach on live shots. Preserve authoritative recorded trajectories and reconnect catch-up.
+
+- Automatically rack new games and rematches; start shots with the cue close to the ball and provide a longer visible power pullback.
+
+- Add two-human 8 Ball and permanent solo Practice with fresh racks, free cue-ball placement, and repeatable shot layouts.
+- Add server-owned shots and foul rules, shared trajectory playback, six cosmetic cues, direct spin and mouse/keyboard controls, resizing, recording, save/restore and rematches that preserve game conversation.
+- Adapt and attribute Pooltool collision and motion models; retain the approved approximate maximum-power calibration.
+- Testing is WIP. Local checks do not replace owner acceptance; no pool bots are included yet.
+
+
+
 ## Reliability corrections - 2026-09-17
 
 - Bind pending sends and replies to their original conversations. Keep failed text recoverable and retry ordinary, protected and game messages with the same request identity.
@@ -26,6 +115,7 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 - Add Normal and qualified Expert Practice bots, public-information search, readable turn pacing, bottom thinking/retry messages, recordings, saves and rematches. Preserve Normal behavior.
 - Add shared movable popup headings, visible close controls, outside/Escape dismissal, draft and pending-action safeguards, and a retry for canceled password confirmation.
 - Testing is WIP.
+
 
 
 ## Game Review reference pack v2 - 2026-09-16
@@ -376,6 +466,15 @@ Seat 1 now appears below the table, followed by seats 2 left, 3 above and 4 righ
 - Added the forward recording migration; existing installation data and earlier
   migration signatures are preserved. No hosting deployment is part of this change.
 
+
+## 2026-09-13 - Normal Spades endgame Nil attacks
+
+- Normal can take a trick from its winning partner to force an opposing Nil to
+  take the final trick, when public card history proves the benefit.
+- The small endgame check runs only after the team has made its contract and
+  neither teammate bid Nil. Uncertain positions keep the existing card choice.
+- Partner Nil protection, Expert strategy and existing thinking-time budgets
+  remain unchanged.
 
 ## 2026-09-12 - Spades bot decision quality
 
@@ -1491,3 +1590,12 @@ server-stored and built-in avatar choices.
 - Corrected rapid double-click card play so selecting a card no longer replaces its element before the second click can submit the play.
 - Replaced the cartoon-style Joker figures with a crowned gold heraldic spade and a smaller silver-teal harlequin-spade seal; both titles remain isolated from decorative lines.
 - Added no database migration and left every new gameplay variation disabled unless a game creator selects it.
+
+
+## 2026-09-13 - Spades Expert bounded thinking time (local, unpublished)
+
+- Allow Expert up to one second of search per decision, with a shared three-second
+  search budget for consecutive bots. Straightforward and forced moves still finish immediately.
+- Preserve Normal behavior, Nil partnership safeguards, legal play and bounded
+  deadlines. Local timing and paired-hand checks support this increase; hosted
+  timing and owner gameplay verification remain pending deployment.

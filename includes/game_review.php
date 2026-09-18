@@ -32,8 +32,9 @@ function game_review_create(PDO $pdo, array $user, string $caseId, string $pack)
     $input=['inactivityProfile'=>'unlimited'];
     if(in_array($case['game'],['acey-deucy','backgammon-first-party'],true))$input['starterMethod']='rotate-starter';
     if(isset($case['rulesProfile']))$input['rulesProfile']=$case['rulesProfile'];
+    if($case['game']==='eight-ball')$input+=['variant'=>$case['variant'],'tableMode'=>$case['tableMode']??'match','pocketCalls'=>$case['pocketCalls']??'none'];
     $settings = multiplayer_game_validate_extension_settings($pdo, $def, $input, 'practice');
-    $count = $case['game']==='space-invasion'?1:2;
+    $count = $case['game']==='space-invasion'||($case['tableMode']??'')==='solo'?1:2;
     if (in_array($case['game'], ['spades','hearts'], true)) $count=4;
     $state = ($adapter['initialState'])(range(1,$count), ['mode'=>'practice','settings'=>multiplayer_game_extension_only_settings($settings),'nowUnixMs'=>1000]);
     [$state,$steps,$instruction,$expected] = game_review_position($state,$case);

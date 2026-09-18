@@ -4,7 +4,7 @@ declare(strict_types=1);
 /** Remove clock origins and randomness bookkeeping, not game outcomes or positions. */
 function game_review_comparable(array $state): array
 {
-    $omit=['_framework','realtime','seed','queue','bag','bagNumber','inputHashes','usedRandomnessRequestIds','readySeed','reshuffleSeed'];
+    $omit=['_framework','realtime','seed','queue','bag','bagNumber','inputHashes','usedRandomnessRequestIds','readySeed','reshuffleSeed','animationUntil','serverNow'];
     foreach($state as $key=>$value){
         if(in_array((string)$key,$omit,true)||preg_match('/(?:At|AtMs|UnixMs|Deadline)$/',(string)$key)){unset($state[$key]);continue;}
         if(is_array($value))$state[$key]=game_review_comparable($value);
@@ -15,13 +15,13 @@ function game_review_comparable(array $state): array
 
 function game_review_rule_check(PDO $pdo,array $user,string $caseId,string $pack): array
 {
-    $path=__DIR__.'/game_review_baseline_v1.json';
+    $path=__DIR__.'/game_review_baseline_v3.json';
     $baseline=is_file($path)?json_decode((string)file_get_contents($path),true):[];
     $saved=$baseline['cases'][$caseId]??null;
     if(!$saved)return ['status'=>'not-saved','message'=>'No frozen rules reference is available for this example.'];
     $r=game_review_create($pdo,$user,$caseId,$pack);
     $initial=game_review_comparable($r['state']);
-    foreach($r['steps'] as $step)game_review_apply($pdo,$r,$step['actor'],$step['action'],$step['payload'],$step['random']??null);
+    foreach($r['steps'] as $i=>$step)game_review_apply($pdo,$r,$step['actor'],$step['action'],$step['payload'],$step['random']??null,$r['case']['game']==='eight-ball'?1000000+$i*60000:null);
     game_review_settle_reference($pdo,$r);
     $final=game_review_comparable($r['state']);
     $same=json_encode($initial)===json_encode($saved['initial'])&&json_encode($final)===json_encode($saved['final']);

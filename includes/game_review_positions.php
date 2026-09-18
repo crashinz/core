@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__.'/game_review_square_positions.php';
 require_once __DIR__.'/game_review_native_positions.php';
 require_once __DIR__.'/game_review_other_positions.php';
+require_once __DIR__.'/game_review_pool_positions.php';
 
 function game_review_step(int $actor, string $action, array $payload=[], ?array $random=null): array
 {
@@ -11,6 +12,7 @@ function game_review_step(int $actor, string $action, array $payload=[], ?array 
 
 function game_review_position(array $s,array $case): array
 {
+    if($case['game']==='eight-ball')return game_review_pool_position($s,$case);
     $game=$case['game'];$mode=$case['mode'];$steps=[];$instruction=$case['instruction'];$expected=$case['expected'];
     if(in_array($game,['chess','checkers'],true)) {
         [$s,$moves]=game_review_square_position($s,$case);

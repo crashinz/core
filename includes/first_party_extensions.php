@@ -131,6 +131,7 @@ function first_party_extension_sources(): array {
             'introducedStorageSchema' => 1,
             'publicFallbackName' => 'Chinese Checkers',
         ],
+        'eight-ball' => ['manifest'=>dirname(__DIR__).'/extensions/eight-ball/extension.json','adapter'=>__DIR__.'/eight_ball_extension.php','factory'=>'eight_ball_extension_adapter','activationCapability'=>'game.rules.authoritative','introducedStorageSchema'=>1,'publicFallbackName'=>'Pool'],
         'dominos' => ['manifest'=>dirname(__DIR__).'/extensions/dominos/extension.json','adapter'=>__DIR__.'/dominos_extension.php','factory'=>'dominos_extension_adapter','activationCapability'=>'game.rules.authoritative','introducedStorageSchema'=>1,'publicFallbackName'=>'Dominos'],
         'nested-four' => [
             'manifest' => dirname(__DIR__) . '/extensions/nested-four/extension.json',
@@ -260,6 +261,7 @@ function first_party_extension_setting_defaults(): array {
         'first_party_extension.chinese-checkers.lifecycle_revision' => '1',
         'first_party_extension.chinese-checkers.storage_schema' => '1',
         'first_party_extension.chinese-checkers.last_failure' => '',
+        'first_party_extension.eight-ball.enabled'=>'1', 'first_party_extension.eight-ball.lifecycle_revision'=>'1', 'first_party_extension.eight-ball.storage_schema'=>'1', 'first_party_extension.eight-ball.last_failure'=>'',
         'first_party_extension.dominos.enabled'=>'1', 'first_party_extension.dominos.lifecycle_revision'=>'1', 'first_party_extension.dominos.storage_schema'=>'1', 'first_party_extension.dominos.last_failure'=>'',
         'first_party_extension.nested-four.enabled' => '1',
         'first_party_extension.nested-four.lifecycle_revision' => '1',

@@ -56,6 +56,7 @@ const SINGLE_SCROLL_GAME_PATHS = Object.freeze({
     "g_b63c0a05": "/games/nested-four-first-party/index.html",
     "g_b63c0a06": "/games/puppy-panic-first-party/index.html",
     "g_dominos01": "/games/dominos/index.html",
+    "g_eightball01": "/games/eight-ball/index.html",
     "g_b61c0a01": "/games/backgammon-first-party/index.html",
     "g_4f8c2d71": "/games/five-dice/index.html"
 });
@@ -101,7 +102,7 @@ export function releaseGameFrameSingleScroll(frameEl) {
 export function gameFrameContentHeight(documentOwner) {
     const documentElement = documentOwner?.documentElement;
     const body = documentOwner?.body;
-    const usesIntrinsicHeight = /\/games\/(?:dominos|five-dice|uno-first-party|puppy-panic-first-party|battleship-first-party|chess-first-party|checkers-first-party|spades-first-party|hearts-first-party|tetris-versus-first-party|space-invasion-first-party)\/(?:index\.html)?$/i.test(String(documentOwner?.location?.pathname || ""));
+    const usesIntrinsicHeight = /\/games\/(?:eight-ball|dominos|five-dice|uno-first-party|puppy-panic-first-party|battleship-first-party|chess-first-party|checkers-first-party|spades-first-party|hearts-first-party|tetris-versus-first-party|space-invasion-first-party)\/(?:index\.html)?$/i.test(String(documentOwner?.location?.pathname || ""));
     if (usesIntrinsicHeight && body) {
         const finite = value => Number.isFinite(Number(value)) ? Number(value) : 0;
         const bodyBox = body.getBoundingClientRect?.() || {};
@@ -511,6 +512,20 @@ export class GameStageRenderer {
                         ? style.setProperty(name, previous.value, previous.priority)
                         : style.removeProperty(name);
                     const originalHeight = captureStyle(frameEl.style, "height");
+                    const originalWidth = captureStyle(frameEl.style, "width");
+                    const originalMaxWidth = captureStyle(frameEl.style, "max-width");
+                    const isPool = game.game_type === "g_eightball01";
+                    const poolScrollStage = isPool ? frameWrap.closest?.(".room-stage") : null;
+                    const originalOverflowX = poolScrollStage ? captureStyle(poolScrollStage.style,"overflow-x") : null;
+                    const originalOverflowY = poolScrollStage ? captureStyle(poolScrollStage.style,"overflow-y") : null;
+                    // Compact coexist rooms already use the document for vertical
+                    // scrolling. Keep horizontal scrolling on that same owner,
+                    // so its scrollbar remains at the visible viewport edge.
+                    const poolUsesPageScroll = () => isPool
+                        && view?.matchMedia?.("(max-width: 860px)").matches
+                        && !!frameWrap.closest?.('.main.game-surface-visible[data-game-layout="coexist"]');
+                    let poolExtraWidth = 0, poolBaseWidth = 0;
+                    let onPoolLayout = null;
                     const originalMinimum = captureStyle(frameEl.style, "min-height");
                     const originalContentHeight = captureStyle(frameWrap.style, "--game-frame-content-height");
                     const originalScrollOwner = frameWrap.getAttribute("data-scroll-owner");
@@ -530,6 +545,7 @@ export class GameStageRenderer {
                             observer?.disconnect?.();
                             if (animationFrame !== null) view?.cancelAnimationFrame?.(animationFrame);
                             documentOwner.removeEventListener?.("wheel", forwardVerticalWheel, true);
+                            documentOwner.removeEventListener?.("corechat-pool-layout", onPoolLayout);
                             sizingStyle?.remove?.();
                             if (frameEl.__corechatGameSingleScrollOwner !== owner) return;
                             frameEl.__corechatGameSingleScrollOwner = null;
@@ -537,6 +553,15 @@ export class GameStageRenderer {
                             frameEl.__corechatGameWheelDocument = null;
                             frameEl.__corechatGameWheelHandler = null;
                             restoreStyle(frameEl.style, "height", originalHeight);
+                            if (isPool) {
+                                restoreStyle(frameEl.style, "width", originalWidth);
+                                restoreStyle(frameEl.style, "max-width", originalMaxWidth);
+                                if(poolScrollStage){
+                                    restoreStyle(poolScrollStage.style,"overflow-x",originalOverflowX);
+                                    restoreStyle(poolScrollStage.style,"overflow-y",originalOverflowY);
+                                }
+                                documentOwner.documentElement.style.removeProperty("--pool-host-width");
+                            }
                             restoreStyle(frameEl.style, "min-height", originalMinimum);
                             restoreStyle(frameWrap.style, "--game-frame-content-height", originalContentHeight);
                             if (originalScrollOwner === null) frameWrap.removeAttribute("data-scroll-owner");
@@ -553,12 +578,22 @@ export class GameStageRenderer {
                     sizingStyle = documentOwner.createElement("style");
                     sizingStyle.id = "corechat-single-scroll-sizing";
                     sizingStyle.textContent = "html,body,#game-root,.game{height:auto!important;min-height:0!important;overflow:visible!important}html,body{scrollbar-width:none!important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}";
+                    if (isPool) sizingStyle.textContent += ".game{width:100%!important;max-width:none!important}body{padding:clamp(8px,calc(var(--pool-host-width)*.012),16px)!important}.surface{padding:clamp(9px,calc(var(--pool-host-width)*.01),14px)!important}";
                     documentOwner.head?.append?.(sizingStyle);
                     forwardVerticalWheel = event => {
                         if (!isCurrent()) return;
-                        const roomStage = frameWrap.closest?.(".room-stage");
+                        const roomStage = poolUsesPageScroll()
+                            ? view.document.scrollingElement
+                            : frameWrap.closest?.(".room-stage");
                         const rawDeltaY = Number(event.deltaY || 0);
                         const rawDeltaX = Number(event.deltaX || 0);
+                        if (isPool && roomStage && (event.shiftKey || (rawDeltaX && Math.abs(rawDeltaX) >= Math.abs(rawDeltaY)))) {
+                            const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? roomStage.clientWidth : 1;
+                            const delta = (rawDeltaX || rawDeltaY) * unit;
+                            const nextLeft = Math.min(Math.max(0, roomStage.scrollWidth-roomStage.clientWidth), Math.max(0,roomStage.scrollLeft+delta));
+                            if(nextLeft !== roomStage.scrollLeft){event.preventDefault();roomStage.scrollTo({left:nextLeft,top:roomStage.scrollTop,behavior:"auto"});}
+                            return;
+                        }
                         if (!roomStage || !rawDeltaY || Math.abs(rawDeltaY) <= Math.abs(rawDeltaX)) return;
                         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? roomStage.clientHeight : 1;
                         const maxTop = Math.max(0, roomStage.scrollHeight - roomStage.clientHeight);
@@ -572,6 +607,25 @@ export class GameStageRenderer {
                     frameEl.__corechatGameWheelHandler = forwardVerticalWheel;
                     const syncHeight = () => {
                         if (!isCurrent()) return;
+                        if (isPool) {
+                            if(poolScrollStage){
+                                poolScrollStage.style.setProperty("overflow-x",poolUsesPageScroll()?"visible":"auto");
+                                if(poolUsesPageScroll())poolScrollStage.style.setProperty("overflow-y","visible");
+                                else restoreStyle(poolScrollStage.style,"overflow-y",originalOverflowY);
+                            }
+                            const base = frameWrap.clientWidth;
+                            if(base > 0 && base !== poolBaseWidth){
+                                poolBaseWidth = base;
+                                documentOwner.documentElement.style.setProperty("--pool-host-width",base+"px");
+                                // Freeze the original responsive body/surface padding and four border pixels.
+                                // Side clearance must grow the iframe, never rescale the physical table.
+                                const tableWidth = base-2*Math.max(8,Math.min(16,base*.012))-2*Math.max(9,Math.min(14,base*.01))-4;
+                                documentOwner.dispatchEvent(new documentOwner.defaultView.CustomEvent("corechat-pool-viewport",{detail:{width:Math.max(1,tableWidth)}}));
+                            }
+                            const width = Math.ceil(base+poolExtraWidth)+"px";
+                            if(frameEl.style.width !== width)frameEl.style.width=width;
+                            frameEl.style.maxWidth="none";
+                        }
                         const contentHeight = gameFrameContentHeight(documentOwner);
                         if (!Number.isFinite(contentHeight) || contentHeight < 1) return;
                         frameWrap.dataset.scrollOwner = "room-stage";
@@ -581,11 +635,21 @@ export class GameStageRenderer {
                         if (frameEl.style.minHeight !== nextHeight) frameEl.style.minHeight = nextHeight;
                     };
                     owner.syncHeight = syncHeight;
+                    if (isPool) {
+                        onPoolLayout = event => {
+                            const extra=Number(event.detail?.extraWidth);
+                            if(!isCurrent()||!Number.isFinite(extra)||extra<0||extra>4000)return;
+                            if(Math.abs(extra-poolExtraWidth)<.1)return;
+                            poolExtraWidth=extra;syncHeight();
+                        };
+                        documentOwner.addEventListener("corechat-pool-layout",onPoolLayout);
+                    }
                     const ResizeObserverOwner = view?.ResizeObserver;
                     if (ResizeObserverOwner) {
                         observer = new ResizeObserverOwner(syncHeight);
                         if (documentOwner.documentElement) observer.observe(documentOwner.documentElement);
                         if (documentOwner.body) observer.observe(documentOwner.body);
+                        if (isPool) observer.observe(frameWrap);
                         frameEl.__corechatGameHeightObserver = observer;
                     }
                     frameEl.setAttribute("scrolling", "no");
