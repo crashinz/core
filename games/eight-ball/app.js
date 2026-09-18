@@ -2,7 +2,7 @@
  * keeps the canvas document mounted while authoritative snapshots arrive. */
 (() => {
   'use strict';
-  const source=new URL('table.html',document.currentScript.src);
+  const source=new URL('table.html?v=afba0c12db23',document.currentScript.src);
   let viewportWidth=0;
   document.addEventListener('corechat-pool-viewport',e=>{viewportWidth=e.detail.width;if(ready)frame.contentWindow.postMessage({type:'pool-viewport',width:viewportWidth},location.origin);});
   let root,frame,context,ready=false,inFlight=false,autoRackQueued=false,autoRackAttempt='';
@@ -54,5 +54,5 @@
     if(!['shot','call','push-out','rack','place','cue','choice','layout','stalemate','practice-edit','practice-rewind'].includes(action))return;
     await perform(action,payload||{});
   });
-  window.CoreChatEightBall={render(c){context=c;if(!root){root=document.createElement('section');root.className='eight-ball-frame';root.style.cssText='width:100%;min-width:0';root.addEventListener('contextmenu',e=>e.preventDefault());frame=document.createElement('iframe');frame.title='Pool table';frame.src=source.href;frame.style.cssText='width:100%;height:600px;max-height:none;border:0;display:block;background:#101923;border-radius:12px';root.append(frame);}send();return root;}};
+  window.CoreChatEightBall={isAnimating(){return !ready||!!frame?.contentWindow.CoreChatPoolPlayback?.isActive();},render(c){context=c;if(!root){root=document.createElement('section');root.className='eight-ball-frame';root.style.cssText='width:100%;min-width:0';root.addEventListener('contextmenu',e=>e.preventDefault());frame=document.createElement('iframe');frame.title='Pool table';frame.src=source.href;frame.style.cssText='width:100%;height:600px;max-height:none;border:0;display:block;background:#101923;border-radius:12px';root.append(frame);}send();return root;}};
 })();

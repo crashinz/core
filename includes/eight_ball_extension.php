@@ -3,14 +3,17 @@ declare(strict_types=1);
 require_once __DIR__.'/ocx_game_extension_support.php';
 require_once __DIR__.'/eight_ball_physics.php';
 require_once __DIR__.'/nine_ball_rules.php';
+require_once __DIR__.'/pool_bot_support.php';
 
-function eight_ball_extension_adapter(): array {return ['id'=>'eight-ball','initialState'=>'eight_ball_initial_state','applyAction'=>'eight_ball_apply_action','validateSettings'=>'eight_ball_validate_settings','settingsProjection'=>'eight_ball_settings_projection','rulesProjection'=>'eight_ball_rules_projection','projectState'=>'eight_ball_project_state','recordingAdapter'=>'eight_ball_recording_adapter','randomnessPurposes'=>['rack'=>'eight-ball-rack'],'deriveRandomness'=>'eight_ball_randomness','presentationStatus'=>'eight_ball_presentation_status','openingProcedure'=>'random-first-break-alternate-rematches','rematchSeatRotation'=>true];}
+function eight_ball_extension_adapter(): array {return ['id'=>'eight-ball','initialState'=>'eight_ball_initial_state','applyAction'=>'eight_ball_apply_action','validateSettings'=>'eight_ball_validate_settings','settingsProjection'=>'eight_ball_settings_projection','rulesProjection'=>'eight_ball_rules_projection','projectState'=>'eight_ball_project_state','recordingAdapter'=>'eight_ball_recording_adapter','projectVirtualMembers'=>'pool_project_virtual_members','randomnessPurposes'=>['rack'=>'eight-ball-rack','bot-rack'=>'eight-ball-rack'],'deriveRandomness'=>'eight_ball_randomness','presentationStatus'=>'eight_ball_presentation_status','openingProcedure'=>'random-first-break-alternate-rematches','rematchSeatRotation'=>true];}
 function eight_ball_fail(string $text,string $code='ACTION_INVALID',int $status=422): never {throw new MultiplayerGameException($text,'EIGHT_BALL_'.$code,$status);}
 function eight_ball_presentation_status(PDO $pdo,?string $pack=null): array {return ['requestedPack'=>'built-in','effectivePack'=>'built-in','classicAvailable'=>false,'fallbackApplied'=>false,'presentationOnly'=>true,'mediaPack'=>['publicCodeNative'=>true,'remoteMedia'=>false]];}
 function eight_ball_validate_settings(array $s,string $mode,array $definition=[]): array {
-    if(array_diff(array_keys($s),['tableMode','pocketCalls','variant']))eight_ball_fail('Unsupported pool option.','SETTINGS_INVALID');
+    if(array_diff(array_keys($s),['tableMode','pocketCalls','variant','botSeat2Difficulty']))eight_ball_fail('Unsupported pool option.','SETTINGS_INVALID');
+    $difficulty=$s['botSeat2Difficulty']??'none';if(!in_array($difficulty,array_column(pool_bot_choices(),'value'),true))eight_ball_fail('Choose a listed bot difficulty.','SETTINGS_INVALID');
+    if($difficulty!=='none'&&$mode!=='practice')eight_ball_fail('Bot games are Practice only.','PRACTICE_ONLY');
     $table=$s['tableMode']??'match';if(!in_array($table,['match','solo'],true))eight_ball_fail('Choose a two-player match or Solo free shooting.','SETTINGS_INVALID');
-    if($table==='solo'&&$mode!=='practice')eight_ball_fail('Solo free shooting is Practice only.','PRACTICE_ONLY');$calls=$s['pocketCalls']??'none';if(!in_array($calls,['all','eight','none'],true))eight_ball_fail('Choose a listed pocket-calling rule.','SETTINGS_INVALID');$variant=pool_validate_variant($s['variant']??'eight-ball');return ['tableMode'=>$table,'pocketCalls'=>$variant==='nine-ball'?'none':$calls,'variant'=>$variant];
+    if($table==='solo'&&$mode!=='practice')eight_ball_fail('Solo free shooting is Practice only.','PRACTICE_ONLY');if($table==='solo'&&$difficulty!=='none')eight_ball_fail('Choose Two-player match to play against a bot, or None for solo free shooting.','SETTINGS_INVALID');$calls=$s['pocketCalls']??'none';if(!in_array($calls,['all','eight','none'],true))eight_ball_fail('Choose a listed pocket-calling rule.','SETTINGS_INVALID');$variant=pool_validate_variant($s['variant']??'eight-ball');return ['tableMode'=>$table,'pocketCalls'=>$variant==='nine-ball'?'none':$calls,'variant'=>$variant,...($mode==='practice'&&$difficulty!=='none'?['botSeat2Difficulty'=>$difficulty]:[])];
 }
 function eight_ball_call_rule(array $s): string {return pool_variant($s)==='nine-ball'?'none':($s['settings']['pocketCalls']??'all');}
 // A call is shared state, while legacy clients may still submit it with a shot.
@@ -27,7 +30,8 @@ function eight_ball_validate_call(array $s,int $actor,array $p,bool $partial=fal
 function eight_ball_settings_projection(array $s,string $mode,array $definition=[]): array {
     $s=eight_ball_validate_settings($s,$mode);return ['label'=>'Game Options','description'=>'Play a two-player match, or practice on your own.','controls'=>[
         ['key'=>'variant','type'=>'button-choice','label'=>'Game','description'=>'Choose 8 Ball or lowest-ball-first 9 Ball.','value'=>$s['variant'],'defaultValue'=>'eight-ball','options'=>[['value'=>'eight-ball','label'=>'8 Ball'],['value'=>'nine-ball','label'=>'9 Ball']]],
-        ['key'=>'tableMode','type'=>'button-choice','label'=>'Table','description'=>'Two human players, or one player in Practice free shooting.','value'=>$s['tableMode'],'defaultValue'=>'match','options'=>array_merge([['value'=>'match','label'=>'Two-player match']],$mode==='practice'?[['value'=>'solo','label'=>'Solo free shooting']]:[])],
+        ['key'=>'tableMode','type'=>'button-choice','label'=>'Table','description'=>'Play a match against a person or Practice bot, or choose Solo free shooting.','value'=>$s['tableMode'],'defaultValue'=>'match','options'=>array_merge([['value'=>'match','label'=>'Two-player match']],$mode==='practice'?[['value'=>'solo','label'=>'Solo free shooting']]:[])],
+        ...($mode==='practice'?[['key'=>'botSeat2Difficulty','type'=>'button-choice','label'=>'Practice opponent','description'=>'For Two-player match: Easy has imperfect aim and no position planning; Normal favors straightforward pots; Expert searches banks, combinations, spin and position. Choose None for a human opponent or solo.','value'=>$s['botSeat2Difficulty']??'none','defaultValue'=>'none','options'=>pool_bot_choices()]]:[]),
         ['key'=>'pocketCalls','type'=>'button-choice','label'=>'Call pockets','description'=>'8-ball match rule only. 9 Ball and Solo free shooting never require a call.','value'=>$s['pocketCalls'],'defaultValue'=>'none','options'=>[['value'=>'eight','label'=>'8 ball only'],['value'=>'all','label'=>'Every shot'],['value'=>'none','label'=>'No calls']]]
     ]];
 }
@@ -56,18 +60,19 @@ function eight_ball_rules_projection(array $s,string $mode,array $definition=[])
         ['label'=>'Digital table','text'=>'All shots and fouls are calculated by the server. Cues differ only in appearance. There are no jump, elevated-cue, or massé shots. Solo practice permits free placement, fresh racks and repeatable layouts.']]];
 }
 function eight_ball_initial_state(array $players,array $c=[]): array {
-    $s=eight_ball_validate_settings($c['settings']??[],$c['mode']??'practice');$count=$s['tableMode']==='solo'?1:2;
-    if(count($players)!==$count||min($players)<=0||count(array_unique($players))!==$count)eight_ball_fail($count===1?'Solo free shooting needs one player.':'A match needs two human players.','PLAYERS_INVALID',409);
+    $s=eight_ball_validate_settings($c['settings']??[],$c['mode']??'practice');$count=$s['tableMode']==='solo'||pool_bot_enabled($s)?1:2;
+    if(count($players)!==$count||min($players)<=0||count(array_unique($players))!==$count)eight_ball_fail($count===1?'This Practice table needs one human player.':'A match needs two human players.','PLAYERS_INVALID',409);
+    $bots=[];if(pool_bot_enabled($s)){$players[]=POOL_BOT_ID;$bots[POOL_BOT_ID]=['userId'=>POOL_BOT_ID,'seat'=>2,'difficulty'=>$s['botSeat2Difficulty'],'displayName'=>ucfirst($s['botSeat2Difficulty']).' Bot','engine'=>POOL_BOT_ENGINE];}
     $cues=array_fill_keys($players,6);
     if(!empty($c['roundContext']['rematchContinues']))foreach($players as$id){
         $cue=filter_var($c['roundContext']['previousState']['cues'][$id]??6,FILTER_VALIDATE_INT);
         if($cue!==false&&$cue>=0&&$cue<=6)$cues[$id]=$cue;
     }
-    return ['schemaVersion'=>1,'ballRadius'=>15.5,'settings'=>$s,'turnOrder'=>array_values($players),'turnIndex'=>0,'phase'=>'rack','balls'=>[],'groups'=>array_fill_keys($players,null),'cues'=>$cues,'sequence'=>0,'shotNumber'=>0,'breakShot'=>true,'placement'=>null,'lastShot'=>null,'calledShot'=>null,'statusText'=>'Rack the table to begin.','completed'=>false,'rematch'=>!empty($c['roundContext']['rematchContinues']),'previousBreaker'=>$c['roundContext']['previousState']['breakerUserId']??null,'stalemateRequests'=>[]];
+    return ['schemaVersion'=>1,'ballRadius'=>15.5,'settings'=>$s,...($bots?['bots'=>$bots]:[]),'turnOrder'=>array_values($players),'turnIndex'=>0,'phase'=>'rack','balls'=>[],'groups'=>array_fill_keys($players,null),'cues'=>$cues,'sequence'=>0,'shotNumber'=>0,'breakShot'=>true,'placement'=>null,'lastShot'=>null,'calledShot'=>null,'statusText'=>'Rack the table to begin.','completed'=>false,'rematch'=>!empty($c['roundContext']['rematchContinues']),'previousBreaker'=>$c['roundContext']['previousState']['breakerUserId']??null,'stalemateRequests'=>[]];
 }
 function eight_ball_randomness(string $reveal,string $action,array $payload,array $context): array {return ['order'=>ocx_game_random_permutation($reveal,range(1,15),'eight-ball-rack'),'starter'=>hexdec(substr(hash('sha256',$reveal.'|starter'),0,6))%2];}
 function eight_ball_rack(array &$s,array $random,?int $breaker=null): void {
-    $s['calledShot']=null;$order=$random['order']??[];if(count($order)!==15||count(array_unique($order))!==15||array_diff($order,range(1,15)))eight_ball_fail('Verified rack is unavailable.','RANDOMNESS_INVALID',409);
+    unset($s['botPendingShot'],$s['botReadyAt'],$s['botAim']);$s['calledShot']=null;$order=$random['order']??[];if(count($order)!==15||count(array_unique($order))!==15||array_diff($order,range(1,15)))eight_ball_fail('Verified rack is unavailable.','RANDOMNESS_INVALID',409);
     // 8 in the center; opposite rear corners are one solid and one stripe.
     $solid=current(array_filter($order,static fn($n)=>$n<8));$stripe=current(array_filter($order,static fn($n)=>$n>8));$rest=array_values(array_diff($order,[8,$solid,$stripe]));$numbers=[];for($i=0;$i<15;$i++)$numbers[]=$i===4?8:($i===10?$solid:($i===14?$stripe:array_shift($rest)));
     $s['ballRadius']=15.5;$s['practiceUndo']=null;$s['practiceSetup']=null;$s['practiceLayout']=null;$balls=[(array)EightBallPhysics::ball(0,330,337)];$i=0;for($r=0;$r<5;$r++)for($k=0;$k<=$r;$k++)$balls[]=(array)EightBallPhysics::ball($numbers[$i++],798+$r*(31.004*sqrt(3)/2),337+($k-$r/2)*31.004);
@@ -113,7 +118,7 @@ function eight_ball_resolve_shot(array &$s,int $actor,array $payload,array $resu
     if($made&&$group===null){$group=eight_ball_group($called);$s['groups'][$actor]=$group;$s['groups'][$s['turnOrder'][$other]]=$group==='solids'?'stripes':'solids';}
     if(!$made)$s['turnIndex']=$other;$s['statusText']=$made?($calls==='all'?'Called shot made. Continue.':'Legal pot. Continue.'):(!empty($payload['safety'])?'Safety. Opponent to play.':'Turn passes to opponent.');
 }
-function eight_ball_apply_action(array $s,int $actor,string $action,array $p,array $c): array {
+function eight_ball_apply_action_core(array $s,int $actor,string $action,array $p,array $c): array {
     if(($s['schemaVersion']??0)!==1||!empty($s['completed']))eight_ball_fail('This match is unavailable.','STATE_INVALID',409);
     if(!in_array($actor,$s['turnOrder'],true))eight_ball_fail('Only seated players may act.','PLAYER_INVALID',403);
     $solo=$s['settings']['tableMode']==='solo';$now=isset($c['nowUnixMs'])?(float)$c['nowUnixMs']/1000:microtime(true);
@@ -168,9 +173,10 @@ function eight_ball_apply_action(array $s,int $actor,string $action,array $p,arr
 function eight_ball_project_state(array $s,int $viewer,array $c): array {
     if(!isset($s['schemaVersion']))return ['phase'=>'lobby','legalActions'=>[]];$p=$s;unset($p['_framework']);$p['legalActions']=[];
     if(in_array($viewer,$s['turnOrder'],true)&&!$s['completed']){$p['legalActions'][]='cue';if($s['settings']['tableMode']==='match'&&$s['phase']==='aim')$p['legalActions'][]='stalemate';if(eight_ball_turn($s)===$viewer){$p['legalActions']=array_merge($p['legalActions'],match($s['phase']){'rack','rerack'=>['rack'],'placement'=>['place'],'choice'=>['choice'],'aim'=>['shot'],default=>[]});if($s['settings']['tableMode']==='match'&&$s['phase']==='aim'&&!$s['breakShot']){if(pool_variant($s)==='nine-ball'){if(!empty($s['pushOutAvailable']))$p['legalActions'][]='push-out';}else $p['legalActions'][]='call';}if($s['settings']['tableMode']==='solo')$p['legalActions']=array_values(array_unique([...$p['legalActions'],'rack','place','layout','practice-edit',...(!empty($s['practiceUndo'])?['practice-rewind']:[])]));}}
+    unset($p['botPendingShot'],$p['botReadyAt']);if(!empty($s['bots']))$p['botTask']=pool_bot_task($s,$viewer,$c);
     $p['serverNow']=microtime(true);return $p;
 }
-function eight_ball_recording_adapter(): array {return ['schemaVersion'=>1,'stateKeys'=>['schemaVersion','settings','turnOrder','turnIndex','phase','balls','groups','cues','sequence','shotNumber','breakShot','placement','lastShot','calledShot','statusText','completed','winner','choice','headStringRequired','breakerUserId','layout','rematch','previousBreaker','nextBreaker','animationUntil','layoutVersion','stalemateRequests','ballRadius','practiceUndo','practiceSetup','practiceVersion','practiceLayout','foulCounts','pushOutAvailable','pushOutDeclared'],'payloadKeys'=>['angle','power','spinX','spinY','calledBall','calledPocket','safety','x','y','cue','choice','layout','balls','setup','variant']];}
+function eight_ball_recording_adapter(): array {return ['schemaVersion'=>1,'stateKeys'=>['bots','botPendingShot','botReadyAt','botAim','schemaVersion','settings','turnOrder','turnIndex','phase','balls','groups','cues','sequence','shotNumber','breakShot','placement','lastShot','calledShot','statusText','completed','winner','choice','headStringRequired','breakerUserId','layout','rematch','previousBreaker','nextBreaker','animationUntil','layoutVersion','stalemateRequests','ballRadius','practiceUndo','practiceSetup','practiceVersion','practiceLayout','foulCounts','pushOutAvailable','pushOutDeclared'],'payloadKeys'=>['angle','power','spinX','spinY','calledBall','calledPocket','safety','x','y','cue','choice','layout','balls','setup','variant']];}
 
 function eight_ball_solo_layout(array &$s,string $layout): void {
     if(!in_array($layout,['practice','pocket','center','follow','draw','left','right'],true))eight_ball_fail('Choose a listed practice layout.');

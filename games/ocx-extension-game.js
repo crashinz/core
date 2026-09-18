@@ -1,4 +1,5 @@
 import { appendAceyMove, aceyMoveAnimating } from "./acey-deucy-motion.js?v=1e269499c30e";
+import { createPoolBotController } from "./eight-ball/bot-controller.js?v=a65cc7cc4fb5";
 import { createAceyDeucyBotController } from "./acey-deucy-bot-controller.js?v=a16519af3c5b";
 import { createNestedFourBotController } from "./nested-four-bot-controller.js?v=c541ed8907b2";
 import { createChineseCheckersBotController } from "./chinese-checkers-bot-controller.js?v=c1460ca5a716";
@@ -11113,6 +11114,15 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
   submit: payload => performAction(payload.action, {engine: payload.engine, positionKey: payload.positionKey}, payload.action === "bot-deal" ? (gameId === "blackjack" ? "blackjack-shoe" : `${gameId}-deal`) : (gameId === "puppy-panic" && payload.action === "bot-settle-random" ? "puppy-panic-random-effect" : "")),
   showStatus: (message, retry) => showBotStatus(gameId, message, retry),
 }); }
+const poolBotController = createPoolBotController({
+  snapshot: () => ({enabled: context.extensionId === "eight-ball" && gameSurfaceVisible && gameLifecycleAvailable() && !session?.review,
+    key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`, task: session?.state?.botTask,
+    animating: !!window.CoreChatEightBall?.isAnimating()}),
+  submit: payload => performAction(payload.action === "rack" ? "bot-rack" : "bot-step", payload, payload.action === "rack" ? "eight-ball-rack" : ""),
+  showStatus: (message, retry) => showBotStatus("eight-ball", message, retry),
+});
+const poolBotTimer = setInterval(() => { if (context.extensionId === "eight-ball") poolBotController.sync(); }, 250);
+window.addEventListener("pagehide", () => { poolBotController.stop(); clearInterval(poolBotTimer); });
 const dominosBotController = createServerCardBot("dominos", "Dominos");
 const puppyBotController = createServerCardBot("puppy-panic", "Puppy Panic");
 const blackjackBotController = createServerCardBot("blackjack", "Blackjack");
@@ -11281,6 +11291,7 @@ function render() {
   scheduleBlackjackAutomaticAction();
   scheduleHeartsAutomaticAction();
   scheduleUnoAutomaticAction();
+  poolBotController.sync();
   dominosBotController.sync();
   puppyBotController.sync();
   blackjackBotController.sync();

@@ -1,7 +1,8 @@
+import {drawPlacementHint} from './placement-hint.js';
 'use strict';
 import {createRollingBallArt,roll} from './ball-art.js';
 import {shotFrames,sampleShot} from './playback.js';
-import {createPoolAudio} from './audio.js';
+import {createPoolAudio} from './audio.js?v=0905101bc65c';
 import {installPractice} from './practice.js';
 import {holes as pockets,railPolygons,aimBoundary} from './table.js';
 (() => {
@@ -41,7 +42,7 @@ let alwaysHighlightTargets=false;
 const isNine=()=>network?.state?.settings?.variant==='nine-ball';
 const lowestBall=st=>Math.min(...(st?.balls||[]).filter(b=>b.n>0&&!b.pocket).map(b=>b.n));
 const canAct=()=>network&&network.status==='active'&&!network.busy&&!sending&&!playback&&Number(network.state.turnOrder?.[network.state.turnIndex])===network.currentUserId&&!network.state.completed;
-const postAction=(action,payload={})=>{if(!network||sending||network.busy||playback?.replay)return;sending=true;parent.postMessage({type:'pool-action',action,payload},location.origin);updateUI();};
+const postAction=(action,payload={})=>{if(!network||sending||network.busy||playback)return;sending=true;parent.postMessage({type:'pool-action',action,payload},location.origin);updateUI();};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const point=e=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*viewW/r.width-cueSpace.left,y:(e.clientY-r.top)*viewH/r.height-cueSpace.top};};
 const cueBall=()=>balls.find(b=>b.n===0&&!b.pocket);
@@ -179,7 +180,7 @@ function placementHit(p){return placement&&Math.hypot(p.x-placement.x,p.y-placem
 function placementMessage(){status(placement.valid?(placement.mode==='break'?'Before the break: place the cue ball in the highlighted starting area.':'After a foul: place the cue ball anywhere clear on the cloth.')+' Drag to move; double-click, Enter or Place ball confirms.':'That position is not available. Choose clear cloth inside the highlighted area.');}
 function movePlacement(p){if(!placement)return;placement.x=clamp(p.x,box.l+R,box.r-R);placement.y=clamp(p.y,box.t+R,box.b-R);placement.valid=placementValid(placement);placementMessage();updateUI();}
 function cancelPlacementDrag(){if(!placement)return;if(placement.dragStart)movePlacement(placement.dragStart);placement.pointer=null;placement.dragStart=null;placement.dragOffset=null;}
-function beginPlacement(mode){if(network){if(!canAct()||network.state.settings?.tableMode!=='solo')return;const b=balls.find(b=>b.n===0);placement={mode:'foul',x:b?.x||330,y:b?.y||337,valid:true,pointer:null};updateUI();closePanel();return;}reset(mode==='break'?'break':'practice');closePanel();const b=cueBall();placement={mode,x:b.x,y:b.y,valid:true,pointer:null,dragStart:null};updateCursor();canvas.focus({preventScroll:true});movePlacement(placement);}
+function beginPlacement(mode){if(network){if(!canAct()||network.state.settings?.tableMode!=='solo')return;const b=balls.find(b=>b.n===0);placement={mode,x:b?.x||330,y:b?.y||337,valid:false,pointer:null};placement.valid=placementValid(placement);updateUI();closePanel();return;}reset(mode==='break'?'break':'practice');closePanel();const b=cueBall();placement={mode,x:b.x,y:b.y,valid:true,pointer:null,dragStart:null};updateCursor();canvas.focus({preventScroll:true});movePlacement(placement);}
 function confirmPlacement(){if(network){if(canAct()&&placement?.valid)postAction('place',{x:placement.x,y:placement.y});return;}if(!placement||!placement.valid)return;const b=cueBall();b.x=placement.x;b.y=placement.y;placement=null;updateCursor();status('Cue ball placed. Aim and set power for your shot.');updateUI();canvas.focus({preventScroll:true});}
 function placementArea(){if(!placement)return;ctx.save();ctx.fillStyle='#8ce9e91b';const right=placement.mode==='break'?335:box.r-R;ctx.fillRect(box.l+R,box.t+R,right-box.l-R,box.b-box.t-2*R);ctx.strokeStyle='#9ce9deaa';ctx.lineWidth=2;ctx.setLineDash([8,7]);ctx.strokeRect(box.l+R,box.t+R,right-box.l-R,box.b-box.t-2*R);ctx.setLineDash([]);ctx.fillStyle='#dcfff1';ctx.font='600 13px system-ui';ctx.textAlign='left';ctx.fillText(placement.mode==='break'?'STARTING AREA':'BALL IN HAND',box.l+R+14,box.t+R+25);ctx.restore();}
 function placementBall(){if(!placement)return;const p=placement;ctx.save();ctx.shadowColor=p.valid?'#86f3de':'#ff6666';ctx.shadowBlur=18;ctx.strokeStyle=p.valid?'#a4ffed':'#ff8585';ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,R+9,0,Math.PI*2);ctx.stroke();ctx.shadowBlur=0;ballDraw({n:0,x:p.x,y:p.y,roll:0});ctx.strokeStyle=p.valid?'#ddfff6':'#ff8585';for(const [dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const x=p.x+dx*32,y=p.y+dy*32;ctx.beginPath();ctx.moveTo(x-dx*6-dy*4,y-dy*6+dx*4);ctx.lineTo(x,y);ctx.lineTo(x-dx*6+dy*4,y-dy*6-dx*4);ctx.stroke();}ctx.restore();}
@@ -213,7 +214,7 @@ function drawTurnGuide(){
   ctx.beginPath();ctx.arc(b.x,b.y,R+3.5,0,Math.PI*2);ctx.strokeStyle='#102330b3';ctx.lineWidth=4.5;ctx.stroke();ctx.strokeStyle='#fff6d9';ctx.lineWidth=2;ctx.stroke();
  }ctx.restore();
 }
-function draw(){tableBackground();if(practice?.editing){for(const b of practice.balls)ballDraw(makeBall(b.n,b.x,b.y),15.5);const b=practice.balls.find(b=>b.n===practice.selected);if(b){ctx.strokeStyle='#f4d478';ctx.lineWidth=2;ctx.beginPath();ctx.arc(b.x,b.y,19,0,Math.PI*2);ctx.stroke();}return;}placementArea();balls.filter(b=>b.n!==0).forEach(b=>ballDraw(b));const white=balls.find(b=>b.n===0);if(white&&!placement)ballDraw(white);drawTurnGuide();placementBall();aimDraw();drawPocketCall();}
+function draw(){tableBackground();if(practice?.editing){for(const b of practice.balls)ballDraw(makeBall(b.n,b.x,b.y),15.5);const b=practice.balls.find(b=>b.n===practice.selected);if(b){ctx.strokeStyle='#f4d478';ctx.lineWidth=2;ctx.beginPath();ctx.arc(b.x,b.y,19,0,Math.PI*2);ctx.stroke();}return;}placementArea();balls.filter(b=>b.n!==0).forEach(b=>ballDraw(b));const white=balls.find(b=>b.n===0);if(white&&!placement)ballDraw(white);drawTurnGuide();placementBall();drawPlacementHint(ctx,canvas,placement,box,viewW);aimDraw();drawPocketCall();}
 const aimStep=Math.PI/3600; // 0.05 degrees per tap.
 let aimKeyStarted=0;
 function adjust(action,amount=1){if(network&&!canAct())return;if(practice?.editing||moving||placement||(gesture?.type==='pull'&&action.startsWith('aim-')))return;const previousAngle=angle;
@@ -338,7 +339,7 @@ function startPlayback(last,age=0,replayRate=0){
  balls=structuredClone(last.before);returned=balls.filter(b=>b.pocket&&b.n).map(b=>b.n);rollingBallArt.reset();updateBallLists();
  playback={last,frames:shotFrames(last,R),time:age,startAge:age,clientStart:performance.now(),rate:replayRate||1,replay:!!replayRate};
  moving=true;placement=null;if(age===0)noiseHit(window.PoolPhysics.shotSpeed(last.power),'cue');
- status(replayRate?'Replaying last shot'+(replayRate<1?' — slow motion.':'.'):'Shot in motion...');
+ matchActions();status(replayRate?'Replaying last shot'+(replayRate<1?' — slow motion.':'.'):'Shot in motion...');
 }
 let replaySetup=null;
 function updateReplay(){const eligible=network?.state?.settings?.tableMode==='solo'&&network?.state?.turnOrder?.includes(network.currentUserId),active=!!playback?.replay;
@@ -416,11 +417,13 @@ function receiveNetwork(data){const previous=network;if(playback?.replay&&(data.
  if(st.practiceSetup&&!st.lastShot&&st.practiceVersion!==previous?.state?.practiceVersion){angle=st.practiceSetup.angle;power=st.practiceSetup.power;spin={...st.practiceSetup.spin};updateSpin();}
  if(playback){const actor=playback.last.actor;cueIndex=st.cues[actor]??6;activePlayer=actor===ownId?0:1;$('.you').classList.toggle('active',actor===ownId);$('.opponent').classList.toggle('active',actor===otherId);}
  if(!playback&&canAct()&&st.phase==='placement'&&!placement)settledNetwork();
+ if(!playback&&st.botAim&&st.botAim.actor===st.turnOrder?.[st.turnIndex]){angle=st.botAim.angle;power=st.botAim.power;spin={x:st.botAim.spinX,y:st.botAim.spinY};updateSpin();}
  if(!playback){status(data.busy?'Saving your action...':st.statusText||'Ready.');matchActions();}practice?.update();updateUI();updateReplay();updateBallLists();updateTurnGuide();
 }
 window.addEventListener('message',e=>{if(e.source!==parent||e.origin!==location.origin)return;if(e.data?.type==='pool-snapshot')receiveNetwork(e.data);if(e.data?.type==='pool-viewport'&&Number.isFinite(e.data.width)&&e.data.width>0){availableTableWidth=e.data.width;layoutTable();}});
 parent.postMessage({type:'pool-ready'},location.origin);
 
+window.CoreChatPoolPlayback={isActive:()=>!!playback||moving||pendingShots.length>0};
 window.poolPreview={state:()=>({placement:placement?{mode:placement.mode,x:placement.x,y:placement.y,valid:placement.valid}:null,angle,power,cue:cues[cueIndex].name,activePlayer,playerCues:playerCues.map(i=>cues[i].name),moving,shot,playbackTime:playback?.time??null,replaying:!!playback?.replay,replayRate:playback?.rate??null,queuedShots:pendingShots.length,spin:{...spin},layout,returned:[...returned],balls:balls.map(b=>({...b})),keys:[...keys],panel:activePanel?.id||null,pull:gesture?.type==='pull'?gesture.pull:0})};
 new ResizeObserver(()=>parent.postMessage({type:'pool-height',height:Math.ceil($('.game-shell').getBoundingClientRect().height)},location.origin)).observe($('.game-shell'));
 practice=installPractice({canvas,colors,network:()=>network,balls:()=>balls,point,canAct,post:postAction,setup:()=>({angle,power,spin:{...spin}}),update:updateUI,restore:settledNetwork,open:openPanel,close:closePanel,cancelGesture});

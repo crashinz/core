@@ -6,6 +6,24 @@ settings keep 8 Ball. Solo free shooting is Practice only. Initial breaks use fr
 randomness; rematches alternate breakers. The in-game rules describe explicit
 optional pocket calls, break choices, scratches, and the winning ball.
 
+Practice matches also offer an Easy, Normal or Expert opponent. Keep Table set
+to Two-player match and choose Practice opponent; None keeps the human match.
+Solo free shooting and its setup library remain available separately.
+
+Easy has imperfect aim/power and no next-shot position planning. Normal searches
+straight pots and simple banks with modest position planning. Expert uses the
+same table physics to search banks, two-cushion shots, kicks, combinations,
+power and spin. When no pot is found, Expert searches legal safeties that leave
+the opponent blocked, farther away or with a difficult pot. It sees only the
+public table and chooses inputs; it cannot change collision or pocket outcomes.
+Expert is a bounded search, not an optimal or unbeatable solver.
+
+Search runs in a cancellable worker (Easy up to 0.6 seconds, Normal 1.8,
+Expert 5.5). The bot shows its aim before shooting and waits for each full
+animation. Thinking and Retry bot messages stay below the board controls.
+Practice bot games support saving and rematches and never enter Recorded
+rankings. No downloaded model or third-party bot engine is needed.
+
 9 Ball uses lowest-ball-first contact, legal combination wins, a diamond rack
 with 9 at the marked foot spot, push-outs with an opponent take/return choice,
 and three consecutive fouls with a visible two-foul warning. No calls are needed.

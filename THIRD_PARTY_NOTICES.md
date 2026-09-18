@@ -3431,3 +3431,42 @@ calibration. No Miniclip or Pogo code, artwork, or sounds are distributed.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+## Pool recorded sound effects
+
+Pool uses these five recordings for cue strikes, ball collisions, cushion hits and
+two alternating pocket drops. Edited mono PCM is embedded in the game module.
+
+- Ball collision: **Pool balls.wav**, by **bsumusictech**.
+  Source: https://freesound.org/people/bsumusictech/sounds/62331/
+  License: CC0 1.0, https://creativecommons.org/publicdomain/zero/1.0/
+  Source preview: https://cdn.freesound.org/previews/62/62331_791247-hq.mp3
+  Uses the second main collision, starting around 7.25 seconds; excludes the
+  preceding cue tap and later contacts. Trimmed to 0.39 seconds, mixed to mono,
+  adjusted level, and faded at edit boundaries.
+- Cue strike: **Pool Cue Strike**, by **Synchedin SFX**, via RouteNote Licensing.
+  Source: https://licensing.routenote.com/sound-effect/pool-cue-strike
+  License listed by the source: CC0.
+  Source preview: https://storage.googleapis.com/routenote-licensing-storage/public/sound_effects/6284/Pool%20Cue%20Strike.mp3
+  Leading silence and quiet tail trimmed; mixed to mono, adjusted level, and
+  faded at edit boundaries. The selected audible strike is preserved.
+- Cushion hit: **pool-ball-bounce-off-rail.wav**, by **mccarthy@bedmas.com**.
+  Source: https://freesound.org/people/mccarthy%40bedmas.com/sounds/42364/
+  License: CC0 1.0, https://creativecommons.org/publicdomain/zero/1.0/
+  Source preview: https://cdn.freesound.org/previews/42/42364_450724-hq.mp3
+  Silence trimmed; mixed to mono, adjusted level, and faded at edit boundaries.
+- Pocket drop, short: **Pool Ball in pocket.wav**, by **jtroan**.
+  Source: https://freesound.org/people/jtroan/sounds/241373/
+  License: Creative Commons Attribution 3.0 Unported,
+  https://creativecommons.org/licenses/by/3.0/
+  Source preview: https://cdn.freesound.org/previews/241/241373_4396563-hq.mp3
+  Adjusted level and faded at edit boundaries. Original mono rate preserved.
+- Pocket drop, longer: **jf Pool Ball hit and pocket.wav**, by **cmusounddesign**.
+  Source: https://freesound.org/people/cmusounddesign/sounds/85169/
+  License: Creative Commons Attribution 4.0 International,
+  https://creativecommons.org/licenses/by/4.0/
+  Source preview: https://cdn.freesound.org/previews/85/85169_1059930-hq.mp3
+  Uses the late drop/rattle section at 2.165-3.080 seconds, excluding the earlier
+  strikes. Trimmed, mixed to mono, adjusted level, and faded at edit boundaries.
+
+The listed edits adapt the credited recordings; the authors do not endorse this project. No Miniclip audio is included. Master volume, mute and impact-strength scaling apply to every clip.

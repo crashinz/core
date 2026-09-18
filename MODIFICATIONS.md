@@ -10,6 +10,20 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Pool recorded sounds and controls - 2026-09-18
+
+- Replace generated Pool effects with the approved recorded cue strike, ball collision, cushion hit and two alternating pocket drops, with source attribution and existing mute/volume behavior.
+- Clarify Shift-arrow fine aiming, validate cue-ball placement immediately, and prevent actions while shots or replays are still animating.
+- Retain the double-click placement caption and remove the large yellow canvas focus outline without disabling keyboard input.
+- Preserve physics, rules, bot search and frozen v3 examples.
+
+## Pool Practice bots - 2026-09-18
+
+- Add Easy, Normal and Expert opponents to both 8 Ball and 9 Ball Practice matches.
+- Use the existing authoritative physics and rules for every bot shot. Expert searches banks, kicks, combinations, spin, next-shot position and defensive safeties; Easy uses imperfect aim without position planning.
+- Show bot aiming before each shot, preserve full rolling animations and place thinking/retry status below the controls.
+- Preserve Solo free shooting, human matches, saved games, immediate rematches, rankings isolation and the frozen v3 references.
+
 ## Pool permanent review and reference pack v3 - 2026-09-18
 
 - Add 37 permanent administrator Pool examples for 8 Ball, 9 Ball, banks, spin, fouls, wins, push-out, ball-in-hand and solo editing/rewind.

@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "id": "eight-ball",
   "name": "Pool",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "repositoryOwned": true,
   "trustedFirstParty": true,
   "compatibility": {
@@ -101,6 +101,13 @@
     "games/eight-ball/playback.js",
     "games/eight-ball/audio.js",
     "includes/nine_ball_rules.php",
-    "games/eight-ball/bank-setups.json"
+    "games/eight-ball/bank-setups.json",
+    "includes/pool_bot_support.php",
+    "games/eight-ball/bot-engine.js",
+    "games/eight-ball/bot-controller.js",
+    "games/eight-ball/bot-worker.js",
+    "games/eight-ball/boot.js",
+    "games/eight-ball/placement-hint.js",
+    "games/eight-ball/recorded-impacts.js"
   ]
 }

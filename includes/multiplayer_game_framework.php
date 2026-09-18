@@ -1356,7 +1356,7 @@ function multiplayer_game_join_session(
         }
         if ($role === 'player' && ($definition['extensionId'] ?? '')==='eight-ball') {
             $poolSettings=json_decode((string)$session['settings_json'],true) ?: [];
-            if(($poolSettings['tableMode']??'match')==='solo'||$session['status']!=='lobby')throw new MultiplayerGameException('This table has no available player seat. You may spectate.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
+            if(($poolSettings['tableMode']??'match')==='solo'||($poolSettings['botSeat2Difficulty']??'none')!=='none'||$session['status']!=='lobby')throw new MultiplayerGameException('This table has no available player seat. You may spectate.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
         }
         if ($role === 'player' && (string)($definition['extensionId'] ?? '') === 'space-invasion') {
             $spaceSettings=json_decode((string)$session['settings_json'],true) ?: [];
@@ -1591,7 +1591,12 @@ function multiplayer_game_resolve_seat_request(PDO $pdo, string $publicId, int $
             $count = $pdo->prepare("SELECT COUNT(*) FROM multiplayer_game_members WHERE game_session_id=? AND role IN ('master','player') AND membership_status='active'");
             $count->execute([(int)$session['id']]);
             $playerCount = (int)$count->fetchColumn();
-            if(($definition['extensionId'] ?? '')==='eight-ball' && (json_decode((string)$session['settings_json'],true)['tableMode']??'match')==='solo')throw new MultiplayerGameException('Solo practice has one player.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
+            if (($definition['extensionId'] ?? '') === 'eight-ball') {
+                $poolSeatSettings = json_decode((string)$session['settings_json'], true) ?: [];
+                if (($poolSeatSettings['tableMode'] ?? 'match') === 'solo' || ($poolSeatSettings['botSeat2Difficulty'] ?? 'none') !== 'none') {
+                    throw new MultiplayerGameException('This Practice table has one human player.', 'MULTIPLAYER_GAME_PLAYER_LIMIT', 409);
+                }
+            }
             if(($definition['extensionId'] ?? '')==='space-invasion') {
                 $spaceSettings=json_decode((string)$session['settings_json'],true) ?: [];
                 if($playerCount >= (int)($spaceSettings['playerCount'] ?? 1))throw new MultiplayerGameException('Choose Two-player co-op before adding another player.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
@@ -2190,7 +2195,7 @@ function multiplayer_game_shared_progress_completed(
     ?int $beforeTurn,
     ?int $afterTurn
 ): bool {
-    if ($extensionId === 'eight-ball') return in_array($action, ['shot','place','rack'], true);
+    if ($extensionId === 'eight-ball') return in_array($action, ['shot','place','rack','bot-rack'], true)||($action==='bot-step'&&((int)($after['shotNumber']??0)>(int)($before['shotNumber']??0)||($before['phase']??'')!==($after['phase']??'')));
     if ($extensionId === 'dominos') return (int)($after['sequence']??0) > (int)($before['sequence']??0);
     if ($extensionId === 'chess') return $action === 'move';
     if ($extensionId === 'checkers') return $action === 'move' && ($beforeTurn !== $afterTurn || !empty($after['completed']));
@@ -2253,7 +2258,7 @@ function multiplayer_game_refresh_shared_inactivity(
 
 function multiplayer_game_minimum_players(array $definition, string $mode, array $settings = []): int
 {
-    if(($definition['extensionId'] ?? '')==='eight-ball')return $mode==='practice'&&($settings['tableMode']??'match')==='solo'?1:2;
+    if(($definition['extensionId'] ?? '')==='eight-ball')return $mode==='practice'&&(($settings['tableMode']??'match')==='solo'||($settings['botSeat2Difficulty']??'none')!=='none')?1:2;
     if(($definition['extensionId'] ?? '')==='space-invasion')return ($settings['playerCount'] ?? 1)===2?2:1;
     $minimumKey = $mode === 'practice' ? 'practiceMinPlayers' : 'recordedMinPlayers';
     return (int)($definition[$minimumKey] ?? $definition['minPlayers']);
@@ -4759,7 +4764,7 @@ function multiplayer_game_room_projection(PDO $pdo, string $publicId, int $roomS
         'activePlayerCount' => $activePlayerCount,
         'onlinePlayerCount' => $onlinePlayerCount,
         'minimumPlayers' => $minimumPlayers,
-        'maximumPlayers' => ($definition['extensionId']??'')==='eight-ball'&&($settings['tableMode']??'match')==='solo'?1:min(MULTIPLAYER_GAME_MAX_PLAYERS, (int)$definition['maxPlayers']),
+        'maximumPlayers' => ($definition['extensionId']??'')==='eight-ball'&&(($settings['tableMode']??'match')==='solo'||($settings['botSeat2Difficulty']??'none')!=='none')?1:min(MULTIPLAYER_GAME_MAX_PLAYERS, (int)$definition['maxPlayers']),
         'savedGame' => is_array($savedGame) ? [
             'available' => true,
             'savedAt' => (string)$savedGame['saved_at'],
