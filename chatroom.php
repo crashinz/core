@@ -954,43 +954,39 @@ $roomAssetVersion = static function (string $path): string {
     <span id="ctx-identity-roles"></span>
   </div>
   <div class="ctx-divider ctx-identity-divider" aria-hidden="true"></div>
-  <button id="ctx-change-nameplate" type="button">Change Nameplate Image</button>
-  <button id="ctx-remove-nameplate" type="button">Remove Nameplate Image</button>
+  <button id="ctx-profile" type="button">User Profile</button>
   <button id="ctx-change-avatar" type="button">Change Avatar</button>
-  <button id="ctx-avatar-size" type="button">Avatar Display Size</button>
-  <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
-    <button id="ctx-orientation" type="button" aria-haspopup="menu" aria-expanded="false">Orientation <span>&gt;</span></button>
-    <div class="ctx-submenu" id="ctx-orientation-submenu" role="menu" aria-label="Avatar orientation">
-      <button type="button" role="menuitemradio" data-avatar-orientation="original" data-label="Original">Original</button>
-      <button type="button" role="menuitemradio" data-avatar-orientation="flip-horizontal" data-label="Flip Horizontally">Flip Horizontally</button>
-      <button type="button" role="menuitemradio" data-avatar-orientation="flip-vertical" data-label="Flip Vertically">Flip Vertically</button>
-      <button type="button" role="menuitemradio" data-avatar-orientation="flip-both" data-label="Flip Horizontally and Vertically">Flip Horizontally and Vertically</button>
+  <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
+  <button id="ctx-dm" type="button">Send DM</button>
+  <button id="ctx-interact" type="button">Link / Sit in Lap</button>
+  <div class="ctx-submenu-wrap" id="ctx-hide-wrap">
+    <button id="ctx-hide" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-hide-submenu">Hide / Show <span aria-hidden="true">›</span></button>
+    <div class="ctx-submenu" id="ctx-hide-submenu" role="menu" aria-label="Hide or show this person's media">
+      <button id="ctx-avatar-visibility" type="button">Hide this avatar until it changes</button>
+      <button id="ctx-avatar-user-visibility" type="button">Hide avatars from this user</button>
+      <button id="ctx-nameplate-visibility" type="button">Hide this nameplate until it changes</button>
+      <button id="ctx-nameplate-user-visibility" type="button">Hide nameplates from this user</button>
+      <button id="ctx-gesture-sender-visibility" type="button">Hide gesture media from this user</button>
+      <button id="ctx-webcam-visibility" type="button">Hide this webcam for me</button>
+      <button id="ctx-webcam-receive" type="button">Stop receiving this webcam</button>
     </div>
   </div>
-  <button id="ctx-auras" type="button">Auras</button>
-  <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
-  <button id="ctx-webcam-size" type="button">Webcam Size</button>
-  <button id="ctx-webcam-visibility" type="button">Hide this webcam for me</button>
-  <button id="ctx-webcam-receive" type="button">Stop receiving this webcam</button>
-  <button id="ctx-avatar-visibility" type="button">Hide this avatar until it changes</button>
-  <button id="ctx-avatar-user-visibility" type="button">Hide avatars from this user</button>
-  <button id="ctx-nameplate-visibility" type="button">Hide this nameplate until it changes</button>
-  <button id="ctx-nameplate-user-visibility" type="button">Hide nameplates from this user</button>
-  <button id="ctx-gesture-sender-visibility" type="button">Hide gesture media from this user</button>
-  <button id="ctx-profile" type="button">User Profile</button>
-  <button id="ctx-dm" type="button">Send DM</button>
-  <button id="ctx-interact" type="button">Interact</button>
   <button id="ctx-lap-dance" type="button" aria-pressed="false">Start Lap Dance</button>
   <button id="ctx-lap-bounce" type="button" aria-pressed="false">Start Lap Bounce</button>
-  <button id="ctx-block" class="danger" type="button">Block</button>
-  <button id="ctx-mute" type="button">Mute</button>
-  <button id="ctx-unblock" type="button">Unblock</button>
+  <div class="ctx-submenu-wrap" id="ctx-block-mute-wrap">
+    <button id="ctx-block-mute" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-block-mute-submenu">Block / Mute <span aria-hidden="true">›</span></button>
+    <div class="ctx-submenu" id="ctx-block-mute-submenu" role="menu" aria-label="Block or mute this person">
+      <button id="ctx-block" class="danger" type="button">Block</button>
+      <button id="ctx-unblock" type="button">Unblock</button>
+      <button id="ctx-mute" type="button">Mute</button>
+    </div>
+  </div>
   <button id="ctx-manage-relationship" type="button">Manage Relationship</button>
   <button id="ctx-unlink" class="danger" type="button">Unlink</button>
   <div class="ctx-divider" id="ctx-tools-divider"></div>
   <div class="ctx-submenu-wrap" id="ctx-tools-wrap">
-    <button id="ctx-tools" type="button">Tools <span>›</span></button>
-    <div class="ctx-submenu" id="ctx-tools-submenu">
+    <button id="ctx-tools" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-tools-submenu"><span id="ctx-tools-label">Admin Tools</span> <span aria-hidden="true">›</span></button>
+    <div class="ctx-submenu" id="ctx-tools-submenu" role="menu" aria-label="Moderation tools">
       <button id="ctx-host-warn" type="button">Warn</button>
       <button id="ctx-host-kick" class="danger" type="button">Kick from Room</button>
       <button id="ctx-community-eject" class="danger" type="button">Community Eject</button>
@@ -998,6 +994,26 @@ $roomAssetVersion = static function (string $path): string {
   </div>
   <div class="ctx-divider" id="ctx-transfer-divider"></div>
   <button id="ctx-send-file-gesture" type="button">Send File or Gesture</button>
+  <div class="ctx-submenu-wrap" id="ctx-avatar-settings-wrap">
+    <button id="ctx-avatar-settings" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-avatar-settings-submenu">Avatar Settings <span aria-hidden="true">›</span></button>
+    <div class="ctx-submenu" id="ctx-avatar-settings-submenu" role="menu" aria-label="Avatar settings">
+      <button id="ctx-avatar-size" type="button">Avatar Display Size</button>
+      <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
+        <button id="ctx-orientation" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-orientation-submenu">Orientation <span aria-hidden="true">›</span></button>
+        <div class="ctx-submenu" id="ctx-orientation-submenu" role="menu" aria-label="Avatar orientation">
+          <button type="button" role="menuitemradio" data-avatar-orientation="original" data-label="Original">Original</button>
+          <button type="button" role="menuitemradio" data-avatar-orientation="flip-horizontal" data-label="Flip Horizontally">Flip Horizontally</button>
+          <button type="button" role="menuitemradio" data-avatar-orientation="flip-vertical" data-label="Flip Vertically">Flip Vertically</button>
+          <button type="button" role="menuitemradio" data-avatar-orientation="flip-both" data-label="Flip Horizontally and Vertically">Flip Horizontally and Vertically</button>
+        </div>
+      </div>
+      <button id="ctx-auras" type="button">Auras</button>
+      <div class="ctx-divider" aria-hidden="true"></div>
+      <button id="ctx-change-nameplate" type="button">Change Nameplate Image</button>
+      <button id="ctx-remove-nameplate" type="button">Remove Nameplate Image</button>
+      <button id="ctx-webcam-size" type="button">Webcam Size</button>
+    </div>
+  </div>
 </div>
 <div id="text-ctx-menu">
   <button id="text-copy" type="button">Copy</button>

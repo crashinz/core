@@ -1740,7 +1740,8 @@ function multiplayer_game_shared_player_ids(array $state): array
 
 function multiplayer_game_shared_clock_active(array $state): bool
 {
-    return (string)($state['clock']['kind'] ?? 'none') !== 'none';
+    return (string)($state['clock']['kind'] ?? 'none') !== 'none'
+        || (isset($state['settings']['turnSeconds']) && ($state['settings']['tableMode'] ?? '') === 'match');
 }
 
 function multiplayer_game_shared_inactivity_seconds(array $settings, array $definition, array $state): int
@@ -1835,6 +1836,9 @@ function multiplayer_game_shared_disconnect_used(array $player, int $now): int
 
 function multiplayer_game_freeze_shared_timing(array &$state, int $now): void
 {
+    if (isset($state['turnClock']) && !isset($state['turnClock']['frozenAt'])) {
+        $state['turnClock']['frozenAt'] = $now;
+    }
     if (isset($state['realtime']) && ($state['realtime']['frozenAtMs'] ?? null) === null) {
         $through = max((int)$state['realtime']['lastAtMs'], $now * 1000);
         $state['realtime']['pendingMs'] += $through - (int)$state['realtime']['lastAtMs'];
@@ -1870,6 +1874,14 @@ function multiplayer_game_freeze_shared_timing(array &$state, int $now): void
 
 function multiplayer_game_resume_shared_timing(array &$state, int $now): void
 {
+    if (isset($state['turnClock']['frozenAt'])
+        && !in_array((string)($state['_framework']['pause']['mode'] ?? 'running'), ['paused', 'resuming', 'completed'], true)
+        && empty($state['_framework']['serviceInterruption']['active'])) {
+        $elapsed = max(0, $now - $state['turnClock']['frozenAt']);
+        $state['turnClock']['startsAt'] += $elapsed;
+        $state['turnClock']['expiresAt'] += $elapsed;
+        unset($state['turnClock']['frozenAt']);
+    }
     if (isset($state['realtime']) && ($state['realtime']['frozenAtMs'] ?? null) !== null
         && !in_array((string)($state['_framework']['pause']['mode'] ?? 'running'), ['paused', 'resuming', 'completed'], true)) {
         $state['realtime']['lastAtMs'] = max((int)$state['realtime']['lastAtMs'], $now * 1000);

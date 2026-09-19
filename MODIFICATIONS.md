@@ -10,6 +10,16 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Pool turn timers and compact chat menus - 2026-09-19
+
+Post-Build 000064 follow-up to public application commit `db6f862`.
+
+- Add a violet countdown around the active Pool player's avatar, with 30 seconds by default and 45/60-second options. Server deadlines handle timeouts, pauses and reconnects; solo practice remains untimed.
+- Group avatar settings, visibility controls and block/mute actions into smaller menus. Support hover opening, nested keyboard navigation and administrator-specific tool labels.
+- Keep long direct-message names inside their tabs, with full names on hover, and center the Community Chat label.
+- Show required Pool break and push-out choices on the cloth. Use clear labels such as **Put the 8 ball back** and **Rerack**, while preserving rule outcomes, player permissions and table layout.
+- Preserve Pool physics and the frozen v4 reference examples.
+
 ## Pool tight-contact loop correction - 2026-09-18
 
 - Resolve leftover inward velocities after simultaneous group impacts so touching balls do not repeatedly collide without advancing simulation time.

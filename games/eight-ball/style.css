@@ -34,6 +34,16 @@ html,body{min-height:0;overflow:hidden}.table-wrap{width:min(100%,var(--table-wi
 /* Side clearance grows the surface; the host keeps the original table scale. */
 .table-wrap{width:var(--table-width,1941.333px);max-width:none}.pool-room{overflow:visible}
 
+/* Required choices share the placement caption's on-cloth appearance. */
+.table-choice{position:absolute;z-index:5;left:var(--choice-left,50%);top:var(--choice-top,51.56%);transform:translate(-50%,-50%);width:min(380px,var(--choice-width,90%));max-height:var(--choice-height,90%);overflow:auto;padding:16px;border:1px solid #9ad9cb99;border-radius:10px;background:#101923f5;box-shadow:0 6px 24px #0007;color:#edfff9;font:13px/1.45 system-ui,Segoe UI,sans-serif}
+.table-choice h2{margin:0 0 8px;font-size:16px;line-height:1.3}
+.table-choice p{margin:0 0 14px;color:#c8ded8}
+.table-choice-actions{display:flex;gap:8px;flex-wrap:wrap}
+.table-choice-actions button{flex:1 1 auto;min-height:42px;padding:8px 12px;font-size:13px}
+.table-choice-actions button:first-child{border-color:#9ad9cb88;background:#244039}
+.table-choice-actions button:hover{border-color:#c0f1e4;background:#315349}
+.table-choice-actions button:focus-visible{outline:2px solid #c0f1e4;outline-offset:2px}
+
 /* Keep spin and the upward power meter together above the table. */
 .match-strip{height:160px}
 .shot-tools{display:flex;align-items:center;justify-content:center;gap:18px}
@@ -64,3 +74,5 @@ html,body{min-height:0;overflow:hidden}.table-wrap{width:min(100%,var(--table-wi
 
 /* Keep keyboard input on the table without outlining the full cue-clearance canvas. */
 #table:focus,#table:focus-visible{outline:none}
+/* The timer is an overlay within the avatar frame: no new layout space. */
+.portrait{position:relative}.turn-countdown{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;filter:drop-shadow(0 0 2px #9b83ff88)}.turn-countdown path{fill:none;stroke:#b39aff;stroke-width:5;stroke-linecap:butt}

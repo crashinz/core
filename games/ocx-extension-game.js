@@ -1,5 +1,5 @@
 import { appendAceyMove, aceyMoveAnimating } from "./acey-deucy-motion.js?v=1e269499c30e";
-import { createPoolBotController } from "./eight-ball/bot-controller.js?v=cc9b6a43cdd4";
+import { createPoolBotController } from "./eight-ball/bot-controller.js?v=afe76977d3c6";
 import { createAceyDeucyBotController } from "./acey-deucy-bot-controller.js?v=a16519af3c5b";
 import { createNestedFourBotController } from "./nested-four-bot-controller.js?v=c541ed8907b2";
 import { createChineseCheckersBotController } from "./chinese-checkers-bot-controller.js?v=c1460ca5a716";
@@ -821,6 +821,13 @@ async function resetCheckersCaptureAuditFixture() {
   } catch (error) {
     actionStatusError = String(error?.message || "The test move could not be reset.");
     actionStatusErrorUntil = Date.now() + 8000;
+    if (context.extensionId === "eight-ball" && actionType === "timeout"
+      && latestPlacementStateAvailable
+      && (session?.state?.turnClock?.id !== payload.clockId || error?.code === "EIGHT_BALL_CLOCK_EARLY")) {
+      // The other viewer settled this clock first; the refreshed turn is enough.
+      actionStatusError = "";
+      actionStatusErrorUntil = 0;
+    }
   } finally {
     busy = false;
     render();

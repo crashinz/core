@@ -12,7 +12,9 @@ function pool_bot_key(array $s): string {
 function pool_bot_task(array $s,int $viewer,array $c): ?array {
     if(($c['mode']??'')!=='practice'||($c['status']??'')!=='active'||!in_array($c['viewerRole']??'',['master','player'],true)||$viewer<=0||!in_array($viewer,$s['turnOrder']??[],true)||empty($s['bots'][POOL_BOT_ID])||!empty($s['completed'])||eight_ball_turn($s)!==POOL_BOT_ID)return null;
     $now=isset($c['nowUnixMs'])?(float)$c['nowUnixMs']/1000:microtime(true);
-    return ['engine'=>POOL_BOT_ENGINE,'positionKey'=>pool_bot_key($s),'actor'=>POOL_BOT_ID,'difficulty'=>$s['bots'][POOL_BOT_ID]['difficulty'],
+    if(pool_clock_expired($s,$now))return null;
+    $remaining=isset($s['turnClock'])?max(0,(int)(($s['turnClock']['expiresAt']-$now)*1000)):null;
+    return ['remainingMs'=>$remaining,'searchBudgetMs'=>$remaining===null?30000:max(100,min(30000,$remaining-6500)),'engine'=>POOL_BOT_ENGINE,'positionKey'=>pool_bot_key($s),'actor'=>POOL_BOT_ID,'difficulty'=>$s['bots'][POOL_BOT_ID]['difficulty'],
         'presentationDelayMs'=>2000,'waitForMotionMs'=>max(0,(int)ceil(((float)($s['animationUntil']??0)-$now)*1000)),
         'pendingShot'=>$s['botPendingShot']??null,
         'position'=>array_intersect_key($s,array_flip(['balls','ballRadius','settings','turnOrder','turnIndex','groups','phase','placement','breakShot','headStringRequired','choice','foulCounts','pushOutAvailable','pushOutDeclared','stalemateRequests']))];
@@ -21,7 +23,14 @@ function pool_bot_task(array $s,int $viewer,array $c): ?array {
 function eight_ball_apply_action(array $s,int $actor,string $action,array $p,array $c): array {
     if($actor<=0||!in_array($actor,$s['turnOrder']??[],true))eight_ball_fail('Only an authenticated participant may act.','PLAYER_INVALID',403);
     if(!empty($s['bots'])&&($c['mode']??'')!=='practice')eight_ball_fail('Bot games are Practice only.','PRACTICE_ONLY',422);
-    $before=$s;$trace=null;
+    $before=$s;$trace=null;$clockNow=pool_clock_now($c);
+    if($action==='timeout'&&(!is_string($p['clockId']??null)||($s['turnClock']['id']??null)!==$p['clockId']))eight_ball_fail('The turn has changed.','CLOCK_STALE',409);
+    if($action!=='resign'&&pool_clock_expired($s,$clockNow)){
+        $r=pool_clock_timeout($s,$clockNow);
+        if(function_exists('game_recording_observe'))game_recording_observe($c,'eight-ball',$before,eight_ball_turn($before),'timeout',[],$r['state'],null);
+        return $r;
+    }
+    if($action==='timeout')eight_ball_fail('The turn has not expired.','CLOCK_EARLY',409);
     if(in_array($action,['bot-step','bot-rack'],true)){
         if(($c['mode']??'')!=='practice'||empty($s['bots'][POOL_BOT_ID])||!empty($s['completed'])||eight_ball_turn($s)!==POOL_BOT_ID)eight_ball_fail('A Practice bot turn is not available.','BOT_UNAVAILABLE',409);
         if(($p['engine']??'')!==POOL_BOT_ENGINE||!is_string($p['positionKey']??null)||!hash_equals(pool_bot_key($s),$p['positionKey']))eight_ball_fail('The bot position changed. Refresh before retrying.','BOT_STALE',409);
@@ -50,6 +59,7 @@ function eight_ball_apply_action(array $s,int $actor,string $action,array $p,arr
         }elseif(!empty($s['botPendingShot']))eight_ball_fail('Finish the announced bot shot first.','BOT_ACTION_INVALID');
     }
     $r=eight_ball_apply_action_core($s,$actor,$action,$p,$c);
+    pool_clock_after($before,$r['state'],$action,$clockNow);
     if(function_exists('game_recording_observe'))game_recording_observe($c,'eight-ball',$before,$actor,$action,$p,$r['state'],$trace);
     return $r;
 }

@@ -4,7 +4,7 @@ export function createPoolBotController({snapshot,submit,showStatus,WorkerClass=
   function fail(active,message){if(job!==active)return;stop();failedKey=active.key;showStatus(message,()=>{failedKey='';sync();});}
   function sync(){
     const current=snapshot();
-    if(!current?.enabled||!current.task){stop();failedKey='';showStatus('');return;}
+    if(!current?.enabled||!current.task||current.task.remainingMs===0){stop();failedKey='';showStatus('');return;}
     if(job?.key===current.key||failedKey===current.key)return;
     stop();const task=current.task,active={key:current.key,started:performance.now(),submitted:false};job=active;
     showStatus(task.pendingShot?'The bot is lining up the shot…':'The bot is thinking…');
@@ -32,10 +32,10 @@ export function createPoolBotController({snapshot,submit,showStatus,WorkerClass=
     }
     if(task.pendingShot){ready({type:'result',engine:task.engine,action:'shot',payload:task.pendingShot,reason:'announced-shot'});return;}
     try{
-      active.worker=new WorkerClass(new URL('./bot-worker.js?v=e691cee6d455',import.meta.url),{type:'module'});
+      active.worker=new WorkerClass(new URL('./bot-worker.js?v=e2fbc35bff9d',import.meta.url),{type:'module'});
       active.timeout=setTimeout(()=>fail(active,'The Pool bot took too long. Retry this turn.'),task.difficulty==='expert'?35000:14000);
       active.worker.onerror=e=>{e?.preventDefault?.();fail(active,'The Pool bot could not load. Check your connection, then retry.');};
-      active.worker.onmessage=({data})=>ready(data);active.worker.postMessage({type:'search',task});
+      active.worker.onmessage=({data})=>ready(data);active.worker.postMessage({type:'search',task:{...task,searchBudgetMs:task.remainingMs==null?task.searchBudgetMs:Math.max(100,Math.min(task.searchBudgetMs??30000,task.remainingMs-(performance.now()-active.started)-6500))}});
     }catch{fail(active,'The Pool bot could not start. Retry in a current browser.');}
   }
   return {sync,stop};

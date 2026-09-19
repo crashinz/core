@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pool — 8 Ball</title><link rel="stylesheet" href="style.css?v=e8947ff71d7d"></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pool — 8 Ball</title><link rel="stylesheet" href="style.css?v=f92764141b1f"></head>
 <body>
 <main class="game-shell">
  <header class="page-heading"><div><span class="eyebrow">THE GAMES ROOM</span><h1>Pool</h1></div><span class="preview-tag">8 Ball</span></header>
@@ -14,7 +14,9 @@
    <div id="practicePalette" class="practice-palette" aria-label="Choose a practice ball"></div>
    <div class="practice-edit-actions"><button id="removePracticeBall">Remove selected ball</button><button id="clearPractice">Clear table</button><button id="applyPractice">Done editing</button><button id="cancelPractice">Cancel</button><output id="practiceEditStatus" role="status"></output></div>
   </div>
-  <div class="table-wrap"><canvas id="table" width="2080" height="1120" tabindex="0" aria-label="Pool table. Left and right arrows aim, up and down arrows change power, Space shoots, Escape cancels a pull-back. Drag near the cue or aiming line to aim, and hold right mouse while pulling backward for power. When placing the cue ball, drag or click to position the cue ball, arrow keys adjust it; double-click or Enter confirms. Your cue ball is ivory white."></canvas><div class="table-badge">INNER TRANQUILLITY</div></div>
+  <div class="table-wrap"><canvas id="table" width="2080" height="1120" tabindex="0" aria-label="Pool table. Left and right arrows aim, up and down arrows change power, Space shoots, Escape cancels a pull-back. Drag near the cue or aiming line to aim, and hold right mouse while pulling backward for power. When placing the cue ball, drag or click to position the cue ball, arrow keys adjust it; double-click or Enter confirms. Your cue ball is ivory white."></canvas><div class="table-badge">INNER TRANQUILLITY</div>
+   <section id="tableChoice" class="table-choice" role="dialog" aria-modal="false" aria-labelledby="tableChoiceTitle" aria-describedby="tableChoiceText" hidden><h2 id="tableChoiceTitle"></h2><p id="tableChoiceText"></p><div id="tableChoiceActions" class="table-choice-actions"></div></section>
+  </div>
   <div id="matchActions" class="match-actions"></div><div class="controls">
    <button class="cue-open" id="openCues" aria-haspopup="dialog"><span class="cue-symbol"></span><span><small id="cueOwner">YOUR CUE</small><strong id="cueName">Crimson eclipse</strong></span><span class="chevron">⌃</span></button>
    <div class="aim-controls"><span class="control-label">AIM <output id="angleValue">0°</output></span><div class="button-pair"><button data-adjust="aim-left" aria-label="Aim left">←</button><button data-adjust="aim-right" aria-label="Aim right">→</button></div></div>
@@ -54,4 +56,4 @@
  <section id="practiceTestingValues" class="practice-testing-values" aria-labelledby="practiceTestingTitle" hidden><h3 id="practiceTestingTitle">Admin testing values</h3><dl id="practiceTestingNumbers"></dl><p>Load restores these saved values exactly. Spin values in parentheses range from −1 to 1.</p></section>
  <canvas id="practiceSetupPreview" width="600" height="340" role="img" aria-label="Selected practice setup" hidden></canvas><label class="practice-deleted-option"><input type="checkbox" id="showDeletedSetups"> Show deleted setups</label><div class="practice-save-actions"><button id="loadPracticeSetup">Load</button><button id="updatePracticeSetup">Update selected</button><button id="renamePracticeSetup">Rename</button><button id="deletePracticeSetup">Delete</button><button id="restorePracticeSetup" hidden>Restore</button><button id="undoPracticeDelete" hidden>Undo delete</button><button id="reloadPracticeSetups">Reload list</button></div><output id="practiceSaveStatus" role="status"></output></div>
 </section>
-<script type="module" src="boot.js?v=c4120505c0ad"></script></body></html>
+<script type="module" src="boot.js?v=4ebf702abfb2"></script></body></html>

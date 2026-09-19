@@ -81,6 +81,8 @@
     }
   },
   "requiredFiles": [
+    "includes/pool_turn_clock.php",
+    "games/eight-ball/turn-clock.js",
     "includes/eight_ball_extension.php",
     "includes/eight_ball_physics.php",
     "games/eight-ball/index.html",

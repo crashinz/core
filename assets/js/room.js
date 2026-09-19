@@ -197,6 +197,8 @@ const webcamAudiencePeople = document.getElementById('webcam-audience-people');
 const webcamAudiencePersonList = document.getElementById('webcam-audience-person-list');
 const webcamAudienceStatus = document.getElementById('webcam-audience-status');
 const ctxMenu = document.getElementById('ctx-menu');
+let avatarMenuHoverTimer = null;
+let avatarMenuHoverTrigger = null;
 const ctxInteract = document.getElementById('ctx-interact');
 const ctxLapDance = document.getElementById('ctx-lap-dance');
 const ctxLapBounce = document.getElementById('ctx-lap-bounce');
@@ -4640,31 +4642,43 @@ function positionFloatingMenu(menu, x, y) {
 
 function isInsideAvatarContextMenu(target) {
   return Boolean(ctxMenu?.contains(target)
-    || (ctxOrientationWrap?.classList.contains('open') && ctxOrientationSubmenu?.contains(target))
-    || (document.getElementById('ctx-tools-wrap')?.classList.contains('open')
-      && document.getElementById('ctx-tools-submenu')?.contains(target)));
+    || avatarContextSubmenus().some(({ wrap, submenu }) => wrap?.classList.contains('open') && submenu?.contains(target)));
+}
+
+function avatarContextSubmenus() {
+  return ['avatar-settings', 'orientation', 'hide', 'block-mute', 'tools'].map(name => ({
+    wrap: document.getElementById(`ctx-${name}-wrap`),
+    trigger: document.getElementById(`ctx-${name}`),
+    submenu: document.getElementById(`ctx-${name}-submenu`),
+  }));
+}
+
+function closeAvatarContextSubmenus() {
+  cancelAvatarMenuHover();
+  avatarContextSubmenus().forEach(({ wrap, trigger, submenu }) => closeContextSubmenu(wrap, trigger, submenu));
 }
 
 function closeContextSubmenu(wrap, trigger, submenu) {
+  if (avatarMenuHoverTrigger === trigger) avatarMenuHoverTrigger = null;
+  avatarContextSubmenus().forEach(child => {
+    if (child.wrap && submenu?.contains(child.wrap)) closeContextSubmenu(child.wrap, child.trigger, child.submenu);
+  });
   wrap?.classList.remove('open');
   trigger?.setAttribute('aria-expanded', 'false');
   if (submenu && wrap && submenu.parentElement !== wrap) wrap.appendChild(submenu);
   ['display', 'position', 'left', 'top', 'max-height', 'overflow-y', 'visibility']
     .forEach(property => submenu?.style.removeProperty(property));
-  const originLeft = ctxMenu?.dataset.submenuOriginLeft;
-  if (ctxMenu && originLeft !== undefined) {
-    ctxMenu.style.left = originLeft;
-    delete ctxMenu.dataset.submenuOriginLeft;
-  }
 }
 
 function openContextSubmenu(wrap, trigger, submenu) {
   if (!ctxMenu || !wrap || !trigger || !submenu) return;
+  // Keep ancestors open when entering Orientation inside Avatar Settings.
+  avatarContextSubmenus().forEach(other => {
+    if (other.wrap !== wrap && !other.submenu?.contains(wrap)) closeContextSubmenu(other.wrap, other.trigger, other.submenu);
+  });
+  const parentMenu = trigger.closest('[role="menu"]') || ctxMenu;
   wrap.classList.add('open');
   trigger.setAttribute('aria-expanded', 'true');
-  if (ctxMenu.dataset.submenuOriginLeft === undefined) {
-    ctxMenu.dataset.submenuOriginLeft = ctxMenu.style.left || '8px';
-  }
   document.body.appendChild(submenu);
   Object.assign(submenu.style, {
     display: 'block',
@@ -4677,17 +4691,13 @@ function openContextSubmenu(wrap, trigger, submenu) {
   });
   const gap = 8;
   const submenuRect = submenu.getBoundingClientRect();
-  let menuRect = ctxMenu.getBoundingClientRect();
-  const overflow = menuRect.right + gap + submenuRect.width + gap - window.innerWidth;
-  if (overflow > 0) {
-    ctxMenu.style.left = `${Math.max(gap, menuRect.left - overflow)}px`;
-    menuRect = ctxMenu.getBoundingClientRect();
-  }
+  const menuRect = parentMenu.getBoundingClientRect();
   const triggerRect = trigger.getBoundingClientRect();
   let left = menuRect.right + gap;
   if (left + submenuRect.width > window.innerWidth - gap) {
-    left = Math.max(gap, window.innerWidth - submenuRect.width - gap);
+    left = menuRect.left - submenuRect.width - gap;
   }
+  left = Math.max(gap, Math.min(left, window.innerWidth - submenuRect.width - gap));
   const top = Math.max(
     gap,
     Math.min(triggerRect.top, window.innerHeight - submenuRect.height - gap)
@@ -4695,6 +4705,46 @@ function openContextSubmenu(wrap, trigger, submenu) {
   submenu.style.left = `${left}px`;
   submenu.style.top = `${top}px`;
   submenu.style.visibility = 'visible';
+}
+
+function avatarMenuButtons(menu) {
+  return Array.from(menu?.querySelectorAll('button') || []).filter(button =>
+    button.closest('[role="menu"]') === menu && !button.disabled && button.getClientRects().length > 0);
+}
+
+function toggleAvatarContextSubmenu(item) {
+  if (item.wrap?.classList.contains('open')) {
+    closeContextSubmenu(item.wrap, item.trigger, item.submenu);
+    item.trigger?.focus();
+  } else {
+    openContextSubmenu(item.wrap, item.trigger, item.submenu);
+    (item.submenu?.querySelector('[aria-checked="true"]') || avatarMenuButtons(item.submenu)[0])?.focus();
+  }
+}
+
+function cancelAvatarMenuHover() {
+  window.clearTimeout(avatarMenuHoverTimer);
+  avatarMenuHoverTimer = null;
+}
+
+function hoverAvatarMenuItem(menu, button) {
+  cancelAvatarMenuHover();
+  // A short pause avoids switching branches while crossing toward a flyout.
+  avatarMenuHoverTimer = window.setTimeout(() => {
+    avatarMenuHoverTimer = null;
+    if (!ctxMenu?.classList.contains('visible') || !button.matches(':hover')) return;
+    const items = avatarContextSubmenus();
+    const selected = items.find(item => item.trigger === button && !button.disabled);
+    items.forEach(item => {
+      if (item.trigger?.closest('[role="menu"]') === menu && item !== selected) {
+        closeContextSubmenu(item.wrap, item.trigger, item.submenu);
+      }
+    });
+    if (selected && !selected.wrap.classList.contains('open')) {
+      openContextSubmenu(selected.wrap, selected.trigger, selected.submenu);
+      avatarMenuHoverTrigger = selected.trigger;
+    }
+  }, 140);
 }
 
 function relationshipCanvasSize() {
@@ -5381,6 +5431,23 @@ function switchChat(chatKey) {
 
 document.querySelectorAll('.chat-tab[data-chat-tab]').forEach(tab => {
   tab.addEventListener('click', () => switchChat(tab.dataset.chatTab));
+});
+
+// Dynamic DM/link tabs share the same clipped-label hint as the fixed tabs.
+document.getElementById('chat-tabs')?.addEventListener('pointerover', event => {
+  if (event.pointerType === 'touch') return;
+  const tab = event.target.closest('.chat-tab');
+  if (!tab || tab.contains(event.relatedTarget)) return;
+  const label = tab.querySelector('span:not(.tab-badge):not(.link-tab-heart)');
+  if (label && label.scrollWidth > label.clientWidth) tab.title = label.textContent.trim();
+  else tab.removeAttribute('title');
+});
+document.getElementById('chat-tabs')?.addEventListener('pointerout', event => {
+  const tab = event.target.closest('.chat-tab');
+  if (tab && !tab.contains(event.relatedTarget)) tab.removeAttribute('title');
+});
+document.getElementById('chat-tabs')?.addEventListener('pointerdown', event => {
+  event.target.closest('.chat-tab')?.removeAttribute('title');
 });
 
 function messagesNearBottom() {
@@ -7033,6 +7100,10 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
   const sameRelationship = Boolean(relationship && viewerRelationship && relationship.id === viewerRelationship.id);
   const canRequestGroup = Boolean(relationship && !viewerRelationship && !isOwn && !isBlocked && participant.online !== false);
   const showHostTools = Boolean(cfg.canUseHostTools && !isOwn);
+  document.getElementById('ctx-avatar-settings-wrap').style.display = isOwn ? 'block' : 'none';
+  document.getElementById('ctx-hide-wrap').style.display = isOwn ? 'none' : 'block';
+  document.getElementById('ctx-block-mute-wrap').style.display = isOwn ? 'none' : 'block';
+  document.getElementById('ctx-tools-label').textContent = ['admin', 'developer'].includes(cfg.myRole) ? 'Admin Tools' : 'Room Tools';
   syncParticipantIdentityHeader(participant);
   if (ctxChangeNameplate) ctxChangeNameplate.style.display = isOwn ? 'block' : 'none';
   if (ctxRemoveNameplate) {
@@ -7051,7 +7122,7 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
   document.getElementById('ctx-dm').style.display = !isOwn && !isBlocked ? 'block' : 'none';
   if (ctxInteract) {
     ctxInteract.style.display = !isOwn ? 'block' : 'none';
-    ctxInteract.textContent = canRequestGroup ? 'Request to Link / Sit in Lap' : 'Interact';
+    ctxInteract.textContent = canRequestGroup ? 'Request to Link / Sit in Lap' : 'Link / Sit in Lap';
     ctxInteract.disabled = !canRequestGroup && !interaction?.allowed;
     ctxInteract.title = canRequestGroup ? 'Request to join this group as a linked member or lap occupant'
       : interaction?.allowed ? 'Link Avatars or Sit in Lap' : relationshipEligibilityLabel(interaction?.reason);
@@ -7059,12 +7130,7 @@ function openAvatarContextMenu(x, y, participant, options = {}) {
   document.getElementById('ctx-tools-wrap').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-tools-divider').style.display = showHostTools ? 'block' : 'none';
   document.getElementById('ctx-community-eject').style.display = showHostTools && Boolean(cfg.canCommunityEject) ? 'block' : 'none';
-  closeContextSubmenu(
-    document.getElementById('ctx-tools-wrap'),
-    document.getElementById('ctx-tools'),
-    document.getElementById('ctx-tools-submenu')
-  );
-  closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
+  closeAvatarContextSubmenus();
   document.getElementById('ctx-manage-relationship').style.display = relationship ? 'block' : 'none';
   document.getElementById('ctx-unlink').style.display = sameRelationship && !isBlocked ? 'block' : 'none';
   document.getElementById('ctx-manage-relationship').textContent = relationship && !sameRelationship ? 'View Relationship / Request to Join' : 'Manage Relationship';
@@ -7125,12 +7191,7 @@ function syncParticipantActionMenu(participant, isOwn = false) {
 
 function closeContextMenu(options = {}) {
   ctxMenu.classList.remove('visible');
-  closeContextSubmenu(
-    document.getElementById('ctx-tools-wrap'),
-    document.getElementById('ctx-tools'),
-    document.getElementById('ctx-tools-submenu')
-  );
-  closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
+  closeAvatarContextSubmenus();
   ctxMenuParticipantId = null;
   const returnFocus = ctxMenuReturnFocus;
   ctxMenuReturnFocus = null;
@@ -9690,22 +9751,6 @@ document.getElementById('avatar-size-match')?.addEventListener('click', () => {
   setAvatarSizeStatus('Linked member size copied once.', 'ok');
 });
 
-ctxOrientation?.addEventListener('click', event => {
-  event.stopPropagation();
-  const opening = !ctxOrientationWrap?.classList.contains('open');
-  closeContextSubmenu(
-    document.getElementById('ctx-tools-wrap'),
-    document.getElementById('ctx-tools'),
-    document.getElementById('ctx-tools-submenu')
-  );
-  if (opening) openContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
-  else closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
-  if (opening) {
-    const selected = ctxOrientationSubmenu?.querySelector('[aria-checked="true"]');
-    (selected || ctxOrientationSubmenu?.querySelector('button'))?.focus();
-  }
-});
-
 ctxOrientationSubmenu?.addEventListener('click', event => {
   const button = event.target.closest('[data-avatar-orientation]');
   if (!button) return;
@@ -9855,16 +9900,62 @@ ctxGestureSenderVisibility?.addEventListener('click', async () => {
   }
 });
 
-document.getElementById('ctx-tools')?.addEventListener('click', e => {
-  e.stopPropagation();
-  const toolsWrap = document.getElementById('ctx-tools-wrap');
-  const toolsTrigger = document.getElementById('ctx-tools');
-  const toolsSubmenu = document.getElementById('ctx-tools-submenu');
-  const opening = !toolsWrap?.classList.contains('open');
-  closeContextSubmenu(ctxOrientationWrap, ctxOrientation, ctxOrientationSubmenu);
-  if (opening) openContextSubmenu(toolsWrap, toolsTrigger, toolsSubmenu);
-  else closeContextSubmenu(toolsWrap, toolsTrigger, toolsSubmenu);
+// One submenu owner handles both top-level groups and nested orientation.
+ctxMenu?.querySelectorAll('button:not([role])').forEach(button => button.setAttribute('role', 'menuitem'));
+avatarContextSubmenus().forEach(item => item.trigger?.addEventListener('click', event => {
+  cancelAvatarMenuHover();
+  event.stopPropagation();
+  // The first mouse click after hover should enter the already open branch.
+  if (event.detail > 0 && avatarMenuHoverTrigger === item.trigger && item.wrap.classList.contains('open')) {
+    avatarMenuHoverTrigger = null;
+    avatarMenuButtons(item.submenu)[0]?.focus();
+    return;
+  }
+  toggleAvatarContextSubmenu(item);
+}));
+[ctxMenu, ...avatarContextSubmenus().map(item => item.submenu)].forEach(menu => {
+  menu?.addEventListener('pointerover', event => {
+    if (event.pointerType !== 'mouse') return;
+    const button = event.target.closest('button');
+    if (!button || button.closest('[role="menu"]') !== menu || button.contains(event.relatedTarget)) return;
+    hoverAvatarMenuItem(menu, button);
+  });
+  menu?.addEventListener('pointerout', event => {
+    if (event.pointerType === 'mouse' && !menu.contains(event.relatedTarget)) cancelAvatarMenuHover();
+  });
+  // A scrolling parent invalidates its flyout's position; hovering opens it again.
+  menu?.addEventListener('scroll', () => {
+    cancelAvatarMenuHover();
+    avatarContextSubmenus().forEach(item => {
+      if (item.trigger?.closest('[role="menu"]') === menu) closeContextSubmenu(item.wrap, item.trigger, item.submenu);
+    });
+  });
 });
+document.addEventListener('keydown', event => {
+  if (!ctxMenu?.classList.contains('visible') || !isInsideAvatarContextMenu(event.target)) return;
+  cancelAvatarMenuHover();
+  avatarMenuHoverTrigger = null;
+  const currentMenu = event.target.closest('[role="menu"]');
+  const owner = avatarContextSubmenus().find(item => item.submenu === currentMenu);
+  const trigger = avatarContextSubmenus().find(item => item.trigger === event.target);
+  if (event.key === 'Escape' || (event.key === 'ArrowLeft' && owner)) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (owner) { closeContextSubmenu(owner.wrap, owner.trigger, owner.submenu); owner.trigger.focus(); }
+    else closeContextMenu({ restoreFocus: true });
+  } else if (event.key === 'ArrowRight' && trigger) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (!trigger.wrap.classList.contains('open')) toggleAvatarContextSubmenu(trigger);
+    else avatarMenuButtons(trigger.submenu)[0]?.focus();
+  } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    const buttons = avatarMenuButtons(currentMenu);
+    if (!buttons.length) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const index = buttons.indexOf(document.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+      : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next].focus();
+  } else if (event.key === 'Tab') closeContextMenu();
+}, true);
 
 async function setBlockState(participant, blocked) {
   if (!participant || participant.id === cfg.myParticipantId) return;
