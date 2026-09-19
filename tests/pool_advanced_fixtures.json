@@ -1,0 +1,2156 @@
+[
+  {
+    "id": "cut-moderate-left",
+    "name": "Pool â€” Moderate cut left",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 481.2847127297908,
+          "y": 394.8304088577984,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 200,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -0.9599310885968813,
+      "power": 34,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "cut-moderate-right",
+    "name": "Pool â€” Moderate cut right",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 710.7152872702093,
+          "y": 394.8304088577984,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 200,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -2.181661564992912,
+      "power": 34,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "cut-thin-left",
+    "name": "Pool â€” Thin cut left",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 414.73844259267,
+          "y": 315.5236523481399,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 200,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -0.4363323129985824,
+      "power": 48,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "cut-thin-right",
+    "name": "Pool â€” Thin cut right",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 777.26155740733,
+          "y": 315.5236523481399,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 200,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -2.705260340591211,
+      "power": 48,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "cut-very-thin-left",
+    "name": "Pool â€” Very thin cut left",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 400.37047985323886,
+          "y": 272.58233816355187,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 200,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -0.21205750411731106,
+      "power": 48,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "cut-very-thin-right",
+    "name": "Pool â€” Very thin cut right",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 791.6295201467611,
+          "y": 272.58233816355187,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 200,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -2.9321531433504737,
+      "power": 64,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "bank-combination",
+    "name": "Pool â€” Efren banked combination",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 874.4635233020489,
+          "y": 498.28653444010905,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 751.8362020188943,
+          "y": 420.90733778546564,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 2,
+          "x": 133.4,
+          "y": 134.2,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -2.594390410693723,
+      "power": 64,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "ball",
+        1,
+        2,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        0
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "z-kick",
+    "name": "Pool â€” Efren Z two-cushion kick",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 260.1500944979489,
+          "y": 514.3678954150528,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 577.020245292224,
+          "y": 496.22550063650124,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -1.2492195775809958,
+      "power": 90,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        2
+      ]
+    ],
+    "qualification": "Two opposite-cushion kick; exact near-simultaneous third-cushion/video geometry is not certified."
+  },
+  {
+    "id": "four-rail-bank",
+    "name": "Pool â€” Melling four-rail bank with position",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 454.2391490335511,
+          "y": 245.56985207051247,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 334.6897452091798,
+          "y": 172.71424113190733,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 8,
+          "x": 820,
+          "y": 400,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -2.5628606710653985,
+      "power": 90,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "follow-cascade",
+    "name": "Pool â€” Follow through multiple balls",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 596,
+          "y": 520,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 619.9283635616302,
+          "y": 390,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 2,
+          "x": 500.09125517331995,
+          "y": 270,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 3,
+          "x": 553.2099421368912,
+          "y": 150,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -1.577220958317865,
+      "power": 39.15819642599672,
+      "spinX": 0,
+      "spinY": -0.9157288106391206
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "ball",
+        0,
+        3,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "banana-follow",
+    "name": "Pool â€” Post-contact banana follow around blockers",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 350,
+          "y": 500,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 210,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 9,
+          "x": 765.9021234952585,
+          "y": 235.23312068414756,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -0.811135053550602,
+      "power": 24,
+      "spinX": 0,
+      "spinY": -0.65
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Post-contact curved follow position around a blocker; not an elevated-cue masse."
+  },
+  {
+    "id": "rail-high-left",
+    "name": "Pool â€” Frozen cue rail high-left analogue",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 420,
+          "y": 100.5,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 690,
+          "y": 350,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": 0.7691831876943449,
+      "power": 34,
+      "spinX": -0.55,
+      "spinY": -0.75
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Planar frozen-cue-ball analogue; reference airborne motion excluded."
+  },
+  {
+    "id": "rail-high-right",
+    "name": "Pool â€” Frozen cue rail high-right analogue",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 420,
+          "y": 100.5,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 690,
+          "y": 350,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": 0.7637726670131625,
+      "power": 34,
+      "spinX": 0.55,
+      "spinY": -0.75
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Planar frozen-cue-ball analogue; reference airborne motion excluded."
+  },
+  {
+    "id": "rail-high",
+    "name": "Pool â€” Frozen cue rail top-spin analogue",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 420,
+          "y": 100.5,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 690,
+          "y": 350,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": 0.7669142596667523,
+      "power": 34,
+      "spinX": 0,
+      "spinY": -0.75
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Planar frozen-cue-ball analogue; reference airborne motion excluded."
+  },
+  {
+    "id": "deflection-nine",
+    "name": "Pool â€” Multi-ball deflection into 9",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 420,
+          "y": 480,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 451.43980491673574,
+          "y": 350,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 9,
+          "x": 494.9318851158023,
+          "y": 270,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 4,
+          "x": 622.4789093155414,
+          "y": 145,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "nine-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -1.3896232079216464,
+      "power": 53.409872016636655,
+      "spinX": 0.36162757165730003,
+      "spinY": -0.09679094306193292
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "ball",
+        1,
+        9,
+        null
+      ],
+      [
+        "ball",
+        9,
+        4,
+        null
+      ],
+      [
+        "pocket",
+        9,
+        null,
+        1
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "triple-kiss",
+    "name": "Pool â€” Three cue/object contacts with pot",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 269.8050997313112,
+          "y": 425.89234130852856,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 8,
+          "x": 157.27081330493093,
+          "y": 192.62723739189096,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -1.966321390558999,
+      "power": 86.50454334565438,
+      "spinX": 0.3502795770764351,
+      "spinY": 0.6957005072850734
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        8,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "jaw-double-kiss",
+    "name": "Pool â€” Corner-pocket double kiss",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 580.8728906325996,
+          "y": 485.25982103310525,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 8,
+          "x": 1056.1237313649617,
+          "y": 552.0891556190327,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": 0.1409487667969023,
+      "power": 71.66288563981652,
+      "spinX": 0.10913808543700726,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "pocket",
+        8,
+        null,
+        5
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "touching-pair-bank",
+    "name": "Pool â€” Two-cushion bank from touching pair",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 265.41235032636433,
+          "y": 267.1265293802755,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 419.97120161540806,
+          "y": 308.4975517052226,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 2,
+          "x": 389.2669857666351,
+          "y": 304.18928591584034,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": 0.23730786123982303,
+      "power": 68.75003697699867,
+      "spinX": 0.5506806090474129,
+      "spinY": -0.4759437876753509
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        3
+      ]
+    ],
+    "qualification": "Planar touching-pair mechanism; cluster spin transfer remains approximate."
+  },
+  {
+    "id": "three-rail-kick",
+    "name": "Pool â€” Around-table kick past blocker",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 501.145088467747,
+          "y": 511.12263440154493,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 751.8362020188943,
+          "y": 420.90733778546564,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -0.8074547119655954,
+      "power": 100,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        0
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "two-in-pocket",
+    "name": "Pool â€” Two balls one pocket rolling combination",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 596,
+          "y": 500,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 330,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 2,
+          "x": 596,
+          "y": 155,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -1.5707963267948966,
+      "power": 48,
+      "spinX": 0,
+      "spinY": 0
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "ball",
+        1,
+        2,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        1
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "draw-position",
+    "name": "Pool â€” Draw for next-shot position",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 596,
+          "y": 410,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 225,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 2,
+          "x": 820,
+          "y": 380,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -1.5742869852988852,
+      "power": 48,
+      "spinX": 0,
+      "spinY": 0.9
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "follow-position",
+    "name": "Pool â€” Follow for next-shot position",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 480,
+          "y": 390,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 596,
+          "y": 200,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 2,
+          "x": 820,
+          "y": 380,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": -0.9405058315549887,
+      "power": 24,
+      "spinX": 0,
+      "spinY": -0.8
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  },
+  {
+    "id": "safety",
+    "name": "Pool â€” Legal defensive leave",
+    "state": {
+      "balls": [
+        {
+          "n": 0,
+          "x": 270.8150514960289,
+          "y": 498.4575587755535,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 1,
+          "x": 988.2920195162296,
+          "y": 548.3891355560627,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 8,
+          "x": 884.216051697731,
+          "y": 434.956955780508,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 9,
+          "x": 323.5740540921688,
+          "y": 407.2871502384078,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 10,
+          "x": 945.7644775509834,
+          "y": 259.84380209469236,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 11,
+          "x": 826.4399690926075,
+          "y": 519.284291662043,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 12,
+          "x": 387.0404529571533,
+          "y": 465.0926410511602,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 13,
+          "x": 349.0088288486004,
+          "y": 343.14796319114976,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 14,
+          "x": 724.3689748644829,
+          "y": 137.90367439971305,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        },
+        {
+          "n": 15,
+          "x": 636.5332426130772,
+          "y": 295.4888718703296,
+          "vx": 0,
+          "vy": 0,
+          "wx": 0,
+          "wy": 0,
+          "wz": 0,
+          "pocket": false
+        }
+      ],
+      "ballRadius": 15.5,
+      "settings": {
+        "tableMode": "match",
+        "variant": "eight-ball",
+        "pocketCalls": "none"
+      },
+      "turnOrder": [
+        1,
+        -7102
+      ],
+      "turnIndex": 1,
+      "groups": {
+        "1": "stripes",
+        "-7102": "solids"
+      },
+      "phase": "aim",
+      "breakShot": false
+    },
+    "shot": {
+      "angle": 0.10695221649348602,
+      "power": 34,
+      "spinX": 0,
+      "spinY": 0,
+      "calledBall": 0,
+      "calledPocket": -1,
+      "safety": true
+    },
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ],
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation."
+  }
+]

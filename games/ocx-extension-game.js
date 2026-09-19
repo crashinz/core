@@ -1,5 +1,5 @@
 import { appendAceyMove, aceyMoveAnimating } from "./acey-deucy-motion.js?v=1e269499c30e";
-import { createPoolBotController } from "./eight-ball/bot-controller.js?v=a65cc7cc4fb5";
+import { createPoolBotController } from "./eight-ball/bot-controller.js?v=cc9b6a43cdd4";
 import { createAceyDeucyBotController } from "./acey-deucy-bot-controller.js?v=a16519af3c5b";
 import { createNestedFourBotController } from "./nested-four-bot-controller.js?v=c541ed8907b2";
 import { createChineseCheckersBotController } from "./chinese-checkers-bot-controller.js?v=c1460ca5a716";

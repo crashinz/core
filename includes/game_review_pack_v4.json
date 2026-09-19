@@ -1,0 +1,48 @@
+{
+  "version": "v4",
+  "tag": "game-review-v4",
+  "filename": "corechat-game-review-v4.zip",
+  "url": "https://github.com/crashinz/core/releases/download/game-review-v4/corechat-game-review-v4.zip",
+  "releaseUrl": "https://github.com/crashinz/core/releases/tag/game-review-v4",
+  "bytes": 158571061,
+  "sha256": "ac8344439191e3f54d4e551f70f0e89e2060ea9c8f29e24f7cf5e2364b69d0dc",
+  "expandedBytes": 182120847,
+  "files": {
+    "documentation/LICENSE.md": {
+      "bytes": 5040,
+      "sha256": "861f4675811c7d7b99200b5469c04a241d7d19047b510007e938f4c1a49c4074"
+    },
+    "documentation/POOL-THIRD-PARTY-NOTICES.md": {
+      "bytes": 134848,
+      "sha256": "44c6c9bcc0edb527c4fac0cef69936f11ec21acd560739bc14109b010dd40e39"
+    },
+    "documentation/README.txt": {
+      "bytes": 1382,
+      "sha256": "e4c77d9a75265d54b1e031569f9f1a70cef8308fb077e16b006c8c0e2ebf3200"
+    },
+    "documentation/THIRD_PARTY_NOTICES.md": {
+      "bytes": 97925,
+      "sha256": "a65f33106934d24ebc7350b11fafbe25c2235286a5a3766d1838c2fede9534b9"
+    },
+    "documentation/games/vendor/gnubg/BUILD.md": {
+      "bytes": 2150,
+      "sha256": "606b6d666f5a12373176827b360c88f4661a3c3c47e2f44cdc799d654d0ea102"
+    },
+    "documentation/games/vendor/gnubg/build.py": {
+      "bytes": 1797,
+      "sha256": "ec2032ffd84bc1c02d69158a75c064853839214d1899544c80a7bf8c73adc8a1"
+    },
+    "documentation/games/vendor/gnubg/corechat_api.c": {
+      "bytes": 1373,
+      "sha256": "331d6987fa64298a1336c1e7c03ebf086903835ad60f338829e7eef7ab70192b"
+    },
+    "documentation/games/vendor/marcher/BUILD.md": {
+      "bytes": 2964,
+      "sha256": "26196081bd15340bc3c7554e94d106a72e23ccc77491feeb997d30ffd3b3809c"
+    },
+    "documentation/games/vendor/marcher/corechat.patch": {
+      "bytes": 23401,
+      "sha256": "309460ee8ca0fb4d62a7bb3b15f044dd3196c37f6aab32b832235ff6a9ec22cf"
+    }
+  }
+}

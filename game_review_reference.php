@@ -4,10 +4,10 @@ require __DIR__.'/includes/base.php';require_once __DIR__.'/includes/game_review
 $user=require_user();security_protect_private_response();
 try {
     game_review_assert_admin($user);$path=(string)($_SERVER['PATH_INFO']??'');
-    if(!str_starts_with($path,'/v3/'))throw new MultiplayerGameException('Reference version not found.','GAME_REVIEW_REFERENCE_MISSING',404);
+    if(!str_starts_with($path,'/v4/'))throw new MultiplayerGameException('Reference version not found.','GAME_REVIEW_REFERENCE_MISSING',404);
     $key=substr($path,4);
     // Pool has an independent frozen dependency tree; its framework API remains isolated.
-    if($key==='games/pool-reference/api/game_framework.php')$key='api/game_framework.php';
+    if(in_array($key,['games/pool-reference/api/game_framework.php','games/pool-advanced-reference/api/game_framework.php'],true))$key='api/game_framework.php';
     if($key==='api/game_framework.php')json_out(game_review_snapshot_dispatch($user,$_SERVER['REQUEST_METHOD']==='POST'?input_json():$_GET));
     if(in_array($key,['api/game_media.php','api/five_dice_media.php'],true)){
         $r=game_review_get($user,(string)($_GET['game_session_id']??''));$game=$key==='api/five_dice_media.php'?'five-dice':(string)($_GET['game']??'');

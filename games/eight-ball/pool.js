@@ -4,7 +4,7 @@ import {createRollingBallArt,roll} from './ball-art.js';
 import {shotFrames,sampleShot} from './playback.js';
 import {createPoolAudio} from './audio.js?v=0905101bc65c';
 import {installPractice} from './practice.js';
-import {holes as pockets,railPolygons,aimBoundary} from './table.js';
+import {holes as pockets,railPolygons,aimBoundary} from './table.js?v=f37c53619037';
 (() => {
 const $=s=>document.querySelector(s), canvas=$('#table'), ctx=canvas.getContext('2d');
 let R=15.5,practice=null;

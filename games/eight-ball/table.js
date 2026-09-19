@@ -1,6 +1,6 @@
 // Original preview scheduler/geometry. Collision and motion models are attributed
 // in their respective modules. These custom pockets are not a measured real table.
-import {collide,resolveCluster} from './collision.js';
+import {collide,resolveCluster} from './collision.js?v=910895a35ea7';
 import {defaults,phase,advance,cushion,init,strike} from './motion.js';
 export {strike};
 // Owner-approved mobile-reference power curve. Gentle shots blend into the established curve at 20%; smooth gain anchors strengthen medium/high power. Cue cosmetics

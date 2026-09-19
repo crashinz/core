@@ -14,7 +14,17 @@ function game_review_pool_position(array $s,array $case): array
     $s['statusText']=$nine?'Hit the 1 ball first.':'Ready for the prepared shot.';
     $payload=$shot(-M_PI/2,40,0,.65);
     $expected='The prepared action follows the live Pool rules; compare ball paths and the resulting turn.';
-    if($mode==='break'){
+    if($mode==='advanced'){
+        $examples=json_decode((string)file_get_contents(__DIR__.'/../games/eight-ball/review-advanced-shots.json'),true,512,JSON_THROW_ON_ERROR);
+        $example=current(array_filter($examples,static fn($e)=>$e['id']===$case['advancedId']));
+        if(!$example)throw new RuntimeException('Unknown advanced Pool example.');
+        $s['balls']=array_map(static fn($b)=>$ball($b['n'],$b['x'],$b['y']),$example['balls']);
+        $q=$example['setup'];$payload=$shot($q['angle'],$q['power'],$q['spin']['x'],$q['spin']['y']);
+        $steps=[game_review_step(1,'shot',$payload)];$s['practiceSetup']=$q;$s['practiceVersion']=1;$s['statusText']='Ready for the prepared practice shot.';
+        $angle=fmod(rad2deg($q['angle'])+360,360);
+        $expected=$example['expected'].' Exact saved inputs are applied by Play example action. Aim '.sprintf('%.6f',$angle).' degrees; power '.sprintf('%.6f',$q['power']).'%; spin X '.sprintf('%.6f',$q['spin']['x']).', Y '.sprintf('%.6f',$q['spin']['y']).'. Negative X is left; negative Y is follow.';
+    }elseif($mode==='break'){
+
         eight_ball_rack($s,$random,0);
         $steps=[game_review_step(1,'place',['x'=>320,'y'=>337]),game_review_step(1,'shot',$shot(0,100))];
         $expected='Place behind the head string, then break the '.($nine?'diamond':'triangle').' rack. The balls disperse and settle.';

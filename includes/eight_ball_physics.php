@@ -143,6 +143,19 @@ final class EightBallPhysics
         // numerical excess around center-of-mass velocity, preserving momentum.
         $cx=$mx/count($group);$cy=$my/count($group);$before=max(0,$energy-count($group)*($cx*$cx+$cy*$cy));$after=0.;foreach($copy as$u)$after+=($u->vx-$cx)**2+($u->vy-$cy)**2;$scale=$after>$before&&$after>0?sqrt($before/$after):1.;
         foreach($copy as$i=>$u){$group[$i]->vx=$cx+($u->vx-$cx)*$scale;$group[$i]->vy=$cy+($u->vy-$cy)*$scale;}
+        // Match the browser residual-contact projection at the real centers.
+        // Pair impulses preserve momentum and only remove inward normal energy.
+        for($pass=0;$pass<80;$pass++){
+            $closing=false;
+            for($i=0;$i<count($group);$i++)for($j=$i+1;$j<count($group);$j++){
+                $u=$group[$i];$v=$group[$j];$dx=$v->x-$u->x;$dy=$v->y-$u->y;$d=hypot($dx,$dy);
+                if($d>2*self::$radius+1e-7||$d<1e-12)continue;
+                $nx=$dx/$d;$ny=$dy/$d;$rel=($v->vx-$u->vx)*$nx+($v->vy-$u->vy)*$ny;
+                if($rel>=-1e-8)continue;$closing=true;
+                $impulse=-$rel/2;$u->vx-=$nx*$impulse;$u->vy-=$ny*$impulse;$v->vx+=$nx*$impulse;$v->vy+=$ny*$impulse;
+            }
+            if(!$closing)break;
+        }
         return true;
     }
     public static function moving(array $balls): bool {foreach($balls as$b)if(!$b->pocket&&(hypot($b->vx,$b->vy)>1e-6||self::phase($b)['type']==='slide'))return true;return false;}

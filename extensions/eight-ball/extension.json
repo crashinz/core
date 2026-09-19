@@ -102,6 +102,7 @@
     "games/eight-ball/audio.js",
     "includes/nine_ball_rules.php",
     "games/eight-ball/bank-setups.json",
+    "games/eight-ball/advanced-setups.json",
     "includes/pool_bot_support.php",
     "games/eight-ball/bot-engine.js",
     "games/eight-ball/bot-controller.js",

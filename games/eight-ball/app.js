@@ -2,7 +2,7 @@
  * keeps the canvas document mounted while authoritative snapshots arrive. */
 (() => {
   'use strict';
-  const source=new URL('table.html?v=afba0c12db23',document.currentScript.src);
+  const source=new URL('table.html?v=110c1ad1d228',document.currentScript.src);
   let viewportWidth=0;
   document.addEventListener('corechat-pool-viewport',e=>{viewportWidth=e.detail.width;if(ready)frame.contentWindow.postMessage({type:'pool-viewport',width:viewportWidth},location.origin);});
   let root,frame,context,ready=false,inFlight=false,autoRackQueued=false,autoRackAttempt='';

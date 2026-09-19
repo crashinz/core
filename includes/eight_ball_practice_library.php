@@ -33,12 +33,17 @@ function eight_ball_setup_content(array $body): array {
 // First-party examples are portable data, installed once into the ordinary
 // shared library. Soft deletes, renamed examples and later edits stay intact.
 function eight_ball_install_bundled_setups(PDO $pdo): void {
-    $marker='pool-practice-bundle:banks-v1';
+    eight_ball_install_setup_bundle($pdo,'banks-v1','bank-setups.json',10);
+    eight_ball_install_setup_bundle($pdo,'advanced-v1','advanced-setups.json',23);
+    eight_ball_install_setup_bundle($pdo,'showcase-v1','showcase-setups.json',13);
+}
+function eight_ball_install_setup_bundle(PDO $pdo,string $bundle,string $filename,int $expected): void {
+    $marker='pool-practice-bundle:'.$bundle;
     if(app_setting($pdo,$marker,'')!=='')return;
-    $path=__DIR__.'/../games/eight-ball/bank-setups.json';
+    $path=__DIR__.'/../games/eight-ball/'.$filename;
     if(!is_file($path))return;
     $examples=json_decode(file_get_contents($path),true,512,JSON_THROW_ON_ERROR);
-    if(!is_array($examples)||count($examples)!==10)throw new RuntimeException('Incomplete Pool bank setup bundle.');
+    if(!is_array($examples)||count($examples)!==$expected)throw new RuntimeException('Incomplete Pool setup bundle.');
     $owns=db_begin_write_transaction($pdo);
     try{
         if(app_setting($pdo,$marker,'')!==''){db_commit_write_transaction($pdo,$owns);return;}
@@ -52,7 +57,7 @@ function eight_ball_install_bundled_setups(PDO $pdo): void {
             $key='pool-practice-setup:'.$example['id'];
             if(app_setting($pdo,$key,'')!==''||in_array(mb_strtolower($example['name']),$names,true))continue;
             $value=['name'=>$example['name']]+eight_ball_setup_content($example);
-            $value['version']='bundled-banks-v1';
+            $value['version']='bundled-'.$bundle;
             $insert->execute([$key,json_encode($value,JSON_THROW_ON_ERROR)]);
         }
         db_commit_write_transaction($pdo,$owns);

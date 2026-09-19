@@ -32,8 +32,8 @@ export function createPoolBotController({snapshot,submit,showStatus,WorkerClass=
     }
     if(task.pendingShot){ready({type:'result',engine:task.engine,action:'shot',payload:task.pendingShot,reason:'announced-shot'});return;}
     try{
-      active.worker=new WorkerClass(new URL('./bot-worker.js?v=c609e806bcbf',import.meta.url),{type:'module'});
-      active.timeout=setTimeout(()=>fail(active,'The Pool bot took too long. Retry this turn.'),14000);
+      active.worker=new WorkerClass(new URL('./bot-worker.js?v=e691cee6d455',import.meta.url),{type:'module'});
+      active.timeout=setTimeout(()=>fail(active,'The Pool bot took too long. Retry this turn.'),task.difficulty==='expert'?35000:14000);
       active.worker.onerror=e=>{e?.preventDefault?.();fail(active,'The Pool bot could not load. Check your connection, then retry.');};
       active.worker.onmessage=({data})=>ready(data);active.worker.postMessage({type:'search',task});
     }catch{fail(active,'The Pool bot could not start. Retry in a current browser.');}

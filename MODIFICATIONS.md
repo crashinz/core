@@ -10,6 +10,36 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Pool tight-contact loop correction - 2026-09-18
+
+- Resolve leftover inward velocities after simultaneous group impacts so touching balls do not repeatedly collide without advancing simulation time.
+- Match browser and server handling; preserve momentum, passive energy behavior, power/spin tuning, table geometry and the existing iteration guards.
+- Retain repeatable advanced-shot paths and test complete 8/9-ball games through the server.
+
+## Pool Expert cluster-shot search - 2026-09-18
+
+- Build approaches to close groups and shared contact points from the current ball positions, then refine aim, power and both spin axes together.
+- Evaluate every attempt with the current physics and existing legality, called-pocket, next-position and safety scoring. No saved example answers or physics changes.
+- Keep Expert within 30 seconds / 5,000 simulations, with unchanged Easy/Normal and existing cancellation/pacing.
+
+## Pool Expert joint rail-shot search - 2026-09-18
+
+- Refine aim, power and combined spin together on difficult cushion-first shots, including clear paths around blocking balls and near-rail contacts.
+- Preserve the existing direct-shot, combination and safety searches; evaluate new candidates with the same physics, called-pocket rules, next-shot position and opponent opportunities.
+- Keep the 30-second / 5,000-simulation Expert ceiling, earlier completion for straightforward positions, and unchanged Easy/Normal policies. No saved-layout answers or physics changes.
+
+## Pool Expert thinking allowance - 2026-09-18
+
+- Allow Expert up to 30 seconds and 5,000 simulations, with more outcome exploration on difficult positions and earlier completion when its search finishes. Easy and Normal retain their budgets.
+- Keep chat and standalone workers alive for the longer search; preserve cancellation, retry and motion pacing.
+- Clarify that the saved Z example demonstrates a two-cushion kick. The later original-layout reconstruction and joint rail refinement verify the mechanism with documented path differences; the earlier extra search used no spin.
+
+## Pool advanced practice shots and Expert search - 2026-09-18
+
+- Add 23 repeatable practice examples with saved aim, power and spin, including cuts, multi-cushion banks/kicks, combinations, repeated contacts and position play. Frozen-rail examples are planar analogues; the Z example demonstrates two cushions, not exact simultaneous third-cushion contact.
+- Expand Expert candidate search and compare actual outcomes, next-shot position, opponent opportunities and small-input robustness. Search is bounded; no claim of every possible shot or a globally optimal choice. Easy and Normal policies remain unchanged.
+- Preserve personal/shared library edits and deletions, the original bank examples, physics, rules and frozen references.
+
 ## Pool recorded sounds and controls - 2026-09-18
 
 - Replace generated Pool effects with the approved recorded cue strike, ball collision, cushion hit and two alternating pocket drops, with source attribution and existing mute/volume behavior.
@@ -1613,3 +1643,7 @@ server-stored and built-in avatar choices.
 - Preserve Normal behavior, Nil partnership safeguards, legal play and bounded
   deadlines. Local timing and paired-hand checks support this increase; hosted
   timing and owner gameplay verification remain pending deployment.
+
+### Advanced Pool review and practice examples
+
+Added 36 verified advanced Pool reference sequences and 13 additional shared practice setups, preserving existing names, edits and deletions. Reference pack v4 retains all 353 prior sequences and freezes the advanced renderer separately. Reviewed cut shots, banks, kicks, combinations, follow/draw, safety and multi-ball clusters use the existing physics. Exact shot inputs and reconstruction limitations are shown in the administrator review. Validated 12 complete 8/9-ball bot matches and reference installation/integrity contracts. Testing is WIP.

@@ -37,6 +37,21 @@ export function resolveCluster(live,a,b,p) {
   if(step===1600)throw new Error('Pool group contact did not settle.');
   const cx=mx/group.length,cy=my/group.length,before=Math.max(0,energy-group.length*(cx*cx+cy*cy)),after=copy.reduce((s,u)=>s+(u.vx-cx)**2+(u.vy-cy)**2,0),scale=after>before&&after>0?Math.sqrt(before/after):1;
   for(let i=0;i<copy.length;i++){group[i].vx=cx+(copy[i].vx-cx)*scale;group[i].vy=cy+(copy[i].vy-cy)*scale;}
+  // The compliant solve returns velocities at virtually displaced centers,
+  // while the event scheduler retains the real contact positions. Remove any
+  // residual inward velocity at those real contacts before resuming time.
+  // Equal, opposite normal impulses preserve momentum and cannot add energy.
+  for(let pass=0;pass<80;pass++){
+    let closing=false;
+    for(let i=0;i<group.length;i++)for(let j=i+1;j<group.length;j++){
+      const u=group[i],v=group[j],dx=v.x-u.x,dy=v.y-u.y,d=Math.hypot(dx,dy);
+      if(d>2*p.R+1e-7||d<1e-12)continue;
+      const nx=dx/d,ny=dy/d,rel=(v.vx-u.vx)*nx+(v.vy-u.vy)*ny;
+      if(rel>=-1e-8)continue;closing=true;
+      const impulse=-rel/2;u.vx-=nx*impulse;u.vy-=ny*impulse;v.vx+=nx*impulse;v.vy+=ny*impulse;
+    }
+    if(!closing)break;
+  }
   return true;
 }
 export function collide(c) {

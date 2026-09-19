@@ -55,5 +55,7 @@ function game_review_catalog(): array
     }
     foreach(['draw'=>'Backspin','follow'=>'Topspin','left'=>'Left sidespin','right'=>'Right sidespin'] as $mode=>$label)$add('eight-ball',"Pool — $label",'spin-'.$mode,['variant'=>'eight-ball','poolMode'=>'spin-'.$mode,'tableMode'=>'solo']);
     foreach(range(1,10) as $bank)$add('eight-ball','Pool — Bank '.str_pad((string)$bank,2,'0',STR_PAD_LEFT),'bank-'.$bank,['variant'=>'eight-ball','poolMode'=>'bank','bank'=>$bank,'tableMode'=>'solo']);
+    $advanced=json_decode((string)file_get_contents(__DIR__.'/../games/eight-ball/review-advanced-shots.json'),true,512,JSON_THROW_ON_ERROR);
+    foreach($advanced as $example)$add('eight-ball',$example['name'],'advanced-'.$example['id'],['variant'=>$example['variant'],'poolMode'=>'advanced','advancedId'=>$example['id'],'tableMode'=>'solo']);
     return $cases;
 }

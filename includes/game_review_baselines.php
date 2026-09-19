@@ -15,7 +15,7 @@ function game_review_comparable(array $state): array
 
 function game_review_rule_check(PDO $pdo,array $user,string $caseId,string $pack): array
 {
-    $path=__DIR__.'/game_review_baseline_v3.json';
+    $path=__DIR__.'/game_review_baseline_v4.json';
     $baseline=is_file($path)?json_decode((string)file_get_contents($path),true):[];
     $saved=$baseline['cases'][$caseId]??null;
     if(!$saved)return ['status'=>'not-saved','message'=>'No frozen rules reference is available for this example.'];

@@ -1,0 +1,2939 @@
+[
+  {
+    "id": "cut-moderate-left",
+    "name": "Pool — Moderate cut left",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 481.2847127297908,
+        "y": 394.8304088577984
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 200
+      }
+    ],
+    "setup": {
+      "angle": -0.9599310885968813,
+      "power": 34,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ]
+  },
+  {
+    "id": "cut-moderate-right",
+    "name": "Pool — Moderate cut right",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 710.7152872702093,
+        "y": 394.8304088577984
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 200
+      }
+    ],
+    "setup": {
+      "angle": -2.181661564992912,
+      "power": 34,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ]
+  },
+  {
+    "id": "cut-thin-left",
+    "name": "Pool — Thin cut left",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 414.73844259267,
+        "y": 315.5236523481399
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 200
+      }
+    ],
+    "setup": {
+      "angle": -0.4363323129985824,
+      "power": 48,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "cut-thin-right",
+    "name": "Pool — Thin cut right",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 777.26155740733,
+        "y": 315.5236523481399
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 200
+      }
+    ],
+    "setup": {
+      "angle": -2.705260340591211,
+      "power": 48,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "cut-very-thin-left",
+    "name": "Pool — Very thin cut left",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 400.37047985323886,
+        "y": 272.58233816355187
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 200
+      }
+    ],
+    "setup": {
+      "angle": -0.21205750411731106,
+      "power": 48,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ]
+  },
+  {
+    "id": "cut-very-thin-right",
+    "name": "Pool — Very thin cut right",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 791.6295201467611,
+        "y": 272.58233816355187
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 200
+      }
+    ],
+    "setup": {
+      "angle": -2.9321531433504737,
+      "power": 64,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "bank-combination",
+    "name": "Pool — Efren banked combination",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 874.4635233020489,
+        "y": 498.28653444010905
+      },
+      {
+        "n": 1,
+        "x": 751.8362020188943,
+        "y": 420.90733778546564
+      },
+      {
+        "n": 2,
+        "x": 133.4,
+        "y": 134.2
+      }
+    ],
+    "setup": {
+      "angle": -2.594390410693723,
+      "power": 64,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 2. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "ball",
+        1,
+        2,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        0
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "z-kick",
+    "name": "Pool — Efren Z two-cushion kick",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 260.1500944979489,
+        "y": 514.3678954150528
+      },
+      {
+        "n": 1,
+        "x": 577.020245292224,
+        "y": 496.22550063650124
+      }
+    ],
+    "setup": {
+      "angle": -1.2492195775809958,
+      "power": 90,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Two opposite-cushion kick; exact near-simultaneous third-cushion/video geometry is not certified.",
+    "expected": "Pocketed balls: 1. Two opposite-cushion kick; exact near-simultaneous third-cushion/video geometry is not certified.",
+    "events": [
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        2
+      ]
+    ]
+  },
+  {
+    "id": "four-rail-bank",
+    "name": "Pool — Melling four-rail bank with position",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 454.2391490335511,
+        "y": 245.56985207051247
+      },
+      {
+        "n": 1,
+        "x": 334.6897452091798,
+        "y": 172.71424113190733
+      },
+      {
+        "n": 8,
+        "x": 820,
+        "y": 400
+      }
+    ],
+    "setup": {
+      "angle": -2.5628606710653985,
+      "power": 90,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ]
+  },
+  {
+    "id": "follow-cascade",
+    "name": "Pool — Follow through multiple balls",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 596,
+        "y": 520
+      },
+      {
+        "n": 1,
+        "x": 619.9283635616302,
+        "y": 390
+      },
+      {
+        "n": 2,
+        "x": 500.09125517331995,
+        "y": 270
+      },
+      {
+        "n": 3,
+        "x": 553.2099421368912,
+        "y": 150
+      }
+    ],
+    "setup": {
+      "angle": -1.577220958317865,
+      "power": 39.15819642599672,
+      "spin": {
+        "x": 0,
+        "y": -0.9157288106391206
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 3. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "ball",
+        0,
+        3,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "banana-follow",
+    "name": "Pool — Post-contact banana follow around blockers",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 350,
+        "y": 500
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 210
+      },
+      {
+        "n": 9,
+        "x": 765.9021234952585,
+        "y": 235.23312068414756
+      }
+    ],
+    "setup": {
+      "angle": -0.811135053550602,
+      "power": 24,
+      "spin": {
+        "x": 0,
+        "y": -0.65
+      }
+    },
+    "qualification": "Post-contact curved follow position around a blocker; not an elevated-cue masse.",
+    "expected": "Pocketed balls: 1. Post-contact curved follow position around a blocker; not an elevated-cue masse.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "rail-high-left",
+    "name": "Pool — Frozen cue rail high-left analogue",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 420,
+        "y": 100.5
+      },
+      {
+        "n": 1,
+        "x": 690,
+        "y": 350
+      }
+    ],
+    "setup": {
+      "angle": 0.7691831876943449,
+      "power": 34,
+      "spin": {
+        "x": -0.55,
+        "y": -0.75
+      }
+    },
+    "qualification": "Planar frozen-cue-ball analogue; reference airborne motion excluded.",
+    "expected": "Pocketed balls: 1. Planar frozen-cue-ball analogue; reference airborne motion excluded.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "rail-high-right",
+    "name": "Pool — Frozen cue rail high-right analogue",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 420,
+        "y": 100.5
+      },
+      {
+        "n": 1,
+        "x": 690,
+        "y": 350
+      }
+    ],
+    "setup": {
+      "angle": 0.7637726670131625,
+      "power": 34,
+      "spin": {
+        "x": 0.55,
+        "y": -0.75
+      }
+    },
+    "qualification": "Planar frozen-cue-ball analogue; reference airborne motion excluded.",
+    "expected": "Pocketed balls: 1. Planar frozen-cue-ball analogue; reference airborne motion excluded.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "rail-high",
+    "name": "Pool — Frozen cue rail top-spin analogue",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 420,
+        "y": 100.5
+      },
+      {
+        "n": 1,
+        "x": 690,
+        "y": 350
+      }
+    ],
+    "setup": {
+      "angle": 0.7669142596667523,
+      "power": 34,
+      "spin": {
+        "x": 0,
+        "y": -0.75
+      }
+    },
+    "qualification": "Planar frozen-cue-ball analogue; reference airborne motion excluded.",
+    "expected": "Pocketed balls: 1. Planar frozen-cue-ball analogue; reference airborne motion excluded.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "deflection-nine",
+    "name": "Pool — Multi-ball deflection into 9",
+    "variant": "nine-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 420,
+        "y": 480
+      },
+      {
+        "n": 1,
+        "x": 451.43980491673574,
+        "y": 350
+      },
+      {
+        "n": 9,
+        "x": 494.9318851158023,
+        "y": 270
+      },
+      {
+        "n": 4,
+        "x": 622.4789093155414,
+        "y": 145
+      }
+    ],
+    "setup": {
+      "angle": -1.3896232079216464,
+      "power": 53.409872016636655,
+      "spin": {
+        "x": 0.36162757165730003,
+        "y": -0.09679094306193292
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 9. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "ball",
+        1,
+        9,
+        null
+      ],
+      [
+        "ball",
+        9,
+        4,
+        null
+      ],
+      [
+        "pocket",
+        9,
+        null,
+        1
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "triple-kiss",
+    "name": "Pool — Three cue/object contacts with pot",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 269.8050997313112,
+        "y": 425.89234130852856
+      },
+      {
+        "n": 8,
+        "x": 157.27081330493093,
+        "y": 192.62723739189096
+      }
+    ],
+    "setup": {
+      "angle": -1.966321390558999,
+      "power": 86.50454334565438,
+      "spin": {
+        "x": 0.3502795770764351,
+        "y": 0.6957005072850734
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 8. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        8,
+        null,
+        5
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "jaw-double-kiss",
+    "name": "Pool — Corner-pocket double kiss",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 580.8728906325996,
+        "y": 485.25982103310525
+      },
+      {
+        "n": 8,
+        "x": 1056.1237313649617,
+        "y": 552.0891556190327
+      }
+    ],
+    "setup": {
+      "angle": 0.1409487667969023,
+      "power": 71.66288563981652,
+      "spin": {
+        "x": 0.10913808543700726,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 8. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "pocket",
+        8,
+        null,
+        5
+      ]
+    ]
+  },
+  {
+    "id": "touching-pair-bank",
+    "name": "Pool — Two-cushion bank from touching pair",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 265.41235032636433,
+        "y": 267.1265293802755
+      },
+      {
+        "n": 1,
+        "x": 419.97120161540806,
+        "y": 308.4975517052226
+      },
+      {
+        "n": 2,
+        "x": 389.2669857666351,
+        "y": 304.18928591584034
+      }
+    ],
+    "setup": {
+      "angle": 0.23730786123982303,
+      "power": 68.75003697699867,
+      "spin": {
+        "x": 0.5506806090474129,
+        "y": -0.4759437876753509
+      }
+    },
+    "qualification": "Planar touching-pair mechanism; cluster spin transfer remains approximate.",
+    "expected": "Pocketed balls: 1. Planar touching-pair mechanism; cluster spin transfer remains approximate.",
+    "events": [
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        3
+      ]
+    ]
+  },
+  {
+    "id": "three-rail-kick",
+    "name": "Pool — Around-table kick past blocker",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 501.145088467747,
+        "y": 511.12263440154493
+      },
+      {
+        "n": 1,
+        "x": 751.8362020188943,
+        "y": 420.90733778546564
+      }
+    ],
+    "setup": {
+      "angle": -0.8074547119655954,
+      "power": 100,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        0
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "two-in-pocket",
+    "name": "Pool — Two balls one pocket rolling combination",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 596,
+        "y": 500
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 330
+      },
+      {
+        "n": 2,
+        "x": 596,
+        "y": 155
+      }
+    ],
+    "setup": {
+      "angle": -1.5707963267948966,
+      "power": 48,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 2, 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "ball",
+        1,
+        2,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        1
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ]
+    ]
+  },
+  {
+    "id": "draw-position",
+    "name": "Pool — Draw for next-shot position",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 596,
+        "y": 410
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 225
+      },
+      {
+        "n": 2,
+        "x": 820,
+        "y": 380
+      }
+    ],
+    "setup": {
+      "angle": -1.5742869852988852,
+      "power": 48,
+      "spin": {
+        "x": 0,
+        "y": 0.9
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "follow-position",
+    "name": "Pool — Follow for next-shot position",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 480,
+        "y": 390
+      },
+      {
+        "n": 1,
+        "x": 596,
+        "y": 200
+      },
+      {
+        "n": 2,
+        "x": 820,
+        "y": 380
+      }
+    ],
+    "setup": {
+      "angle": -0.9405058315549887,
+      "power": 24,
+      "spin": {
+        "x": 0,
+        "y": -0.8
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: 1. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "safety",
+    "name": "Pool — Legal defensive leave",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 270.8150514960289,
+        "y": 498.4575587755535
+      },
+      {
+        "n": 1,
+        "x": 988.2920195162296,
+        "y": 548.3891355560627
+      },
+      {
+        "n": 8,
+        "x": 884.216051697731,
+        "y": 434.956955780508
+      },
+      {
+        "n": 9,
+        "x": 323.5740540921688,
+        "y": 407.2871502384078
+      },
+      {
+        "n": 10,
+        "x": 945.7644775509834,
+        "y": 259.84380209469236
+      },
+      {
+        "n": 11,
+        "x": 826.4399690926075,
+        "y": 519.284291662043
+      },
+      {
+        "n": 12,
+        "x": 387.0404529571533,
+        "y": 465.0926410511602
+      },
+      {
+        "n": 13,
+        "x": 349.0088288486004,
+        "y": 343.14796319114976
+      },
+      {
+        "n": 14,
+        "x": 724.3689748644829,
+        "y": 137.90367439971305
+      },
+      {
+        "n": 15,
+        "x": 636.5332426130772,
+        "y": 295.4888718703296
+      }
+    ],
+    "setup": {
+      "angle": 0.10695221649348602,
+      "power": 34,
+      "spin": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    "qualification": "Equivalent mechanism on our table, not an exact video recreation.",
+    "expected": "Pocketed balls: none; this example demonstrates legal contact or a defensive leave. Equivalent mechanism on our table, not an exact video recreation.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "z-reyes-left-top",
+    "name": "Pool — Reyes Z-shot, left/top spin",
+    "variant": "nine-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 205.853759765625,
+        "y": 162.7130126953125
+      },
+      {
+        "n": 5,
+        "x": 1092.292236328125,
+        "y": 347.69622802734375
+      },
+      {
+        "n": 6,
+        "x": 247.5123748779297,
+        "y": 181.19859313964844
+      },
+      {
+        "n": 7,
+        "x": 802.9482421875,
+        "y": 225.2431182861328
+      },
+      {
+        "n": 9,
+        "x": 216.08399963378906,
+        "y": 374.6201477050781
+      }
+    ],
+    "setup": {
+      "angle": 1.167822735658555,
+      "power": 81.90709628757209,
+      "spin": {
+        "x": -0.5339726357706659,
+        "y": -0.03
+      }
+    },
+    "qualification": "Original five-ball layout reconstructed from the video. Two long-rail kick, 5 into the far corner, cue returns for the 6. Uses left and slight top spin. Current larger balls require a wider first angle; the second bounce occurs earlier than in the video.",
+    "expected": "Pocketed balls: 5. Original five-ball layout reconstructed from the video. Two long-rail kick, 5 into the far corner, cue returns for the 6. Uses left and slight top spin. Current larger balls require a wider first angle; the second bounce occurs earlier than in the video.",
+    "events": [
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        5,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        5,
+        null,
+        null
+      ],
+      [
+        "rail",
+        5,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        5,
+        null,
+        5
+      ]
+    ]
+  },
+  {
+    "id": "z-reyes-route",
+    "name": "Pool — Reyes Z-shot, closer route",
+    "variant": "nine-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 205.853759765625,
+        "y": 162.7130126953125
+      },
+      {
+        "n": 5,
+        "x": 1092.292236328125,
+        "y": 347.69622802734375
+      },
+      {
+        "n": 6,
+        "x": 247.5123748779297,
+        "y": 181.19859313964844
+      },
+      {
+        "n": 7,
+        "x": 802.9482421875,
+        "y": 225.2431182861328
+      },
+      {
+        "n": 9,
+        "x": 216.08399963378906,
+        "y": 374.6201477050781
+      }
+    ],
+    "setup": {
+      "angle": 1.1693922814192574,
+      "power": 83.12976937851002,
+      "spin": {
+        "x": -0.7242654582163398,
+        "y": 0.5478543132552203
+      }
+    },
+    "qualification": "Same measured layout, closer second-cushion route and cue finish. This variant uses left/draw spin in our current model; it is not a claim about Reyes’s actual cue input.",
+    "expected": "Pocketed balls: 5. Same measured layout, closer second-cushion route and cue finish. This variant uses left/draw spin in our current model; it is not a claim about Reyes’s actual cue input.",
+    "events": [
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        5,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        5,
+        null,
+        null
+      ],
+      [
+        "rail",
+        5,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        5,
+        null,
+        5
+      ]
+    ]
+  },
+  {
+    "id": "butterfly",
+    "name": "Pool — Butterfly: six balls, six pockets",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 343.1847462322629,
+        "y": 337.5
+      },
+      {
+        "n": 1,
+        "x": 502.09536753603845,
+        "y": 365.2081690290597
+      },
+      {
+        "n": 2,
+        "x": 474.7200422825073,
+        "y": 379.76287903178314
+      },
+      {
+        "n": 3,
+        "x": 531.4206116510917,
+        "y": 375.27186981915366
+      },
+      {
+        "n": 4,
+        "x": 502.09536753603845,
+        "y": 309.7918309709403
+      },
+      {
+        "n": 5,
+        "x": 474.7200422825073,
+        "y": 295.23712096821686
+      },
+      {
+        "n": 6,
+        "x": 531.4206116510917,
+        "y": 299.72813018084634
+      }
+    ],
+    "setup": {
+      "angle": 0,
+      "power": 66.84428852278705,
+      "spin": {
+        "x": 0,
+        "y": 0.7823645572154093
+      }
+    },
+    "qualification": "Published setup adapted to our table dimensions. Current physics; 40 identical-input runs passed across four timesteps.",
+    "expected": "Pocketed balls: 4, 1, 6, 3, 5, 2. Published setup adapted to our table dimensions. Current physics; 40 identical-input runs passed across four timesteps.",
+    "events": [
+      [
+        "ball",
+        0,
+        4,
+        null
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        1
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        4
+      ],
+      [
+        "rail",
+        6,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        6,
+        null,
+        2
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        5
+      ],
+      [
+        "pocket",
+        5,
+        null,
+        0
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        3
+      ]
+    ]
+  },
+  {
+    "id": "line-four",
+    "name": "Pool — Line of four: cluster and return bank",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 481.28149267824625,
+        "y": 213.69106922305565
+      },
+      {
+        "n": 1,
+        "x": 584.8162700666576,
+        "y": 134.63086922305567
+      },
+      {
+        "n": 2,
+        "x": 587.2932360728697,
+        "y": 165.5357661716635
+      },
+      {
+        "n": 3,
+        "x": 589.7702020790819,
+        "y": 196.44066312027132
+      },
+      {
+        "n": 4,
+        "x": 592.247168085294,
+        "y": 227.34556006887914
+      }
+    ],
+    "setup": {
+      "angle": -0.2955078972103787,
+      "power": 70.93971575222491,
+      "spin": {
+        "x": 0,
+        "y": 0.49887851586281867
+      }
+    },
+    "qualification": "Published line-of-four mechanism adapted to this table; the line is tilted about 4.5 degrees. Pocket-jaw brushes are part of the demonstrated path.",
+    "expected": "Pocketed balls: 1, 2, 4, 3. Published line-of-four mechanism adapted to this table; the line is tilted about 4.5 degrees. Pocket-jaw brushes are part of the demonstrated path.",
+    "events": [
+      [
+        "ball",
+        0,
+        3,
+        null
+      ],
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        2
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        4
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        0
+      ]
+    ]
+  },
+  {
+    "id": "double-rail",
+    "name": "Pool — Double the rail: reverse-spin escape",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 850.8443744438409,
+        "y": 122.07695688420404
+      },
+      {
+        "n": 1,
+        "x": 246.02268399193647,
+        "y": 184.3582916565228
+      }
+    ],
+    "setup": {
+      "angle": -0.3446119497618839,
+      "power": 53.96507677571545,
+      "spin": {
+        "x": -0.7027797145160148,
+        "y": -0.5290619156463576
+      }
+    },
+    "qualification": "Top cushion, right cushion, top cushion again, then legal contact with the 1. The same input without sidespin is also tested.",
+    "expected": "Pocketed balls: none; this example demonstrates legal contact or a defensive leave. Top cushion, right cushion, top cushion again, then legal contact with the 1. The same input without sidespin is also tested.",
+    "events": [
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "two-way-bank",
+    "name": "Pool — Three-rail two-way bank: pot",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 570,
+        "y": 325.19847420030624
+      },
+      {
+        "n": 8,
+        "x": 1012.5829672607808,
+        "y": 337.5
+      }
+    ],
+    "setup": {
+      "angle": 0.07238620961557363,
+      "power": 93.07322181717007,
+      "spin": {
+        "x": -0.6141435880155569,
+        "y": 0.2970041392759193
+      }
+    },
+    "qualification": "Adapted layout: the 8 starts 81.92 table units off the cushion. Right, top and left cushions before the bottom-side pocket. The separate miss example changes only aim/power.",
+    "expected": "Pocketed balls: 8. Adapted layout: the 8 starts 81.92 table units off the cushion. Right, top and left cushions before the bottom-side pocket. The separate miss example changes only aim/power.",
+    "events": [
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        8,
+        null,
+        4
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "two-way-miss",
+    "name": "Pool — Three-rail two-way bank: nearby miss",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 570,
+        "y": 325.19847420030624
+      },
+      {
+        "n": 8,
+        "x": 1012.5829672607808,
+        "y": 337.5
+      }
+    ],
+    "setup": {
+      "angle": 0.0727352754659725,
+      "power": 93.07322181717007,
+      "spin": {
+        "x": -0.6141435880155569,
+        "y": 0.2970041392759193
+      }
+    },
+    "qualification": "Same board. Aim offset 0.02 degrees; power offset 0 percentage points. Legal miss leaves 29.0 ball diameters of separation. Geometric direct-pot quality 0.0; this is a difficult leave, not an unbeatable safety.",
+    "expected": "Pocketed balls: none; this example demonstrates legal contact or a defensive leave. Same board. Aim offset 0.02 degrees; power offset 0 percentage points. Legal miss leaves 29.0 ball diameters of separation. Geometric direct-pot quality 0.0; this is a difficult leave, not an unbeatable safety.",
+    "events": [
+      [
+        "ball",
+        0,
+        8,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        8,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "butterfly-match-original",
+    "name": "Pool — Butterfly, original",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 343.1847462322629,
+        "y": 337.5
+      },
+      {
+        "n": 1,
+        "x": 502.09536753603845,
+        "y": 365.2081690290597
+      },
+      {
+        "n": 2,
+        "x": 474.7200422825073,
+        "y": 379.76287903178314
+      },
+      {
+        "n": 3,
+        "x": 531.4206116510917,
+        "y": 375.27186981915366
+      },
+      {
+        "n": 4,
+        "x": 502.09536753603845,
+        "y": 309.7918309709403
+      },
+      {
+        "n": 5,
+        "x": 474.7200422825073,
+        "y": 295.23712096821686
+      },
+      {
+        "n": 6,
+        "x": 531.4206116510917,
+        "y": 299.72813018084634
+      },
+      {
+        "n": 8,
+        "x": 1055,
+        "y": 320
+      },
+      {
+        "n": 9,
+        "x": 145,
+        "y": 355
+      }
+    ],
+    "setup": {
+      "angle": -0.04620888033485373,
+      "power": 87.86449839501921,
+      "spin": {
+        "x": 0.9219677406771888,
+        "y": -0.19679715348258692
+      }
+    },
+    "qualification": "The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "expected": "Pocketed balls: 1, 4, 6, 3, 2, 5. The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "events": [
+      [
+        "ball",
+        0,
+        4,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        4
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        1
+      ],
+      [
+        "rail",
+        6,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        6,
+        null,
+        2
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        5
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        3
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        5,
+        null,
+        0
+      ]
+    ]
+  },
+  {
+    "id": "butterfly-match-mirror",
+    "name": "Pool — Butterfly, mirror",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 343.1847462322629,
+        "y": 337.5
+      },
+      {
+        "n": 1,
+        "x": 502.09536753603845,
+        "y": 309.7918309709403
+      },
+      {
+        "n": 2,
+        "x": 474.7200422825073,
+        "y": 295.23712096821686
+      },
+      {
+        "n": 3,
+        "x": 531.4206116510917,
+        "y": 299.72813018084634
+      },
+      {
+        "n": 4,
+        "x": 502.09536753603845,
+        "y": 365.2081690290597
+      },
+      {
+        "n": 5,
+        "x": 474.7200422825073,
+        "y": 379.76287903178314
+      },
+      {
+        "n": 6,
+        "x": 531.4206116510917,
+        "y": 375.27186981915366
+      },
+      {
+        "n": 8,
+        "x": 1055,
+        "y": 355
+      },
+      {
+        "n": 9,
+        "x": 145,
+        "y": 320
+      }
+    ],
+    "setup": {
+      "angle": -0.04055631469597128,
+      "power": 98.1753601935105,
+      "spin": {
+        "x": 0.16212811658873072,
+        "y": 0.01332306450518577
+      }
+    },
+    "qualification": "The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "expected": "Pocketed balls: 4, 1, 3, 6, 5, 2. The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "events": [
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "ball",
+        0,
+        4,
+        null
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        4
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        2
+      ],
+      [
+        "rail",
+        6,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        6,
+        null,
+        5
+      ],
+      [
+        "pocket",
+        5,
+        null,
+        3
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        0
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "butterfly-match-nearby",
+    "name": "Pool — Butterfly, nearby",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 346.1847462322629,
+        "y": 339.5
+      },
+      {
+        "n": 1,
+        "x": 502.09536753603845,
+        "y": 365.2081690290597
+      },
+      {
+        "n": 2,
+        "x": 474.7200422825073,
+        "y": 379.76287903178314
+      },
+      {
+        "n": 3,
+        "x": 531.4206116510917,
+        "y": 375.27186981915366
+      },
+      {
+        "n": 4,
+        "x": 502.09536753603845,
+        "y": 309.7918309709403
+      },
+      {
+        "n": 5,
+        "x": 474.7200422825073,
+        "y": 295.23712096821686
+      },
+      {
+        "n": 6,
+        "x": 531.4206116510917,
+        "y": 299.72813018084634
+      },
+      {
+        "n": 8,
+        "x": 1055,
+        "y": 320
+      },
+      {
+        "n": 9,
+        "x": 145,
+        "y": 355
+      }
+    ],
+    "setup": {
+      "angle": -0.05050358269337632,
+      "power": 82.59499932783577,
+      "spin": {
+        "x": 0.24158412329289444,
+        "y": -0.00590189623826114
+      }
+    },
+    "qualification": "The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "expected": "Pocketed balls: 1, 4, 6, 3, 2, 5. The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "events": [
+      [
+        "ball",
+        0,
+        4,
+        null
+      ],
+      [
+        "ball",
+        0,
+        1,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        4
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        1
+      ],
+      [
+        "rail",
+        6,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        6,
+        null,
+        2
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        5
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        3
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        5,
+        null,
+        0
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "id": "line-four-match-original",
+    "name": "Pool — Four-ball line, original",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 481.28149267824625,
+        "y": 213.69106922305565
+      },
+      {
+        "n": 1,
+        "x": 584.8162700666576,
+        "y": 134.63086922305567
+      },
+      {
+        "n": 2,
+        "x": 587.2932360728697,
+        "y": 165.5357661716635
+      },
+      {
+        "n": 3,
+        "x": 589.7702020790819,
+        "y": 196.44066312027132
+      },
+      {
+        "n": 4,
+        "x": 592.247168085294,
+        "y": 227.34556006887914
+      },
+      {
+        "n": 8,
+        "x": 145,
+        "y": 530
+      },
+      {
+        "n": 9,
+        "x": 1055,
+        "y": 530
+      }
+    ],
+    "setup": {
+      "angle": -0.29626347376941686,
+      "power": 89.38914065746802,
+      "spin": {
+        "x": 0.9640150054475702,
+        "y": 0.2658478310461107
+      }
+    },
+    "qualification": "The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "expected": "Pocketed balls: 1, 2, 4, 3. The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "events": [
+      [
+        "ball",
+        0,
+        3,
+        null
+      ],
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        2
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        4
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        2
+      ]
+    ]
+  },
+  {
+    "id": "line-four-match-mirror",
+    "name": "Pool — Four-ball line, mirror",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 481.28149267824625,
+        "y": 461.30893077694435
+      },
+      {
+        "n": 1,
+        "x": 584.8162700666576,
+        "y": 540.3691307769443
+      },
+      {
+        "n": 2,
+        "x": 587.2932360728697,
+        "y": 509.4642338283365
+      },
+      {
+        "n": 3,
+        "x": 589.7702020790819,
+        "y": 478.5593368797287
+      },
+      {
+        "n": 4,
+        "x": 592.247168085294,
+        "y": 447.65443993112086
+      },
+      {
+        "n": 8,
+        "x": 145,
+        "y": 145
+      },
+      {
+        "n": 9,
+        "x": 1055,
+        "y": 145
+      }
+    ],
+    "setup": {
+      "angle": 0.29083620686416944,
+      "power": 77.37084528414012,
+      "spin": {
+        "x": 0.993997094735787,
+        "y": 0.1094064699038185
+      }
+    },
+    "qualification": "The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "expected": "Pocketed balls: 1, 2, 4, 3. The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "events": [
+      [
+        "ball",
+        0,
+        3,
+        null
+      ],
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        4
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        5
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        1
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        3
+      ]
+    ]
+  },
+  {
+    "id": "line-four-match-nearby",
+    "name": "Pool — Four-ball line, nearby",
+    "variant": "eight-ball",
+    "balls": [
+      {
+        "n": 0,
+        "x": 484.28149267824625,
+        "y": 215.69106922305565
+      },
+      {
+        "n": 1,
+        "x": 584.8162700666576,
+        "y": 134.63086922305567
+      },
+      {
+        "n": 2,
+        "x": 587.2932360728697,
+        "y": 165.5357661716635
+      },
+      {
+        "n": 3,
+        "x": 589.7702020790819,
+        "y": 196.44066312027132
+      },
+      {
+        "n": 4,
+        "x": 592.247168085294,
+        "y": 227.34556006887914
+      },
+      {
+        "n": 8,
+        "x": 145,
+        "y": 530
+      },
+      {
+        "n": 9,
+        "x": 1055,
+        "y": 530
+      }
+    ],
+    "setup": {
+      "angle": -0.3226680688122756,
+      "power": 89.49082790389701,
+      "spin": {
+        "x": 0.03880735584217904,
+        "y": -0.002784099571186971
+      }
+    },
+    "qualification": "The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "expected": "Pocketed balls: 1, 2, 4, 3. The 8 ball and an opponent ball remain on the table. Expert must plan the next shot as well as pocket this cluster. Play saved shot repeats the measured input; Let Expert choose searches again.",
+    "events": [
+      [
+        "ball",
+        0,
+        3,
+        null
+      ],
+      [
+        "ball",
+        0,
+        2,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        1,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        1,
+        null,
+        1
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "rail",
+        2,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        2,
+        null,
+        2
+      ],
+      [
+        "rail",
+        4,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        4,
+        null,
+        4
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        0,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "rail",
+        3,
+        null,
+        null
+      ],
+      [
+        "pocket",
+        3,
+        null,
+        2
+      ]
+    ]
+  }
+]
