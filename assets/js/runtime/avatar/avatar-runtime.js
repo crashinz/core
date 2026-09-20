@@ -159,7 +159,7 @@ import {
 
     AvatarRenderer
 
-} from "./renderers/avatar-renderer.js?v=20260914-bubble-emojis";
+} from "./renderers/avatar-renderer.js?v=20260920-linked-presentation";
 
 import {
 

@@ -35,7 +35,7 @@ function heartbeat_presence(PDO $pdo, int $sessionId): array {
         'id' => (int)$p['id'],
         'webcam_path' => $p['webcam_path'],
         'webcam_enabled' => !empty($p['webcam_enabled']),
-        'online' => $p['last_seen_at'] && strtotime($p['last_seen_at']) >= time() - 35,
+        'online' => participant_presence_is_online($p['last_seen_at']),
     ], $stmt->fetchAll());
 }
 

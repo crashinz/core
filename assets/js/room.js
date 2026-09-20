@@ -677,7 +677,7 @@ async function initializeAvatarRuntime() {
     import(appUrl('/assets/js/runtime/game/game-runtime.js?v=20260916-dominos')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
     import(appUrl('/assets/js/runtime/imported-room/imported-room-runtime.js?v=20260913-regression')),
-    import(`${appUrl('/assets/js/runtime/avatar/avatar-runtime.js?v=20260914-bubble-emojis')}?v=20260913-away-layout`),
+    import(`${appUrl('/assets/js/runtime/avatar/avatar-runtime.js?v=20260920-linked-presentation')}?v=20260913-away-layout`),
     import(`${appUrl('/assets/js/runtime/polling/polling-runtime.js')}?v=20260901-latency-phase-r1`),
     import(appUrl('/assets/js/core/runtime-diagnostics.js')),
     import(appUrl('/assets/js/core/runtime-request-client.js?v=20260913-server-clock-r2')),

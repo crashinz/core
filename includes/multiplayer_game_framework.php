@@ -4672,8 +4672,8 @@ function multiplayer_game_room_projection(PDO $pdo, string $publicId, int $roomS
     $practiceMode = (string)$session['mode'] === 'practice';
     $projectedMembers = array_map(static function(array $row) use ($sessionState, $requiresGameHeartbeat, $practiceMode, $session, $acceptanceBasis): array {
         $userId = (int)$row['user_id'];
-        $roomSeenAt = strtotime((string)($row['participant_last_seen_at'] ?? ''));
-        $gameSeenAt = strtotime((string)($row['member_last_seen_at'] ?? ''));
+        $roomOnline = participant_presence_is_online($row['participant_last_seen_at'] ?? null);
+        $gameOnline = participant_presence_is_online($row['member_last_seen_at'] ?? null);
         return [
             'userId' => $userId,
             'participantId' => (int)($row['participant_id'] ?? 0),
@@ -4691,9 +4691,7 @@ function multiplayer_game_room_projection(PDO $pdo, string $publicId, int $roomS
             // A fresh authenticated game-session poll is direct evidence that
             // the board is connected. A historical reconnect marker can lag
             // behind that heartbeat and must not make room presence stale.
-            'online' => $roomSeenAt !== false && $roomSeenAt >= time() - 35
-                && (!$requiresGameHeartbeat
-                    || ($gameSeenAt !== false && $gameSeenAt >= time() - 35)),
+            'online' => $roomOnline && (!$requiresGameHeartbeat || $gameOnline),
         ];
     }, $members->fetchAll());
     $viewer = current(array_filter($projectedMembers, static fn(array $member): bool => $member['userId'] === $viewerUserId));

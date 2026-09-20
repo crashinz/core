@@ -10,6 +10,12 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Explicit room departure - 2026-09-20
+
+- Remove a participant from other room views after an explicit room leave. Preserve the separate temporary-away behavior for missed heartbeats.
+- Mark room/game presence Away after 45 seconds without a heartbeat. New installations default to five minutes before disconnected avatars and links are removed; existing administrator timeout choices are preserved.
+- Interpret database heartbeat timestamps as UTC regardless of the PHP host time zone, preventing stale room/game presence from appearing online for hours.
+
 ## Password-protected lobby previews - 2026-09-20
 
 - Replace locked room previews with PASSWORD PROTECTED until the viewer has room access. Omit background and thumbnail URLs from the initial lobby and refreshed cards for uploaded, imported and live-website rooms.
@@ -1704,3 +1710,8 @@ Full transfers wait for the server-confirmed connection state before sending pay
 - Added an off-by-default Installation Owner setting for future 2FA enrollments, with host-configured SMTP/PHP mail and required private-email verification. Existing enrollments and normal password-plus-authenticator/backup-code disabling are unchanged.
 - Added a separate lost-authenticator route: bounded single-use email verification, a 24-hour cancellable wait, and explicit completion requiring the password and email proof. Completion revokes old sessions and backup codes. Private contact details and SMTP credentials are excluded from public projections.
 - Added shared account dialogs and recovery screens, with hosting instructions and bundled PHPMailer licensing. Corrected the account email form's missing 2FA-code submission and an unrelated accidental field read in its deletion form.
+
+## Relationship presentation overlays - 2026-09-20
+
+Avatar render layers expose their current relationship membership to presentation adapters, and clear it on unlink. This lets client layouts preserve link/lap geometry while repositioning a group around local panels. Relationship lifecycle and permissions retain their existing owners.
+

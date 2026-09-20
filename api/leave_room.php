@@ -39,7 +39,9 @@ emit_event($pdo, $sessionId, 'voice', [
 ]);
 $pdo->prepare('INSERT INTO media_signals (session_id, media, from_participant_id, to_participant_id, type, data, expires_at) VALUES (?,?,?,?,?,?,?)')
     ->execute([$sessionId, 'voice', (int)$p['id'], 0, 'leave', json_encode(['participant_id' => (int)$p['id']]), gmdate('Y-m-d H:i:s', time() + 600)]);
-emit_event($pdo, $sessionId, 'presence_leave', [
+// An explicit departure removes the participant from other clients. A missing
+// heartbeat uses presence_leave separately to represent temporary absence.
+emit_event($pdo, $sessionId, 'participant_leave', [
     'participant_id' => (int)$p['id'],
     'display_name' => $p['display_name'],
 ]);

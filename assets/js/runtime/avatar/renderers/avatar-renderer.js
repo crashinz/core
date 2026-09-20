@@ -450,6 +450,14 @@ export class AvatarRenderer {
             participant.typingEl,
             participant.speechEl
         ].filter(Boolean);
+        // Publish presentation membership for optional clients without granting
+        // them ownership of relationship state or exposing credentials.
+        const relationshipId = this.#runtime.relationships
+            ?.relationshipPresentationForParticipant?.(participant.id)?.relationshipId;
+        for (const element of layers) {
+            if (relationshipId) element.dataset.relationshipId = String(relationshipId);
+            else delete element.dataset.relationshipId;
+        }
         if (!layers.length || layers.every(element => element.parentElement === stage)) {
             return false;
         }

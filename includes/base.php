@@ -1658,7 +1658,7 @@ function seed_app_settings(PDO $pdo): void {
         'gesture_upload_limit' => '50',
         'room_image_max_size_mb' => '10',
         'room_video_max_size_mb' => '200',
-        'participant_idle_timeout_minutes' => '2',
+        'participant_idle_timeout_minutes' => '5',
         'auth_login_max_attempts' => '5',
         'auth_recovery_max_attempts' => '5',
         'auth_ip_max_attempts' => '30',
@@ -7430,9 +7430,17 @@ function active_ejection_sql(string $alias = 're'): string {
     return "($alias.permanent = 1 OR $alias.expires_at IS NULL OR $alias.expires_at > CURRENT_TIMESTAMP)";
 }
 
+function participant_presence_is_online(?string $lastSeenAt, ?int $now = null): bool {
+    if ($lastSeenAt === null || trim($lastSeenAt) === '') return false;
+    // Database connections write UTC. PHP's host default may be a local zone;
+    // parsing a bare DATETIME in that zone can keep a stale user green for hours.
+    $seenAt = strtotime($lastSeenAt . ' UTC');
+    return $seenAt !== false && $seenAt >= ($now ?? time()) - 45;
+}
+
 function stale_cutoff(PDO $pdo, ?float $minutes = null): string {
     if ($minutes === null) {
-        $configured = corechat_limit_value($pdo, 'participant_idle_timeout_minutes', 2.0);
+        $configured = corechat_limit_value($pdo, 'participant_idle_timeout_minutes', 5.0);
         if ($configured === null) return '1970-01-01 00:00:00';
         $minutes = (float)$configured;
     }

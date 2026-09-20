@@ -152,7 +152,7 @@ $participants = array_map(function(array $p) use ($roomOwnerId, $pdo, $session, 
         'webcam_enabled' => !empty($p['webcam_enabled']),
         'linked_to' => $p['linked_to_participant_id'] ? (int)$p['linked_to_participant_id'] : null,
         'link_mode' => in_array(($p['link_mode'] ?? 'normal'), ['normal', 'lap'], true) ? $p['link_mode'] : 'normal',
-        'online' => $p['last_seen_at'] && strtotime($p['last_seen_at']) >= time() - 35,
+        'online' => participant_presence_is_online($p['last_seen_at']),
     ], avatar_size_participant_event_fields($pdo, $p)));
     $projected = avatar_visibility_project_payload($pdo, (int)$participant['user_id'], $projected);
     $projected = nameplate_visibility_project_payload($pdo, (int)$participant['user_id'], $projected);
