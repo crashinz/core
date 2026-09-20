@@ -10,6 +10,10 @@
 .avatar-library-grid details input { margin-block: 4px; }
 .avatar-library-dialog [hidden] { display: none; }
 
+/* Keep desktop window dragging underneath the chooser from swallowing its clicks.
+   The chooser title bar still moves the dialog through its pointer handlers. */
+.avatar-library-dialog { -webkit-app-region: no-drag; }
+
 .avatar-library-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 1; background: var(--panel, #151922); cursor: grab; touch-action: none; user-select: none; }
 .avatar-library-titlebar.is-dragging { cursor: grabbing; }
 .avatar-library-titlebar h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }

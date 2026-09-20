@@ -1678,3 +1678,5 @@ Added 36 verified advanced Pool reference sequences and 13 additional shared pra
 
 - Add Unfiled first sorting for avatar and nameplate libraries across all pages.
 - Expand the chooser's close button so its center, edges and corners respond consistently.
+
+- Avatar and nameplate chooser: retain a responsive full 44px close target and title-bar dragging.
