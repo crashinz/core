@@ -13,4 +13,5 @@
 .avatar-library-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 1; background: var(--panel, #151922); cursor: grab; touch-action: none; user-select: none; }
 .avatar-library-titlebar.is-dragging { cursor: grabbing; }
 .avatar-library-titlebar h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.avatar-library-titlebar button { flex: 0 0 auto; cursor: pointer; }
+.avatar-library-titlebar button { flex: 0 0 auto; display: grid; place-items: center; box-sizing: border-box; min-width: 44px; min-height: 44px; padding: 8px; line-height: 1; border-radius: 0; cursor: pointer; }
+.avatar-library-titlebar button:hover { background: #ffffff18; }

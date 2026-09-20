@@ -1673,3 +1673,8 @@ Added 36 verified advanced Pool reference sequences and 13 additional shared pra
 - Keep scroll position, loaded images and open edits when deleting from the avatar/nameplate library.
 - Remove the redundant saved-section selector; retain alphabetical suggestions and new names in the Section name field.
 - Show each avatar/nameplate image's original pixel dimensions on its card.
+
+## 2026-09-20 — Avatar library sorting and close control
+
+- Add Unfiled first sorting for avatar and nameplate libraries across all pages.
+- Expand the chooser's close button so its center, edges and corners respond consistently.

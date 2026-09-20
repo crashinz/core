@@ -20,7 +20,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
   titleBar.appendChild(close);
   const filters = el('div'); filters.className = 'avatar-library-actions';
   const sort = el('select'); sort.dataset.popupNoDraft = ''; sort.setAttribute('aria-label', kindText('Sort avatars'));
-  for (const [value, label] of [['uploaded','Newest uploads'],['modified','Last modified'],['name','File name'],['oldest','Oldest uploads']]) { const option = el('option', label); option.value = value; sort.appendChild(option); }
+  for (const [value, label] of [['uploaded','Newest uploads'],['modified','Last modified'],['name','File name'],['oldest','Oldest uploads'],['unfiled','Unfiled first']]) { const option = el('option', label); option.value = value; sort.appendChild(option); }
   const section = el('select'); section.dataset.popupNoDraft = ''; section.setAttribute('aria-label', kindText('Avatar section'));
   const allSections = el('option', 'All sections'); allSections.value = ''; section.appendChild(allSections);
   const sectionNames = el('datalist'); sectionNames.id = `${kind}-library-sections-${userId}`;

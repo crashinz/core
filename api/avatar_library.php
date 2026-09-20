@@ -212,6 +212,7 @@ $sectionNames = $sections->fetchAll(PDO::FETCH_COLUMN);
 $section = mb_substr(trim((string)($_GET['section'] ?? '')), 0, 80);
 if ($section !== '') { $filter .= ' AND sections.value=?'; $parameters[] = $section; }
 $sort = match ((string)($_GET['sort'] ?? 'uploaded')) {
+    'unfiled' => "CASE WHEN COALESCE(TRIM(sections.value),'')='' THEN 0 ELSE 1 END ASC,a.created_at DESC,a.id DESC",
     'name' => "LOWER(COALESCE(NULLIF(names.value,''),a.safe_name)) ASC,a.id DESC",
     'modified' => 'a.updated_at DESC,a.id DESC',
     'oldest' => 'a.created_at ASC,a.id ASC',
