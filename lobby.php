@@ -1051,9 +1051,9 @@ $rooms = $roomsStmt->fetchAll();
   </div>
 </div>
 <?php endif; ?>
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260919-modal-stack')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260920-settings-drafts')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/game-recordings.js?v=20260914')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260916-popups')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260920-settings-drafts')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260916-retry')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260916-popups')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/lobby.js?v=20260920-preview')) ?>"></script>

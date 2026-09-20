@@ -680,7 +680,7 @@ function avatar_relationship_capacity_pair_admission(
         ]
         : [
             [
-                'participant_id' => (int)$initiator['id'],
+                'participant_id' => (int)$target['id'],
                 'relationship_role' => 'normal',
                 'membership_status' => 'active',
                 'member_order' => 0,
@@ -689,7 +689,7 @@ function avatar_relationship_capacity_pair_admission(
                 'anchor_json' => null,
             ],
             [
-                'participant_id' => (int)$target['id'],
+                'participant_id' => (int)$initiator['id'],
                 'relationship_role' => 'normal',
                 'membership_status' => 'active',
                 'member_order' => 1,

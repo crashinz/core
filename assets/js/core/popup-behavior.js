@@ -2,6 +2,14 @@
   'use strict';
   if (window.CoreChatPopups) return;
   const records = new Map();
+  const draftOwners = new Map();
+  const managedField = field => [...draftOwners.keys()].some(container => container.contains(field));
+  function registerDraftOwner(container, owner) {
+    draftOwners.set(container, owner);
+    for (const record of records.values()) {
+      if (record.baseline) record.baseline = record.baseline.filter(field => !container.contains(field.el));
+    }
+  }
   const selector = '.modal, .game-start-menu, #media-picker, dialog';
   const draftIds = new Set(['admin-modal', 'room-edit-modal', 'lobby-room-edit-modal', 'room-effects-modal', 'aura-modal', 'avatar-size-modal', 'webcam-audience-modal', 'message-protection-dialog', 'report-problem-modal', 'p2p-transfer-compose-modal', 'host-warn-modal', 'host-kick-modal', 'community-eject-modal', 'game-mode-modal']);
   let lastOutsideFocus = null, titleSequence = 0;
@@ -11,7 +19,7 @@
   const tracksDraft = record => draftIds.has(record.root.id) || record.root.matches('.avatar-library-dialog');
   function snapshot(record) {
     const fields = [...record.box.querySelectorAll('input,textarea,select')].filter(el =>
-      !['password','file','search','submit','button'].includes(el.type) && !/search|filter/.test(el.id || '') && !el.closest('[data-popup-no-draft]'));
+      !managedField(el) && !['password','file','search','submit','button'].includes(el.type) && !/search|filter/.test(el.id || '') && !el.closest('[data-popup-no-draft]'));
     return fields.map(el => ({el, value:el.value, checked:el.checked, selected:el.tagName === 'SELECT' ? [...el.options].map(o=>o.selected) : null}));
   }
   const extras = record => [...record.box.querySelectorAll('.aura-option.selected')].map(el=>el.dataset.auraKey).join('|');
@@ -24,19 +32,22 @@
   }
   function isDirty(record) {
     if (!tracksDraft(record) || !record.baseline) return false;
+    if ([...draftOwners].some(([container, owner]) => record.box.contains(container) && owner.isDirty())) return true;
     const current = snapshot(record);
-    return current.length !== record.baseline.length || current.some((field,i)=> {
-      const before=record.baseline[i];
+    const baseline = record.baseline.filter(field => !managedField(field.el));
+    return current.length !== baseline.length || current.some((field,i)=> {
+      const before=baseline[i];
       return field.el!==before.el || field.value!==before.value || field.checked!==before.checked || JSON.stringify(field.selected)!==JSON.stringify(before.selected);
     }) || extras(record)!==record.extraBaseline;
   }
   function discardChanges(record) {
     for (const field of record.baseline || []) {
-      if (!field.el.isConnected) continue;
+      if (!field.el.isConnected || managedField(field.el)) continue;
       field.el.value=field.value;
       if (field.checked!==undefined) field.el.checked=field.checked;
       if (field.selected) [...field.el.options].forEach((o,i)=>o.selected=field.selected[i]);
     }
+    for (const [container, owner] of draftOwners) if (record.box.contains(container)) owner.discard();
     record.root.dispatchEvent(new Event('corechat:popup-discard'));
   }
   function restoreFocus(record) {
@@ -239,7 +250,7 @@
       enhance(dialog);dialog.showModal();sync(records.get(dialog));(input||no).focus();input?.select();
     });
   }
-  window.CoreChatPopups=Object.freeze({markSaved, isDirty:root=>records.has(root)&&isDirty(records.get(root)), confirm:(message,options)=>ask(message,options),prompt:(message,value='')=>ask(message,{title:'Enter details',value,accept:'Save'}),
+  window.CoreChatPopups=Object.freeze({markSaved, registerDraftOwner, isDirty:root=>records.has(root)&&isDirty(records.get(root)), confirm:(message,options)=>ask(message,options),prompt:(message,value='')=>ask(message,{title:'Enter details',value,accept:'Save'}),
     reflow(root){const record=records.get(root);if(record?.active&&record.moved){const r=record.box.getBoundingClientRect();clamp(record,r.left,r.top);}},
     clearDismissed(root){const record=records.get(root);record?.reopen?.remove();if(record)record.reopen=null;},
     consumeDiscardApproval(root){const approved=root?.dataset.popupDiscardApproved==='1';if(root)delete root.dataset.popupDiscardApproved;return approved;}});

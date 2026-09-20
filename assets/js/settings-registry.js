@@ -299,6 +299,12 @@
           this.selectView(fragment, false);
         });
       }
+      // This model survives filtering, category changes and successful-save renders.
+      // Let the popup guard use it instead of comparing replaced DOM controls.
+      window.CoreChatPopups?.registerDraftOwner?.(this.container, {
+        isDirty: () => this.entries.some(entry => this.isDirty(entry)),
+        discard: () => { if (this.registry) this.setRegistry(this.registry); },
+      });
       if (options.registry) this.setRegistry(options.registry);
     }
 

@@ -1078,8 +1078,8 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
   </section>
 </main>
 <script src="<?= e(app_url('/assets/js/avatar-processing.js')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260919-modal-stack')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260916-popups')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260920-settings-drafts')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260920-settings-drafts')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/setup.js')) ?>"></script>
 </body>
 </html>

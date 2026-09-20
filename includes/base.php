@@ -3015,7 +3015,8 @@ function avatar_relationship_sync_legacy(
     int $targetId,
     string $mode,
     bool $clearExisting = true,
-    ?string $lapSide = 'bottom-right'
+    ?string $lapSide = 'bottom-right',
+    bool $initiatorOnRight = false
 ): ?array {
     if ($initiatorId <= 0 || $targetId <= 0 || $initiatorId === $targetId) return null;
     $mode = avatar_relationship_mode($mode);
@@ -3053,6 +3054,17 @@ function avatar_relationship_sync_legacy(
         }
     }
     $metadata = avatar_relationship_metadata($initiatorId, $targetId, $mode, $relationshipId, $lapSide);
+    // New normal links place the arriving participant to the recipient's right.
+    // Legacy reconciliation and existing explicitly ordered groups keep their order.
+    $existingMetadata = $existing ? (avatar_relationship_decode_json($existing['metadata_json'] ?? null)['value'] ?? []) : [];
+    if ($mode === 'normal' && ((!$existing && $initiatorOnRight)
+        || ($existingMetadata['order'] ?? null) === [$targetId, $initiatorId])) {
+        $metadata['members'] = [
+            ['participantId' => $targetId, 'role' => 'target', 'order' => 0],
+            ['participantId' => $initiatorId, 'role' => 'initiator', 'order' => 1],
+        ];
+        $metadata['order'] = [$targetId, $initiatorId];
+    }
     $metadataJson = json_encode($metadata, JSON_UNESCAPED_SLASHES);
     $anchorsJson = json_encode($metadata['anchors'], JSON_UNESCAPED_SLASHES);
     $optionsJson = json_encode($metadata['options'], JSON_UNESCAPED_SLASHES);
@@ -3388,7 +3400,8 @@ function avatar_relationship_create_pair_atomic(
             $targetId,
             $mode,
             false,
-            $lapSide
+            $lapSide,
+            true
         );
 
         if (!$relationship) {

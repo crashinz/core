@@ -13179,6 +13179,32 @@ function updateRoomLayout() {
   participants.forEach(positionAvatar);
 }
 
+// The avatar area can change after entry without a browser resize (late layout,
+// restored dividers or a desktop presentation change). Repaint when its real
+// viewport settles so an avatar is not left clipped at an earlier position.
+let avatarStageResizeFrame = null;
+if (typeof ResizeObserver === 'function') {
+  let lastAvatarStageSize = '';
+  const avatarStageObserver = new ResizeObserver(() => {
+    const layer = avatarViewportLayer || roomStage;
+    const width = layer?.clientWidth || 0, height = layer?.clientHeight || 0;
+    const size = `${width}:${height}:${roomStage?.clientWidth}:${roomStage?.clientHeight}`;
+    if (!width || !height || size === lastAvatarStageSize) return;
+    lastAvatarStageSize = size;
+    if (avatarStageResizeFrame !== null) return;
+    avatarStageResizeFrame = requestAnimationFrame(() => {
+      avatarStageResizeFrame = null;
+      updateRoomLayout();
+      avatarRuntime?.coordinator?.scheduleRelationshipRefresh({ all: true, reason: 'avatar-stage-resize' });
+    });
+  });
+  for (const layer of new Set([roomStage, avatarViewportLayer])) if (layer) avatarStageObserver.observe(layer);
+  window.addEventListener('pagehide', () => {
+    avatarStageObserver.disconnect();
+    if (avatarStageResizeFrame !== null) cancelAnimationFrame(avatarStageResizeFrame);
+  }, { once: true });
+}
+
 function runFrameSync() {
   frameQueued = false;
 
