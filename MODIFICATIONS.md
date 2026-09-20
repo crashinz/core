@@ -1666,3 +1666,10 @@ Added 36 verified advanced Pool reference sequences and 13 additional shared pra
 - Keep avatar/nameplate choosers open through nested confirmation dialogs, refresh saved names and sections immediately, and provide alphabetical existing-section selectors.
 - Keep expanded library controls within the viewport, improve webcam-audience spacing and empty report-status presentation, and consolidate avatar menu actions.
 - Provide a database-free compatibility handshake and read-only connection status for compatible clients.
+
+
+## 2026-09-20 — Avatar library browsing
+
+- Keep scroll position, loaded images and open edits when deleting from the avatar/nameplate library.
+- Remove the redundant saved-section selector; retain alphabetical suggestions and new names in the Section name field.
+- Show each avatar/nameplate image's original pixel dimensions on its card.

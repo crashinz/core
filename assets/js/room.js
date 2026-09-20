@@ -9622,7 +9622,7 @@ document.getElementById('tab-manage-relationship')?.addEventListener('click', ()
 document.getElementById('ctx-change-avatar').addEventListener('click', async () => {
   closeContextMenu();
   try {
-    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260919-library-sections`);
+    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260920-library-scroll`);
     await openAvatarLibrary({
       userId: cfg.myUserId,
       base: APP_BASE,
@@ -9653,7 +9653,7 @@ ctxChangeNameplate?.addEventListener('click', async () => {
   closeContextMenu();
   try {
     const [{ openAvatarLibrary }, { prepareNameplateFile }, policy] = await Promise.all([
-      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260919-library-sections`),
+      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260920-library-scroll`),
       import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
       runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
     ]);

@@ -25,22 +25,6 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
   const allSections = el('option', 'All sections'); allSections.value = ''; section.appendChild(allSections);
   const sectionNames = el('datalist'); sectionNames.id = `${kind}-library-sections-${userId}`;
   let knownSections = [];
-  const sectionPickers = new Map();
-  const fillSectionPicker = (picker, input) => {
-    const placeholder = el('option', 'Choose saved section…'); placeholder.value = '';
-    picker.replaceChildren(placeholder);
-    for (const value of knownSections) { const option = el('option', value); option.value = value; picker.appendChild(option); }
-    picker.value = knownSections.includes(input.value) ? input.value : '';
-  };
-  const existingSectionPicker = input => {
-    const picker = el('select'); picker.setAttribute('aria-label', kindText('Saved avatar sections'));
-    picker.dataset.popupNoDraft = '';
-    Object.assign(picker.style, { width: '100%', minWidth: '0', maxWidth: '100%' });
-    sectionPickers.set(picker, input); fillSectionPicker(picker, input);
-    picker.addEventListener('change', () => { if (picker.value) { input.value = picker.value; input.dispatchEvent(new Event('input', { bubbles: true })); } });
-    input.addEventListener('input', () => { picker.value = knownSections.includes(input.value) ? input.value : ''; });
-    return picker;
-  };
   const updateSections = values => {
     knownSections = [...new Set(values.filter(value => typeof value === 'string' && value))].sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
     const selected = section.value;
@@ -50,7 +34,6 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
       const suggestion = el('option'); suggestion.value = value; sectionNames.appendChild(suggestion);
     }
     section.value = selected;
-    for (const [picker,input] of sectionPickers) { if (!picker.isConnected && picker !== uploadSectionPicker) sectionPickers.delete(picker); else fillSectionPicker(picker,input); }
   };
   const uploadSection = el('input'); uploadSection.placeholder = 'Optional section'; uploadSection.maxLength = 80; uploadSection.setAttribute('list', sectionNames.id);
   uploadSection.id = sectionNames.id + '-upload';
@@ -58,8 +41,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
   const uploadSectionLabel = el('label'); uploadSectionLabel.htmlFor = uploadSection.id; uploadSectionLabel.hidden = true;
   Object.assign(uploadSectionLabel.style, { flex: '1 1 12rem', minWidth: '0', maxWidth: '100%' });
   const uploadSectionTitle = el('span', 'Folder upload section'); uploadSectionTitle.style.display = 'block';
-  const uploadSectionPicker = existingSectionPicker(uploadSection);
-  uploadSectionLabel.append(uploadSectionTitle, uploadSectionPicker, uploadSection);
+  uploadSectionLabel.append(uploadSectionTitle, uploadSection);
   filters.style.flexWrap = 'wrap';
   filters.append(sort, section, uploadSectionLabel, sectionNames);
   const explanation = el('p', 'Your uploads stay private unless you share them. Making an avatar private stops future library reuse; it cannot recall copies already chosen by others.');
@@ -138,22 +120,41 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
     }
     return postForm(form);
   };
-  const load = async (append = false) => {
+  const load = async (append = false, { preserveView = false, removedId = '', notice = '' } = {}) => {
     const current = ++generation;
-    if (!append) { page = 1; gallery.replaceChildren(); }
+    const scrollTop = dialog.scrollTop;
+    const previousFocus = document.activeElement;
+    const keptCards = preserveView ? new Map([...gallery.children].map(card => [card.dataset.assetId, card])) : null;
+    const anchor = preserveView ? [...gallery.children].find(card => card.dataset.assetId !== String(removedId)
+      && card.getBoundingClientRect().bottom > titleBar.getBoundingClientRect().bottom) : null;
+    const anchorTop = anchor ? anchor.getBoundingClientRect().top - dialog.getBoundingClientRect().top : 0;
+    if (!append && !preserveView) { page = 1; gallery.replaceChildren(); }
     status.textContent = kindText('Loading avatars...'); more.disabled = true;
     try {
-      const params = new URLSearchParams({ kind, view, page: String(page), sort: sort.value, section: section.value });
-      const response = await fetch(`${base}/api/avatar_library.php?${params}`, { credentials: 'same-origin', cache: 'no-store' });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || kindText('Avatars could not be loaded.'));
+      const items = [];
+      let data;
+      // Reload the loaded range after deletion: offset pagination shifts when an item is removed.
+      // Keep its cards mounted until the new range arrives so scroll and unsaved editors survive.
+      for (let requestedPage = preserveView ? 1 : page; requestedPage <= page; requestedPage++) {
+        const params = new URLSearchParams({ kind, view, page: String(requestedPage), sort: sort.value, section: section.value });
+        const response = await fetch(`${base}/api/avatar_library.php?${params}`, { credentials: 'same-origin', cache: 'no-store' });
+        data = await response.json();
+        if (!response.ok) throw new Error(data.error || kindText('Avatars could not be loaded.'));
+        if (current !== generation || !dialog.isConnected) return;
+        items.push(...data.items);
+        if (!data.hasMore) { page = requestedPage; break; }
+      }
       if (current !== generation || !dialog.isConnected) return;
       folder.hidden = !data.canPublishFolder;
       uploadSectionLabel.hidden = !data.canPublishFolder;
       updateSections(data.sections || []);
       for (const [button, key] of [[mine,'mine'],[privateAvatars,'private'],[community,'community']]) { button.classList.toggle('btn-primary', view === key); button.setAttribute('aria-pressed', String(view === key)); }
-      for (const avatar of data.items) {
+      const orderedCards = [];
+      for (const avatar of items) {
+        const existing = keptCards?.get(String(avatar.id));
+        if (existing) { orderedCards.push(existing); continue; }
         const card = el('article');
+        card.dataset.assetId = String(avatar.id);
         const image = el('img'); image.src = `${base}/api/avatar_library.php?action=image&kind=${kind}&id=${encodeURIComponent(avatar.id)}`; image.alt = kindText('Stored avatar'); image.loading = 'lazy';
         const select = el('button', 'Use avatar'); select.type = 'button'; select.className = 'btn';
         select.addEventListener('click', async () => {
@@ -166,7 +167,15 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
           finally { busy = false; select.disabled = false; }
         });
         const cardName = el('strong', avatar.name), cardSection = el('small', avatar.section || 'Unfiled');
-        card.append(image, cardName, cardSection, select);
+        const dimensions = el('small', 'Dimensions loading…'); dimensions.className = 'avatar-library-dimensions minor';
+        const showDimensions = () => {
+          dimensions.textContent = image.naturalWidth > 0 && image.naturalHeight > 0
+            ? `${image.naturalWidth} × ${image.naturalHeight} px` : 'Dimensions unavailable';
+        };
+        image.addEventListener('load', showDimensions);
+        image.addEventListener('error', () => { dimensions.textContent = 'Dimensions unavailable'; });
+        if (image.complete && image.naturalWidth) showDimensions();
+        card.append(image, cardName, cardSection, dimensions, select);
         if (avatar.canOrganize) {
           const edit = el('details'); edit.appendChild(el('summary', 'Name & section'));
           const name = el('input'); name.value = avatar.name; name.maxLength = 180; name.setAttribute('aria-label', kindText('Avatar file name'));
@@ -189,7 +198,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
             catch (error) { status.textContent = kindText(error.message); }
             finally { busy = false; delete dialog.dataset.popupBusy; save.disabled = false; }
           });
-          edit.append(name, existingSectionPicker(category), category, save); card.appendChild(edit);
+          edit.append(name, category, save); card.appendChild(edit);
         }
         if (avatar.mine) {
           const share = el('button', avatar.shared ? 'Make private' : 'Share with community'); share.type = 'button'; share.className = 'btn';
@@ -217,21 +226,36 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
             busy = true; remove.disabled = true;
             try {
               await requestForm({ action: avatar.mine ? 'delete' : 'remove_community', id: avatar.id });
-              await load();
-              status.textContent = kindText(avatar.mine
+              await load(false, { preserveView: true, removedId: avatar.id, notice: kindText(avatar.mine
                 ? 'Avatar deleted from your library and unshared. Images already in use and existing copies are unchanged.'
-                : 'Avatar removed from the community library. The owner\'s private copy and existing uses are unchanged.');
+                : 'Avatar removed from the community library. The owner\'s private copy and existing uses are unchanged.') });
             } catch (error) { status.textContent = kindText(error.message); }
             finally { busy = false; remove.disabled = false; }
           });
           card.appendChild(remove);
         }
-        gallery.appendChild(card);
+        if (preserveView) orderedCards.push(card);
+        else gallery.appendChild(card);
       }
-      window.CoreChatPopups?.markSaved(dialog);
-      more.hidden = !data.hasMore; status.textContent = gallery.childElementCount ? '' : kindText('No avatars in this collection yet.');
+      if (preserveView) {
+        const retained = new Set(orderedCards);
+        for (const card of keptCards.values()) if (!retained.has(card)) card.remove();
+        for (const [index, card] of orderedCards.entries()) {
+          if (gallery.children[index] !== card) gallery.insertBefore(card, gallery.children[index] || null);
+        }
+      } else window.CoreChatPopups?.markSaved(dialog);
+      more.hidden = !data.hasMore; status.textContent = notice || (gallery.childElementCount ? '' : kindText('No avatars in this collection yet.'));
     } catch (error) { if (current === generation) status.textContent = kindText(error.message); }
-    finally { if (current === generation) { more.disabled = false; clampPicker(); } }
+    finally {
+      if (current === generation) {
+        more.disabled = false; clampPicker();
+        if (preserveView) {
+          if (anchor?.isConnected) dialog.scrollTop += anchor.getBoundingClientRect().top - dialog.getBoundingClientRect().top - anchorTop;
+          else dialog.scrollTop = scrollTop;
+          if (previousFocus && !previousFocus.isConnected) (anchor?.querySelector('button') || more).focus({ preventScroll: true });
+        }
+      }
+    }
   };
   local.addEventListener('click', async () => {
     if (busy) return;
