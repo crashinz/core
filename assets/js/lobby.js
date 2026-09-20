@@ -199,18 +199,18 @@ function roomCardSelector(id) {
 }
 
 function roomVideoPlaceholder(room) {
-  return room?.video_without_thumb ? '<div class="room-video-placeholder">Video Room</div>' : '';
+  return !room?.preview_locked && room?.video_without_thumb ? '<div class="room-video-placeholder">Video Room</div>' : '';
 }
 
 function roomCardHtml(room) {
-  const bg = room.tile_background_url ? ` style="background-image:url('${esc(room.tile_background_url)}')"` : '';
+  const bg = !room.preview_locked && room.tile_background_url ? ` style="background-image:url('${esc(room.tile_background_url)}')"` : '';
   const liveDomain = room.live_website_target_host
     ? `<div class="live-website-room-domain"><span>Live Website</span>${esc(room.live_website_target_host)}</div>`
     : '';
   const edit = room.can_edit
     ? `<button class="btn btn-primary room-edit-open" type="button" data-room-id="${esc(room.public_id)}" data-room-name="${esc(room.name)}" data-can-delete="${room.can_delete ? 'true' : 'false'}" data-room-bg="${esc(room.background_url || '')}" data-room-thumb="${esc(room.thumb_url || '')}" data-room-mime="${esc(room.background_mime || '')}">Edit</button>`
     : '';
-  return `<div class="room-card-media"${bg}>${roomVideoPlaceholder(room)}${room.is_private ? '<span class="room-private-badge">PRIVATE ROOM</span>' : ''}</div>
+  return `<div class="room-card-media${room.preview_locked ? ' is-password-protected' : ''}"${bg}>${roomVideoPlaceholder(room)}${room.is_private ? `<span class="room-private-badge">${room.preview_locked ? 'PASSWORD PROTECTED' : 'PRIVATE ROOM'}</span>` : ''}</div>
     <div class="room-card-body">
       <h2 class="room-card-name">${esc(room.name)}</h2>
       ${liveDomain}
@@ -245,12 +245,16 @@ function updateRoomCard(card, room) {
   const edit = card.querySelector('.room-edit-open');
   const media = card.querySelector('.room-card-media');
   if (media) {
-    const image = room.tile_background_url ? `url(${JSON.stringify(String(room.tile_background_url))})` : '';
+    const image = !room.preview_locked && room.tile_background_url ? `url(${JSON.stringify(String(room.tile_background_url))})` : '';
     if (media.style.backgroundImage !== image) media.style.backgroundImage = image;
-    const badge = media.querySelector('.room-private-badge');
+    media.classList.toggle('is-password-protected', !!room.preview_locked);
+    let badge = media.querySelector('.room-private-badge');
     if (!room.is_private) badge?.remove();
-    else if (!badge) media.insertAdjacentHTML('beforeend', '<span class="room-private-badge">PRIVATE ROOM</span>');
-    if (!room.video_without_thumb) media.querySelector('.room-video-placeholder')?.remove();
+    else {
+      if (!badge) { badge = document.createElement('span'); badge.className = 'room-private-badge'; media.append(badge); }
+      badge.textContent = room.preview_locked ? 'PASSWORD PROTECTED' : 'PRIVATE ROOM';
+    }
+    if (room.preview_locked || !room.video_without_thumb) media.querySelector('.room-video-placeholder')?.remove();
     else if (!media.querySelector('.room-video-placeholder')) media.insertAdjacentHTML('beforeend', roomVideoPlaceholder(room));
   }
   if (name && name.textContent !== room.name) name.textContent = room.name;

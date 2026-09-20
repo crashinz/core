@@ -94,7 +94,7 @@ $rooms = $roomsStmt->fetchAll();
   <title><?= e(branded_page_title('Lobby', $pdo, 'lobby')) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css?v=20260913-permission-toggles')) ?>">
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/live-website-rooms.css')) ?>">
-  <link rel="stylesheet" href="<?= e(app_url('/assets/css/room-access.css')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/room-access.css?v=20260920-preview')) ?>">
   <?php if ($canvasAvailable): ?><link rel="stylesheet" href="<?= e(app_url('/extensions/canvas/assets/canvas.css?v=20260828-checklist-r2')) ?>"><?php endif; ?>
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=e365788d6f6d')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/unused-image-cleanup.css?v=20260915')) ?>">
@@ -182,6 +182,7 @@ $rooms = $roomsStmt->fetchAll();
         </div>
       </form>
       <?php foreach ($rooms as $room): ?>
+      <?php $room = room_access_lobby_preview($room, $user); ?>
       <article class="room-card" data-room-id="<?= e($room['public_id']) ?>">
         <?php
           $tileBg = room_import_tile_image_from_layout($room['import_layout_json'] ?? null);
@@ -192,8 +193,8 @@ $rooms = $roomsStmt->fetchAll();
                   : $room['background_path'];
           }
         ?>
-        <div class="room-card-media" <?php if ($tileBg): ?>style="background-image:url('<?= e(media_url($tileBg)) ?>')"<?php endif; ?>>
-          <?php if (room_access_is_private($room)): ?><span class="room-private-badge">PRIVATE ROOM</span><?php endif; ?>
+        <div class="room-card-media<?= $room['preview_locked'] ? ' is-password-protected' : '' ?>" <?php if ($tileBg): ?>style="background-image:url('<?= e(media_url($tileBg)) ?>')"<?php endif; ?>>
+          <?php if (room_access_is_private($room)): ?><span class="room-private-badge"><?= $room['preview_locked'] ? 'PASSWORD PROTECTED' : 'PRIVATE ROOM' ?></span><?php endif; ?>
           <?php if (!$tileBg && $room['background_path'] && str_starts_with((string)$room['background_mime'], 'video/')): ?>
           <div class="room-video-placeholder">Video Room</div>
           <?php endif; ?>
@@ -1055,7 +1056,7 @@ $rooms = $roomsStmt->fetchAll();
 <script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260916-popups')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260916-retry')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260916-popups')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/lobby.js?v=20260916-popups')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/lobby.js?v=20260920-preview')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/unused-image-cleanup.js?v=20260915')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260916-popups')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>

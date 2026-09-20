@@ -29,6 +29,17 @@ function room_access_allowed(array $room, array $user): bool {
     return is_string($grant) && hash_equals(hash('sha256', $room['room_password_hash']), $grant);
 }
 
+/** Redact preview sources before either lobby renderer can expose or request them. */
+function room_access_lobby_preview(array $room, array $user): array {
+    $room['preview_locked'] = !room_access_allowed($room, $user);
+    if ($room['preview_locked']) {
+        foreach (['background_path', 'background_mime', 'background_thumb_path', 'import_layout_json'] as $field) {
+            $room[$field] = null;
+        }
+    }
+    return $room;
+}
+
 function room_access_for_session(PDO $pdo, int $sessionId): array {
     $q = $pdo->prepare('SELECT r.id,r.public_id,r.owner_id,r.room_password_hash FROM rooms r JOIN room_sessions s ON s.room_id=r.id WHERE s.id=?');
     $q->execute([$sessionId]);

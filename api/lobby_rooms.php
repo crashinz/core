@@ -38,6 +38,7 @@ function lobby_room_rows(PDO $pdo, array $user): array {
 }
 
 function lobby_room_payload(array $room, array $user): array {
+    $room = room_access_lobby_preview($room, $user);
     $backgroundPath = (string)($room['background_path'] ?? '');
     $backgroundMime = (string)($room['background_mime'] ?? '');
     $thumbPath = (string)($room['background_thumb_path'] ?? '');
@@ -64,6 +65,7 @@ function lobby_room_payload(array $room, array $user): array {
         'live_website_target_host' => (string)($room['live_website_target_host'] ?? ''),
         'can_refresh_preview' => !empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || live_website_rooms_is_admin($user)),
         'is_private' => room_access_is_private($room),
+        'preview_locked' => $room['preview_locked'],
         'can_delete' => room_access_can_delete($user, $room),
         'can_edit' => empty($room['live_website_target_host']) && ((int)$room['owner_id'] === (int)$user['id'] || in_array($user['role'] ?? 'user', ['admin', 'developer'], true)),
         'enter_url' => app_url('/chatroom.php?id=' . rawurlencode((string)$room['public_id'])),

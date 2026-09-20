@@ -10,6 +10,11 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Password-protected lobby previews - 2026-09-20
+
+- Replace locked room previews with PASSWORD PROTECTED until the viewer has room access. Omit background and thumbnail URLs from the initial lobby and refreshed cards for uploaded, imported and live-website rooms.
+- Preserve existing owner/admin access and password grants for the authenticated session. Changed passwords hide previews again; public rooms keep their previews.
+
 ## Optional two-factor authentication - 2026-09-20
 
 - Add optional Aegis-compatible authenticator setup during registration, through a sign-in setup link, or in Account > Security & Privacy.
