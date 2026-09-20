@@ -1680,3 +1680,10 @@ Added 36 verified advanced Pool reference sequences and 13 additional shared pra
 - Expand the chooser's close button so its center, edges and corners respond consistently.
 
 - Avatar and nameplate chooser: retain a responsive full 44px close target and title-bar dragging.
+
+- Avatar/nameplate local picker retains the chooser on cancellation or upload failure and offers a standard file-input retry when a host denies filesystem handle reads.
+
+
+## Direct transfer completion reliability - 2026-09-20
+
+Full transfers wait for the server-confirmed connection state before sending payload bytes, preventing small-file completion from racing connection registration. Completed local downloads retain their backing storage until released by the receiving UI; completed peers no longer display misleading reconnect prompts.

@@ -34,6 +34,7 @@ export class P2PTransferService {
   #pollFailures = 0;
   #nextPollAt = 0;
   #localStorage = new P2PLocalTransferStorage();
+  #completedOutputs = new Map();
 
   configure(context = {}) {
     this.#context = context;
@@ -74,7 +75,8 @@ export class P2PTransferService {
     this.#peers.clear();
     this.#offers.clear();
     this.#pendingSignalAcks.clear();
-    this.#localStorage.destroy().catch(() => {});
+    Promise.all([...this.#completedOutputs.values()].map(release => release()))
+      .finally(() => this.#localStorage.destroy()).catch(() => {});
   }
 
   async explicitLogout() {
@@ -439,14 +441,14 @@ export class P2PTransferService {
         }
         if (TERMINAL.has(offer.status)) {
           this.#closePeer(this.#peers.get(offer.id), offer.status);
-          await this.#localStorage.cleanupAttempt(offer.id).catch(() => {});
+          if (!this.#completedOutputs.has(offer.id)) await this.#localStorage.cleanupAttempt(offer.id).catch(() => {});
           this.#clearTransferState(offer.id);
         }
       }
       for (const [offerId, previous] of this.#offers) {
         if (seenOfferIds.has(offerId) || TERMINAL.has(previous.status)) continue;
         this.#closePeer(this.#peers.get(offerId), 'authorization-ended');
-        await this.#localStorage.cleanupAttempt(offerId).catch(() => {});
+        if (!this.#completedOutputs.has(offerId)) await this.#localStorage.cleanupAttempt(offerId).catch(() => {});
         this.#clearTransferState(offerId);
         this.#offers.delete(offerId);
         this.#status(previous, 'failed', 'The transfer is no longer authorized.');
@@ -468,7 +470,7 @@ export class P2PTransferService {
         await this.#context.apiPost('/api/p2p_transfer.php', {action: 'signal-ack', signal_id: Number(signal.id)});
         this.#pendingSignalAcks.delete(Number(signal.id));
       }
-      await this.#localStorage.cleanupInvalid(validDurableIds).catch(() => {});
+      await this.#localStorage.cleanupInvalid([...validDurableIds, ...this.#completedOutputs.keys()]).catch(() => {});
     } finally {
       this.#polling = false;
     }
@@ -709,7 +711,12 @@ export class P2PTransferService {
     channel.binaryType = 'arraybuffer';
     channel.bufferedAmountLowThreshold = LOW_WATER;
     channel.onopen = () => {
-      if (peer.sender) (peer.previewOnly ? this.#sendPreview(peer) : this.#sendFile(peer)).catch(error => {
+      // A small payload can finish before getStats/server confirmation completes.
+      // Publish the connection state before sending any full-transfer bytes.
+      if (peer.sender) this.#connectionEstablished(peer).then(() => {
+        if (peer.closed) return;
+        return peer.previewOnly ? this.#sendPreview(peer) : this.#sendFile(peer);
+      }).catch(error => {
         if (error?.message === 'Direct connection could not be established.') this.#recover(peer, error);
         else this.#fail(peer, error);
       });
@@ -722,7 +729,13 @@ export class P2PTransferService {
     channel.onerror = () => this.#recover(peer, new Error('Direct connection could not be established.'));
   }
 
-  async #connectionEstablished(peer) {
+  #connectionEstablished(peer) {
+    // Both the connection-state event and data-channel open can arrive first.
+    // Share one confirmation so duplicate events cannot repeat the transition.
+    return peer.connectionReady ||= this.#confirmConnectionEstablished(peer);
+  }
+
+  async #confirmConnectionEstablished(peer) {
     if (peer.previewOnly) {
       this.#status(peer.offer, 'preview-connecting', 'Preparing a bounded local preview. The full transfer is not authorized.');
       return;
@@ -987,6 +1000,7 @@ export class P2PTransferService {
         await this.#completeReceiveBatch(peer);
       } else if (message.kind === 'verified') {
         if (!peer.sender) throw new Error('Transfer verification was invalid.');
+        peer.completed = true;
         this.#resumeStates.delete(peer.offer.id);
         this.#sources.delete(peer.offer.id);
         await this.#localStorage.cleanupAttempt(peer.offer.id).catch(() => {});
@@ -1326,23 +1340,30 @@ export class P2PTransferService {
       outputCleanup = finalized.cleanup;
       name = `CoreChat-transfer-${peer.offer.id.slice(-8)}.zip`;
     }
-    await this.#update(peer.offer.id, 'complete');
-    peer.channel.send(JSON.stringify({kind: 'verified', completed: successful.length, total: Number(peer.offer.fileCount)}));
-    this.#status(peer.offer, 'completed', `${successful.length} of ${peer.offer.fileCount} files verified locally.`);
     const savedDirect = directBatch || successful.some(result => String(result.storageMode || '').startsWith('direct'));
     let released = false;
     const release = async () => {
       if (released) return;
       released = true;
+      this.#completedOutputs.delete(peer.offer.id);
       for (const result of successful) await result.cleanup?.().catch?.(() => {});
       await outputCleanup?.().catch?.(() => {});
       await this.#localStorage.cleanupAttempt(peer.offer.id).catch(() => {});
     };
-    if (this.#context?.onReceived) {
-      await this.#context.onReceived({offer: peer.offer, blob: output, name, kind: peer.offer.kind, results: peer.results, savedDirect, release});
-    } else {
-      await release();
-    }
+    // Keep OPFS-backed downloads alive until the UI releases them after Save,
+    // dismissal timeout, or navigation. Terminal polling must not delete them.
+    this.#completedOutputs.set(peer.offer.id, release);
+    try {
+      await this.#update(peer.offer.id, 'complete');
+      peer.completed = true;
+      if (peer.channel.readyState === 'open') peer.channel.send(JSON.stringify({kind: 'verified', completed: successful.length, total: Number(peer.offer.fileCount)}));
+      this.#status(peer.offer, 'completed', `${successful.length} of ${peer.offer.fileCount} files verified locally.`);
+      if (this.#context?.onReceived) {
+        await this.#context.onReceived({offer: peer.offer, blob: output, name, kind: peer.offer.kind, results: peer.results, savedDirect, release});
+      } else {
+        await release();
+      }
+    } catch (error) { await release(); throw error; }
     this.#resumeStates.delete(peer.offer.id);
   }
 
@@ -1544,7 +1565,7 @@ export class P2PTransferService {
   }
 
   async #recover(peer, error) {
-    if (!peer || peer.closed || peer.recovering) return;
+    if (!peer || peer.closed || peer.completed || peer.recovering || TERMINAL.has(this.#offers.get(peer.offer.id)?.status)) return;
     peer.recovering = true;
     const state = this.#resumeStates.get(peer.offer.id);
     const expiry = serverTime(peer.offer.expiresAt);

@@ -1,4 +1,4 @@
-export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, prepareFile, postForm, chooseFallback, kind = 'avatar' }) {
+export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, prepareFile, postForm, kind = 'avatar' }) {
   const kindText = value => kind === 'nameplate' ? String(value).replace(/avatar/gi, word => word[0] === 'A' ? 'Nameplate' : 'nameplate') : String(value);
   const el = (tag, text = '') => { const item = document.createElement(tag); item.textContent = kindText(text); return item; };
   const dialog = el('dialog'); dialog.className = 'avatar-library-dialog';
@@ -49,8 +49,13 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
   const gallery = el('div'); gallery.className = 'avatar-library-grid';
   const more = el('button', 'Load more'); more.type = 'button'; more.className = 'btn'; more.hidden = true;
   const folderInput = el('input'); folderInput.type = 'file'; folderInput.multiple = true; folderInput.hidden = true; folderInput.accept = 'image/*'; folderInput.setAttribute('webkitdirectory', '');
-  dialog.append(titleBar, actions, filters, explanation, status, gallery, more, folderInput);
+  const localInput = el('input'); localInput.type = 'file'; localInput.hidden = true;
+  localInput.accept = '.png,.jpg,.jpeg,.gif,.webp';
+  localInput.setAttribute('aria-label', kindText('Local avatar image'));
+  dialog.append(titleBar, actions, filters, explanation, status, gallery, more, folderInput, localInput);
   let view = 'mine', page = 1, generation = 0, busy = false;
+  // Retain a standard input for hosts that lack or reject filesystem handles.
+  let basicLocalPicker = !window.showOpenFilePicker;
   const visualViewport = window.visualViewport;
   let dragState = null;
   const clampPicker = (left, top) => {
@@ -257,15 +262,33 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
       }
     }
   };
+  const applyLocalFile = async file => {
+    if (!file || !dialog.isConnected) return;
+    busy = true; dialog.dataset.popupBusy = 'true'; local.disabled = true;
+    status.textContent = kindText('Applying avatar...');
+    try { await applyFile(file); closePicker(); }
+    catch (error) { status.textContent = error?.code === 'OUTSIDE_CONTENT_CANCELLED' ? '' : kindText(error.message || 'The image could not be applied.'); }
+    finally { busy = false; delete dialog.dataset.popupBusy; local.disabled = false; localInput.value = ''; }
+  };
+  localInput.addEventListener('change', () => { if (!busy) applyLocalFile(localInput.files?.[0]); });
   local.addEventListener('click', async () => {
     if (busy) return;
-    if (!window.showOpenFilePicker) { closePicker(); chooseFallback(); return; }
+    if (basicLocalPicker) { localInput.value = ''; localInput.click(); return; }
+    let file;
+    busy = true; dialog.dataset.popupBusy = 'true'; local.disabled = true;
     try {
       // The browser remembers a separate directory for this stable account-specific picker ID.
       const [handle] = await window.showOpenFilePicker({ id: `${kind}-user-${userId}`.slice(0, 32), startIn: 'pictures', multiple: false, types: [{ description: kindText('Avatar images'), accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp'] } }] });
-      busy = true; status.textContent = kindText('Applying avatar...'); await applyFile(await handle.getFile()); closePicker();
-    } catch (error) { if (error.name !== 'AbortError') status.textContent = kindText(error.message); }
-    finally { busy = false; }
+      file = await handle.getFile();
+    } catch (error) {
+      if (['NotAllowedError', 'SecurityError', 'NotSupportedError'].includes(error.name)) {
+        basicLocalPicker = true;
+        // A fresh click supplies user activation; do not open another picker
+        // after the asynchronous permission failure or retry an upload.
+        status.textContent = 'This app could not read the selected file. Click Choose local image again to use the standard file picker.';
+      } else if (error.name !== 'AbortError') status.textContent = kindText(error.message);
+    } finally { busy = false; delete dialog.dataset.popupBusy; local.disabled = false; }
+    if (file) await applyLocalFile(file);
   });
   mine.addEventListener('click', () => { if (!busy) { view = 'mine'; load(); } });
   privateAvatars.addEventListener('click', () => { if (!busy) { view = 'private'; load(); } });

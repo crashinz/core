@@ -684,7 +684,7 @@ async function initializeAvatarRuntime() {
   import(appUrl('/assets/js/core/runtime-issue-capture-service.js?v=20260913-local-failure-recovery')),
     import(appUrl('/assets/js/runtime/gesture/gesture-presentation-service.js')),
     import(appUrl('/assets/js/runtime/gesture/gesture-catalog-controller.js?v=20260914-gesture-actions')),
-    import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js?v=20260913-server-clock')),
+    import(appUrl('/assets/js/runtime/chat/services/p2p-transfer-service.js?v=20260920-transfer-ready')),
     import(appUrl('/assets/js/core/animation-server-clock.js?v=20260913-r2')),
     import(appUrl('/assets/js/runtime/chat/services/chat-outbox.js?v=20260917')),
   ]);
@@ -9622,14 +9622,13 @@ document.getElementById('tab-manage-relationship')?.addEventListener('click', ()
 document.getElementById('ctx-change-avatar').addEventListener('click', async () => {
   closeContextMenu();
   try {
-    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260920-library-unfiled`);
+    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260920-file-picker`);
     await openAvatarLibrary({
       userId: cfg.myUserId,
       base: APP_BASE,
       applyFile: applyAvatarFile,
       applyAsset: id => applyLibraryAsset('avatar', id),
       prepareFile: file => window.ChatSpaceAvatar ? window.ChatSpaceAvatar.prepareAvatarFile(file) : Promise.resolve(file),
-      chooseFallback: () => avatarFileInput.click(),
       postForm: form => {
         form.append('_csrf', CSRF_TOKEN);
         return postOutsideContentForm(runtimeRequestClient, '/api/avatar_library.php', form, { operation: 'upload-avatar', endpointCategory: 'avatar' });
@@ -9653,7 +9652,7 @@ ctxChangeNameplate?.addEventListener('click', async () => {
   closeContextMenu();
   try {
     const [{ openAvatarLibrary }, { prepareNameplateFile }, policy] = await Promise.all([
-      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260920-library-unfiled`),
+      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260920-file-picker`),
       import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
       runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
     ]);
@@ -9661,7 +9660,6 @@ ctxChangeNameplate?.addEventListener('click', async () => {
       userId: cfg.myUserId, base: APP_BASE, kind: 'nameplate', applyFile: applyNameplateFile,
       applyAsset: id => applyLibraryAsset('nameplate', id),
       prepareFile: file => prepareNameplateFile(file, policy.nameplatePolicy),
-      chooseFallback: () => nameplateFileInput?.click(),
       postForm: form => {
         form.append('_csrf', CSRF_TOKEN);
         return postOutsideContentForm(runtimeRequestClient, '/api/avatar_library.php', form, { operation: 'upload-nameplate', endpointCategory: 'avatar' });
