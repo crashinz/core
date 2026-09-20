@@ -1,0 +1,19 @@
+#account-two-factor { margin:24px 0; padding:18px; border:1px solid #66748a; border-radius:12px; }
+.two-factor-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+.two-factor-actions .btn { white-space:normal; }
+.two-factor-dialog { box-sizing:border-box; width:min(510px,calc(100vw - 20px)); max-height:calc(100dvh - 20px); padding:22px; border:1px solid #7887a0; border-radius:14px; background:#151823; color:#f1f3fa; overflow:auto; -webkit-app-region:no-drag; }
+.two-factor-dialog * { -webkit-app-region:no-drag; box-sizing:border-box; }
+.two-factor-dialog::backdrop { background:#0009; }
+.two-factor-dialog .cc-popup-header { gap:12px; }
+.two-factor-dialog .cc-popup-close { min-width:44px; min-height:44px; border-radius:0; }
+.two-factor-dialog label { display:grid; gap:7px; margin:14px 0; line-height:1.5; }
+.two-factor-dialog input,.two-factor-dialog textarea { width:100%; min-width:0; padding:10px; background:#0d111c; color:#fff; border:1px solid #7d88a2; border-radius:6px; }
+.two-factor-dialog p { line-height:1.5; overflow-wrap:anywhere; }
+.two-factor-dialog canvas { display:block; max-width:100%; height:auto; margin:14px auto; image-rendering:pixelated; }
+.two-factor-dialog [hidden], #account-two-factor [hidden] { display:none!important; }
+.two-factor-dialog .two-factor-message:empty { display:none; }
+.two-factor-dialog .two-factor-message { padding:10px; border-radius:6px; background:#25364a; }
+.two-factor-dialog .two-factor-message.error { background:#4b2027; }
+.two-factor-dialog textarea { resize:vertical; min-height:230px; font-family:monospace; font-size:15px; line-height:1.65; }
+.two-factor-dialog .two-factor-secret { font-family:monospace; font-size:15px; }
+.two-factor-dialog button { min-height:40px; }

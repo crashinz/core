@@ -10,6 +10,13 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 
 # Modification History
 
+## Optional two-factor authentication - 2026-09-20
+
+- Add optional Aegis-compatible authenticator setup during registration, through a sign-in setup link, or in Account > Security & Privacy.
+- Generate QR codes locally, confirm enrollment before activation, and offer single-use backup codes with Copy and Download (.txt). Require fresh verification to disable 2FA or replace backup codes.
+- Protect sign-in, administrator database-update authentication and sensitive password reconfirmation; password recovery preserves the second factor. Encrypted-chat device keys and recovery phrases remain separate.
+- Use the existing movable, sticky-header popup behavior for account dialogs.
+
 ## Pool turn timers and compact chat menus - 2026-09-19
 
 Post-Build 000064 follow-up to public application commit `db6f862`.

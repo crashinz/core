@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-09-19-002-profile-relationship-consent';
+const CORE_MIGRATION_REQUIRED_ID = '2026-09-20-001-optional-two-factor';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -908,7 +908,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => 'C0589E9235D8AD8093431F804D105C1E3516A73A4A62A86772BADEE11CA76134',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-09-19-002-profile-relationship-consent',
             'title' => 'Mutually approved profile relationships',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -917,6 +917,17 @@ function database_migrations_manifest(): array
             'validate' => 'database_migration_validate_profile_relationship_consent',
             'source_functions' => ['database_migration_apply_profile_relationship_consent', 'database_migration_validate_profile_relationship_consent'],
             'expected_checksum' => '42258F69A303B1CE76B968988C7A4AC66737136DE7286F85AA7FF8F66E877AFE',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Optional account two-factor authentication',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_two_factor',
+            'validate' => 'database_migration_validate_two_factor',
+            'source_functions' => ['database_migration_apply_two_factor', 'database_migration_validate_two_factor'],
+            'expected_checksum' => 'B942DEBD490FF4508B6257606718716987896E3B3339DF590A847138B41E746A',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -4419,4 +4430,26 @@ function database_migration_apply_profile_relationship_consent(PDO $pdo): void
 function database_migration_validate_profile_relationship_consent(PDO $pdo): bool
 {
     return database_migration_has_columns($pdo, 'profile_relationship_requests', ['public_id','requester_user_id','recipient_user_id','status','created_at','updated_at']);
+}
+
+function database_migration_apply_two_factor(PDO $pdo): void
+{
+    $suffix = db_uses_mysql_syntax($pdo) ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : '';
+    $pdo->exec('CREATE TABLE IF NOT EXISTS account_two_factor (
+        user_id INTEGER PRIMARY KEY, secret_ciphertext TEXT DEFAULT NULL,
+        revision INTEGER NOT NULL DEFAULT 0, last_step BIGINT NOT NULL DEFAULT -1,
+        enabled_at TIMESTAMP NULL DEFAULT NULL
+    )' . $suffix);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS account_two_factor_backup (
+        user_id INTEGER NOT NULL, code_hash VARCHAR(64) NOT NULL,
+        PRIMARY KEY (user_id, code_hash)
+    )' . $suffix);
+}
+
+function database_migration_validate_two_factor(PDO $pdo): bool
+{
+    return database_migration_has_columns($pdo, 'account_two_factor', ['user_id','secret_ciphertext','revision','last_step','enabled_at'])
+        && database_migration_has_columns($pdo, 'account_two_factor_backup', ['user_id','code_hash'])
+        && database_migration_has_unique_key($pdo, 'account_two_factor', ['user_id'])
+        && database_migration_has_unique_key($pdo, 'account_two_factor_backup', ['user_id','code_hash']);
 }

@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $userId = (int)$result['userId'];
             database_transaction_commit($pdo, $transaction);
             authenticate_user($userId);
-            redirect_to('/lobby.php');
+            redirect_to(!empty($_POST['setup_two_factor']) ? '/account.php?tab=security&setup2fa=1' : '/lobby.php');
         } catch (Throwable $e) {
             if (isset($transaction) && is_array($transaction)) database_transaction_rollback($pdo, $transaction);
             if ($avatarPath !== 'preset:Default') {
@@ -118,6 +118,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <?php if ($ageGateEnabled): ?>
       <label class="check-label"><input type="checkbox" name="age_gate_confirm" value="1" required> I confirm that I am at least <?= e((string)$ageGateMinAge) ?>.</label>
       <?php endif; ?>
+      <label class="checkbox-row"><input type="checkbox" name="setup_two_factor" value="1"> Set up two-factor authentication (optional)</label>
+      <p class="minor">Use Aegis or another authenticator app. You can skip setup or enable it later in Account → Security &amp; Privacy.</p>
       <button class="btn btn-primary" type="submit" <?= $registrationPolicy['administratorCreatedOnly'] ? 'disabled' : '' ?>>Sign Up</button>
       <?php if ($registrationPolicy['administratorCreatedOnly']): ?><p class="minor" role="status">Accounts are created by an Administrator for this community.</p><?php endif; ?>
       <div class="auth-action-panel">

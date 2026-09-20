@@ -2,6 +2,7 @@
 define('CHATSPACE_RESTRICTED_ACCOUNT_ROUTE', true);
 require_once __DIR__ . '/includes/base.php';
 $user = require_user();
+security_protect_private_response();
 $pdo = db();
 $branding = private_site_branding_projection($pdo, 'other');
 $return = (string)($_GET['return'] ?? 'lobby');
@@ -22,6 +23,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
   <title><?= e(branded_page_title('Account', $pdo, 'other')) ?></title>
   <link rel="stylesheet" href="<?= e($assetVersion('/assets/css/styles.css')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/popup-behavior.css?v=20260916-r1')) ?>">
+<link rel="stylesheet" href="<?= e($assetVersion('/assets/css/two-factor.css')) ?>">
 </head>
 <body class="shared-surface-body" data-app-base="<?= e(app_base_path()) ?>" data-csrf="<?= e(csrf_token()) ?>" data-role-colors-mode="<?= e($roleColors['mode']) ?>" style="<?= e(role_color_css_variables($pdo)) ?>">
 <main class="shared-surface">
@@ -84,6 +86,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
     <form id="account-email-form" class="shared-form compact-form">
       <label>Email <input name="email" type="email" required autocomplete="email"></label>
       <label>Current password <input name="current_password" type="password" required autocomplete="current-password"></label>
+      <label data-two-factor-field hidden>Authenticator or backup code<input name="two_factor_code" autocomplete="one-time-code" maxlength="32"></label>
       <button class="btn btn-primary" type="submit">Update Email</button>
     </form>
     <h2>Password</h2>
@@ -92,10 +95,24 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
       <label>Old password <input name="old_password" type="password" required autocomplete="current-password"></label>
       <label>New password <input name="new_password" type="password" required minlength="8" autocomplete="new-password"></label>
       <label>Confirm password <input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></label>
+      <label data-two-factor-field hidden>Authenticator or backup code<input name="two_factor_code" autocomplete="one-time-code" maxlength="32"></label>
       <button class="btn btn-primary" type="submit">Update Password</button>
     </form>
+    <section id="account-two-factor" aria-labelledby="two-factor-heading" data-username="<?= e((string)$user['username']) ?>">
+      <h2 id="two-factor-heading">Two-factor authentication</h2>
+      <p>Add an optional authenticator code to your password. Works with Aegis and other TOTP apps.</p>
+      <p id="two-factor-status" role="status">Checking 2FA status…</p>
+      <div class="two-factor-actions">
+        <button class="btn btn-primary" id="two-factor-setup" type="button" disabled>Set up 2FA</button>
+        <button class="btn" id="two-factor-backup" type="button" hidden>Replace backup codes</button>
+        <button class="btn" id="two-factor-disable" type="button" hidden>Disable 2FA</button>
+        <button class="btn" id="two-factor-view-codes" type="button" hidden>View new backup codes</button>
+      </div>
+      <p class="minor">To change authenticator apps, disable the old setup here, then set up the new one. Your Private Chat Recovery Phrase stays separate.</p>
+    </section>
+
     <h2>Lost Access Recovery</h2>
-    <div class="account-recovery-card" id="account-recovery-card">Checking recovery status…</div>
+    <div class="account-recovery-card" id="account-recovery-card">Checking recovery statusâ€¦</div>
     <button class="btn" id="account-recovery-generate" type="button">Create Recovery Code</button>
     <section class="account-delete-card" id="account-delete-card" aria-labelledby="account-delete-heading">
       <h2 id="account-delete-heading">Delete Account</h2>
@@ -103,7 +120,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
         <strong>This permanently deletes your active account.</strong>
         <p>Your login, recovery, private profile, personal settings, sessions, and unshared personal media are removed or anonymized. Required chat, moderation, safety, audit, and shared-history records remain under <strong>[Deleted User]</strong>. This cannot be undone.</p>
       </div>
-      <div id="account-delete-readiness" class="account-recovery-card" aria-live="polite">Checking account ownership and room responsibilities…</div>
+      <div id="account-delete-readiness" class="account-recovery-card" aria-live="polite">Checking account ownership and room responsibilitiesâ€¦</div>
       <div id="account-delete-owned-rooms" class="admin-scroll-list" aria-live="polite"></div>
       <form id="account-delete-form" class="shared-form compact-form" novalidate>
         <label id="account-delete-successor-label" hidden>Transfer all rooms I own to
@@ -138,7 +155,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
     <h3>Private Chat Recovery Phrase</h3>
     <p class="minor">This is separate from your password and Lost Access recovery code. It is generated and encrypted in this browser. CoreChat never receives the phrase.</p>
     <output id="account-private-chat-recovery-output" class="account-recovery-card" aria-live="assertive">Recovery phrase hidden.</output>
-    <p class="minor" id="account-private-chat-recovery-state">Checking recovery configuration…</p>
+    <p class="minor" id="account-private-chat-recovery-state">Checking recovery configurationâ€¦</p>
   </section>
   <section class="shared-panel" data-account-panel="voice-webcam"<?= $voiceWebcamAvailable ? '' : ' hidden' ?>>
     <div class="account-preference-heading">
@@ -180,7 +197,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
             <option value="everyone">Everyone in the room</option>
             <option value="private-voice">Members of my current private voice chat</option>
             <option value="selected">Only selected people</option>
-            <option value="nobody">Nobody — local preview only</option>
+            <option value="nobody">Nobody â€” local preview only</option>
           </select>
         </label>
       </fieldset>
@@ -264,5 +281,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
 <script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260919-modal-stack')) ?>"></script>
 <script src="<?= e($assetVersion('/assets/js/profile-relationship.js')) ?>"></script>
 <script src="<?= e($assetVersion('/assets/js/account.js')) ?>"></script>
+<script src="<?= e($assetVersion('/assets/vendor/qrcodegen-v1.8.0.js')) ?>"></script>
+<script src="<?= e($assetVersion('/assets/js/two-factor.js')) ?>"></script>
 </body>
 </html>

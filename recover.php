@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/base.php';
 $pdo = db();
 $branding = private_site_branding_projection($pdo, 'recovery');
+security_protect_private_response();
 $error = '';
 $success = '';
 
@@ -38,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare('UPDATE users SET password_hash = ?, recovery_code_hash = NULL, recovery_code_suffix = NULL, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?');
                 $stmt->execute([password_hash($newPassword, PASSWORD_DEFAULT), (int)$user['id']]);
                 auth_rate_clear_identifier($pdo, 'recovery', $login);
-                $success = 'Password reset. Your old recovery code has been invalidated.';
+                $success = 'Password reset. Your old recovery code has been invalidated. If 2FA is enabled, your authenticator or a 2FA backup code is still required to sign in.';
             }
         }
     }

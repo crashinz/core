@@ -109,6 +109,9 @@ function security_bootstrap(): void
 
 function security_mark_authenticated(int $userId): void
 {
+    if (function_exists('two_factor_session_valid') && !two_factor_session_valid(db_migration_connection(), $userId)) {
+        throw new SecurityPolicyViolation('Authenticator verification is required before signing in.', 403);
+    }
     session_regenerate_id(true);
     $now = time();
     $_SESSION['user_id'] = $userId;

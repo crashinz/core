@@ -339,7 +339,7 @@ document.getElementById('account-delete-form')?.addEventListener('submit', async
     form.dataset.requestId ||= accountRequestId('delete-account');
     const data = await post('/api/account_deletion.php', {
       request_id: form.dataset.requestId,
-      current_password: form.elements.current_password.value,
+      current_password: form.elements.current_password.value, two_factor_code: form.elements.two_factor_code.value,
       confirmation: form.elements.confirmation.value,
       room_successor_user_id: Number(form.elements.room_successor_user_id.value || 0) || null,
     });
@@ -467,7 +467,7 @@ document.getElementById('account-password-form').addEventListener('submit', asyn
   const form = event.currentTarget;
   try {
     showStatus('Updating password…');
-    await post('/api/account.php', { action: 'update_password', old_password: form.elements.old_password.value, new_password: form.elements.new_password.value, confirm_password: form.elements.confirm_password.value });
+    await post('/api/account.php', { action: 'update_password', old_password: form.elements.old_password.value, new_password: form.elements.new_password.value, confirm_password: form.elements.confirm_password.value, two_factor_code: form.elements.two_factor_code.value });
     form.reset(); showStatus('Password updated.');
     render(await request('/api/account.php'));
   } catch (error) { showStatus(error.message, true); }

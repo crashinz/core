@@ -3470,3 +3470,8 @@ two alternating pocket drops. Edited mono PCM is embedded in the game module.
   strikes. Trimmed, mixed to mono, adjusted level, and faded at edit boundaries.
 
 The listed edits adapt the credited recordings; the authors do not endorse this project. No Miniclip audio is included. Master volume, mute and impact-strength scaling apply to every clip.
+
+
+## QR Code generator v1.8.0
+
+Optional authenticator enrollment uses Project Nayuki QR Code generator (MIT), locally bundled at assets/vendor/qrcodegen-v1.8.0.js with its complete copyright/license header. Source: https://github.com/nayuki/QR-Code-generator/releases/tag/v1.8.0 . No enrollment secret is sent to an external QR service.

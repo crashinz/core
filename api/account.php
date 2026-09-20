@@ -23,6 +23,7 @@ function account_projection(PDO $pdo, array $user): array
             'email' => (string)$user['email'],
             'emailChangedAt' => $user['email_changed_at'] ?? null,
             'passwordChangedAt' => $user['password_changed_at'] ?? null,
+            'twoFactor' => two_factor_status($pdo, (int)$user['id']),
             'hasRecoveryCode' => !empty($user['recovery_code_hash']),
             'recoveryCodeSuffix' => $user['recovery_code_suffix'] ?? null,
         ],
@@ -134,6 +135,10 @@ if ($action === 'update_email') {
     $password = (string)($body['current_password'] ?? '');
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) json_out(['error' => 'Enter a valid email address.'], 400);
     if (!password_verify($password, (string)$user['password_hash'])) json_out(['error' => 'Current password is not correct.'], 403);
+    if (two_factor_enabled($pdo, (int)$user['id'])) {
+        try { two_factor_verify($pdo, (int)$user['id'], (string)($body['two_factor_code'] ?? '')); }
+        catch (TwoFactorException $e) { json_out(['error' => $e->getMessage()], $e->httpStatus); }
+    }
     security_mark_recent_authentication();
     $duplicate = $pdo->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id <> ? LIMIT 1');
     $duplicate->execute([$email, (int)$user['id']]);
@@ -148,6 +153,10 @@ $newPassword = (string)($body['new_password'] ?? '');
 $confirmPassword = (string)($body['confirm_password'] ?? '');
 if ($oldPassword === '' || $newPassword === '' || $confirmPassword === '') json_out(['error' => 'All password fields are required.'], 400);
 if (!password_verify($oldPassword, (string)$user['password_hash'])) json_out(['error' => 'Old password is not correct.'], 403);
+if (two_factor_enabled($pdo, (int)$user['id'])) {
+    try { two_factor_verify($pdo, (int)$user['id'], (string)($body['two_factor_code'] ?? '')); }
+    catch (TwoFactorException $e) { json_out(['error' => $e->getMessage()], $e->httpStatus); }
+}
 security_mark_recent_authentication();
 if (strlen($newPassword) < 8) json_out(['error' => 'New password must be at least 8 characters.'], 400);
 if ($newPassword !== $confirmPassword) json_out(['error' => 'New password and confirmation do not match.'], 400);

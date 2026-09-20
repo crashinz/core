@@ -22,6 +22,7 @@ function recovery_mask(?string $suffix): ?string {
 }
 
 $pdo = db();
+security_protect_private_response();
 $body = input_json();
 $action = (string)($body['action'] ?? '');
 

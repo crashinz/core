@@ -13,6 +13,7 @@ function database_update_actor(PDO $pdo): ?array
     $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([(int)$_SESSION['user_id']]);
     $user = $stmt->fetch();
+    if ($user && !two_factor_session_valid($pdo, (int)$user['id'])) return null;
     return is_array($user) ? $user : null;
 }
 
@@ -175,6 +176,9 @@ if ($requestMethod === 'POST') {
             if (!$candidate || !password_verify($password, (string)$candidate['password_hash'])) {
                 auth_rate_record_failure($pdo, 'database-update-login', $login);
                 throw new CoreMigrationException('Administrator sign-in was not accepted.', 'MIGRATION_LOGIN_FAILED', 403);
+            }
+            if (two_factor_enabled($pdo, (int)$candidate['id'])) {
+                two_factor_verify($pdo, (int)$candidate['id'], (string)($_POST['two_factor_code'] ?? ''));
             }
             auth_rate_clear_identifier($pdo, 'database-update-login', $login);
             security_mark_authenticated((int)$candidate['id']);
@@ -441,6 +445,7 @@ $updateActionLabel = $status['kind'] === 'failed'
         <input type="hidden" name="action" value="authenticate">
         <label>Administrator email or username<input name="login" required autocomplete="username"></label>
         <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+        <label>Authenticator or backup code (if 2FA is enabled)<input name="two_factor_code" autocomplete="one-time-code" maxlength="32" spellcheck="false"></label>
         <button class="btn btn-primary" type="submit">Confirm Administrator</button>
       </form>
     <?php elseif ($status['current'] && !$isAdmin && !$ownerEntryRequested && empty($recoveryStatus['maintenance'])): ?>
@@ -543,6 +548,7 @@ $updateActionLabel = $status['kind'] === 'failed'
           <input type="hidden" name="action" value="authenticate">
           <label>Administrator email or username<input name="login" required autocomplete="username"></label>
           <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+        <label>Authenticator or backup code (if 2FA is enabled)<input name="two_factor_code" autocomplete="one-time-code" maxlength="32" spellcheck="false"></label>
           <button class="btn btn-primary" type="submit">Confirm Administrator</button>
         </form>
       <?php else: ?>

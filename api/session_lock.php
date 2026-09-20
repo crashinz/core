@@ -20,6 +20,11 @@ if (!password_verify($password, (string)$user['password_hash'])) {
     json_out(['error' => 'Incorrect password.'], 403);
 }
 
+if (two_factor_enabled($pdo, (int)$user['id'])) {
+    if (trim((string)($body['code'] ?? '')) === '') json_out(['error' => 'Enter an authenticator or backup code to confirm your identity.', 'two_factor_required' => true], 403);
+    try { two_factor_verify($pdo, (int)$user['id'], (string)($body['code'] ?? '')); }
+    catch (TwoFactorException $e) { json_out(['error' => $e->getMessage(), 'two_factor_required' => true], $e->httpStatus); }
+}
 auth_rate_clear_identifier($pdo, 'reauthentication', $identifier);
 security_mark_recent_authentication();
 json_out(['ok' => true]);

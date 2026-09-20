@@ -56,6 +56,7 @@
         <p>For sensitive changes, confirm your password again. You will stay signed in and in your room.</p>
         <label for="recent-authentication-password">Current password</label>
         <input id="recent-authentication-password" name="password" type="password" autocomplete="current-password" required>
+        <label id="recent-authentication-code-label" hidden>Authenticator or backup code<input id="recent-authentication-code" name="code" autocomplete="one-time-code" maxlength="32" spellcheck="false"></label>
         <p class="recent-authentication-message" role="status" aria-live="polite"></p>
         <div class="recent-authentication-actions"><button type="button" data-close>Cancel</button><button type="submit">Confirm Identity</button></div>
       </form>`;
@@ -69,6 +70,7 @@
       dialog.addEventListener('cancel', event => { if (pending) event.preventDefault(); });
       dialog.addEventListener('close', () => {
         password.value = '';
+        dialog.querySelector('[name=code]').value = '';
         if (previousFocus?.isConnected) previousFocus.focus();
       });
       form.addEventListener('submit', async event => {
@@ -82,7 +84,7 @@
         const timeout = setTimeout(() => controller.abort(), 20000);
         try {
           const csrf = document.body.dataset.csrf || '';
-          const requestBody = JSON.stringify({password: password.value, _csrf: csrf});
+          const requestBody = JSON.stringify({password: password.value, code: dialog.querySelector('[name=code]').value, _csrf: csrf});
           password.value = '';
           const response = await fetch(`${base}/api/session_lock.php`, {
             method: 'POST', credentials: 'same-origin', signal: controller.signal,
@@ -94,6 +96,7 @@
           try { data = JSON.parse(text); } catch {
             throw new Error('The server could not confirm your identity. Please try again.');
           }
+          if (data.two_factor_required) dialog.querySelector('#recent-authentication-code-label').hidden = false;
           if (!response.ok || data.error || !data.ok) {
             throw new Error(response.status === 401
               ? 'Your sign-in session has expired. Password confirmation cannot restore an expired session.'
@@ -121,6 +124,8 @@
             }
           });
           message.textContent = 'Identity confirmed. Close this dialog and try your action again.';
+          dialog.querySelector('#recent-authentication-code-label').hidden = true;
+          dialog.querySelector('[name=code]').value = '';
           password.hidden = true;
           password.required = false;
           dialog.querySelector('label').hidden = true;
@@ -141,6 +146,7 @@
       });
     }
     dialog.querySelector('form').reset();
+    dialog.querySelector('#recent-authentication-code-label').hidden = true;
     const password = dialog.querySelector('input');
     password.hidden = false;
     password.required = true;
@@ -149,6 +155,10 @@
     dialog.querySelector('[data-close]').textContent = 'Cancel';
     dialog.querySelector('[role="status"]').textContent = '';
     dialog.showModal();
+    fetch(`${base}/api/two_factor.php`, {credentials:'same-origin', cache:'no-store'})
+      .then(response => response.ok ? response.json() : null)
+      .then(data => { if (data?.enabled && dialog.open && !password.hidden) dialog.querySelector('#recent-authentication-code-label').hidden = false; })
+      .catch(() => {});
     password.focus();
   }
   window.CoreChatRecentAuthentication = Object.freeze({open});

@@ -224,3 +224,11 @@ Unused-file review supports **Select this page**, **Select all results** across 
 Reference pack v2 retains every prepared sequence and updates only the approved Five Dice dice presentation. Install the current application before this ZIP. Version 2 installs alongside private v1; it never overwrites it. Matching Classic media in v1 is copied privately to v2 after hash verification. Keep v1 as a local backup.
 
 Reference pack v3 adds 37 approved Pool examples (8 Ball and 9 Ball) without replacing the 316 earlier frozen sequences or their resources. Install the matching application first. The installer reuses verified Classic media from private v2 and preserves that older folder. Manual installation belongs in private game-review-snapshots/v3, never under the public application directory. The application directory may have any name.
+
+### Optional two-factor authentication
+
+Install the matching application files and run the normal protected database update. 2FA is off for existing and new accounts until each user confirms enrollment. Users can opt in during registration, use **Set up 2FA** on the login page after signing in, or open **Account > Security & Privacy**. Aegis and other standard TOTP apps can scan the locally generated QR or enter the manual key (SHA-1, six digits, 30 seconds). Keep server time synchronized.
+
+Users can copy or download ten single-use backup codes as a text file. These replace the authenticator code during sign-in, not the password. Replacing the backup list invalidates the old list. A password reset does not disable 2FA. Authenticator setup, disabling and backup replacement are personal account actions, independent of Private Chat Protection and its recovery phrase.
+
+Authenticator secrets are encrypted using the installation-private `two-factor/key-v1.bin` file, outside the public application folder under the configured private storage root. Back up that key with private host storage and the corresponding database; a database-only backup does not contain it. Keep the key out of public folders, Git and application ZIPs. Do not regenerate or delete it when moving/upgrading an existing installation. A missing key fails closed for authenticator verification; an unused backup code can still be used. Without either the matching key/authenticator or usable backup codes there is no password-only 2FA bypass.
