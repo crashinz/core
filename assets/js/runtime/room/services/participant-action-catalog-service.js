@@ -54,6 +54,13 @@ export class ParticipantActionCatalogService {
         ];
         if (!own) actions.push(
             {
+                id: "user.poke",
+                label: "Poke",
+                active: false,
+                disabled: blocked,
+                applicable: Number(participant.user_id) > 0
+            },
+            {
                 id: "message.direct",
                 label: "Send DM",
                 active: false,
@@ -146,7 +153,7 @@ export class ParticipantActionCatalogService {
         return Object.freeze({
             owner: "RoomRuntime",
             service: "ParticipantActionCatalogService",
-            actionDefinitionCount: 13,
+            actionDefinitionCount: 14,
             resolutionCount: this.#resolutionCount,
             duplicateCount: this.#duplicateCount
         });

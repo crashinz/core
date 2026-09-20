@@ -671,8 +671,8 @@ async function initializeAvatarRuntime() {
 
   const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }, ServerClock, { ChatOutbox }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
-    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260917-send-recovery')),
-    import(appUrl('/assets/js/runtime/room/room-runtime.js')),
+    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260919-capabilities')),
+    import(appUrl('/assets/js/runtime/room/room-runtime.js?v=20260919-capabilities')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
     import(appUrl('/assets/js/runtime/game/game-runtime.js?v=20260916-dominos')),
     import(appUrl('/assets/js/runtime/room-effects/room-effects-runtime.js')),
@@ -1388,6 +1388,7 @@ function configureChatNotifications() {
 
 function configureChatEventRouter() {
   chatRuntime?.events?.configure({
+    receivePoke: payload => chatRuntime?.pokes?.receive(payload),
     getConfig: () => cfg,
     getActiveChat: () => activeChatKey(),
     relationshipChatKeyFromPayload,
@@ -3179,7 +3180,14 @@ function configureImportedRoomRuntime() {
   importedRoomRuntime?.music?.configure(context);
 }
 
+// Read-only presentation signal; transport retries and message ownership stay unchanged.
+function reportChatConnection(state) {
+  document.documentElement.dataset.chatConnection = state;
+  document.dispatchEvent(new CustomEvent('corechat:connection-state', { detail: { state } }));
+}
+
 function configureChatPoll() {
+  reportChatConnection('connecting');
   chatRuntime?.poll?.configure({
     getConfig: () => cfg,
     shouldStop: () => roomExitInProgress,
@@ -3209,6 +3217,7 @@ function configureChatPoll() {
       roomRuntime?.events?.routeCommunityEvent(event);
     },
     handleProjection(data) {
+      reportChatConnection('connected');
       const projection = data?.avatar_visibility_preferences;
       if (projection) avatarRuntime?.visibility?.applyServerProjection(projection, 'room-poll');
       if (data?.gesture_preferences) {
@@ -3219,6 +3228,7 @@ function configureChatPoll() {
       }
     },
     warnError(error, retry = {}) {
+      reportChatConnection([401, 403].includes(Number(error?.details?.status)) ? 'signin' : 'reconnecting');
       recordRuntimeDiagnostic('requests', 'room-poll-retry-scheduled', {
         code: error?.code || null,
         status: error?.details?.status || null,
@@ -7166,6 +7176,8 @@ function syncParticipantActionMenu(participant, isOwn = false) {
   const actions = new Map((roomRuntime?.participantActions?.actionsFor(participant) || []).map(action => [action.id, action]));
   syncParticipantActionButton(ctxProfile, actions.get('user.profile'), true);
   syncParticipantActionButton(document.getElementById('ctx-dm'), actions.get('message.direct'), !isOwn);
+  const pokeButton=document.getElementById('ctx-poke');
+  if(pokeButton){pokeButton.hidden=isOwn||!Number(participant?.user_id);syncParticipantActionButton(pokeButton,actions.get('user.poke'),!isOwn);}
   const exact = actions.get('avatar.current-visibility');
   const user = actions.get('avatar.user-visibility');
   const block = actions.get('user.block');
@@ -8579,9 +8591,16 @@ document.getElementById('room-action-btn')?.addEventListener('click', e => {
 
 document.getElementById('lock-session-btn')?.addEventListener('click', lockSession);
 
+function setReportProblemStatus(message = '', isError = false) {
+  reportProblemStatus.textContent = message;
+  reportProblemStatus.hidden = !message;
+  reportProblemStatus.classList.toggle('form-error', isError);
+  reportProblemStatus.classList.toggle('minor', !isError);
+}
+
 async function openReportProblem() {
   closeRoomMenu();
-  reportProblemStatus.textContent = '';
+  setReportProblemStatus();
   reportProblemScreenshot.checked = false;
   reportProblemScreenshot.closest('.diagnostic-screenshot-option').hidden = true;
   try {
@@ -8610,13 +8629,13 @@ reportProblemForm?.addEventListener('submit', async event => {
   event.preventDefault();
   if (reportProblemForm.getAttribute('aria-busy') === 'true') return;
   reportProblemForm.setAttribute('aria-busy', 'true');
-  reportProblemStatus.textContent = 'Submitting…';
+  setReportProblemStatus('Submitting…');
   try {
     await runtimeIssueCaptureService.report({ summary: reportProblemSummary.value, includeScreenshot: reportProblemScreenshot.checked });
-    reportProblemStatus.textContent = 'Report submitted.';
+    setReportProblemStatus('Report submitted.');
     reportProblemForm.reset();
   } catch (error) {
-    reportProblemStatus.textContent = error?.message || 'Report could not be submitted.';
+    setReportProblemStatus(error?.message || 'Report could not be submitted.', true);
   } finally {
     reportProblemForm.removeAttribute('aria-busy');
   }
@@ -9603,7 +9622,7 @@ document.getElementById('tab-manage-relationship')?.addEventListener('click', ()
 document.getElementById('ctx-change-avatar').addEventListener('click', async () => {
   closeContextMenu();
   try {
-    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260917-recovery`);
+    const { openAvatarLibrary } = await import(`${APP_BASE}/assets/js/avatar-library.js?v=20260919-library-sections`);
     await openAvatarLibrary({
       userId: cfg.myUserId,
       base: APP_BASE,
@@ -9634,7 +9653,7 @@ ctxChangeNameplate?.addEventListener('click', async () => {
   closeContextMenu();
   try {
     const [{ openAvatarLibrary }, { prepareNameplateFile }, policy] = await Promise.all([
-      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260917-recovery`),
+      import(`${APP_BASE}/assets/js/avatar-library.js?v=20260919-library-sections`),
       import(`${APP_BASE}/assets/js/nameplate-processing.js?v=20260913-independent`),
       runtimeRequestClient.getJson('/api/nameplate_policy.php', { operation: 'read-nameplate-policy', endpointCategory: 'avatar', cache: 'no-store' }),
     ]);
@@ -9835,6 +9854,19 @@ document.getElementById('ctx-dm').addEventListener('click', () => {
   const p = participants.get(ctxMenuParticipantId);
   closeContextMenu();
   if (p) openDmWithUser({ id: p.user_id, display_name: p.display_name, avatar_url: avatarUrl(p) });
+});
+
+document.getElementById('ctx-poke')?.addEventListener('click',()=>{
+  const person=participants.get(ctxMenuParticipantId);closeContextMenu();
+  if(person)void chatRuntime?.pokes?.send(person);
+});
+document.addEventListener('corechat:open-notified-chat',event=>{
+  const channel=String(event.detail?.channel||'');
+  if(/^(dm|link|game):[A-Za-z0-9_-]+$/.test(channel))switchChat(channel);
+  else if(/^poke:\d+$/.test(channel)){
+    const userId=Number(channel.slice(5)),person=[...participants.values()].find(p=>Number(p.user_id)===userId);
+    if(person)openDmWithUser({id:userId,display_name:person.display_name,avatar_url:avatarUrl(person)});
+  }
 });
 
 ctxWebcamVisibility?.addEventListener('click', () => {
@@ -12365,6 +12397,11 @@ function renderMemberProfile(profile) {
     { emptyText: `Not separately set — shown as ${effectiveDisplayName}` }
   );
   appendMemberProfileField('Name', profile.name);
+  appendMemberProfileField('In a relationship with', profile.relationshipWith);
+  if (profile.isSelf) {
+    const relationEditor = document.getElementById('member-profile-fields').lastElementChild;
+    window.CoreChatProfileRelationship?.mount(relationEditor);
+  }
   appendMemberProfileField('Location', profile.location);
   appendMemberProfileField('About Me', profile.aboutMe, { multiline: true });
   appendMemberProfileField(
@@ -13020,6 +13057,10 @@ async function bootRoom() {
   // Optional audio must never prevent participants or room transport starting.
   try {
     configureChatNotifications();
+    chatRuntime?.pokes?.configure({document,userId:cfg.myUserId,warn:showWarning,now:()=>roomServerClock?.serverEpochNow?.()??Date.now(),
+      muted:userId=>Boolean(activeMutedPolicyFor(userId)?.scopes.includes('notices-unread')),
+      request:(action,body={})=>apiPost('/api/chat_poke.php',{...body,action,session_id:cfg.sessionId,join_token:cfg.myJoinToken}),
+    });
   } catch (error) {
     chatRuntime?.notifications?.destroy();
     warnRuntimeRequest(error);
@@ -13183,3 +13224,7 @@ async function postOutsideContentForm(...args) {
   const { postOutsideContentForm: uploadWithConsent } = await import('./core/outside-content-upload.js?v=20260913-consent-r2');
   return uploadWithConsent(...args);
 }
+
+window.CoreChatProfileRelationship?.startNotice(() => {
+  if (cfg?.myUserId) openMemberProfile(cfg.myUserId);
+});

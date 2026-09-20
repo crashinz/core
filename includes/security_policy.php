@@ -70,7 +70,7 @@ function security_send_browser_headers(array $additionalFrameUrls = []): void
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
-    header('Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), browsing-topics=()');
+    header('Permissions-Policy: camera=(self), microphone=(self), geolocation=(self), payment=(), usb=(), browsing-topics=()');
     security_send_content_security_policy($additionalFrameUrls);
     if (function_exists('network_privacy_should_send_hsts') && network_privacy_should_send_hsts()) {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');

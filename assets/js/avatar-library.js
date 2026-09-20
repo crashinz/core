@@ -24,13 +24,42 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
   const section = el('select'); section.dataset.popupNoDraft = ''; section.setAttribute('aria-label', kindText('Avatar section'));
   const allSections = el('option', 'All sections'); allSections.value = ''; section.appendChild(allSections);
   const sectionNames = el('datalist'); sectionNames.id = `${kind}-library-sections-${userId}`;
+  let knownSections = [];
+  const sectionPickers = new Map();
+  const fillSectionPicker = (picker, input) => {
+    const placeholder = el('option', 'Choose saved section…'); placeholder.value = '';
+    picker.replaceChildren(placeholder);
+    for (const value of knownSections) { const option = el('option', value); option.value = value; picker.appendChild(option); }
+    picker.value = knownSections.includes(input.value) ? input.value : '';
+  };
+  const existingSectionPicker = input => {
+    const picker = el('select'); picker.setAttribute('aria-label', kindText('Saved avatar sections'));
+    picker.dataset.popupNoDraft = '';
+    Object.assign(picker.style, { width: '100%', minWidth: '0', maxWidth: '100%' });
+    sectionPickers.set(picker, input); fillSectionPicker(picker, input);
+    picker.addEventListener('change', () => { if (picker.value) { input.value = picker.value; input.dispatchEvent(new Event('input', { bubbles: true })); } });
+    input.addEventListener('input', () => { picker.value = knownSections.includes(input.value) ? input.value : ''; });
+    return picker;
+  };
+  const updateSections = values => {
+    knownSections = [...new Set(values.filter(value => typeof value === 'string' && value))].sort((a,b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+    const selected = section.value;
+    section.replaceChildren(allSections); sectionNames.replaceChildren();
+    for (const value of knownSections) {
+      const option = el('option', value); option.value = value; section.appendChild(option);
+      const suggestion = el('option'); suggestion.value = value; sectionNames.appendChild(suggestion);
+    }
+    section.value = selected;
+    for (const [picker,input] of sectionPickers) { if (!picker.isConnected && picker !== uploadSectionPicker) sectionPickers.delete(picker); else fillSectionPicker(picker,input); }
+  };
   const uploadSection = el('input'); uploadSection.placeholder = 'Optional section'; uploadSection.maxLength = 80; uploadSection.setAttribute('list', sectionNames.id);
   uploadSection.id = sectionNames.id + '-upload';
   Object.assign(uploadSection.style, { width: '100%', minWidth: '0', maxWidth: '100%', boxSizing: 'border-box' });
   const uploadSectionLabel = el('label'); uploadSectionLabel.htmlFor = uploadSection.id; uploadSectionLabel.hidden = true;
   Object.assign(uploadSectionLabel.style, { flex: '1 1 12rem', minWidth: '0', maxWidth: '100%' });
   const uploadSectionTitle = el('span', 'Folder upload section'); uploadSectionTitle.style.display = 'block';
-  uploadSectionLabel.append(uploadSectionTitle, uploadSection);
+  const uploadSectionPicker = existingSectionPicker(uploadSection);
+  uploadSectionLabel.append(uploadSectionTitle, uploadSectionPicker, uploadSection);
   filters.style.flexWrap = 'wrap';
   filters.append(sort, section, uploadSectionLabel, sectionNames);
   const explanation = el('p', 'Your uploads stay private unless you share them. Making an avatar private stops future library reuse; it cannot recall copies already chosen by others.');
@@ -67,6 +96,9 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
     if (titleBar.hasPointerCapture(pointerId)) titleBar.releasePointerCapture(pointerId);
   };
   const viewportChanged = () => { endDrag(); clampPicker(); };
+  // Expanding an editor or loading results can grow the picker after centering.
+  const resizeObserver = new ResizeObserver(() => clampPicker());
+  resizeObserver.observe(dialog);
   titleBar.addEventListener('pointerdown', event => {
     if (!event.isPrimary || event.button !== 0 || event.target.closest('button, input, select, textarea, a, [contenteditable], [role="button"]')) return;
     event.preventDefault();
@@ -118,13 +150,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
       if (current !== generation || !dialog.isConnected) return;
       folder.hidden = !data.canPublishFolder;
       uploadSectionLabel.hidden = !data.canPublishFolder;
-      const selectedSection = section.value;
-      section.replaceChildren(allSections); sectionNames.replaceChildren();
-      for (const name of data.sections || []) {
-        const option = el('option', name); option.value = name; section.appendChild(option);
-        const suggestion = el('option'); suggestion.value = name; sectionNames.appendChild(suggestion);
-      }
-      section.value = selectedSection;
+      updateSections(data.sections || []);
       for (const [button, key] of [[mine,'mine'],[privateAvatars,'private'],[community,'community']]) { button.classList.toggle('btn-primary', view === key); button.setAttribute('aria-pressed', String(view === key)); }
       for (const avatar of data.items) {
         const card = el('article');
@@ -139,7 +165,8 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
           } catch (error) { status.textContent = kindText(error.message); }
           finally { busy = false; select.disabled = false; }
         });
-        card.append(image, el('strong', avatar.name), el('small', avatar.section || 'Unfiled'), select);
+        const cardName = el('strong', avatar.name), cardSection = el('small', avatar.section || 'Unfiled');
+        card.append(image, cardName, cardSection, select);
         if (avatar.canOrganize) {
           const edit = el('details'); edit.appendChild(el('summary', 'Name & section'));
           const name = el('input'); name.value = avatar.name; name.maxLength = 180; name.setAttribute('aria-label', kindText('Avatar file name'));
@@ -147,11 +174,22 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
           const save = el('button', 'Save name & section'); save.type = 'button'; save.className = 'btn';
           save.addEventListener('click', async () => {
             if (busy) return; busy = true; dialog.dataset.popupBusy = 'true'; save.disabled = true;
-            try { await requestForm({ action: 'organize', id: avatar.id, name: name.value, section: category.value }); window.CoreChatPopups?.markSaved(dialog, [name, category]); status.textContent = 'Saved.'; }
+            try {
+              const saved = await requestForm({ action: 'organize', id: avatar.id, name: name.value, section: category.value });
+              const clean = value => value.replace(/[\x00-\x1f\x7f]/g, '').trim();
+              avatar.name = typeof saved.name === 'string' ? saved.name : clean(name.value);
+              avatar.section = typeof saved.section === 'string' ? saved.section : clean(category.value);
+              name.value = avatar.name; category.value = avatar.section;
+              cardName.textContent = avatar.name; cardSection.textContent = avatar.section || 'Unfiled';
+              updateSections([...knownSections, avatar.section]);
+              // Update this card only: preserve other unsaved edits and the current view.
+              window.CoreChatPopups?.markSaved(dialog, [name, category, section]);
+              status.textContent = 'Saved.';
+            }
             catch (error) { status.textContent = kindText(error.message); }
             finally { busy = false; delete dialog.dataset.popupBusy; save.disabled = false; }
           });
-          edit.append(name, category, save); card.appendChild(edit);
+          edit.append(name, existingSectionPicker(category), category, save); card.appendChild(edit);
         }
         if (avatar.mine) {
           const share = el('button', avatar.shared ? 'Make private' : 'Share with community'); share.type = 'button'; share.className = 'btn';
@@ -256,6 +294,7 @@ export async function openAvatarLibrary({ userId, base, applyFile, applyAsset, p
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
   dialog.addEventListener('close', () => {
     generation++;
+    resizeObserver.disconnect();
     endDrag();
     window.removeEventListener('resize', viewportChanged);
     visualViewport?.removeEventListener('resize', viewportChanged);

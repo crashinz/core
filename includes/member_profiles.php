@@ -1399,7 +1399,7 @@ function member_profiles_row(PDO $pdo, int $userId, bool $forUpdate = false): ?a
         . 'u.avatar_orientation, u.avatar_display_size_px, u.avatar_size_version, '
         . 'u.created_at, '
         . 'p.profile_name, p.location, p.about_me, p.public_contact_email, '
-        . 'p.website, p.interests, p.discord_username, p.discord_visible, '
+        . 'p.relationship_with, p.website, p.interests, p.discord_username, p.discord_visible, '
         . 'p.public_profile_id, p.profile_version, p.updated_at '
         . 'FROM users u JOIN member_profiles p ON p.user_id = u.id WHERE u.id = ? LIMIT 1';
     if ($forUpdate && db_driver($pdo) === 'mysql') $sql .= ' FOR UPDATE';
@@ -1464,6 +1464,7 @@ function member_profiles_projection(PDO $pdo, int $viewerUserId, int $targetUser
         'displayName' => $displayName,
         'effectiveDisplayName' => $effectiveDisplayName,
         'location' => $row['location'],
+        'relationshipWith' => profile_relationship_public_name($pdo, $targetUserId),
         'aboutMe' => $row['about_me'],
         'publicContactEmail' => $row['public_contact_email'],
         'website' => $row['website'],
@@ -1566,6 +1567,9 @@ function member_profiles_update(
             'MEMBER_PROFILE_VERSION_REQUIRED',
             409
         );
+    }
+    if (array_key_exists('relationship_with', $input)) {
+        throw new MemberProfileException('Use the relationship request controls; the other member must approve.', 'RELATIONSHIP_CONSENT_REQUIRED');
     }
     $allowed = [
         'display_name', 'name', 'location', 'about_me',

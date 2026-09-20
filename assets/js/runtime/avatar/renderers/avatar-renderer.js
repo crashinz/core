@@ -1685,6 +1685,7 @@ export class AvatarRenderer {
             const documentRef = options.document || document;
             const element = documentRef.createElement("div");
             element.className = "typing-bubble";
+            element.dataset.participantId = String(participant.id);
             element.innerHTML = "<span></span><span></span><span></span>";
             options.stage?.appendChild(element);
             participant.typingEl = element;
@@ -1716,6 +1717,7 @@ export class AvatarRenderer {
             const documentRef = options.document || document;
             const element = documentRef.createElement("div");
             element.className = "chat-bubble";
+            element.dataset.participantId = String(participant.id);
             options.stage?.appendChild(element);
             participant.speechEl = element;
         }

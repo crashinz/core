@@ -49,7 +49,7 @@ import {
 
     ParticipantActionCatalogService
 
-} from "./services/participant-action-catalog-service.js";
+} from "./services/participant-action-catalog-service.js?v=20260919-capabilities";
 
 //--------------------------------------------------
 // Room Runtime

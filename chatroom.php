@@ -955,9 +955,30 @@ $roomAssetVersion = static function (string $path): string {
   </div>
   <div class="ctx-divider ctx-identity-divider" aria-hidden="true"></div>
   <button id="ctx-profile" type="button">User Profile</button>
-  <button id="ctx-change-avatar" type="button">Change Avatar</button>
+  <div class="ctx-submenu-wrap" id="ctx-avatar-settings-wrap">
+    <button id="ctx-avatar-settings" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-avatar-settings-submenu">Avatar Settings <span aria-hidden="true">›</span></button>
+    <div class="ctx-submenu" id="ctx-avatar-settings-submenu" role="menu" aria-label="Avatar settings">
+      <button id="ctx-change-avatar" type="button">Change Avatar</button>
+      <button id="ctx-avatar-size" type="button">Avatar Display Size</button>
+      <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
+        <button id="ctx-orientation" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-orientation-submenu">Orientation <span aria-hidden="true">›</span></button>
+        <div class="ctx-submenu" id="ctx-orientation-submenu" role="menu" aria-label="Avatar orientation">
+          <button type="button" role="menuitemradio" data-avatar-orientation="original" data-label="Original">Original</button>
+          <button type="button" role="menuitemradio" data-avatar-orientation="flip-horizontal" data-label="Flip Horizontally">Flip Horizontally</button>
+          <button type="button" role="menuitemradio" data-avatar-orientation="flip-vertical" data-label="Flip Vertically">Flip Vertically</button>
+          <button type="button" role="menuitemradio" data-avatar-orientation="flip-both" data-label="Flip Horizontally and Vertically">Flip Horizontally and Vertically</button>
+        </div>
+      </div>
+      <button id="ctx-auras" type="button">Auras</button>
+      <div class="ctx-divider" aria-hidden="true"></div>
+      <button id="ctx-change-nameplate" type="button">Change Nameplate Image</button>
+      <button id="ctx-remove-nameplate" type="button">Remove Nameplate Image</button>
+      <button id="ctx-webcam-size" type="button">Webcam Size</button>
+    </div>
+  </div>
   <button id="ctx-toggle-webcam" type="button">Enable Webcam</button>
   <button id="ctx-dm" type="button">Send DM</button>
+  <button id="ctx-poke" type="button" hidden>Poke</button>
   <button id="ctx-interact" type="button">Link / Sit in Lap</button>
   <div class="ctx-submenu-wrap" id="ctx-hide-wrap">
     <button id="ctx-hide" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-hide-submenu">Hide / Show <span aria-hidden="true">›</span></button>
@@ -994,26 +1015,6 @@ $roomAssetVersion = static function (string $path): string {
   </div>
   <div class="ctx-divider" id="ctx-transfer-divider"></div>
   <button id="ctx-send-file-gesture" type="button">Send File or Gesture</button>
-  <div class="ctx-submenu-wrap" id="ctx-avatar-settings-wrap">
-    <button id="ctx-avatar-settings" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-avatar-settings-submenu">Avatar Settings <span aria-hidden="true">›</span></button>
-    <div class="ctx-submenu" id="ctx-avatar-settings-submenu" role="menu" aria-label="Avatar settings">
-      <button id="ctx-avatar-size" type="button">Avatar Display Size</button>
-      <div class="ctx-submenu-wrap" id="ctx-orientation-wrap">
-        <button id="ctx-orientation" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="ctx-orientation-submenu">Orientation <span aria-hidden="true">›</span></button>
-        <div class="ctx-submenu" id="ctx-orientation-submenu" role="menu" aria-label="Avatar orientation">
-          <button type="button" role="menuitemradio" data-avatar-orientation="original" data-label="Original">Original</button>
-          <button type="button" role="menuitemradio" data-avatar-orientation="flip-horizontal" data-label="Flip Horizontally">Flip Horizontally</button>
-          <button type="button" role="menuitemradio" data-avatar-orientation="flip-vertical" data-label="Flip Vertically">Flip Vertically</button>
-          <button type="button" role="menuitemradio" data-avatar-orientation="flip-both" data-label="Flip Horizontally and Vertically">Flip Horizontally and Vertically</button>
-        </div>
-      </div>
-      <button id="ctx-auras" type="button">Auras</button>
-      <div class="ctx-divider" aria-hidden="true"></div>
-      <button id="ctx-change-nameplate" type="button">Change Nameplate Image</button>
-      <button id="ctx-remove-nameplate" type="button">Remove Nameplate Image</button>
-      <button id="ctx-webcam-size" type="button">Webcam Size</button>
-    </div>
-  </div>
 </div>
 <div id="text-ctx-menu">
   <button id="text-copy" type="button">Copy</button>
@@ -1118,6 +1119,11 @@ $roomAssetVersion = static function (string $path): string {
       <details class="chat-option-help"><summary aria-label="About DM and link chime interval" title="About DM and link chime interval">i</summary><div class="chat-option-help-copy">Minimum time between alerts, in 5-second steps. Default: 30 seconds. Every message removes the cooldown; 5 minutes is the longest interval.</div></details>
     </div>    <div class="chat-option-item">
       <div class="settings-choice-row chat-option-line">
+        <span class="settings-choice-name" id="poke-option-title">Allow other users to poke me</span>
+        <div class="chat-option-controls"><button type="button" class="btn" id="poke-toggle" aria-labelledby="poke-option-title poke-toggle" aria-pressed="false" disabled>Loading</button></div>
+      </div>
+      <p class="settings-choice-description">Pokes show a private notice. Blocked users and users muted for notices cannot poke you. This choice follows your account.</p>
+    </div><div class="chat-option-item"><div class="settings-choice-row chat-option-line">
         <span class="settings-choice-name" id="room-message-chime-title">Chat Room message chime</span>
         <div class="chat-option-controls"><button type="button" class="btn" id="room-message-chime-toggle" aria-labelledby="room-message-chime-title room-message-chime-toggle" aria-pressed="false">Off</button></div>
       </div>
@@ -1231,7 +1237,7 @@ $roomAssetVersion = static function (string $path): string {
       </label>
       <label class="diagnostic-screenshot-option" hidden><input id="report-problem-screenshot" type="checkbox"> Include a locally censored schematic</label>
       <p class="minor">Reports exclude chat contents, credentials, private files, raw media, SDP, and ICE.</p>
-      <div class="form-error" id="report-problem-status" role="status"></div>
+      <div class="minor" id="report-problem-status" role="status" aria-live="polite" hidden></div>
       <div class="modal-actions"><button class="btn btn-primary" type="submit">Submit Report</button></div>
     </form>
   </div>
@@ -1554,9 +1560,10 @@ $roomAssetVersion = static function (string $path): string {
 <?php endif; ?>
 <script src="https://www.youtube.com/iframe_api"></script>
 
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260917-recovery')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260919-modal-stack')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/avatar-processing.js')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/core/recent-authentication.js')) ?>"></script>
+<script src="<?= e($roomAssetVersion('/assets/js/profile-relationship.js')) ?>"></script>
 <script src="<?= e($roomAssetVersion('/assets/js/room.js')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e($roomAssetVersion('/extensions/canvas/assets/canvas.js')) ?>"></script><?php endif; ?>
 </body>

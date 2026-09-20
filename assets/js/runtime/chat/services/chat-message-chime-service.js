@@ -211,6 +211,7 @@ export class ChatMessageChimeService {
 
     syncAttention() {
         const chatKey = this.#context?.getActiveChat();
+        if (this.#isReading(chatKey)) this.#attention("read", chatKey);
         if (this.#pendingChats.has(chatKey) && this.#isReading(chatKey)) {
             this.#pendingChats.delete(chatKey);
             if (chatKey === "room") this.#lastRoomChime = -Infinity;
@@ -218,9 +219,20 @@ export class ChatMessageChimeService {
         }
     }
 
+    #attention(action, chatKey, senderName = "") {
+        if (!/^(dm|link|game):/.test(String(chatKey))) return;
+        const context = this.#context;
+        // Presentation adapters receive identity, never message contents.
+        context.document.dispatchEvent(new context.window.CustomEvent("corechat:chat-attention", {
+            detail: { action, channel: chatKey, senderName: String(senderName).slice(0,80) }
+        }));
+    }
+
     consider(message, chatKey, { live = false, existing = false, suppressed = false } = {}) {
         const roomMessage = chatKey === "room";
-        if (!this.#context || (!roomMessage && !/^(dm|link):/.test(String(chatKey)))) return false;
+        const gameMessage = String(chatKey).startsWith("game:")
+            && this.#context?.document.documentElement?.dataset.chatGameChime === "true";
+        if (!this.#context || (!roomMessage && !gameMessage && !/^(dm|link):/.test(String(chatKey)))) return false;
         const id = message?.id || message?.client_message_id;
         if (!id) return false;
         const identity = `${chatKey}:${id}`;
@@ -234,8 +246,9 @@ export class ChatMessageChimeService {
             && Number(message.participant_id) === Number(config.myParticipantId);
         this.syncAttention();
         const reading = this.#isReading(chatKey);
-        if (!live || existing || seen || suppressed || ownUser || ownParticipant
-            || message.is_deleted || !(roomMessage ? this.#roomEnabled : this.#enabled)
+        if (!live || existing || seen || suppressed || ownUser || ownParticipant || message.is_deleted) return false;
+        if (!reading) this.#attention("unread", chatKey, message.display_name || message.username || "someone");
+        if (!(roomMessage ? this.#roomEnabled : this.#enabled)
             || (reading && !this.#whileFocused)) return false;
         // Focused messages are already being viewed: do not mark them pending,
         // or the next message would reset the cooldown while focus is unchanged.

@@ -93,7 +93,7 @@ import {
 
     ChatEventRouter
 
-} from "./routing/chat-event-router.js";
+} from "./routing/chat-event-router.js?v=20260919-capabilities";
 
 import {
 
@@ -107,7 +107,8 @@ import {
 
 } from "./services/chat-unread-service.js";
 
-import { ChatMessageChimeService } from "./services/chat-message-chime-service.js?v=20260913-room-chime";
+import { ChatMessageChimeService } from "./services/chat-message-chime-service.js?v=20260919-capabilities";
+import { ChatPokeService } from "./services/chat-poke-service.js?v=20260919-capabilities";
 
 import {
 
@@ -188,6 +189,7 @@ export class ChatRuntime extends CoreModule {
     #unread = null;
 
     #notifications = null;
+    pokes = new ChatPokeService();
 
     /**
      * Reply draft runtime component.
@@ -563,6 +565,7 @@ export class ChatRuntime extends CoreModule {
         this.#reply?.destroy();
 
         this.#notifications?.destroy();
+        this.pokes.destroy();
         this.#unread?.destroy();
 
         this.#privateChats?.destroy();

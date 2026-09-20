@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-09-14-002-room-passwords';
+const CORE_MIGRATION_REQUIRED_ID = '2026-09-19-002-profile-relationship-consent';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -886,7 +886,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => 'F70AA46D1640F5733F06FDB08AA77CCBF2F4D5B649C41D9FD1D4B9E1C2F6A9AC',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-09-14-002-room-passwords',
             'title' => 'Optional private room passwords',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -895,6 +895,28 @@ function database_migrations_manifest(): array
             'validate' => 'database_migration_validate_room_passwords',
             'source_functions' => ['database_migration_apply_room_passwords', 'database_migration_validate_room_passwords'],
             'expected_checksum' => '09A0DD6869EFC0E828ED9A3EB6E4A0626C1C8F57C21B18663C39FF14B1543ACE',
+        ],
+        [
+            'id' => '2026-09-19-001-profile-relationship',
+            'title' => 'Optional member relationship profile field',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_profile_relationship',
+            'validate' => 'database_migration_validate_profile_relationship',
+            'source_functions' => ['database_migration_apply_profile_relationship', 'database_migration_validate_profile_relationship'],
+            'expected_checksum' => 'C0589E9235D8AD8093431F804D105C1E3516A73A4A62A86772BADEE11CA76134',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Mutually approved profile relationships',
+            'owner' => 'core',
+            'atomicity' => 'transactional-sqlite-forward-mariadb',
+            'revision' => 1,
+            'up' => 'database_migration_apply_profile_relationship_consent',
+            'validate' => 'database_migration_validate_profile_relationship_consent',
+            'source_functions' => ['database_migration_apply_profile_relationship_consent', 'database_migration_validate_profile_relationship_consent'],
+            'expected_checksum' => '42258F69A303B1CE76B968988C7A4AC66737136DE7286F85AA7FF8F66E877AFE',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -4360,4 +4382,41 @@ function database_migration_apply_room_passwords(PDO $pdo): void
 function database_migration_validate_room_passwords(PDO $pdo): bool
 {
     return in_array('room_password_hash', database_migration_columns($pdo, 'rooms'), true);
+}
+
+function database_migration_apply_profile_relationship(PDO $pdo): void
+{
+    if (!database_migration_validate_profile_relationship($pdo)) {
+        $pdo->exec('ALTER TABLE member_profiles ADD COLUMN relationship_with '
+            . (db_driver($pdo) === 'mysql' ? 'VARCHAR(160) DEFAULT NULL' : 'TEXT DEFAULT NULL'));
+    }
+}
+
+function database_migration_validate_profile_relationship(PDO $pdo): bool
+{
+    return in_array('relationship_with', member_profiles_table_columns($pdo, 'member_profiles'), true);
+}
+
+function database_migration_apply_profile_relationship_consent(PDO $pdo): void
+{
+    $suffix = db_driver($pdo) === 'mysql' ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : '';
+    $pdo->exec("CREATE TABLE IF NOT EXISTS profile_relationship_requests (
+        public_id VARCHAR(36) PRIMARY KEY,
+        requester_user_id INTEGER NOT NULL,
+        recipient_user_id INTEGER NOT NULL,
+        status VARCHAR(16) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )" . $suffix);
+    foreach (['requester','recipient'] as $side) {
+        $index = 'idx_profile_relationship_' . $side;
+        if (!database_migration_index_exists($pdo, 'profile_relationship_requests', $index)) {
+            $pdo->exec('CREATE INDEX ' . $index . ' ON profile_relationship_requests (' . $side . '_user_id,status)');
+        }
+    }
+}
+
+function database_migration_validate_profile_relationship_consent(PDO $pdo): bool
+{
+    return database_migration_has_columns($pdo, 'profile_relationship_requests', ['public_id','requester_user_id','recipient_user_id','status','created_at','updated_at']);
 }

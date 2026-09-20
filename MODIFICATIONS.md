@@ -1657,3 +1657,12 @@ server-stored and built-in avatar choices.
 ### Advanced Pool review and practice examples
 
 Added 36 verified advanced Pool reference sequences and 13 additional shared practice setups, preserving existing names, edits and deletions. Reference pack v4 retains all 353 prior sequences and freezes the advanced renderer separately. Reviewed cut shots, banks, kicks, combinations, follow/draw, safety and multi-ball clusters use the existing physics. Exact shot inputs and reconstruction limitations are shown in the administrator review. Validated 12 complete 8/9-ball bot matches and reference installation/integrity contracts. Testing is WIP.
+
+
+## 2026-09-19 — Profiles, notifications and avatar library reliability
+
+- Add reciprocal profile relationships with recipient approval, private pending prompts, cancellation and either-side removal.
+- Add recipient-controlled private poke notifications and shared notification metadata while retaining existing sound and mute preferences.
+- Keep avatar/nameplate choosers open through nested confirmation dialogs, refresh saved names and sections immediately, and provide alphabetical existing-section selectors.
+- Keep expanded library controls within the viewport, improve webcam-audience spacing and empty report-status presentation, and consolidate avatar menu actions.
+- Provide a database-free compatibility handshake and read-only connection status for compatible clients.

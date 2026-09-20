@@ -103,6 +103,7 @@ function render(data) {
   profileForm.elements.display_name.value = profile.displayName || '';
   profileForm.elements.name.value = profile.name || '';
   profileForm.elements.location.value = profile.location || '';
+
   profileForm.elements.about_me.value = profile.aboutMe || '';
   profileForm.elements.public_contact_email.value = profile.publicContactEmail || '';
   profileForm.elements.website.value = profile.website || '';
@@ -250,6 +251,7 @@ document.getElementById('account-profile-form').addEventListener('submit', async
       display_name: form.elements.display_name.value,
       name: form.elements.name.value,
       location: form.elements.location.value,
+
       about_me: form.elements.about_me.value,
       public_contact_email: form.elements.public_contact_email.value,
       website: form.elements.website.value,

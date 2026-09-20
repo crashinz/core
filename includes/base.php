@@ -25,8 +25,10 @@ const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
     '2026-09-12-live-website-official-successors',
     '2026-09-13-avatar-exact-display-size',
     '2026-09-14-shared-game-recording',
+    '2026-09-14-room-passwords',
+    '2026-09-19-profile-relationship',
 ];
-const CHATSPACE_SCHEMA_VERSION = '2026-09-14-room-passwords';
+const CHATSPACE_SCHEMA_VERSION = '2026-09-19-profile-relationship-consent';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 5000;
 const CHATSPACE_SQLITE_POLL_BUSY_TIMEOUT_MS = 100;
 const CHATSPACE_SQLITE_POLL_RETRY_BUDGET_MS = 1500;
@@ -93,6 +95,7 @@ require_once __DIR__ . '/gesture_catalog_service.php';
 require_once __DIR__ . '/gesture_package_service.php';
 require_once __DIR__ . '/media_signal_service.php';
 require_once __DIR__ . '/member_profiles.php';
+require_once __DIR__ . '/profile_relationships.php';
 require_once __DIR__ . '/database_migrations.php';
 require_once __DIR__ . '/account_deletion.php';
 require_once __DIR__ . '/database_recovery.php';

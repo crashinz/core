@@ -220,6 +220,10 @@ export class ChatEventRouter {
                 this.#routeDirectMessage(payload);
                 return true;
 
+            case "poke":
+                context.receivePoke?.(payload);
+                return true;
+
             case "community_message_edit":
             case "link_message_edit":
             case "dm_message_edit":

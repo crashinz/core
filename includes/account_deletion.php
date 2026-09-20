@@ -54,6 +54,7 @@ function account_deletion_disposition_registry(): array
         'member_identity_names' => 'anonymize-tombstone',
         'member_profile_requests' => 'delete-active-edge',
         'member_profiles' => 'anonymize-tombstone',
+        'profile_relationship_requests' => 'terminate-active-state',
         'message_protection_device_approvals' => 'delete-active-edge',
         'message_protection_devices' => 'delete-active-edge',
         'message_protection_policies' => 'retain-opaque-history',
@@ -791,6 +792,7 @@ function account_deletion_execute(
         ]);
         account_deletion_delete($pdo, 'member_display_name_history', 'user_id=?', [$userId]);
         account_deletion_delete($pdo, 'member_profile_requests', 'user_id=?', [$userId]);
+        account_deletion_update($pdo, 'profile_relationship_requests', "status='ended',updated_at=CURRENT_TIMESTAMP", "(requester_user_id=? OR recipient_user_id=?) AND status IN ('pending','accepted')", [$userId,$userId]);
         account_deletion_update($pdo, 'member_profiles', "profile_name=NULL,location=NULL,about_me=NULL,public_contact_email=NULL,website=NULL,interests=NULL,discord_username=NULL,discord_visible=0,profile_version=profile_version+1,updated_at=CURRENT_TIMESTAMP", 'user_id=?', [$userId]);
         if (account_deletion_table_exists($pdo, 'member_identity_names')) {
             $pdo->prepare('DELETE FROM member_identity_names WHERE user_id=?')->execute([$userId]);

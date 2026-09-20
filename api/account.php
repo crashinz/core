@@ -100,6 +100,9 @@ if ($action === 'update_profile') {
         'discord_username' => $body['discord_username'] ?? null,
         'discord_visible' => $body['discord_visible'] ?? null,
     ];
+    if (array_key_exists('relationship_with', $body)) {
+        $fields['relationship_with'] = $body['relationship_with'];
+    }
     try {
         $result = member_profiles_update(
             $pdo,

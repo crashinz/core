@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__.'/chat_pokes.php';
 
 /**
  * Build 000052 common server-authoritative event delivery contract.
@@ -133,6 +134,9 @@ function event_delivery_map_room_event(PDO $pdo, int $sessionId, array $viewer, 
 function event_delivery_map_community_event(PDO $pdo, array $viewer, array $event): array
 {
     $payload = json_decode((string)$event['payload'], true) ?: [];
+    if((string)$event['type']==='poke' && ((int)($payload['recipient_id']??0)!==(int)$viewer['user_id'] || time()-(int)($payload['at']??0)>60 || !chat_poke_allowed($pdo,(int)($payload['sender_id']??0),(int)$viewer['user_id']))) {
+        return ['id'=>(int)$event['id'],'type'=>'private_notice_skipped','payload'=>[]];
+    }
     $payload = message_protection_project_event($pdo, $payload);
     $payload = gesture_capability_project_message_payload(
         $pdo,

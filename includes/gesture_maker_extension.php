@@ -96,7 +96,7 @@ function gesture_maker_extension_render_editor(array $view): void {
     </div>
   </form>
 </main>
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260917')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260919-modal-stack')) ?>"></script>
 <script type="module" src="<?= e(app_url('/extensions/gesture-maker/assets/gesture-editor.js?v=20260914-duplicates')) ?>"></script>
 </body>
 </html>

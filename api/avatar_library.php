@@ -160,7 +160,7 @@ if ($method === 'POST') {
         database_transaction_rollback($pdo, $transaction);
         throw $error;
     }
-    json_out(['ok' => true]);
+    json_out($action === 'organize' ? ['ok' => true, 'name' => $name, 'section' => $section] : ['ok' => true]);
 }
 if ($method !== 'GET') json_out(['error' => 'Method not allowed.'], 405);
 

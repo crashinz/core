@@ -186,7 +186,8 @@
   function top() {
     for(const record of records.values()) sync(record);
     return [...records.values()].filter(r=>r.active).sort((a,b)=>
-      Number(b.native)-Number(a.native) || (Number(getComputedStyle(b.root).zIndex)||0)-(Number(getComputedStyle(a.root).zIndex)||0) || b.order-a.order)[0];
+      // Native modal dialogs occupy the browser's top layer, above any CSS z-index.
+      Number(b.root.matches('dialog:modal'))-Number(a.root.matches('dialog:modal')) || Number(b.native)-Number(a.native) || (Number(getComputedStyle(b.root).zIndex)||0)-(Number(getComputedStyle(a.root).zIndex)||0) || b.order-a.order)[0];
   }
   async function requestClose(record, ownerButton=record.button) {
     if (!record.active || record.closing) return;

@@ -52,6 +52,7 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
       <p class="minor field-help" id="account-profile-display-fallback"></p>
       <label>Name <input name="name" autocomplete="name" aria-describedby="profile-name-help profile-name-count"><span class="profile-field-count" id="profile-name-count" data-profile-counter="name"></span></label>
       <p class="minor field-help" id="profile-name-help">This optional name is shown only on your member profile. You may enter a first name, real name, preferred name, nickname, or another name you want profile viewers to see. It is not required or verified.</p>
+      <section id="account-profile-relationship" aria-label="In a relationship with"></section>
       <label>Location <input name="location" autocomplete="address-level2" aria-describedby="profile-location-count"><span class="profile-field-count" id="profile-location-count" data-profile-counter="location"></span></label>
       <label>About Me <textarea name="about_me" rows="6" aria-describedby="profile-about-me-count"></textarea><span class="profile-field-count" id="profile-about-me-count" data-profile-counter="about_me"></span></label>
       <label>Public profile contact email <input name="public_contact_email" type="email" autocomplete="off" aria-describedby="profile-email-help profile-public-contact-email-count"><span class="profile-field-count" id="profile-public-contact-email-count" data-profile-counter="public_contact_email"></span></label>
@@ -260,7 +261,8 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
     <div id="account-reports" class="admin-scroll-list"></div>
   </section>
 </main>
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260917-recovery')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260919-modal-stack')) ?>"></script>
+<script src="<?= e($assetVersion('/assets/js/profile-relationship.js')) ?>"></script>
 <script src="<?= e($assetVersion('/assets/js/account.js')) ?>"></script>
 </body>
 </html>

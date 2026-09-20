@@ -122,6 +122,22 @@
 .settings-checkbox-row:hover input { filter: brightness(1.18); }
 .settings-checkbox-row input:focus-visible { outline: 2px solid var(--aqua); outline-offset: 3px; }
 .settings-checkbox-row span { color: var(--text-muted); font-weight: 500; }
+/* Webcam audience choices have two columns, unlike the administrator capability rows. */
+#webcam-audience-modal .settings-checkbox-row {
+  grid-template-columns:20px minmax(0,1fr);
+  margin:10px 0;
+}
+#webcam-audience-person-list { display:flex; flex-wrap:wrap; gap:8px; padding:8px 0; }
+#webcam-audience-person-list .settings-checkbox-row {
+  display:flex!important; gap:8px!important; margin:0; padding:8px 12px;
+  border:1px solid var(--border); border-radius:6px; background:var(--surface);
+  max-width:100%; box-sizing:border-box;
+}
+#webcam-audience-person-list input { flex:0 0 20px; }
+#webcam-audience-person-list span {
+  padding:0; border:0; background:none; text-transform:none;
+  min-width:0; overflow-wrap:anywhere;
+}
 .account-preference-checkbox-row {
   display: grid !important;
   grid-template-columns: 22px minmax(0, 1fr);
@@ -9170,3 +9186,5 @@ body.hide-identity-nameplates .identity-nameplate-artwork { display: none; }
   width: auto; height: auto; max-width: 100%; max-height: none;
   object-fit: contain; cursor: zoom-out; border-radius: 0;
 }
+
+#poke-status { flex:0 0 auto; margin:4px 8px; padding:6px 10px; color:var(--text,#edf2fa); background:rgba(30,40,57,.9); border-radius:6px; font-size:13px; }
