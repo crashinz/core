@@ -101,8 +101,11 @@ $voiceWebcamAvailable = $voiceTransmissionAvailable || $webcamAudienceAvailable;
     <section id="account-two-factor" aria-labelledby="two-factor-heading" data-username="<?= e((string)$user['username']) ?>">
       <h2 id="two-factor-heading">Two-factor authentication</h2>
       <p>Add an optional authenticator code to your password. Works with Aegis and other TOTP apps.</p>
-      <p id="two-factor-status" role="status">Checking 2FA status…</p>
-      <div class="two-factor-actions">
+        <p id="two-factor-status" role="status">Checking 2FA status…</p>
+        <p id="two-factor-email-status" role="status"></p>
+        <div class="two-factor-actions">
+          <button class="btn" id="two-factor-email-verify" type="button" hidden>Verify account email</button>
+          <button class="btn" id="two-factor-email-cancel" type="button" hidden>Cancel pending email recovery</button>
         <button class="btn btn-primary" id="two-factor-setup" type="button" disabled>Set up 2FA</button>
         <button class="btn" id="two-factor-backup" type="button" hidden>Replace backup codes</button>
         <button class="btn" id="two-factor-disable" type="button" hidden>Disable 2FA</button>

@@ -115,6 +115,7 @@ function security_mark_authenticated(int $userId): void
     session_regenerate_id(true);
     $now = time();
     $_SESSION['user_id'] = $userId;
+    $_SESSION['_email_recovery_epoch'] = function_exists('account_email_epoch') ? account_email_epoch(db_migration_connection(), $userId) : 0;
     $_SESSION['_authenticated_at'] = $now;
     $_SESSION['_session_started_at'] = $now;
     $_SESSION['_session_rotated_at'] = $now;

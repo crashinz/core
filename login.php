@@ -11,13 +11,20 @@ if (!moderation_identity_policy_acceptance_storage_ready($pdo)) {
 $branding = private_site_branding_projection($pdo, 'login');
 $brandingUtilityLinks = private_site_branding_utility_links($pdo);
 security_protect_private_response();
+// A private email link restores completion proof after the original browser session expires.
+// It cannot sign in, verify the code, skip the wait, or disable 2FA by itself.
+if (isset($_GET['email_recovery_token'], $_GET['email_recovery_account'])) {
+    $token = (string)$_GET['email_recovery_token'];
+    if (preg_match('/^[a-f0-9]{64}$/D',$token)) $_SESSION['_email_recovery_finish'] = ['userId'=>(int)$_GET['email_recovery_account'],'hash'=>hash('sha256',$token)];
+    redirect_to('/login.php');
+}
 $setupTwoFactor = ($_GET['setup2fa'] ?? '') === '1';
 if (!empty($_SESSION['_two_factor_login']) && (int)$_SESSION['_two_factor_login']['expires'] < time()) {
     unset($_SESSION['_two_factor_login']); $error = 'Sign-in confirmation expired. Enter your password again.';
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cancel_two_factor') {
     unset($_SESSION['_two_factor_login']);
-} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'verify_two_factor') {
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['verify_two_factor','email_recovery_send','email_recovery_confirm','email_recovery_finish'], true)) {
     try {
         $pending = $_SESSION['_two_factor_login'] ?? [];
         if (!$pending || (int)$pending['expires'] < time()) throw new TwoFactorException('Sign-in confirmation expired. Enter your password again.', 403);
@@ -29,10 +36,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cance
             unset($_SESSION['_two_factor_login']); throw new TwoFactorException('Account security changed. Enter your password again.', 403);
         }
         network_moderation_assert_request_allowed($pdo, (int)$candidate['id'], network_privacy_client_ip());
-        two_factor_verify($pdo, (int)$candidate['id'], (string)($_POST['code'] ?? ''));
-        unset($_SESSION['_two_factor_login']);
-        authenticate_user((int)$candidate['id']);
-        redirect_to(!empty($pending['setup']) ? '/account.php?tab=security&setup2fa=1' : '/lobby.php');
+        $action = (string)$_POST['action'];
+        if ($action === 'email_recovery_send') {
+            account_email_request($pdo,$candidate,'recover');
+            $notice = 'Recovery email sent. Enter its code within 15 minutes. Another email can be requested after 24 hours.';
+        } elseif ($action === 'email_recovery_confirm') {
+            account_email_confirm($pdo,$candidate,'recover',(string)($_POST['code'] ?? ''));
+            $notice = 'Email confirmed. Recovery is waiting for 24 hours; 2FA is still on. You can cancel from the email or Account Security.';
+        } elseif ($action === 'email_recovery_finish') {
+            account_email_finish_recovery($pdo,$candidate);
+            security_destroy_session();
+            redirect_to('/login.php?two_factor_recovered=1');
+        } else {
+            two_factor_verify($pdo, (int)$candidate['id'], (string)($_POST['code'] ?? ''));
+            unset($_SESSION['_two_factor_login']);
+            authenticate_user((int)$candidate['id']);
+            redirect_to(!empty($pending['setup']) ? '/account.php?tab=security&setup2fa=1' : '/lobby.php');
+        }
     } catch (TwoFactorException|SecurityPolicyViolation|NetworkPrivacyException $failure) { $error = $failure->getMessage(); }
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $login = trim($_POST['login'] ?? '');
@@ -85,6 +105,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cance
         }
     }
 }
+$emailRecovery = null;
+if (!empty($_SESSION['_two_factor_login'])) {
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE id=?'); $stmt->execute([(int)$_SESSION['_two_factor_login']['userId']]);
+    $recoveryUser = $stmt->fetch(); $stmt->closeCursor();
+    if ($recoveryUser && account_email_eligible($pdo,$recoveryUser)) $emailRecovery = account_email_status($pdo,$recoveryUser);
+}
+if (($_GET['two_factor_recovered'] ?? '') === '1') $notice = 'Email recovery completed. Sign in with your password, then set up a new authenticator. Old backup codes no longer work.';
 ?>
 <!doctype html>
 <html lang="en">
@@ -112,6 +139,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cance
       <button class="btn btn-primary" type="submit">Verify and sign in</button>
     </form>
     <form method="post"><?= csrf_input() ?><input type="hidden" name="action" value="cancel_two_factor"><button class="btn" type="submit">Use a different account</button></form>
+    <?php if ($emailRecovery): ?>
+    <details id="lost-authenticator" <?= str_starts_with((string)($_POST['action'] ?? ''),'email_recovery_') ? 'open' : '' ?>>
+      <summary>Lost your authenticator?</summary>
+      <p>Your verified account email can start recovery without an authenticator or backup code. Recovery has a 24-hour waiting period and can be cancelled. Normal 2FA sign-in still works.</p>
+      <?php if ($emailRecovery['recoveryPending']): ?>
+        <p>Recovery can finish after <strong><?= e(gmdate('Y-m-d H:i',(int)$emailRecovery['recoveryReadyAt'])) ?> UTC</strong>. Return here and enter your password again when ready. If you changed browsers or signed out, open the recovery link in the original email. Finish within seven days afterward.</p>
+        <form method="post"><?= csrf_input() ?><input type="hidden" name="action" value="email_recovery_finish"><button class="btn" type="submit">Finish recovery and disable 2FA</button></form>
+      <?php else: ?>
+        <form method="post"><?= csrf_input() ?><input type="hidden" name="action" value="email_recovery_send"><button class="btn" type="submit">Email a recovery code</button></form>
+        <form class="form-grid" method="post"><?= csrf_input() ?><input type="hidden" name="action" value="email_recovery_confirm">
+          <label>Code from your recovery email<input name="code" required maxlength="32" autocomplete="one-time-code" spellcheck="false"></label>
+          <button class="btn" type="submit">Verify email code and start waiting period</button>
+        </form>
+        <p class="minor">One recovery email request per 24 hours. The code expires after 15 minutes and permits five attempts. If this sign-in expires first, enter your password again and use the same email code.</p>
+      <?php endif; ?>
+    </details>
+    <?php endif; ?>
     <?php else: ?>
     <?php if ($setupTwoFactor): ?><p>Sign in first, then set up optional two-factor authentication.</p><?php endif; ?>
     <form class="form-grid" method="post">

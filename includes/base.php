@@ -28,8 +28,9 @@ const CHATSPACE_SUPPORTED_UPGRADE_SCHEMA_VERSIONS = [
     '2026-09-14-room-passwords',
     '2026-09-19-profile-relationship',
     '2026-09-19-profile-relationship-consent',
+    '2026-09-20-optional-two-factor',
 ];
-const CHATSPACE_SCHEMA_VERSION = '2026-09-20-optional-two-factor';
+const CHATSPACE_SCHEMA_VERSION = '2026-09-20-two-factor-email-recovery';
 const CHATSPACE_SQLITE_BUSY_TIMEOUT_MS = 5000;
 const CHATSPACE_SQLITE_POLL_BUSY_TIMEOUT_MS = 100;
 const CHATSPACE_SQLITE_POLL_RETRY_BUDGET_MS = 1500;
@@ -99,6 +100,8 @@ require_once __DIR__ . '/member_profiles.php';
 require_once __DIR__ . '/profile_relationships.php';
 require_once __DIR__ . '/database_migrations.php';
 require_once __DIR__ . '/two_factor.php';
+require_once __DIR__ . '/account_mail.php';
+require_once __DIR__ . '/account_email.php';
 require_once __DIR__ . '/account_deletion.php';
 require_once __DIR__ . '/database_recovery.php';
 require_once __DIR__ . '/database_compatibility_policy.php';
@@ -1929,7 +1932,8 @@ function uuid_v4(): string {
 
 function current_user(): ?array {
     if (empty($_SESSION['user_id'])) return null;
-    if (!two_factor_session_valid(db(), (int)$_SESSION['user_id'])) {
+    if (!two_factor_session_valid(db(), (int)$_SESSION['user_id'])
+        || (int)($_SESSION['_email_recovery_epoch'] ?? 0) !== account_email_epoch(db(), (int)$_SESSION['user_id'])) {
         security_destroy_session();
         return null;
     }

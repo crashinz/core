@@ -3475,3 +3475,6 @@ The listed edits adapt the credited recordings; the authors do not endorse this 
 ## QR Code generator v1.8.0
 
 Optional authenticator enrollment uses Project Nayuki QR Code generator (MIT), locally bundled at assets/vendor/qrcodegen-v1.8.0.js with its complete copyright/license header. Source: https://github.com/nayuki/QR-Code-generator/releases/tag/v1.8.0 . No enrollment secret is sent to an external QR service.
+## PHPMailer 7.1.1
+
+The unmodified PHPMailer, SMTP and Exception classes in `includes/vendor/phpmailer/` are from https://github.com/PHPMailer/PHPMailer/tree/v7.1.1, licensed under LGPL-2.1. The complete license is included in that directory. They provide the optional host-configured account-email transport; no external delivery service or credentials are bundled.

@@ -16,7 +16,7 @@ function two_factor_row(PDO $pdo, int $userId, bool $lock = false): ?array
 {
     if (!two_factor_ready($pdo)) {
         // A supported predecessor has no MFA. A damaged enrolled schema must not bypass it.
-        if (database_migration_read_setting($pdo, 'schema_version') === '2026-09-20-optional-two-factor') {
+        if (in_array(database_migration_read_setting($pdo, 'schema_version'), ['2026-09-20-optional-two-factor','2026-09-20-two-factor-email-recovery'], true)) {
             throw new TwoFactorException('Two-factor authentication storage is unavailable. Contact the host administrator.', 503);
         }
         return null;
@@ -204,8 +204,11 @@ function two_factor_begin(PDO $pdo, array $user, string $password): array
     if (!empty($row['secret_ciphertext'])) throw new TwoFactorException('2FA is already enabled. Disable the old authenticator before setting up its replacement.', 409);
     $existing = (int)$pdo->query('SELECT COUNT(*) FROM account_two_factor WHERE secret_ciphertext IS NOT NULL')->fetchColumn();
     two_factor_key($existing === 0); // Never silently replace a lost key for enrolled accounts.
+    $emailPolicy = account_email_policy($pdo);
+    if ($emailPolicy && (!account_email_ready($pdo) || !account_mail_ready())) throw new TwoFactorException('The host must configure account email before new 2FA enrollment.', 503);
+    if ($emailPolicy && !account_email_verified($pdo, $user)) throw new TwoFactorException('Verify your private account email first. This enrollment will offer delayed email recovery if you lose your authenticator.', 409);
     $secret = two_factor_base32(random_bytes(20));
-    $_SESSION['_two_factor_enrollment'] = ['userId' => (int)$user['id'], 'secretCiphertext' => two_factor_seal($secret, (int)$user['id']), 'expires' => time() + 600, 'revision' => (int)($row['revision'] ?? 0), 'passwordHash' => hash('sha256', (string)$user['password_hash'])];
+    $_SESSION['_two_factor_enrollment'] = ['userId' => (int)$user['id'], 'secretCiphertext' => two_factor_seal($secret, (int)$user['id']), 'emailRecovery' => $emailPolicy, 'email' => (string)($user['email'] ?? ''), 'expires' => time() + 600, 'revision' => (int)($row['revision'] ?? 0), 'passwordHash' => hash('sha256', (string)$user['password_hash'])];
     return ['secret' => $secret];
 }
 
@@ -217,13 +220,22 @@ function two_factor_activate(PDO $pdo, array $user, string $code): array
         || !hash_equals((string)($pending['passwordHash'] ?? ''), hash('sha256', (string)$user['password_hash']))) {
         unset($_SESSION['_two_factor_enrollment']); throw new TwoFactorException('Setup expired. Start setup again.', 409);
     }
+    if ((bool)($pending['emailRecovery'] ?? false) !== account_email_policy($pdo)
+        || (!empty($pending['emailRecovery']) && (!account_mail_ready() || !account_email_verified($pdo, $user) || !hash_equals($pending['email'], (string)$user['email'])))) {
+        unset($_SESSION['_two_factor_enrollment']); throw new TwoFactorException('Email recovery settings changed. Verify your email and start setup again.',409);
+    }
     $secret = two_factor_unseal($pending['secretCiphertext'], $userId);
     $step = two_factor_matching_step($secret, trim($code), -1);
     if ($step === null) { auth_rate_record_failure($pdo, 'two-factor', (string)$userId); throw new TwoFactorException('Enter a current six-digit code from your authenticator.', 403); }
     $tx = database_transaction_begin($pdo, true);
     try {
         // Lock an existing user even before there is an enrollment row.
-        $lock = $pdo->prepare('SELECT id FROM users WHERE id=?' . (db_uses_mysql_syntax($pdo) ? ' FOR UPDATE' : '')); $lock->execute([$userId]); $lock->fetchAll(); $lock->closeCursor();
+        $lock = $pdo->prepare('SELECT * FROM users WHERE id=?' . (db_uses_mysql_syntax($pdo) ? ' FOR UPDATE' : '')); $lock->execute([$userId]); $lockedUser = $lock->fetch(PDO::FETCH_ASSOC); $lock->closeCursor();
+        if (!$lockedUser || !hash_equals($pending['passwordHash'], hash('sha256', $lockedUser['password_hash']))
+            || (bool)($pending['emailRecovery'] ?? false) !== account_email_policy($pdo)
+            || (!empty($pending['emailRecovery']) && (!account_email_verified($pdo, $lockedUser) || !hash_equals($pending['email'], (string)$lockedUser['email'])))) {
+            throw new TwoFactorException('Account security changed. Start setup again.',409);
+        }
         $row = two_factor_row($pdo, $userId, true);
         if (!empty($row['secret_ciphertext']) || (int)($row['revision'] ?? 0) !== $pending['revision']) throw new TwoFactorException('Security settings changed. Start setup again.', 409);
         $revision = $pending['revision'] + 1;
@@ -231,6 +243,10 @@ function two_factor_activate(PDO $pdo, array $user, string $code): array
         if ($row) $pdo->prepare('UPDATE account_two_factor SET secret_ciphertext=?,last_step=?,revision=?,enabled_at=CURRENT_TIMESTAMP WHERE user_id=?')->execute([$cipher,$step,$revision,$userId]);
         else $pdo->prepare('INSERT INTO account_two_factor (secret_ciphertext,last_step,revision,user_id,enabled_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)')->execute([$cipher,$step,$revision,$userId]);
         $codes = two_factor_new_backup_codes($pdo, $userId);
+        if (account_email_ready($pdo)) {
+            $pdo->prepare('DELETE FROM account_two_factor_email WHERE user_id=?')->execute([$userId]);
+            if (!empty($pending['emailRecovery'])) $pdo->prepare('INSERT INTO account_two_factor_email (user_id,mfa_revision) VALUES (?,?)')->execute([$userId,$revision]);
+        }
         database_transaction_commit($pdo, $tx);
     } catch (Throwable $e) { database_transaction_rollback($pdo, $tx); throw $e; }
     unset($_SESSION['_two_factor_enrollment']); two_factor_mark_verified($userId, $revision);
@@ -249,6 +265,10 @@ function two_factor_manage(PDO $pdo, array $user, string $action, string $passwo
             if ($action === 'disable') {
                 $pdo->prepare('UPDATE account_two_factor SET secret_ciphertext=NULL,last_step=-1,revision=revision+1,enabled_at=NULL WHERE user_id=?')->execute([$userId]);
                 $pdo->prepare('DELETE FROM account_two_factor_backup WHERE user_id=?')->execute([$userId]);
+                if (account_email_ready($pdo)) {
+                    $pdo->prepare('DELETE FROM account_two_factor_email WHERE user_id=?')->execute([$userId]);
+                    $pdo->prepare("UPDATE account_email_challenges SET state='cancelled',code_hash='',cancel_hash='' WHERE user_id=? AND purpose='recover'")->execute([$userId]);
+                }
             } elseif ($action === 'backup_codes') $codes = two_factor_new_backup_codes($pdo, $userId);
             else throw new TwoFactorException('Unknown security action.');
         }

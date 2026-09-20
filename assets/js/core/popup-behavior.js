@@ -240,6 +240,7 @@
     });
   }
   window.CoreChatPopups=Object.freeze({markSaved, isDirty:root=>records.has(root)&&isDirty(records.get(root)), confirm:(message,options)=>ask(message,options),prompt:(message,value='')=>ask(message,{title:'Enter details',value,accept:'Save'}),
+    reflow(root){const record=records.get(root);if(record?.active&&record.moved){const r=record.box.getBoundingClientRect();clamp(record,r.left,r.top);}},
     clearDismissed(root){const record=records.get(root);record?.reopen?.remove();if(record)record.reopen=null;},
     consumeDiscardApproval(root){const approved=root?.dataset.popupDiscardApproved==='1';if(root)delete root.dataset.popupDiscardApproved;return approved;}});
   document.querySelectorAll(selector).forEach(enhance);

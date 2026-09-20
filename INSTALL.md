@@ -232,3 +232,31 @@ Install the matching application files and run the normal protected database upd
 Users can copy or download ten single-use backup codes as a text file. These replace the authenticator code during sign-in, not the password. Replacing the backup list invalidates the old list. A password reset does not disable 2FA. Authenticator setup, disabling and backup replacement are personal account actions, independent of Private Chat Protection and its recovery phrase.
 
 Authenticator secrets are encrypted using the installation-private `two-factor/key-v1.bin` file, outside the public application folder under the configured private storage root. Back up that key with private host storage and the corresponding database; a database-only backup does not contain it. Keep the key out of public folders, Git and application ZIPs. Do not regenerate or delete it when moving/upgrading an existing installation. A missing key fails closed for authenticator verification; an unused backup code can still be used. Without either the matching key/authenticator or usable backup codes there is no password-only 2FA bypass.
+
+### Optional lost-authenticator email recovery
+
+Normal disabling still accepts the current password and an authenticator or unused backup code. Email recovery is a separate, optional route. It is off by default and is not retroactively added to existing 2FA enrollments.
+
+1. Configure `CHATSPACE_ACCOUNT_MAIL_*` and `CHATSPACE_ACCOUNT_SMTP_*` in your installation's private `includes/config.php`, following the commented example in `includes/config.sample.php`. Use your actual installed application URL for `CHATSPACE_ACCOUNT_MAIL_BASE_URL` (including its subfolder). Credentials belong only in private host configuration, never in Git or application archives. The SMTP transport supports authenticated TLS on port 587 (`tls`) or implicit TLS on port 465 (`ssl`). Certificate verification stays enabled. Alternatively, choose `mail` only when your host has configured PHP's mail transport. Plain SMTP and HTTP links are allowed only for loopback testing; hosted recovery links require HTTPS.
+2. Install the matching application files and run the protected database update. Verify your private account email from **Account → Security & Privacy** to test real delivery. SMTP acceptance does not guarantee inbox delivery; check spam filtering and your provider's sender requirements.
+3. As Installation Owner, open **Admin → Settings → Moderation, Privacy & Security → Account Recovery** and enable **Email recovery for new 2FA enrollments**. The switch refuses enabling when mail configuration is incomplete. New enrollments must verify their account email first and are warned to retain access to it. Existing enrollments remain unchanged; a user who wants this recovery option can disable and re-enroll after the option is enabled. Turning the switch off only affects later enrollments; previously eligible users retain recovery.
+
+For an existing installation, add the following constants to its private `includes/config.php`, replacing the example values with your provider's details. Do not replace your existing database configuration or publish this file. Set mail enabled to `true` when those details are ready:
+
+```php
+const CHATSPACE_ACCOUNT_MAIL_ENABLED = false;
+const CHATSPACE_ACCOUNT_MAIL_FROM = 'accounts@example.com';
+const CHATSPACE_ACCOUNT_MAIL_BASE_URL = 'https://example.com/core';
+const CHATSPACE_ACCOUNT_MAIL_TRANSPORT = 'smtp';
+const CHATSPACE_ACCOUNT_SMTP_HOST = 'smtp.example.com';
+const CHATSPACE_ACCOUNT_SMTP_PORT = 587;
+const CHATSPACE_ACCOUNT_SMTP_SECURITY = 'tls';
+const CHATSPACE_ACCOUNT_SMTP_USERNAME = '';
+const CHATSPACE_ACCOUNT_SMTP_PASSWORD = '';
+```
+
+After entering the correct password, eligible users can select **Lost your authenticator?** and request a code at their already verified private account email. Verification and recovery each allow one email request per rolling 24 hours. Each code expires after 15 minutes, permits five attempts, and can be verified once. An explicit transport failure permits retry after one minute; an accepted send uses the daily allowance. Existing authentication attempt protections also apply.
+
+Confirming the recovery code starts a 24-hour waiting period; it does not disable 2FA or sign the user in. The email provides a cancellation link and a private completion link. Keep that email. After waiting, the user must sign in with the password again and finish in the confirming browser, or use the private email link if their browser/session changed. A password alone cannot finish another person's pending recovery. Completion is available for seven days after the waiting period. An email-link GET never disables 2FA or cancels a request; confirmation is required. A signed-in user can also cancel recovery in Account Security. Normal authenticator/backup sign-in and disabling remain available during the wait.
+
+Completing recovery removes the authenticator and all old 2FA backup codes, invalidates previous sessions, and requires a fresh sign-in. The user can then enroll a new authenticator. Password changes, email changes, and authenticator replacement invalidate mismatched recovery requests. Changing the private account email requires the existing MFA through the normal account form and clears its verification; verify the new address before email recovery becomes available again. Public profile contact email is unrelated. Encrypted-chat device keys and its recovery phrase are unchanged.

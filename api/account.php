@@ -144,6 +144,7 @@ if ($action === 'update_email') {
     $duplicate->execute([$email, (int)$user['id']]);
     if ($duplicate->fetchColumn()) json_out(['error' => 'That email is already in use.'], 409);
     $pdo->prepare('UPDATE users SET email = ?, email_changed_at = CURRENT_TIMESTAMP WHERE id = ?')->execute([$email, (int)$user['id']]);
+    if ($email !== (string)$user['email']) account_email_invalidate($pdo, (int)$user['id']);
     json_out(['ok' => true] + account_projection($pdo, current_user() ?: $user));
 }
 

@@ -21,6 +21,15 @@
   }
   function render(data) {
     state = data;
+    const emailStatus = document.getElementById('two-factor-email-status');
+    emailStatus.textContent = data.recoveryPending
+      ? `Email recovery is pending until ${new Date(data.recoveryReadyAt * 1000).toLocaleString()}. Cancel it if you did not request it.`
+      : data.emailRecoveryEligible ? 'Delayed email recovery is available if you lose your authenticator. Normal authenticator/backup-code disabling still works.'
+      : data.emailRecoveryEnrolled && !data.emailVerified ? 'Verify your current private account email to restore email recovery. Your authenticator and backup codes still work.'
+      : !data.enabled && data.enrollmentEmailRequired ? 'This host requires a verified private account email for new 2FA enrollments. Keep access to it for optional lost-authenticator recovery. Normal authenticator/backup-code disabling still works.'
+      : data.enabled ? 'This enrollment keeps its original recovery methods. Email recovery was not enabled for it.' : '';
+    document.getElementById('two-factor-email-verify').hidden = !data.mailConfigured || data.emailVerified;
+    document.getElementById('two-factor-email-cancel').hidden = !data.recoveryPending;
     status.textContent = !data.available ? 'The host must update its database before setting up 2FA.'
       : data.enabled ? `Enabled · ${data.backupCodesRemaining} backup codes remaining.` : 'Off · Two-factor authentication is optional.';
     document.getElementById('two-factor-setup').hidden = data.enabled;
@@ -40,6 +49,8 @@
     close.addEventListener('click', () => { if (!pending) dialog.close(); }); header.append(close);
     contents = el('div'); message = el('p', '', {class:'two-factor-message', role:'status', 'aria-live':'polite'});
     dialog.append(header, contents, message); document.body.append(dialog);
+    // A dragged dialog must stay in bounds when the next setup step becomes taller.
+    new ResizeObserver(() => window.CoreChatPopups?.reflow?.(dialog)).observe(dialog);
     dialog.addEventListener('close', () => {
       dialog.querySelectorAll('input[type=password],input[autocomplete=one-time-code]').forEach(input => input.value = '');
     });
@@ -63,6 +74,7 @@
     finally { pending = false; dialog.dataset.popupBusy = 'false'; buttons.forEach(b => b.disabled = false); }
   }
   function credentials(action) {
+    if (action === 'begin' && state?.enrollmentEmailRequired && !state.emailVerified) { emailVerification(); return; }
     open(); mode = action;
     title(action === 'begin' ? 'Set up two-factor authentication' : action === 'disable' ? 'Disable two-factor authentication' : 'Replace backup codes');
     contents.replaceChildren();
@@ -86,6 +98,24 @@
           dialog.close(); status.textContent = '2FA disabled. Authenticator and backup codes are no longer accepted.';
         } }
       });
+    }); password.focus();
+  }
+  function emailVerification() {
+    open(); mode = 'email'; title('Verify your private account email'); contents.replaceChildren();
+    contents.append(el('p', 'A code will be sent to the private email in Account Security. Verify it before enabling 2FA with email recovery. If you change that address, verify the new address again.'));
+    const form = el('form'); contents.append(form);
+    const password = field(form, 'Current password', {type:'password',name:'password',autocomplete:'current-password',required:''});
+    const code = field(form, 'Email verification code', {name:'email_code',autocomplete:'one-time-code',maxlength:'32',spellcheck:'false'});
+    const row = actions(form);
+    button('Send verification email', () => {
+      if (!password.reportValidity()) return;
+      perform(async () => { await request({action:'email_send',password:password.value}); showMessage('Email sent. Enter its code within 15 minutes. One request per 24 hours.'); });
+    }, row);
+    row.append(el('button','Verify email',{type:'submit',class:'btn btn-primary'}));
+    button('Cancel',()=>dialog.close(),row);
+    form.addEventListener('submit', e => {
+      e.preventDefault(); if (!form.reportValidity() || !code.value.trim()) { showMessage('Enter the code from your email.',true); return; }
+      perform(async () => { const data=await request({action:'email_confirm',password:password.value,code:code.value}); password.value='';code.value='';render(data);dialog.close();status.textContent='Email verified. You can now set up 2FA.'; });
     }); password.focus();
   }
   async function copy(text, input) {
@@ -135,7 +165,15 @@
   });
   document.getElementById('two-factor-backup').addEventListener('click', () => credentials('backup_codes'));
   document.getElementById('two-factor-disable').addEventListener('click', () => credentials('disable'));
+  document.getElementById('two-factor-email-verify').addEventListener('click',emailVerification);
+  document.getElementById('two-factor-email-cancel').addEventListener('click', () => {
+    open();title('Cancel email recovery');contents.replaceChildren();
+    contents.append(el('p','Stop the pending recovery and keep your authenticator and backup codes active.'));
+    button('Cancel recovery',()=>perform(async()=>{render(await request({action:'email_cancel'}));dialog.close();}),contents,true);
+    button('Keep recovery request',()=>dialog.close(),contents);
+  });
   document.getElementById('two-factor-view-codes').addEventListener('click', () => backupCodes());
+  window.addEventListener('corechat-account-security-updated', () => request().then(render).catch(error => { status.textContent=error.message; }));
   request().then(data => {
     render(data);
     if (new URLSearchParams(location.search).get('setup2fa') === '1' && data.available && !data.enabled) credentials('begin');

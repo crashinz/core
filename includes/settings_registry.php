@@ -126,6 +126,17 @@ function settings_registry_definitions(bool $includeInstalledGames = true): arra
     $definitions = array_map('settings_registry_entry', private_site_branding_setting_definitions());
     $definitions = array_merge($definitions, [
         settings_registry_entry([
+            'id' => ACCOUNT_EMAIL_RECOVERY_SETTING, 'settingKey' => ACCOUNT_EMAIL_RECOVERY_SETTING,
+            'categoryId' => 'moderation-privacy-security', 'subsectionId' => 'account-recovery',
+            'subsectionLabel' => 'Account Recovery', 'subsectionOrder' => 15,
+            'label' => 'Email recovery for new 2FA enrollments',
+            'description' => 'Offer Lost your authenticator recovery to accounts that enable 2FA after this option is enabled. Existing enrollments are unchanged.',
+            'helpText' => 'Configure account email in the host configuration first. New enrollments must verify their private email. Recovery needs the password, an emailed code and a 24-hour wait, with cancellation available. Normal authenticator and backup-code disabling still works. Switching this off affects future enrollments only.',
+            'type' => 'boolean', 'defaultValue' => false, 'optional' => true, 'safeToReset' => false,
+            'bulkOperations' => ['setting'], 'authorization' => 'installation-owner-and-recent-authentication',
+            'aliases' => ['2FA', 'MFA', 'authenticator', 'verified email', 'lost phone'],
+        ]),
+        settings_registry_entry([
             'id' => LIVE_WEBSITE_ROOMS_SETTING,
             'settingKey' => LIVE_WEBSITE_ROOMS_SETTING,
             'owner' => 'live_website_rooms',
@@ -2004,6 +2015,9 @@ function settings_registry_validate_value(
     }
     if ($type === 'boolean') {
         $normalized = avatar_dance_capability_validate_boolean($value);
+        if (($definition['id'] ?? '') === ACCOUNT_EMAIL_RECOVERY_SETTING && $normalized && !account_mail_ready()) {
+            return ['ok'=>false,'code'=>'ACCOUNT_MAIL_NOT_CONFIGURED','error'=>'Configure account email and its public website URL in the host configuration before enabling email recovery.','http_status'=>409];
+        }
         return $normalized === null
             ? ['ok' => false, 'code' => 'SETTING_VALUE_INVALID', 'error' => $definition['label'] . ' must be enabled or disabled.', 'http_status' => 400]
             : ['ok' => true, 'value' => $normalized];

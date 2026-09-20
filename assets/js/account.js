@@ -339,7 +339,7 @@ document.getElementById('account-delete-form')?.addEventListener('submit', async
     form.dataset.requestId ||= accountRequestId('delete-account');
     const data = await post('/api/account_deletion.php', {
       request_id: form.dataset.requestId,
-      current_password: form.elements.current_password.value, two_factor_code: form.elements.two_factor_code.value,
+      current_password: form.elements.current_password.value,
       confirmation: form.elements.confirmation.value,
       room_successor_user_id: Number(form.elements.room_successor_user_id.value || 0) || null,
     });
@@ -457,8 +457,9 @@ document.getElementById('account-email-form').addEventListener('submit', async e
   const form = event.currentTarget;
   try {
     showStatus('Updating email…');
-    const data = await post('/api/account.php', { action: 'update_email', email: form.elements.email.value, current_password: form.elements.current_password.value });
-    form.elements.current_password.value = ''; render(data); showStatus('Email updated.');
+    const data = await post('/api/account.php', { action: 'update_email', email: form.elements.email.value, current_password: form.elements.current_password.value, two_factor_code: form.elements.two_factor_code.value });
+    form.elements.current_password.value = ''; form.elements.two_factor_code.value = ''; render(data); showStatus('Email updated.');
+    window.dispatchEvent(new Event('corechat-account-security-updated'));
   } catch (error) { showStatus(error.message, true); }
 });
 

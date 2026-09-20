@@ -13,7 +13,8 @@ function database_update_actor(PDO $pdo): ?array
     $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([(int)$_SESSION['user_id']]);
     $user = $stmt->fetch();
-    if ($user && !two_factor_session_valid($pdo, (int)$user['id'])) return null;
+    if ($user && (!two_factor_session_valid($pdo, (int)$user['id'])
+        || (int)($_SESSION['_email_recovery_epoch'] ?? 0) !== account_email_epoch($pdo, (int)$user['id']))) return null;
     return is_array($user) ? $user : null;
 }
 

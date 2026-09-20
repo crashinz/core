@@ -1694,3 +1694,8 @@ Added 36 verified advanced Pool reference sequences and 13 additional shared pra
 ## Direct transfer completion reliability - 2026-09-20
 
 Full transfers wait for the server-confirmed connection state before sending payload bytes, preventing small-file completion from racing connection registration. Completed local downloads retain their backing storage until released by the receiving UI; completed peers no longer display misleading reconnect prompts.
+# 2026-09-20 — Optional delayed email recovery for lost authenticators
+
+- Added an off-by-default Installation Owner setting for future 2FA enrollments, with host-configured SMTP/PHP mail and required private-email verification. Existing enrollments and normal password-plus-authenticator/backup-code disabling are unchanged.
+- Added a separate lost-authenticator route: bounded single-use email verification, a 24-hour cancellable wait, and explicit completion requiring the password and email proof. Completion revokes old sessions and backup codes. Private contact details and SMTP credentials are excluded from public projections.
+- Added shared account dialogs and recovery screens, with hosting instructions and bundled PHPMailer licensing. Corrected the account email form's missing 2FA-code submission and an unrelated accidental field read in its deletion form.

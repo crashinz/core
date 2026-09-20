@@ -9,7 +9,7 @@ declare(strict_types=1);
  */
 
 const CORE_MIGRATION_STATE_KEY = 'core_migration_state';
-const CORE_MIGRATION_REQUIRED_ID = '2026-09-20-001-optional-two-factor';
+const CORE_MIGRATION_REQUIRED_ID = '2026-09-20-002-two-factor-email-recovery';
 const CORE_MIGRATION_MAX_STATE_BYTES = 32768;
 const CORE_MIGRATION_BACKUP_MAX_STDERR_BYTES = 32768;
 const CORE_MIGRATION_MARIADB_BACKUP_FORMAT = 'corechat-mariadb-logical-backup';
@@ -841,8 +841,9 @@ function database_migrations_manifest(): array
                 '2BFEA00B9B257A1B589D7C62E05EF123DCDD7E68B6E69DC61270D6EB3E85D851',
                 '3A8211F5FAC4A489320BFFEEDB956B4707C2D6C28EE7651753BC8BAA57D72E18',
                 'F0BC0647FFEC5D3DC54F223376FA920E0CBCB622FE2CE6ABA82AE29CE196F003',
+                '7EC9F4DB466C04BEAF6BE4BDAD2F1A913433D7AC1D681BB2C7048CC0EF5ABA75',
             ],
-            'expected_checksum' => '7EC9F4DB466C04BEAF6BE4BDAD2F1A913433D7AC1D681BB2C7048CC0EF5ABA75',
+            'expected_checksum' => '7EED7EF16BE5143D728B77388248F8D3F782D44FFB9346A628BDC9A57846C43A',
         ],
         [
             'id' => '2026-09-12-001-live-website-official-successors',
@@ -919,7 +920,7 @@ function database_migrations_manifest(): array
             'expected_checksum' => '42258F69A303B1CE76B968988C7A4AC66737136DE7286F85AA7FF8F66E877AFE',
         ],
         [
-            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'id' => '2026-09-20-001-optional-two-factor',
             'title' => 'Optional account two-factor authentication',
             'owner' => 'core',
             'atomicity' => 'transactional-sqlite-forward-mariadb',
@@ -928,6 +929,15 @@ function database_migrations_manifest(): array
             'validate' => 'database_migration_validate_two_factor',
             'source_functions' => ['database_migration_apply_two_factor', 'database_migration_validate_two_factor'],
             'expected_checksum' => 'B942DEBD490FF4508B6257606718716987896E3B3339DF590A847138B41E746A',
+        ],
+        [
+            'id' => CORE_MIGRATION_REQUIRED_ID,
+            'title' => 'Optional delayed email recovery for future 2FA enrollments',
+            'owner' => 'core', 'atomicity' => 'transactional-sqlite-forward-mariadb', 'revision' => 1,
+            'up' => 'database_migration_apply_two_factor_email',
+            'validate' => 'database_migration_validate_two_factor_email',
+            'source_functions' => ['database_migration_apply_two_factor_email','database_migration_validate_two_factor_email'],
+            'expected_checksum' => 'A92FC7BAFF2C3D8888B8ADD13B568DFA86D2524D6FC81BDEB12072412959E9CB',
         ],
     ];
     foreach ($definitions as &$definition) {
@@ -4452,4 +4462,34 @@ function database_migration_validate_two_factor(PDO $pdo): bool
         && database_migration_has_columns($pdo, 'account_two_factor_backup', ['user_id','code_hash'])
         && database_migration_has_unique_key($pdo, 'account_two_factor', ['user_id'])
         && database_migration_has_unique_key($pdo, 'account_two_factor_backup', ['user_id','code_hash']);
+}
+
+function database_migration_apply_two_factor_email(PDO $pdo): void
+{
+    $suffix = db_uses_mysql_syntax($pdo) ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : '';
+    $pdo->exec('CREATE TABLE IF NOT EXISTS account_email_state (
+        user_id INTEGER PRIMARY KEY, verified_email VARCHAR(254) DEFAULT NULL,
+        verified_at BIGINT DEFAULT NULL, recovery_epoch INTEGER NOT NULL DEFAULT 0
+    )' . $suffix);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS account_two_factor_email (
+        user_id INTEGER PRIMARY KEY, mfa_revision INTEGER NOT NULL
+    )' . $suffix);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS account_email_challenges (
+        user_id INTEGER NOT NULL, purpose VARCHAR(16) NOT NULL, email VARCHAR(254) NOT NULL,
+        code_hash VARCHAR(64) NOT NULL, cancel_hash VARCHAR(64) NOT NULL, finish_hash VARCHAR(64) NOT NULL,
+        requested_at BIGINT NOT NULL, expires_at BIGINT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        ready_at BIGINT NOT NULL DEFAULT 0, state VARCHAR(16) NOT NULL,
+        mfa_revision INTEGER NOT NULL, password_stamp VARCHAR(64) NOT NULL,
+        PRIMARY KEY (user_id,purpose)
+    )' . $suffix);
+}
+
+function database_migration_validate_two_factor_email(PDO $pdo): bool
+{
+    return database_migration_has_columns($pdo,'account_email_state',['user_id','verified_email','verified_at','recovery_epoch'])
+        && database_migration_has_columns($pdo,'account_two_factor_email',['user_id','mfa_revision'])
+        && database_migration_has_columns($pdo,'account_email_challenges',['user_id','purpose','email','code_hash','cancel_hash','finish_hash','requested_at','expires_at','attempts','ready_at','state','mfa_revision','password_stamp'])
+        && database_migration_has_unique_key($pdo,'account_email_state',['user_id'])
+        && database_migration_has_unique_key($pdo,'account_two_factor_email',['user_id'])
+        && database_migration_has_unique_key($pdo,'account_email_challenges',['user_id','purpose']);
 }
