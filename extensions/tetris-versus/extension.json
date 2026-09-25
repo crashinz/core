@@ -41,8 +41,8 @@
     "entry": "index.html",
     "icon": "tetris-icon.png",
     "profile": "versus",
-    "minPlayers": 2,
-    "practiceMinPlayers": 2,
+    "minPlayers": 1,
+    "practiceMinPlayers": 1,
     "recordedMinPlayers": 2,
     "maxPlayers": 2,
     "seats": [
@@ -91,6 +91,9 @@
     "games/game-avatar.js",
     "games/classic-game-audio.js",
     "games/game-view-storage.js",
-    "games/bot-pacing.js"
+    "games/bot-pacing.js",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

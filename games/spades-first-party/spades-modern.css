@@ -525,3 +525,24 @@
 .spm-score-math b{white-space:normal;overflow-wrap:anywhere}
 /* The 75% height-fit floor must retain a 24px history-button target. */
 .spm-round-history{min-height:32px!important;min-width:32px!important}
+
+/* Keep a full portrait lane between the two team panels. */
+@media(min-width:961px){
+.spm-board .spm-scoreboard{left:2%!important;right:2%!important;top:20px!important;width:96%!important;transform:none!important;display:grid!important;grid-template-columns:minmax(0,1fr) 220px minmax(0,1fr)!important;gap:20px!important}
+.spm-board .spm-score-team:first-of-type{grid-column:1!important}.spm-board .spm-score-team:last-of-type{grid-column:3!important}
+.spm-board .spm-seat-top,.spm-board.spm-host-compact .spm-seat-top{top:28px!important;width:150px!important;height:210px!important}
+.spm-board .spm-seat-top .spm-avatar{height:154px!important}
+.spm-board .spm-score-math span{font-size:10px!important;overflow-wrap:normal}.spm-board .spm-score-math b{font-size:17px!important}
+}
+
+@media(min-width:961px){
+.spm-board .spm-scoreboard{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important}
+.spm-board .spm-scoreboard>h2{position:absolute!important;left:50%!important;top:250px!important;width:auto!important;transform:translateX(-50%)!important;font-size:12px!important}
+.spm-board .spm-seat-top,.spm-board.spm-host-compact .spm-seat-top{width:180px!important;height:236px!important}
+.spm-board .spm-seat-top .spm-avatar{height:180px!important}
+}
+
+/* Both teams use identical text alignment and equal board-edge insets. */
+.spm-team-title{text-align:left}
+.spm-score-stat,.spm-score-math>div{text-align:center}
+@media(min-width:961px){.spm-board .spm-scoreboard{margin:0!important}}

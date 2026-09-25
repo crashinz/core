@@ -1,3 +1,45 @@
+## 2026-09-25 — Classic game presentation and gameplay updates
+
+Classic games should now match the original OCX presentation, with restored artwork, animation sequences and sound timing. Checkers uses the original capture sequence, Five Dice includes its personal-record celebration and clean score labels, and Battleship effects follow their impact and sinking stages.
+
+Improve game results and celebrations, practice opponent selection, arcade movement and replay, and sound cancellation. Add the v5 Game Review reference pack with 398 playable example variants. Pool returns full-sized pocketed balls through a visible outlet and curved collection chute.
+
+Add complete database-and-media backups, selective content imports and automatic validation/import of server-placed original OCX files.
+
+## 2026-09-25 — Pool return entrance and curved feeder
+
+Pocketed balls visibly emerge sideways from a table outlet, roll around a curved elbow and continue down the collection lane. Space simultaneous returns apart so they stay separate through the bend. Keep full ball size and game physics unchanged.
+
+## 2026-09-25 — Pool ball return chute
+
+Replace the plain dark side return with a framed metal channel, shaded running rails, entrance hood and end bumper. Full-sized balls emerge behind the foreground lip and roll into the channel. Shot physics, pocket geometry and rules are unchanged.
+
+## 2026-09-24 — Automatic private Classic media inbox
+
+Validate and import server-placed original OCXs after setup, after successful database updates, and once daily when the site is used. Skip fully installed games before checking source files. Reuse static extraction, private storage, validated activation and retained resources; keep installed media intact on failure and expose the inbox path, last result and manual retry to the Installation Owner.
+## 2026-09-25 — Frozen Game Review references v5
+
+Add a separately pinned v5 reference pack with current game renderers and executable examples, including recorded intermediate Space Invasion movement, Tetris line clears, fleet placement, and explicit Spades and Blackjack win/loss cases. Preserve older reference versions. Suspend turn countdowns only in prepared Pool reviews. Avoid a stale-step error when a reference trick settles automatically. Keep review bot portraits synthetic and exclude global avatar editing. Original Classic media remains private and is copied only after exact verification.
+
+## 2026-09-25 — Game sound lifecycle and Built-in timing
+
+Remove animation-length sound waits when Visual FX is off. Cancel pending sounds on mute, reset, hidden games and replacement moves, including Classic sound chains and Five Dice bonus cues. Align Chinese Checkers sounds to each visible jump and the final landing, and Nested Four placement/result sounds to the piece landing. Preserve the verified Classic animation timelines. Stop active Built-in Five Dice effects when SFX is switched off.
+
+## 2026-09-24 — Classic game sound and animation timing
+
+Align Battleship impact, sinking and result cues with their visual stages instead of waiting for the previous recording to finish. Restore the movement cue after captures in Classic Backgammon and Acey Deucy, align Chess check/result cues with the move, and keep Five Dice record artwork on the same clock as its sound when images load late. Preserve sound/effect options and cancel stale cues after reset or replacement.
+## 2026-09-24 — Classic Checkers capture audio timing
+
+Start the original capture sound with the jump and replace it with the crowning sound at landing. Play the winning cue with the visual result. Preload the existing clips, preserve sound/visual settings, and cancel stale cues when a move is replaced or reset.
+
+## 2026-09-24 — Classic Checkers capture sequence
+
+Restore the original capture order and frame cadence: checker lift, concurrent landing and vertical missile drop, then impact and explosion. Remove the missile and captured checker at impact; start promotion when the moving checker lands. Keep normal moves and Built-in presentation unchanged.
+
+## 2026-09-24 — Game review playback and Dominoes celebration
+
+Center Dominoes Replay celebration. The opponent-wins live review now plays its prepared tile after the board appears, retaining a manual retry. Space Invasion live review accepts full legal input batches and prepared actions visibly move/fire, hit and end the invasion. Normal match timing checks remain unchanged. Existing frozen reference files are preserved.
+
 # Modification Notice
 
 This distribution of ChatSpace Community Edition has been modified by **exe**.
@@ -9,6 +51,25 @@ See [AUTHORS.md](AUTHORS.md) for the original project credits and
 [LICENSE.md](LICENSE.md) for the governing license.
 
 # Modification History
+
+## Practice lobbies, resume controls and game presentation - 2026-09-24
+
+- Allow Pool and Tetris opponents to be selected in the waiting lobby after choosing no bot; list Tetris as supporting one or two players.
+- Resume games with one human and optional bots immediately, preserving the shared countdown for multiple human players.
+- Compare Space Invasion prediction snapshots independently of stored field order and retain pending movement across slower replies, within the server's existing time allowance.
+- Add executable Dominos play, victory and defeat reviews with clear result dialogs. Give Player 2 a contrasting blue default Pool cue while preserving rematch selections.
+
+## Classic Five Dice labels and popup draft tracking - 2026-09-24
+
+- Show the original board's clean score labels without covering them with alternate textured artwork; retain score previews and pointer/keyboard selection.
+- Do not treat asynchronously loaded or refreshed popup fields as unsaved edits. Preserve warnings for edited controls, settings-model drafts and aura selections, including partial-save handling.
+
+## Complete site backups and selective content imports - 2026-09-24
+
+- Add encrypted database-and-media archives with preview, selected content groups, stable-identity duplicate checks and explicit conflict choices.
+- Retain library ownership/visibility, account authentication, installed Classic media and review references. Preserve existing login credentials during selective merges.
+- Create a private recovery archive before applying an import and reconcile interrupted database/file restoration. Keep the older portable JSON and database-only tools available.
+
 
 ## Explicit room departure - 2026-09-20
 
@@ -88,8 +149,6 @@ Post-Build 000064 follow-up to public application commit `db6f862`.
 - Preserve all 316 previous frozen sequences and resources; isolate the new Pool renderer and rebase replay clocks without changing saved trajectories.
 - Fit Pool within the review page, keep account setup libraries outside isolated examples, and install v3 alongside private v2 with verified Classic-media reuse.
 - Complete a 17-shot uninterrupted browser 9-ball match, with banks, fouls, re-spotting and a legal win.
-- Testing is WIP.
-
 ## 8 Ball Pool - 2026-09-17
 
 Pool ball numbers are larger and sharper, with the gloss highlight moved away from the number patch. Both 8 Ball and 9 Ball retain their ball size, natural rolling orientation and existing physics.
@@ -118,7 +177,7 @@ Pool corner openings and angled cushions now match the approved larger-ball prop
 
 Pool practice setups now follow the signed-in account, with automatic idempotent import of prior browser saves. Personal and administrator shared setups support updating, visual previews, and recoverable deletion. Shared editing remains administrator-only, and stale edits are rejected. Pool aiming guides now shorten the target line on thin cuts while retaining the angle-dependent cue departure, matching the Android reference behavior.
 
-Pool now uses larger balls on new tables, with unchanged table dimensions and cosmetic decoration along each cue shaft. Solo practice includes a ball editor, clear/rack controls, shot rewind, and named personal setups with load/rename/delete. Administrators can publish named practice setups for everyone to load; shared changes require administrator permission. Existing tables retain their original ball geometry until reset. Nine-ball remains a disabled Coming soon choice.
+Pool now uses larger balls on new tables, with unchanged table dimensions and cosmetic decoration along each cue shaft. Solo practice includes a ball editor, clear/rack controls, shot rewind, and named personal setups with load/rename/delete. Administrators can publish named practice setups for everyone to load; shared changes require administrator permission. Existing tables retain their original ball geometry until reset.
 
 Pool gentle shots now use a softer minimum that blends into the existing power curve at 20%; medium and full power remain unchanged. The target-ball direction guide is shorter, with a separate short cue-ball departure guide at contact.
 
@@ -136,7 +195,7 @@ Pool turn outlines now last three seconds. Table options can keep playable targe
 
 Pool briefly outlines legal target balls before every playable shot, including continued turns, and places routine shot status below the controls. Reminder waits for movement/placement to finish and does not restart on duplicate updates.
 
-Pool aiming now marks predicted illegal first contact with a red crossed circle, matching server group and 8-ball rules while preserving solo free shooting and break exemptions. Testing remains WIP pending owner acceptance.
+Pool aiming now marks predicted illegal first contact with a red crossed circle, matching server group and 8-ball rules while preserving solo free shooting and break exemptions.
 
 - Refine Pool aim buttons and arrow keys to 0.05-degree taps, with delayed hold repeat and finer Shift-arrow adjustments.
 
@@ -167,7 +226,7 @@ Pool aiming now marks predicted illegal first contact with a red crossed circle,
 - Add two-human 8 Ball and permanent solo Practice with fresh racks, free cue-ball placement, and repeatable shot layouts.
 - Add server-owned shots and foul rules, shared trajectory playback, six cosmetic cues, direct spin and mouse/keyboard controls, resizing, recording, save/restore and rematches that preserve game conversation.
 - Adapt and attribute Pooltool collision and motion models; retain the approved approximate maximum-power calibration.
-- Testing is WIP. Local checks do not replace owner acceptance; no pool bots are included yet.
+-  Local checks do not replace owner acceptance; no pool bots are included yet.
 
 
 
@@ -186,305 +245,291 @@ Pool aiming now marks predicted illegal first contact with a red crossed circle,
 - Add responsive domino artwork, on-board avatars and scores, team glows, legal placement previews, drag-to-play, drawing and move animations, placement sounds and a victory sequence.
 - Add Normal and qualified Expert Practice bots, public-information search, readable turn pacing, bottom thinking/retry messages, recordings, saves and rematches. Preserve Normal behavior.
 - Add shared movable popup headings, visible close controls, outside/Escape dismissal, draft and pending-action safeguards, and a retry for canceled password confirmation.
-- Testing is WIP.
-
-
-
 ## Game Review reference pack v2 - 2026-09-16
 
 - Add the approved Five Dice blank, tumbling and smooth-landing presentation to a new frozen reference pack, preserving all other game references and sequences.
 - Add v2 installation alongside the private v1 backup and verified reuse of its Classic media, with an updated optional download.
-- Testing is WIP.
-
 ## Five Dice smooth roll landing - 2026-09-16
 
 - Add a gradual landing transition from tumbling dice into the original resting artwork, completing before the rolling view clears. Keep held dice still and retain existing roll results and timing.
-- Testing is WIP.
-
 ## Five Dice edge-over-edge rolling - 2026-09-16
 
 - Add six-sided Built-in dice that tip over their edges during rolls, with fixed face numbers and the real result at rest. Preserve kept dice, Classic motion and existing timing.
-- Testing is WIP.
-
 ## Five Dice rolling motion - 2026-09-16
 
 - Add visible Built-in dice rotations and changing faces during rolls, settling on the actual result while kept dice remain still. Preserve Classic rolling artwork and existing sound/timing.
-- Testing is WIP.
-
 ## Five Dice unrolled dice - 2026-09-16
 
 - Add blank Built-in dice before the first roll so placeholder values cannot look like a Yahtzee. Preserve Classic unrolled presentation, real rolled faces and all game/bot rules.
-- Testing is WIP.
-
 ## Five Dice full-scorecard Expert - 2026-09-16
-Added full-scorecard planning to Five Dice Expert with generated strategy values for the existing Joker and bonus rules, preserved Easy/Normal play and readable pacing, and added a safe fallback when strategy data is unavailable. Added reproducible first-party table generation and research attribution in the consolidated notices. Testing is WIP.
+Added full-scorecard planning to Five Dice Expert with generated strategy values for the existing Joker and bonus rules, preserved Easy/Normal play and readable pacing, and added a safe fallback when strategy data is unavailable. Added reproducible first-party table generation and research attribution in the consolidated notices.
 
 ## Five Dice Practice bots - 2026-09-16
-Added Easy, Normal and Expert Five Dice bots in optional empty lobby seats, with Practice-only play, visible holds and rolls, and below-board thinking and retry controls. Added scorecard-aware probability search, bot-aware outcomes, protected game recordings and save/rematch coverage while preserving solo play. Testing is WIP.
+Added Easy, Normal and Expert Five Dice bots in optional empty lobby seats, with Practice-only play, visible holds and rolls, and below-board thinking and retry controls. Added scorecard-aware probability search, bot-aware outcomes, protected game recordings and save/rematch coverage while preserving solo play.
 
 ## Puppy Panic Practice bots - 2026-09-16
-Added Easy, Normal and Expert Practice bots for the Core deck and Mischief Pack, selectable in empty lobby seats. Added paced turns and counters, below-table thinking and last-move feedback, protected game recordings and save/rematch coverage. Added safeguards for private card views and empty-hand card requests, plus a rectangular default avatar that fits the Puppy Panic portrait frame. Testing is WIP.
+Added Easy, Normal and Expert Practice bots for the Core deck and Mischief Pack, selectable in empty lobby seats. Added paced turns and counters, below-table thinking and last-move feedback, protected game recordings and save/rematch coverage. Added safeguards for private card views and empty-hand card requests, plus a rectangular default avatar that fits the Puppy Panic portrait frame.
 
 ## Blackjack Expert - 2026-09-16
-Added a qualified Expert Practice bot with exposed-card memory, count-informed hand decisions and betting based on public standings and rounds remaining. Added shuffle/legacy-memory safeguards and recording/save/rematch coverage. Existing Easy and Normal play is preserved. Testing is WIP.
+Added a qualified Expert Practice bot with exposed-card memory, count-informed hand decisions and betting based on public standings and rounds remaining. Added shuffle/legacy-memory safeguards and recording/save/rematch coverage. Existing Easy and Normal play is preserved.
 
 ## Blackjack Practice bots - 2026-09-16
-Added optional Easy and Normal Blackjack players in empty lobby seats, Practice-only play, exact-rule basic strategy, readable per-action pacing and bottom thinking/retry feedback. Added shared Blackjack move/score recordings and bot decision traces, with saves/rematches and hidden-card protection. Testing is WIP.
+Added optional Easy and Normal Blackjack players in empty lobby seats, Practice-only play, exact-rule basic strategy, readable per-action pacing and bottom thinking/retry feedback. Added shared Blackjack move/score recordings and bot decision traces, with saves/rematches and hidden-card protection.
 
 ## Acey Deucy Practice bots - 2026-09-16
-Added optional Easy, Normal and Expert Acey Deucy bots for Current and European Double-Double rules, with Practice-only lobby seats, variant-aware dice-sequence and reply search, verified rolls, paced individual checker moves, bottom thinking/retry feedback, recordings, saves and rematches. Added visible Built-in checker travel and registered bot win/hit presentation. Testing is WIP.
+Added optional Easy, Normal and Expert Acey Deucy bots for Current and European Double-Double rules, with Practice-only lobby seats, variant-aware dice-sequence and reply search, verified rolls, paced individual checker moves, bottom thinking/retry feedback, recordings, saves and rematches. Added visible Built-in checker travel and registered bot win/hit presentation.
 
 ## Nested Four Practice bots - 2026-09-16
 
-Added optional Easy, Normal and Expert Nested Four bots for both reserve-covering rules, with remembered public moves, committed-piece search, Practice-only lobby seats, authoritative move validation and shared game recordings. Added paced visible selection and movement for humans and bots, saved-game memory, rematch support and reserved bottom thinking/retry feedback. Testing is WIP.
+Added optional Easy, Normal and Expert Nested Four bots for both reserve-covering rules, with remembered public moves, committed-piece search, Practice-only lobby seats, authoritative move validation and shared game recordings. Added paced visible selection and movement for humans and bots, saved-game memory, rematch support and reserved bottom thinking/retry feedback.
 
 ## Chinese Checkers guide colors - 2026-09-16
 
-Added matching marble colors to the goal triangle, labels and direction arrow. Testing is WIP.
+Added matching marble colors to the goal triangle, labels and direction arrow.
 
 ## 2026-09-16 - Chinese Checkers goal guide
 
-Added a personal destination outline, Your goal label and direction arrow to Chinese Checkers, with a saved Goal guide setting that defaults to On. Added support across board appearances and viewer-relative seats. Added visible marble steps and hops along confirmed move routes, last-move markers, and bot waits for completed animations. Testing is WIP.
+Added a personal destination outline, Your goal label and direction arrow to Chinese Checkers, with a saved Goal guide setting that defaults to On. Added support across board appearances and viewer-relative seats. Added visible marble steps and hops along confirmed move routes, last-move markers, and bot waits for completed animations.
 
 
 ## 2026-09-16 - Readable Practice bot turns
 
-Added viewing intervals for individual bot actions across Chinese Checkers, Chess, Checkers, Backgammon, Spades, Hearts, UNO and Battleship. Added separate visible server replies for Spades and Battleship, individually paced Backgammon checker moves including doubles, and a larger Expert Backgammon reply-search allowance within the viewing interval. Preserved bottom status placement, game animations and Practice-only recording. Testing is WIP.
+Added viewing intervals for individual bot actions across Chinese Checkers, Chess, Checkers, Backgammon, Spades, Hearts, UNO and Battleship. Added separate visible server replies for Spades and Battleship, individually paced Backgammon checker moves including doubles, and a larger Expert Backgammon reply-search allowance within the viewing interval. Preserved bottom status placement, game animations and Practice-only recording.
 
 
 ## 2026-09-16 - Chinese Checkers Practice bots
 
-Added optional Easy, Normal and Expert Chinese Checkers bots using an attributed JumpStar classical adaptation, empty-seat lobby controls, server-validated moves, Practice-only protection, and reserved thinking/retry feedback below the controls. Added multiplayer goal planning, bounded lookahead and decision recording. Testing is WIP.
+Added optional Easy, Normal and Expert Chinese Checkers bots using an attributed JumpStar classical adaptation, empty-seat lobby controls, server-validated moves, Practice-only protection, and reserved thinking/retry feedback below the controls. Added multiplayer goal planning, bounded lookahead and decision recording.
 
 
 ## 2026-09-16 — Optional downloadable Game Review references
 
-Add a versioned optional reference ZIP distributed through GitHub Releases, with administrator download, chunked installation, verification and per-game Classic media copying. Built-in assets and frozen example code/sequences are distributed separately from ordinary application updates; original OCX media and personal references remain private. Existing matching references are reused and differing files are never overwritten. Missing Classic references affect only their game, while live examples and rules comparisons remain available. Testing is WIP.
+Add a versioned optional reference ZIP distributed through GitHub Releases, with administrator download, chunked installation, verification and per-game Classic media copying. Built-in assets and frozen example code/sequences are distributed separately from ordinary application updates; original OCX media and personal references remain private. Existing matching references are reused and differing files are never overwritten. Missing Classic references affect only their game, while live examples and rules comparisons remain available.
 
 
 ## 2026-09-16 — Immediate administrator game-review selection
 
-Administrator Game Review now defaults to Classic where supported. Changing the example or appearance applies immediately; the Choose example button is removed. Explicit appearance choices, Built-in-only games, Start/Reset and independent frozen references remain supported. Testing is WIP.
+Administrator Game Review now defaults to Classic where supported. Changing the example or appearance applies immediately; the Choose example button is removed. Explicit appearance choices, Built-in-only games, Start/Reset and independent frozen references remain supported.
 
 
 ## 2026-09-16 — Bulk selection for unused-file cleanup
 
-Added Select this page, Select all results, Clear selection, and a selected count/size summary to administrator unused-file review. Selections persist across result pages and reset when changing scan categories. Batch confirmation includes total count/size; progress reports completed and skipped/failed files. Stop after current file lets an in-flight request finish and retains unprocessed selections for review or retry. Existing per-file reference/identity checks and recoverable trash remain in force. Nothing is automatically selected. Testing is WIP.
+Added Select this page, Select all results, Clear selection, and a selected count/size summary to administrator unused-file review. Selections persist across result pages and reset when changing scan categories. Batch confirmation includes total count/size; progress reports completed and skipped/failed files. Stop after current file lets an in-flight request finish and retains unprocessed selections for review or retry. Existing per-file reference/identity checks and recoverable trash remain in force. Nothing is automatically selected.
 
 
 ## 2026-09-16 — Administrator unused media cleanup
 
-Added Admin → Storage Management → Find unused files for avatars, nameplates, gesture files, imported-room media and room backgrounds. The compact, cancellable review protects saved private/community libraries, selected media, retained gesture versions and database history/room references without exposing protected files. Files younger than 24 hours and unsupported or unverifiable files are skipped. Administrators select candidates and confirm a move into private recoverable trash; restore never overwrites another file. Permanent deletion requires a separate confirmation and another reference check. Custom emoji files remain excluded so historical messages keep working. No automatic deletion or database migration. Testing is WIP.
+Added Admin → Storage Management → Find unused files for avatars, nameplates, gesture files, imported-room media and room backgrounds. The compact, cancellable review protects saved private/community libraries, selected media, retained gesture versions and database history/room references without exposing protected files. Files younger than 24 hours and unsupported or unverifiable files are skipped. Administrators select candidates and confirm a move into private recoverable trash; restore never overwrites another file. Permanent deletion requires a separate confirmation and another reference check. Custom emoji files remain excluded so historical messages keep working. No automatic deletion or database migration.
 
 
 ## 2026-09-15 - Continuous game rematches and conversation
 
-Play Again keeps the game view open and carries the conversation into consent-linked rematches. Earlier-round messages remain available after reload for authorized returning players, while new messages and game records stay attached to their own match. Testing is WIP.
+Play Again keeps the game view open and carries the conversation into consent-linked rematches. Earlier-round messages remain available after reload for authorized returning players, while new messages and game records stay attached to their own match.
 
 
 ## 2026-09-15 - Editable extensions and central release checksums
 
-Extension manifests now list required files without duplicate hashes. Release checksums are centralized in release-manifest.json, with administrator modified-file diagnostics and optional strict checking disabled by default. Required-file, capability and frozen-reference checks remain enforced. Testing is WIP.
+Extension manifests now list required files without duplicate hashes. Release checksums are centralized in release-manifest.json, with administrator modified-file diagnostics and optional strict checking disabled by default. Required-file, capability and frozen-reference checks remain enforced.
 
 
 ## 2026-09-15 - Stable bot thinking feedback
 
-Chess, Checkers, Hearts, UNO and Backgammon share a reserved status area below the board controls. Thinking, completion and retry messages no longer move the board. Frozen administrator references remain unchanged. Testing is WIP.
+Chess, Checkers, Hearts, UNO and Backgammon share a reserved status area below the board controls. Thinking, completion and retry messages no longer move the board. Frozen administrator references remain unchanged.
 
 
 ## 2026-09-15 - Permanent administrator game review
 
-Adds Game review to the administrator games list with 158 repeatable examples across all 15 games and supported Built-in/Classic appearances. Live practice examples compare against preserved renderer, media and rules references, with private reference backups and revision history. Review preferences stay isolated from regular games. Testing is WIP.
+Adds Game review to the administrator games list with 158 repeatable examples across all 15 games and supported Built-in/Classic appearances. Live practice examples compare against preserved renderer, media and rules references, with private reference backups and revision history. Review preferences stay isolated from regular games.
 
 
 ## 2026-09-15 - Original game audio and optional voices
 
-Classic games add personal default-off controls for original turn reminders and extra voices, with sound previews. Chess move/capture and check cues, incoming draw offers, Battleship placement sounds, and Acey Deucy roll and victory reactions follow traced original events. Manual previews continue across routine game refreshes. Testing is WIP.
+Classic games add personal default-off controls for original turn reminders and extra voices, with sound previews. Chess move/capture and check cues, incoming draw offers, Battleship placement sounds, and Acey Deucy roll and victory reactions follow traced original events. Manual previews continue across routine game refreshes.
 
 
 ## 2026-09-15 - Five Dice roll effects and original reactions
 
-Five Dice presents accepted rolls for every player, preserves held dice and prepares Classic sound with motion. Original Yahtzee, upper-bonus, repeat-Yahtzee and personal-record Cheers cues are connected. Idle voices have personal opt-in switches and audio previews, disabled by default. Optional Classic resources preserve compatibility with existing packs. Testing is WIP.
+Five Dice presents accepted rolls for every player, preserves held dice and prepares Classic sound with motion. Original Yahtzee, upper-bonus, repeat-Yahtzee and personal-record Cheers cues are connected. Idle voices have personal opt-in switches and audio previews, disabled by default. Optional Classic resources preserve compatibility with existing packs.
 
 
 ## 2026-09-15 - Restore original Battleship sequences
 
-Classic Battleship follows original combat stages, timing and victory strip geometry. Spades retains the approved sliding card and original direct transitions. Game rules are unchanged. Testing is WIP.
+Classic Battleship follows original combat stages, timing and victory strip geometry. Spades retains the approved sliding card and original direct transitions. Game rules are unchanged.
 
 
 ## 2026-09-15 - Correct Chess castling presentation
 
-Classic castling now places the king and rook together, following the original OCX board-update behavior. Built-in castling moves both pieces in one coordinated transition, including server confirmation and either board orientation. Game rules are unchanged. Testing is WIP.
+Classic castling now places the king and rook together, following the original OCX board-update behavior. Built-in castling moves both pieces in one coordinated transition, including server confirmation and either board orientation. Game rules are unchanged.
 
 
 ## 2026-09-15 — Keep selected Checkers and Chess pieces visible
 
-Classic Checkers and Chess now retain the visible piece until its selected artwork is decoded. Chess keyboard focus uses the same protection, and delayed, failed or cancelled image requests cannot replace a newer selection. Classic Checkers time expiration now receives the same colored-tile sequence as other decisive results. Existing game rules and source artwork are preserved. Testing is WIP.
+Classic Checkers and Chess now retain the visible piece until its selected artwork is decoded. Chess keyboard focus uses the same protection, and delayed, failed or cancelled image requests cannot replace a newer selection. Classic Checkers time expiration now receives the same colored-tile sequence as other decisive results. Existing game rules and source artwork are preserved.
 
 
 ## 2026-09-15 — Keep point-game artwork visible during image loading
 
-Fixed the first selected checker briefly disappearing in Classic Backgammon and Acey Deucy, and the Acey Deucy board briefly disappearing on a winning move. Preload the replacement artwork and retain the visible checker or board until the replacement decodes, including safe fallback for failed loads and cancelled selections. Testing is WIP.
+Fixed the first selected checker briefly disappearing in Classic Backgammon and Acey Deucy, and the Acey Deucy board briefly disappearing on a winning move. Preload the replacement artwork and retain the visible checker or board until the replacement decodes, including safe fallback for failed loads and cancelled selections.
 
 
 ## 2026-09-15 — Original checker sequences and rotating starters
 
-Made Rotate starter the default for new Backgammon and Acey Deucy games while preserving explicit starter choices. Added optional original Classic checker capture, bar arrival, spinning movement and landing sequences, including settling after bearing off before victory. Retained larger dice, corrected racks and fallback for older media packs. Verify now reports whether the complete checker artwork needs re-importing. Testing is WIP.
+Made Rotate starter the default for new Backgammon and Acey Deucy games while preserving explicit starter choices. Added optional original Classic checker capture, bar arrival, spinning movement and landing sequences, including settling after bearing off before victory. Retained larger dice, corrected racks and fallback for older media packs. Verify now reports whether the complete checker artwork needs re-importing.
 
 
 ## 2026-09-15 — Original point-game rack alignment
 
-Corrected Classic Backgammon and Acey Deucy bear-off rack positions to match the original upper/lower baselines and alternating offsets. Corrected Acey Deucy resting checker widths and kept the animation destination aligned with the resting stack. Testing is WIP.
+Corrected Classic Backgammon and Acey Deucy bear-off rack positions to match the original upper/lower baselines and alternating offsets. Corrected Acey Deucy resting checker widths and kept the animation destination aligned with the resting stack.
 
 
 ## 2026-09-15 — Acey direction and original Chess king animation
 
-Corrected Classic Acey Deucy’s lower-row direction and player bear-off racks. Added the original Chess king-and-flag animation with working frame playback, cleanup and optional-media fallback. Verify now checks its artwork. Corrected Backgammon and Acey Deucy bear-off to use the original concurrent slide and turn, eight complete frames at80ms, and clean handoff to the resting rack. Testing is WIP.
+Corrected Classic Acey Deucy’s lower-row direction and player bear-off racks. Added the original Chess king-and-flag animation with working frame playback, cleanup and optional-media fallback. Verify now checks its artwork. Corrected Backgammon and Acey Deucy bear-off to use the original concurrent slide and turn, eight complete frames at80ms, and clean handoff to the resting rack.
 
 
 ## 2026-09-15 — Original Chess capture and Acey Deucy victory animations
 
-Added optional original Chess capture artwork for all piece depths and both viewing orientations, including en passant, and the original five-stage Acey Deucy victory sequence. Verify reports whether the new animation artwork is installed. Existing Classic packs retain their fallback effects. Testing is WIP.
+Added optional original Chess capture artwork for all piece depths and both viewing orientations, including en passant, and the original five-stage Acey Deucy victory sequence. Verify reports whether the new animation artwork is installed. Existing Classic packs retain their fallback effects.
 
 
 ## 2026-09-15 — Five Dice original and doubled Classic media
 
-Added complete static Five Dice OCX import, original-size image preparation, and automatic preference for supplied doubled artwork when multiple sources are selected. Verify now identifies 2x artwork, Original OCX 1x artwork, or a mixture, alongside missing and invalid file checks. Existing complete packs and protected private installation remain supported. Testing is WIP.
+Added complete static Five Dice OCX import, original-size image preparation, and automatic preference for supplied doubled artwork when multiple sources are selected. Verify now identifies 2x artwork, Original OCX 1x artwork, or a mixture, alongside missing and invalid file checks. Existing complete packs and protected private installation remain supported.
 
 
 ## 2026-09-15 — Classic media details on demand
 
-Kept the Classic game list compact by moving optional bear-off artwork details into the Verify result. Verification still reports progress, missing or invalid files, and failures beside the relevant game. Testing is WIP.
+Kept the Classic game list compact by moving optional bear-off artwork details into the Verify result. Verification still reports progress, missing or invalid files, and failures beside the relevant game.
 
 
 ## 2026-09-15 — Clear Classic media verification results
 
-Added verification progress, file counts and errors beside each game in Admin, with results remaining visible when its menu is closed. Added separate original bear-off animation status for Backgammon and Acey Deucy so missing artwork clearly requests re-import. Added immediate status refresh after installation or removal and an unverified message for older server responses. Testing is WIP.
+Added verification progress, file counts and errors beside each game in Admin, with results remaining visible when its menu is closed. Added separate original bear-off animation status for Backgammon and Acey Deucy so missing artwork clearly requests re-import. Added immediate status refresh after installation or removal and an unverified message for older server responses.
 
 
 ## 2026-09-15 — Shared original bear-off animation
 
-Added matching rack-entry and overlapping checker-turn motion for Classic Backgammon and Acey Deucy, using the original optional bear-off frames. Added a full bear-off duration for Acey Deucy so cleanup no longer truncates the shared sequence. Added compatible optional-media import and a working fallback for existing packs or unavailable artwork, with both-seat ordinary and final-checker checks. Testing is WIP.
+Added matching rack-entry and overlapping checker-turn motion for Classic Backgammon and Acey Deucy, using the original optional bear-off frames. Added a full bear-off duration for Acey Deucy so cleanup no longer truncates the shared sequence. Added compatible optional-media import and a working fallback for existing packs or unavailable artwork, with both-seat ordinary and final-checker checks.
 
 
 ## 2026-09-15 — Single blocked-roll dice pair and Backgammon rack entry
 
-Added a single displayed dice pair during Classic Backgammon rolls and blocked bar-entry turns, preventing smaller legacy dice from appearing over the new dice. Added the same dice renderer for blocked-turn fallback. Added a Backgammon bear-off path that enters the side channel before travelling along the rack and turning edge-on into the notch, with existing total duration preserved. Added both-seat blocked-roll and ordinary/final bear-off checks, plus Acey Deucy regression coverage. Testing is WIP.
+Added a single displayed dice pair during Classic Backgammon rolls and blocked bar-entry turns, preventing smaller legacy dice from appearing over the new dice. Added the same dice renderer for blocked-turn fallback. Added a Backgammon bear-off path that enters the side channel before travelling along the rack and turning edge-on into the notch, with existing total duration preserved. Added both-seat blocked-roll and ordinary/final bear-off checks, plus Acey Deucy regression coverage.
 
 
 ## 2026-09-15 — Game FX controls and motion preferences
 
-Added per-game Visual FX choices that override the device motion default. Added matching lit/enabled and dim/disabled Classic sound and visual controls for Backgammon, Acey Deucy, Chess and Checkers. Added protection against white empty-image boxes during Classic control loading. Added browser checks for delayed artwork, saved FX state, keyboard controls and animations under reduced motion. Testing is WIP.
+Added per-game Visual FX choices that override the device motion default. Added matching lit/enabled and dim/disabled Classic sound and visual controls for Backgammon, Acey Deucy, Chess and Checkers. Added protection against white empty-image boxes during Classic control loading. Added browser checks for delayed artwork, saved FX state, keyboard controls and animations under reduced motion.
 
 
 ## 2026-09-15 — Independent game records loading
 
-Added records loading independent of gameplay across shared games and Five Dice. Added isolated records errors, retained cached totals, stale-response protection and retry on reopening Five Dice records. Added regression coverage for held/failed requests, accepted browser actions, session expiry and retained point-game animations. Testing is WIP.
+Added records loading independent of gameplay across shared games and Five Dice. Added isolated records errors, retained cached totals, stale-response protection and retry on reopening Five Dice records. Added regression coverage for held/failed requests, accepted browser actions, session expiry and retained point-game animations.
 
 
 ## 2026-09-15 — Readable Classic dice and prompt point-game animation
 
-Added larger dice and separated larger dots for Classic Backgammon and Acey Deucy. Added immediate animation rendering after accepted actions while score records load separately, preserving checker movement and Backgammon roll motion on slow record responses. Added delayed-record movement and opening/ordinary-roll browser verification. Testing is WIP.
+Added larger dice and separated larger dots for Classic Backgammon and Acey Deucy. Added immediate animation rendering after accepted actions while score records load separately, preserving checker movement and Backgammon roll motion on slow record responses. Added delayed-record movement and opening/ordinary-roll browser verification.
 
 
 ## 2026-09-15 — Matching Classic dice and stable bot-turn layout
 
-Added matching rounded, shaded dice for all six values in Classic Backgammon and Acey Deucy. Added stable below-board Backgammon bot feedback to prevent vertical board movement during bot turns. Added complete dice-face and bot-opening layout verification. Testing is WIP.
+Added matching rounded, shaded dice for all six values in Classic Backgammon and Acey Deucy. Added stable below-board Backgammon bot feedback to prevent vertical board movement during bot turns. Added complete dice-face and bot-opening layout verification.
 
 
 ## 2026-09-15 — Classic legal-move cues and stable embedded controls
 
-Added deployment-folder-aware legal-move artwork for Classic Backgammon, Acey Deucy, Chess and Checkers. Added stable embedded sound and visual control visibility during game redraws. Added subdirectory and repeated-selection regression coverage. Testing is WIP.
+Added deployment-folder-aware legal-move artwork for Classic Backgammon, Acey Deucy, Chess and Checkers. Added stable embedded sound and visual control visibility during game redraws. Added subdirectory and repeated-selection regression coverage.
 
 
 ## 2026-09-15 — Clear Classic six-face dice
 
-Added scalable six-face pips with clear spacing for Classic Backgammon and Acey Deucy at native and enlarged board sizes. Added populated gameplay-input and board-selection verification across all 15 first-party games. Testing is WIP.
+Added scalable six-face pips with clear spacing for Classic Backgammon and Acey Deucy at native and enlarged board sizes. Added populated gameplay-input and board-selection verification across all 15 first-party games.
 
 
 ## 2026-09-15 — Classic Backgammon controls and board interaction
 
-Added corrected Classic Backgammon direction-arrow positioning and orientation, source-backed dice-roll motion, board artwork selection protection and stable Classic control artwork. Added shared removal of redundant idle practice-bot and engine-credit lines while retaining consolidated Third-Party Notices and active bot feedback. Testing is WIP.
+Added corrected Classic Backgammon direction-arrow positioning and orientation, source-backed dice-roll motion, board artwork selection protection and stable Classic control artwork. Added shared removal of redundant idle practice-bot and engine-credit lines while retaining consolidated Third-Party Notices and active bot feedback.
 
 
 ## 2026-09-15 — In-message emoji expansion and bundled monkey
 
-Added full-size custom emoji expansion inside the original chat message, proportional containment within the chat, click-away collapse and keyboard controls. Added a bundled animated monkey emoji with automatic one-time catalog installation, duplicate reuse and normal administrator rename/delete support. Testing is WIP.
+Added full-size custom emoji expansion inside the original chat message, proportional containment within the chat, click-away collapse and keyboard controls. Added a bundled animated monkey emoji with automatic one-time catalog installation, duplicate reuse and normal administrator rename/delete support.
 
 
 ## 2026-09-14 — Hearts Expert Practice bot
 
-Added an Expert Hearts bot alongside Easy and Normal for two-player and four-player Practice games. Expert compares a small set of plays and passes against possible unseen hands using public card information, current scores and the existing Shoot the Moon rules. Added a short computation limit, Normal fallback and automatic search decision traces. Existing bot seating, late additions, human priority, explicit Start and unranked recording/lifecycle behavior are preserved. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+Added an Expert Hearts bot alongside Easy and Normal for two-player and four-player Practice games. Expert compares a small set of plays and passes against possible unseen hands using public card information, current scores and the existing Shoot the Moon rules. Added a short computation limit, Normal fallback and automatic search decision traces. Existing bot seating, late additions, human priority, explicit Start and unranked recording/lifecycle behavior are preserved. Difficulty labels are relative, not calibrated ratings.
 
 
 ## 2026-09-14 — Hearts Practice bots
 
-Added Easy and Normal Hearts bots for two-player and four-player games, including the existing Shoot the Moon option. Hosts can add bots to empty seats after people join, with None as the default, human seat priority and explicit Start. Adding a bot switches the game to Practice Mode; bot games never affect rankings. Normal considers passing, public played cards, safe high-card disposal and moon prevention. Added paced turns, Retry, automatic decision recordings and saved-game support through the shared game framework. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+Added Easy and Normal Hearts bots for two-player and four-player games, including the existing Shoot the Moon option. Hosts can add bots to empty seats after people join, with None as the default, human seat priority and explicit Start. Adding a bot switches the game to Practice Mode; bot games never affect rankings. Normal considers passing, public played cards, safe high-card disposal and moon prevention. Added paced turns, Retry, automatic decision recordings and saved-game support through the shared game framework. Difficulty labels are relative, not calibrated ratings.
 
 
 ## 2026-09-14 — Complete custom emoji display and preview
 
-Added uncropped custom emoji display and an original-size animated preview, with click-anywhere dismissal and keyboard controls. Testing is WIP.
+Added uncropped custom emoji display and an original-size animated preview, with click-anywhere dismissal and keyboard controls.
 
 
 ## 2026-09-14 — Private room passwords and room controls
 
-Added optional passwords when creating regular, imported URL and Live Website rooms, with private-room entry prompts and PRIVATE ROOM overlays in the room list. Added owner/admin deletion controls for Live Website rooms and a single-line optional room-name label. Testing is WIP.
+Added optional passwords when creating regular, imported URL and Live Website rooms, with private-room entry prompts and PRIVATE ROOM overlays in the room list. Added owner/admin deletion controls for Live Website rooms and a single-line optional room-name label.
 
 
 ## 2026-09-14 — Admin library duplicate review
 
-Added Find duplicates under Admin Storage Management, with compact previews and grouped exact matches across avatar, nameplate, gesture and custom emoji libraries. Administrators can choose a copy to keep and confirm individual removals, with current-match checks, private-library boundaries and existing historical-image protections. Scans show progress, cancellation and skipped entries. Testing is WIP.
+Added Find duplicates under Admin Storage Management, with compact previews and grouped exact matches across avatar, nameplate, gesture and custom emoji libraries. Administrators can choose a copy to keep and confirm individual removals, with current-match checks, private-library boundaries and existing historical-image protections. Scans show progress, cancellation and skipped entries.
 
 
 ## 2026-09-14 — Duplicate uploads and custom emoji renaming
 
-Added content-based duplicate checks for avatars, nameplates, gestures and custom emojis, including folder uploads and older stored media. Existing accessible images can be selected without another upload; private libraries remain separate and distinct gesture text, sound or posters remain supported. Added administrator Rename emoji beside Delete, preserving existing image references and protecting against name conflicts and stale edits. Testing is WIP.
+Added content-based duplicate checks for avatars, nameplates, gestures and custom emojis, including folder uploads and older stored media. Existing accessible images can be selected without another upload; private libraries remain separate and distinct gesture text, sound or posters remain supported. Added administrator Rename emoji beside Delete, preserving existing image references and protecting against name conflicts and stale edits.
 
 
 ## 2026-09-14 — Emoji and gesture management actions
 
-Added administrator right-click custom emoji deletion while preserving images in older messages. Restored gesture three-dot menus, added Manage gesture and Delete gesture for administrators, and added deletion to the existing admin gesture editor. Added viewport bounds for picker menus. Testing is WIP.
+Added administrator right-click custom emoji deletion while preserving images in older messages. Restored gesture three-dot menus, added Manage gesture and Delete gesture for administrators, and added deletion to the existing admin gesture editor. Added viewport bounds for picker menus.
 
 
 ## 2026-09-14 — UNO Easy and Normal choices
 
-Updated UNO bot choices to Easy and Normal, with None remaining the default. Older Expert lobby settings and rematches use Normal; existing in-progress and saved Expert matches remain compatible through completion. Bot games remain Practice only. Testing is WIP.
+Updated UNO bot choices to Easy and Normal, with None remaining the default. Older Expert lobby settings and rematches use Normal; existing in-progress and saved Expert matches remain compatible through completion. Bot games remain Practice only.
 
 
 ## 2026-09-14 — UNO Practice bots
 
-Added Easy, Normal and Expert UNO bots for two through ten total players. Hosts can add bots to empty seats after people join, with None as the default and existing seat choices preserved. Adding a bot switches the game to Practice Mode; bot games never affect rankings. Bots use their own cards and public information, handle special cards and UNO declarations, and continue between hands. Added paced turns, Retry, automatic decision recordings and saved-game support. Corrected bot-winner scoring after a final Draw Four and allowed UNO declarations for a playable drawn card. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+Added Easy, Normal and Expert UNO bots for two through ten total players. Hosts can add bots to empty seats after people join, with None as the default and existing seat choices preserved. Adding a bot switches the game to Practice Mode; bot games never affect rankings. Bots use their own cards and public information, handle special cards and UNO declarations, and continue between hands. Added paced turns, Retry, automatic decision recordings and saved-game support. Corrected bot-winner scoring after a final Draw Four and allowed UNO declarations for a playable drawn card. Difficulty labels are relative, not calibrated ratings.
 
 
 ## 2026-09-14 — Backgammon narrow-screen bar entry
 
-Fixed the built-in Backgammon dice panel covering the bar and intercepting checker clicks on narrow screens. The panel now fits its board area, and only the enabled Roll button captures clicks. Verified actual bar entry, bot pacing, failed-download Retry, pause/resume, focus and recording replay locally. Testing is WIP.
+Fixed the built-in Backgammon dice panel covering the bar and intercepting checker clicks on narrow screens. The panel now fits its board area, and only the enabled Roll button captures clicks. Verified actual bar entry, bot pacing, failed-download Retry, pause/resume, focus and recording replay locally.
 
 
 ## 2026-09-14 — Backgammon Practice bots
 
-Added Easy, Normal and Expert Backgammon bots using a bundled GNU Backgammon browser evaluator. Hosts can fill the second empty seat before starting; bot games automatically use Practice Mode and never affect rankings. Both starter methods and Standard/Legacy OCX move-use options remain supported. Added bounded thinking, retry, server-validated moves and dice, saved continuation, automatic recording metadata, and centralized engine licenses/source/build instructions. Local compatibility, complete-game, save/resume and recording checks passed. Testing is WIP; difficulty labels are relative, not calibrated ratings.
+Added Easy, Normal and Expert Backgammon bots using a bundled GNU Backgammon browser evaluator. Hosts can fill the second empty seat before starting; bot games automatically use Practice Mode and never affect rankings. Both starter methods and Standard/Legacy OCX move-use options remain supported. Added bounded thinking, retry, server-validated moves and dice, saved continuation, automatic recording metadata, and centralized engine licenses/source/build instructions. Local compatibility, complete-game, save/resume and recording checks passed. Difficulty labels are relative, not calibrated ratings.
 
 
 ## 2026-09-14 — Checkers bot optional rules
 
-Checkers Practice bots now support optional backward movement, backward captures and flying kings in every combination. Preserved Easy, Normal and Expert choices and bounded thinking time. Updated engine version checks, movement-rule recording details and the existing centralized Marcher notices/source patch. Expanded local lobby, saved-game, rematch and recording verification. Testing is WIP.
+Checkers Practice bots now support optional backward movement, backward captures and flying kings in every combination. Preserved Easy, Normal and Expert choices and bounded thinking time. Updated engine version checks, movement-rule recording details and the existing centralized Marcher notices/source patch. Expanded local lobby, saved-game, rematch and recording verification.
 
 
 ## 2026-09-14 — Practice bot completion results
 
-Corrected Checkers and Chess Practice bot winner names in game results and the result sound when the bot wins. Expanded complete-game, saved-game restoration and cross-game verification. Testing is WIP.
+Corrected Checkers and Chess Practice bot winner names in game results and the result sound when the bot wins. Expanded complete-game, saved-game restoration and cross-game verification.
 
 
 ## 2026-09-14 — Checkers Practice bots
 
-Added Marcher Checkers bots with Easy, Normal and Expert levels, default-None lobby controls, automatic Practice conversion, server-validated moves and shared game recording. Corrected draw outcome scoring and preserved draw history across reloads and rematches. Added centralized Marcher attribution and source/build access. Testing is WIP.
+Added Marcher Checkers bots with Easy, Normal and Expert levels, default-None lobby controls, automatic Practice conversion, server-validated moves and shared game recording. Corrected draw outcome scoring and preserved draw history across reloads and rematches. Added centralized Marcher attribution and source/build access.
 
 
 ## 2026-09-14 — Chess Practice bots
 
-Added a separate Stockfish.js browser engine with approximate rating choices and readable level names, default-None lobby controls, automatic Practice conversion, server-validated moves and shared game recording. Includes engine license and corresponding source access. Testing is WIP.
+Added a separate Stockfish.js browser engine with approximate rating choices and readable level names, default-None lobby controls, automatic Practice conversion, server-validated moves and shared game recording. Includes engine license and corresponding source access.
 
 
 ## 2026-09-14 — Add bots from waiting lobbies
@@ -1664,7 +1709,7 @@ server-stored and built-in avatar choices.
 - Added no database migration and left every new gameplay variation disabled unless a game creator selects it.
 
 
-## 2026-09-13 - Spades Expert bounded thinking time (local, unpublished)
+## 2026-09-13 - Spades Expert bounded thinking time
 
 - Allow Expert up to one second of search per decision, with a shared three-second
   search budget for consecutive bots. Straightforward and forced moves still finish immediately.
@@ -1674,7 +1719,7 @@ server-stored and built-in avatar choices.
 
 ### Advanced Pool review and practice examples
 
-Added 36 verified advanced Pool reference sequences and 13 additional shared practice setups, preserving existing names, edits and deletions. Reference pack v4 retains all 353 prior sequences and freezes the advanced renderer separately. Reviewed cut shots, banks, kicks, combinations, follow/draw, safety and multi-ball clusters use the existing physics. Exact shot inputs and reconstruction limitations are shown in the administrator review. Validated 12 complete 8/9-ball bot matches and reference installation/integrity contracts. Testing is WIP.
+Added 36 verified advanced Pool reference sequences and 13 additional shared practice setups, preserving existing names, edits and deletions. Reference pack v4 retains all 353 prior sequences and freezes the advanced renderer separately. Reviewed cut shots, banks, kicks, combinations, follow/draw, safety and multi-ball clusters use the existing physics. Exact shot inputs and reconstruction limitations are shown in the administrator review. Validated 12 complete 8/9-ball bot matches and reference installation/integrity contracts.
 
 
 ## 2026-09-19 — Profiles, notifications and avatar library reliability
@@ -1715,3 +1760,15 @@ Full transfers wait for the server-confirmed connection state before sending pay
 
 Avatar render layers expose their current relationship membership to presentation adapters, and clear it on unlink. This lets client layouts preserve link/lap geometry while repositioning a group around local panels. Relationship lifecycle and permissions retain their existing owners.
 
+## Classic original resources and Five Dice record effect - 2026-09-24
+
+Original OCX imports retain all static resources in private media storage for future supported effects. Known missing slots can be prepared from those resources without another import; existing files and media validation remain authoritative. The executable container is not retained. Existing installations require one updated original import. Complete and selected Classic-media backups include the resources.
+
+Five Dice Classic uses the original 40-frame personal-record sparkle with the existing qualifying record cheer. The result popup follows the effect, and Visual FX, interrupted viewing and missing artwork are handled independently of sound.
+
+
+2026-09-24: Backgammon and Acey Deucy Original OCX boards now offer a saved, viewer-specific dice appearance choice. Modern dice remain the default for clarity on enlarged boards; original imported dice can be selected in Game Options, with explanatory information help.
+
+2026-09-24: Five Dice now waits for the saved appearance before revealing its initial board, preventing a brief Built-in flash when joining with Classic selected. Loading and connection errors remain visible.
+
+2026-09-24: Tetris Versus and Space Invasion resignations now tolerate intervening ordinary gameplay updates, preventing false state-change errors while retaining lifecycle conflict and request-replay checks.

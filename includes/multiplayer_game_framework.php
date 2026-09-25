@@ -1358,6 +1358,10 @@ function multiplayer_game_join_session(
             $poolSettings=json_decode((string)$session['settings_json'],true) ?: [];
             if(($poolSettings['tableMode']??'match')==='solo'||($poolSettings['botSeat2Difficulty']??'none')!=='none'||$session['status']!=='lobby')throw new MultiplayerGameException('This table has no available player seat. You may spectate.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
         }
+        if($role==='player'&&($definition['extensionId']??'')==='tetris-versus'){
+            $tetrisSettings=json_decode((string)$session['settings_json'],true)?:[];
+            if(($tetrisSettings['opponent']??'human')!=='human'||$session['status']!=='lobby')throw new MultiplayerGameException('This Tetris run has no open human seat.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
+        }
         if ($role === 'player' && (string)($definition['extensionId'] ?? '') === 'space-invasion') {
             $spaceSettings=json_decode((string)$session['settings_json'],true) ?: [];
             if((string)$session['status']!=='lobby') throw new MultiplayerGameException('Player seats are fixed after this run starts. Start a new Two-player co-op run.','MULTIPLAYER_GAME_SEAT_APPROVAL_STATE_INVALID',409);
@@ -1597,6 +1601,7 @@ function multiplayer_game_resolve_seat_request(PDO $pdo, string $publicId, int $
                     throw new MultiplayerGameException('This Practice table has one human player.', 'MULTIPLAYER_GAME_PLAYER_LIMIT', 409);
                 }
             }
+            if(($definition['extensionId']??'')==='tetris-versus'&&(json_decode((string)$session['settings_json'],true)['opponent']??'human')!=='human')throw new MultiplayerGameException('This Practice run has one human player.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
             if(($definition['extensionId'] ?? '')==='space-invasion') {
                 $spaceSettings=json_decode((string)$session['settings_json'],true) ?: [];
                 if($playerCount >= (int)($spaceSettings['playerCount'] ?? 1))throw new MultiplayerGameException('Choose Two-player co-op before adding another player.','MULTIPLAYER_GAME_PLAYER_LIMIT',409);
@@ -2125,6 +2130,11 @@ function multiplayer_game_apply_shared_action(
         $pause['resumeAt'] = gmdate('c', $now + 60);
         $pause['resumeRemainingSeconds'] = null;
         $pause['resumeNowByUserIds'] = [$actorUserId];
+        // Bot identities are excluded by shared_player_ids. With one human,
+        // starting resume already supplies every player's consent.
+        if (count($players) === 1) {
+            return multiplayer_game_apply_shared_action($state, $actorUserId, 'resume-now', $context);
+        }
     } elseif (in_array($action, ['resume-now', 'settle-resume'], true)) {
         if ((string)$pause['mode'] !== 'resuming') throw new MultiplayerGameException('A resume countdown is not active.', 'MULTIPLAYER_GAME_RESUME_STATE_INVALID', 409);
         if ($action === 'resume-now') {
@@ -2271,6 +2281,7 @@ function multiplayer_game_refresh_shared_inactivity(
 function multiplayer_game_minimum_players(array $definition, string $mode, array $settings = []): int
 {
     if(($definition['extensionId'] ?? '')==='eight-ball')return $mode==='practice'&&(($settings['tableMode']??'match')==='solo'||($settings['botSeat2Difficulty']??'none')!=='none')?1:2;
+    if(($definition['extensionId'] ?? '')==='tetris-versus'&&$mode==='practice')return ($settings['opponent']??'human')==='human'?2:1;
     if(($definition['extensionId'] ?? '')==='space-invasion')return ($settings['playerCount'] ?? 1)===2?2:1;
     $minimumKey = $mode === 'practice' ? 'practiceMinPlayers' : 'recordedMinPlayers';
     return (int)($definition[$minimumKey] ?? $definition['minPlayers']);
@@ -2687,10 +2698,12 @@ function multiplayer_game_extension_action(
             $expectedVersion = (int)$session['state_version'];
         }
         if (!empty($adapter['allowsConcurrentInputs'])
-            && in_array($actionType, multiplayer_game_shared_action_names(), true)
+            && (in_array($actionType, multiplayer_game_shared_action_names(), true)
+                || ($actionType === 'resign' && in_array($definition['extensionId'] ?? '', ['tetris-versus', 'space-invasion'], true)))
             && $expectedVersion >= 0 && $expectedVersion < (int)$session['state_version']
             && (int)$session['state_version'] - $expectedVersion <= 1000) {
-            // Only pure gameplay ticks may be crossed. A different pause vote,
+            // Lifecycle actions and explicit arcade resignation may cross only
+            // pure gameplay ticks. A different pause vote,
             // restore, reconnect or other lifecycle transition still invalidates
             // the old consent; missing action history also fails closed.
             $intervening = $pdo->prepare("SELECT COUNT(*) FROM multiplayer_game_actions WHERE game_session_id=? AND resulting_version>? AND resulting_version<=? AND action_type IN ('arcade-input','arcade-tick')");
@@ -4243,6 +4256,7 @@ function multiplayer_game_project_shared_state(
     $pause['resumeRemainingSeconds'] = $resumeAt === false
         ? ($pause['resumeRemainingSeconds'] ?? null)
         : max(0, $resumeAt - $now);
+    $pause['resumeCountdownSeconds'] = count(multiplayer_game_shared_player_ids($state)) === 1 ? 0 : 60;
     $inactivity = &$state['_framework']['inactivity'];
     $deadline = strtotime((string)($inactivity['deadlineAt'] ?? ''));
     $inactivity['remainingProjectedSeconds'] = $deadline === false
@@ -4293,6 +4307,7 @@ function multiplayer_game_shared_can_pause(array $state, int $viewerUserId): boo
 
 function multiplayer_game_project_virtual_members(PDO $pdo, array $definition, array $state, array $context): array
 {
+    require_once __DIR__.'/game_bot_avatars.php';
     $adapter = multiplayer_game_extension_adapter($pdo, $definition);
     $callback = is_array($adapter) ? trim((string)($adapter['projectVirtualMembers'] ?? '')) : '';
     if ($callback === '') return [];
@@ -4327,7 +4342,7 @@ function multiplayer_game_project_virtual_members(PDO $pdo, array $definition, a
             'lastSeenAt' => null,
             'online' => true,
             'avatarPath' => 'preset:Default',
-            'avatarUrl' => $fallbackAvatarUrl,
+            'avatarUrl' => game_bot_avatar_url($pdo,$seat),
             'avatarFallbackUrl' => $fallbackAvatarUrl,
             'avatarHidden' => false,
             'webcamPath' => null,

@@ -124,6 +124,9 @@
     "games/acey-deucy-engine.js",
     "games/acey-deucy-worker.js",
     "games/acey-deucy-bot-controller.js",
-    "games/acey-deucy-motion.js"
+    "games/acey-deucy-motion.js",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

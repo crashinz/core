@@ -66,6 +66,9 @@
 .settings-bulk-media-drop { flex: 1 1 100%; padding: 10px; border: 1px dashed var(--accent); border-radius: 6px; text-align: center; cursor: pointer; }
 .settings-bulk-media > [role=status],
 .settings-bulk-media-rows { flex-basis: 100%; margin: 0; }
+.settings-media-inbox { flex: 1 1 100%; min-width: 0; border-top: 1px solid var(--border); padding-top: 10px; }
+.settings-media-inbox code { display: block; white-space: normal; overflow-wrap: anywhere; user-select: all; }
+.settings-media-inbox p { overflow-wrap: anywhere; }
 .settings-bulk-media-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr) max-content; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); gap: 10px; }
 .settings-bulk-media-row:has(details[open]) { grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr); }
 .settings-bulk-media-row details[open] { grid-column: 1 / -1; }

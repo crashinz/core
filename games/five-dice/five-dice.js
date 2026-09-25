@@ -1,3 +1,4 @@
+import { botAvatarOptions } from "../bot-avatar-options.js?v=20260925-reference5";
 import { gameViewStorage } from "../game-view-storage.js?v=1dd11e938aa8";
 import { classicSourceMap } from "../classic-source-maps.js?v=f69e083b7fee";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "../viewport-height-fit.js?v=f9547db55052";
@@ -6,7 +7,7 @@ import { bindGameAvatar } from "../game-avatar.js?v=20260913-room-avatars";
 
 import { optionalVoices, originalVoices, voiceEnabled, classicScoreReaction, classicRecordReaction, chooseIdleVoice } from "./five-dice-voices.js?v=c2894603811a";
 
-import { reactionStrips, reactionFrame } from "./five-dice-reactions.js?v=8b09bca30632";
+import { reactionStrips, reactionFrame } from "./five-dice-reactions.js?v=20260924-record1";
 
 import { renderGameBotControls } from "../../assets/js/runtime/game/renderers/game-seat-controls.js?v=8829b14ae801";
 
@@ -596,6 +597,9 @@ function observeSessionTransition(before, after, present = true) {
     }
   }
   if (recordCue) {
+    // Claim the visual before the shared audio key is consumed. A delayed best-score
+    // projection can qualify after completion; reconnects must not replay it.
+    void startClassicReaction({ ...recordCue, record: true });
     // A later record projection replaces an already-started result voice, as the original sound channel did.
     for (const slot of ["win-sound", "loser-sound", "draw-sound"]) audioPlayers.get(slot)?.pause();
     playStateAudioOnce(recordCue.key,recordCue.slot,{owner:"original-personal-record",score:recordCue.score,viewerUserId:recordViewer});
@@ -1112,7 +1116,46 @@ function renderDrumMotion() {
   node.dataset.owner = "music";
 }
 
+// Separate original idle controls: 519/520 are microphone waves; 521 is the
+// bass-drum beater. These are independent of the Roll drum and singer's mouth.
+// The supplied recording cycles at approximately 190ms per source frame.
+function renderClassicControlMotion() {
+  const host = el("play-surface");
+  if (!host || terminalSessionError) return;
+  const visible = session?.presentation?.effectivePack === "classic" && documentVisible && gameSurfaceVisible;
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches && options?.categories?.gfxEnabled !== true;
+  const sound = options?.categories?.sfxEnabled ?? (options?.effectsEnabled !== false);
+  const strips = [
+    {slot:"control-music-beater",on:options?.musicEnabled === true,x:522,y:578,width:46,height:62,sourceWidth:48,frames:11},
+    {slot:"control-sfx-left",on:sound,x:708,y:432,width:38,height:54,sourceWidth:38,frames:4},
+    {slot:"control-sfx-right",on:sound,x:788,y:460,width:38,height:54,sourceWidth:38,frames:4},
+  ];
+  for (const strip of strips) {
+    let node = host.querySelector(`[data-idle-control="${strip.slot}"]`);
+    const active = visible && strip.on && classicVoiceAvailable(strip.slot);
+    if (!node && !active) continue;
+    if (!node) {
+      node = document.createElement("div"); node.className = "classic-idle-control";
+      node.dataset.idleControl = strip.slot; node.setAttribute("aria-hidden", "true"); node.hidden = true;
+      const image = document.createElement("img"); image.alt = "";
+      image.style.width = `${strip.sourceWidth / strip.width * 100}%`;
+      image.style.height = `${strip.frames * 100}%`;
+      image.style.setProperty("--control-frames", String(strip.frames));
+      image.style.setProperty("--control-duration", `${strip.frames * 190}ms`);
+      image.onload = () => { node.dataset.loaded = "true"; node.hidden = node.dataset.active !== "true"; };
+      image.onerror = () => { node.dataset.loaded = "false"; node.hidden = true; };
+      image.src = mediaUrl(strip.slot); node.append(image); host.append(node);
+      setClassicSourceBox(node, strip);
+    }
+    node.dataset.active = active ? "true" : "false";
+    node.hidden = !active || node.dataset.loaded !== "true";
+    node.firstElementChild.classList.toggle("is-running", active && !reduced);
+  }
+}
+matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", renderClassicControlMotion);
+
 function renderMicrophoneMotion() {
+  renderClassicControlMotion();
   if (terminalSessionError) return;
 
   const node = el("classic-microphone-motion");
@@ -1319,10 +1362,10 @@ function presentFiveDiceScore(before, after, actor, category) {
     traceMedia("score-commit-cue", "score-commit-sound", { category, categoryScore, repeatBonus, upperBonus });
     playOptionalSound("score-commit-sound");
     if (upperBonus > 0) {
-      window.setTimeout(() => playOptionalSound("upper-bonus-sound"), 260);
+      scheduleScoreSound("upper-bonus-sound", 260);
     }
     if (result.after?.presentation?.effectivePack !== "classic" && (isFiveDice || repeatBonus > 0)) {
-      window.setTimeout(() => playOptionalSound("celebration-sound"), upperBonus > 0 ? 680 : 300);
+      scheduleScoreSound("celebration-sound", upperBonus > 0 ? 680 : 300);
     }
   }
 }
@@ -1613,19 +1656,8 @@ function renderClassicScore(state, canAct) {
   labelHost.replaceChildren();
   renderClassicAvatars(players);
 
-  classicGeometry.scoreRows.forEach((rowBox, row) => {
-    const art = document.createElement("span");
-    art.className = "classic-score-row-art";
-    art.dataset.mediaSlot = `score-row-${500 + row}`;
-    art.style.setProperty("--five-dice-score-row-art", `url("${mediaUrl(art.dataset.mediaSlot)}")`);
-    setClassicSourceBox(art, {
-      x: classicGeometry.scoreAction.x,
-      y: rowBox.y,
-      width: classicGeometry.scoreAction.labelWidth,
-      height: classicGeometry.scoreAction.height,
-    });
-    scoreHost.append(art);
-  });
+  // The board already contains the normal labels. Alternate resource strips
+  // must not cover them simply because those images are present in the pack.
 
   for (let column = 0; column < 4; column += 1) {
     const player = players[column];
@@ -2773,7 +2805,7 @@ function renderLifecycleControls() {
     status.className = "lifecycle-status";
     status.textContent = pause.reason === "reconnect" ? "Paused while waiting for reconnect." : "Game paused by agreement.";
     host.append(status);
-    if (actions.canStartResume) appendLifecycleButton(host, "Start 1-minute resume", "start-resume", true);
+    if (actions.canStartResume) appendLifecycleButton(host, pause.resumeCountdownSeconds === 0 ? "Resume game" : "Start 1-minute resume", "start-resume", true);
   }
   if (pause.mode === "resuming") {
     const status = document.createElement("span");
@@ -2830,7 +2862,7 @@ function renderBuiltInMotionState(state, displayName) {
 
   const result = el("built-in-five-dice-result");
   const resultKey = `${String(session?.publicId || activeGameSessionId)}:${Number(session?.stateVersion || 0)}`;
-  const showResult = !classic && state.completed && builtInResultDismissedKey !== resultKey;
+  const showResult = state.completed && builtInResultDismissedKey !== resultKey && !classicReaction?.record;
   result.hidden = !showResult;
   if (showResult) {
     result.dataset.outcome = terminal.outcome;
@@ -2982,7 +3014,7 @@ function fiveDiceMinimumScoreTargetScale(artboard) {
 function syncFiveDiceBot() {
   const task = session?.state?.botTask;
   const key = task ? `${session.publicId}:${task.positionKey}` : "";
-  const available = Boolean(task && gameLifecycleAvailable() && documentVisible && gameSurfaceVisible && !document.hidden && !fiveDiceRollPresentation && !terminalSessionError);
+  const available = Boolean(task && gameLifecycleAvailable() && !fiveDiceRollPresentation && !terminalSessionError);
   if (botScheduledKey !== key || !available) { clearTimeout(botTimer); botTimer = 0; botScheduledKey = ""; }
   if (botFailedKey !== key) { botFailedKey = ""; botError = ""; }
   const host = el("five-dice-bot-status");
@@ -2999,7 +3031,7 @@ function syncFiveDiceBot() {
 }
 
 async function runFiveDiceBot(task, key) {
-  if (!gameLifecycleAvailable() || !documentVisible || !gameSurfaceVisible || document.hidden || fiveDiceRollPresentation || `${session.publicId}:${session.state.botTask?.positionKey}` !== key) return;
+  if (!gameLifecycleAvailable() || fiveDiceRollPresentation || `${session.publicId}:${session.state.botTask?.positionKey}` !== key) return;
   const gameId = activeGameSessionId;
   const expectedVersion = Number(session.stateVersion);
   busy = true;
@@ -3011,7 +3043,7 @@ async function runFiveDiceBot(task, key) {
       await post("randomness", {request_id:receipt, commitment_sha256:await sha256Canonical(reveal), purpose:"five-dice-roll"});
       await post("reveal-practice-randomness", {request_id:receipt, reveal});
     }
-    if (gameId !== activeGameSessionId || !documentVisible || !gameSurfaceVisible || document.hidden) return;
+    if (gameId !== activeGameSessionId) return;
     const result = await post("extension-action", {request_id:randomId("five-dice-bot"), expected_version:expectedVersion, action_type:task.action, payload:{engine:task.engine, positionKey:task.positionKey}, randomness_request_id:receipt});
     if (gameId !== activeGameSessionId) return;
     replaceSession(result?.session || await getSession());
@@ -3105,6 +3137,17 @@ function render() {
     fiveDiceScoreLayoutCleanup?.();
     fiveDiceScoreLayoutCleanup = null;
   }
+  // Reveal only after the authoritative appearance and board have rendered.
+  // Keeping visibility (not display) hidden preserves geometry for layout checks.
+  const firstPresentation = document.body.dataset.presentationReady !== "true";
+  document.body.dataset.presentationReady = "true";
+  const presentationGrid = document.querySelector(".presentation-grid");
+  presentationGrid.inert = false;
+  presentationGrid.setAttribute("aria-busy", "false");
+  if (firstPresentation && !actionFailureStatusMessage && gameStatus.dataset.loadError !== "true") {
+    gameStatus.classList.remove("status");
+    gameStatus.classList.add("sr-only");
+  }
   requestAnimationFrame(syncScoreScrollCue);
   scheduleSharedLifecycleDeadline();
 }
@@ -3121,7 +3164,8 @@ function cancelClassicReaction() {
 function classicReactionStillCurrent(event) {
   return classicReaction === event && !terminalSessionError && documentVisible && gameSurfaceVisible
     && !document.hidden && session?.publicId === event.publicId
-    && session?.presentation?.effectivePack === "classic" && session.status === "active" && !session.state?.completed
+    && session?.presentation?.effectivePack === "classic"
+    && (event.record ? session.state?.completed : session.status === "active" && !session.state?.completed)
     && !session.state?._framework?.serviceInterruption?.active
     && !["paused", "resuming"].includes(session.state?._framework?.pause?.mode);
 }
@@ -3129,22 +3173,38 @@ function classicReactionStillCurrent(event) {
 async function startClassicReaction(reaction) {
   if (playedStateAudioKeys.has(reaction.key)) return;
   cancelClassicReaction();
-  const event = { ...reaction, publicId:session.publicId, strips:[] };
+  if (reaction.record && !fiveDiceVisualFxEnabled()) return;
+  const event = { ...reaction, publicId:session.publicId, strips:[],
+    recordStartedAt: reaction.record ? performance.now() : null };
   classicReaction = event;
   const strips = (reactionStrips[reaction.slot] || []).filter(s => classicVoiceAvailable(`reaction-${s.id}`));
   if (fiveDiceVisualFxEnabled()) {
-    try { await Promise.all(strips.map(s => preloadClassicVisual(`reaction-${s.id}`))); event.strips = strips; }
+    let mediaDeadline;
+    try {
+      const loaded = Promise.all(strips.map(s => preloadClassicVisual(`reaction-${s.id}`)));
+      if (event.record) {
+        await Promise.race([loaded, new Promise((_, reject) => {
+          mediaDeadline = setTimeout(() => reject(new Error("Record artwork unavailable")), 2000);
+        })]);
+      } else await loaded;
+      event.strips = strips;
+    }
     catch { traceMedia("reaction-media-unavailable", reaction.slot); }
+    finally { clearTimeout(mediaDeadline); }
   }
-  await prepareClassicSound(event.slot);
+  // Record audio already has its own immediate, once-only transition owner.
+  // Loading optional artwork must not delay or suppress that existing cue.
+  if (!event.record) await prepareClassicSound(event.slot);
   if (!classicReactionStillCurrent(event)) return;
   if (event.idle) {
     const choice = optionalVoices.find(v => v.slot === event.slot);
     if (!choice || !voiceEnabled(options,choice.key)) { cancelClassicReaction(); return; }
     activeOptionalVoice = event.slot;
   }
-  event.startedAt = performance.now();
-  playStateAudioOnce(event.key,event.slot,{owner:event.idle ? "optional-original-idle" : "original-classic-score-reaction"});
+  // Record audio starts immediately in observeSessionTransition. Seek any
+  // cold-loaded artwork into that same timeline instead of starting it late.
+  event.startedAt = event.recordStartedAt ?? performance.now();
+  if (!event.record) playStateAudioOnce(event.key,event.slot,{owner:event.idle ? "optional-original-idle" : "original-classic-score-reaction"});
   traceMedia("classic-reaction-started",event.slot,{key:event.key,strips:event.strips.map(s=>s.id),clockMs:80});
   renderClassicReaction();
 }
@@ -3152,7 +3212,11 @@ async function startClassicReaction(reaction) {
 function renderClassicReaction() {
   const event = classicReaction;
   if (!event) return;
-  if (!classicReactionStillCurrent(event) || !fiveDiceVisualFxEnabled()) { cancelClassicReaction(); return; }
+  if (!classicReactionStillCurrent(event) || !fiveDiceVisualFxEnabled()) {
+    cancelClassicReaction();
+    if (event.record) render();
+    return;
+  }
   if (event.startedAt == null) return;
   clearTimeout(classicReactionTimer);
   const elapsed = performance.now()-event.startedAt, host=el("play-surface");
@@ -3173,7 +3237,7 @@ function renderClassicReaction() {
     node.dataset.frame=String(frame.frame);shown++;mouth ||= strip.id>=526 && strip.id<=534 && strip.id!==530;
   }
   host.classList.toggle("has-native-mouth-reaction",mouth);
-  if (!shown) { cancelClassicReaction(); return; }
+  if (!shown) { cancelClassicReaction(); if (event.record) render(); return; }
   classicReactionTimer=setTimeout(renderClassicReaction, Math.max(1,80-(elapsed%80)));
 }
 
@@ -3367,6 +3431,23 @@ const BUILT_IN_PUBLIC_SOUND_ROOT = "../../assets/audio/built-in-games";
     "draw-sound": "five-dice-draw.wav",
   });
 
+let scoreSoundEpoch = 0;
+const scoreSoundTimers = new Set();
+function cancelScoreSounds() {
+  scoreSoundEpoch++;
+  for (const timer of scoreSoundTimers) clearTimeout(timer);
+  scoreSoundTimers.clear();
+}
+function scheduleScoreSound(slot, delay) {
+  if (!fiveDiceVisualFxEnabled()) { playOptionalSound(slot); return; }
+  const epoch = scoreSoundEpoch, id = session?.publicId, version = session?.stateVersion;
+  const timer = setTimeout(() => {
+    scoreSoundTimers.delete(timer);
+    if (epoch === scoreSoundEpoch && session?.publicId === id && session?.stateVersion === version) playOptionalSound(slot);
+  }, delay);
+  scoreSoundTimers.add(timer);
+}
+
 function playOptionalSound(slot) {
   if (session?.presentation?.effectivePack === "classic" && slot === "ready-sound" && !voiceEnabled(options, "idleReady") && activeOptionalVoice !== slot) return;
   const classic = session?.presentation?.effectivePack === "classic";
@@ -3419,6 +3500,7 @@ function playOptionalBackgroundMusic() {
 }
 
 function pauseAllAudio(reason) {
+  cancelScoreSounds();
   cancelClassicReaction();
   clearTimeout(idleVoiceTimer); idleVoiceTimer = 0; idleVoiceActivityAt = Date.now();
   activeOptionalVoice = null;
@@ -3447,8 +3529,9 @@ async function toggleEffectCategory(key, label, slots) {
   renderMediaControls();
   traceMedia("effect-category-toggled", null, { category: label, enabled: categories[key] });
   if (!categories[key]) {
+    if (key === "sfxEnabled") cancelScoreSounds();
     for (const [slot, audio] of audioPlayers) {
-      if (!slots.has(slot)) continue;
+      if (!slots.has(slot) && !(key === "sfxEnabled" && slot.startsWith("built-in-public:"))) continue;
       audio.pause();
       audio.currentTime = 0;
     }
@@ -3489,6 +3572,7 @@ async function toggleViewerCategory(key, label, fallback = true) {
 }
 
 function toggleGfx() {
+  cancelScoreSounds();
   return toggleViewerCategory("gfxEnabled", "gfx");
 }
 
@@ -3652,7 +3736,6 @@ async function refresh() {
   if (terminalSessionError) return;
   const requestGameId = activeGameSessionId;
   try {
-    if (gameSurfaceVisible === false || documentVisible === false || document.hidden) return;
     const previousSessionIdentity = stableFiveDiceRenderIdentity(session);
     const previousOptionsIdentity = stableFiveDiceRenderIdentity(options);
     const refreshRecords = records === null || refreshCount % 10 === 0;
@@ -3757,3 +3840,7 @@ document.addEventListener("dragstart", event => {
     event.preventDefault();
   }
 });
+
+document.addEventListener("contextmenu", event => event.preventDefault(), true);
+
+document.getElementById("game-options")?.append(botAvatarOptions(context.csrf));

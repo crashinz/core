@@ -33,13 +33,14 @@ function game_review_catalog(): array
         foreach(range(1,5) as $length) foreach(['horizontal','vertical'] as $orientation) $add('battleship',"Battleship — Sink $length-cell ship, $orientation".($view==='opponent'?' received':''),"sunk-$length-$orientation-$view",['nativeMode'=>"sunk-$length-$orientation",'view'=>$view]);
     }
     $add('battleship','Battleship — Place and rotate fleet','placement');
-    foreach(['deal'=>'Deal and bid','partner-pass'=>'Blind Nil partner exchange','play'=>'Play card','opponent-play'=>'Opponent plays card','ordinary-trick'=>'Collect trick','nil-set'=>'Nil fails','last-trick'=>'Last trick and score'] as $mode=>$label) $add('spades',"Spades — $label",$mode,['view'=>$mode==='opponent-play'?'opponent':'own']);
+    foreach(['deal'=>'Deal and bid','partner-pass'=>'Blind Nil partner exchange','play'=>'Play card','opponent-play'=>'Opponent plays card','ordinary-trick'=>'Collect trick','nil-set'=>'Nil fails','last-trick'=>'Last trick and score','win'=>'Your team wins','loss'=>'Opponent team wins'] as $mode=>$label) $add('spades',"Spades — $label",$mode,['view'=>$mode==='opponent-play'?'opponent':'own']);
     foreach(['roll'=>'Roll and hold dice','opponent'=>'Opponent rolls','yahtzee'=>'Yahtzee reaction','upper'=>'Upper bonus','repeat'=>'Repeat Yahtzee','record'=>'Finish scorecard and record reaction'] as $mode=>$label) $add('five-dice',"Five Dice — $label",$mode);
-    foreach(['hearts'=>['deal'=>'Deal','pass'=>'Pass three cards','play'=>'Play and collect trick','queen'=>'Queen of spades','moon'=>'Shoot the moon','finish'=>'End game'],
+    foreach(['dominos'=>['play'=>'Play a tile','win'=>'Winning tile and victory','loss'=>'Opponent wins'],
+        'hearts'=>['deal'=>'Deal','pass'=>'Pass three cards','play'=>'Play and collect trick','queen'=>'Queen of spades','moon'=>'Shoot the moon','finish'=>'End game'],
         'uno'=>['deal'=>'Deal','play'=>'Play card','draw'=>'Draw card','reverse'=>'Reverse','skip'=>'Skip','wild'=>'Wild color','draw-four'=>'Wild draw four','finish'=>'UNO and finish hand'],
         'chinese-checkers'=>['move'=>'Move','jump'=>'Jump','chain'=>'Multiple jumps','finish'=>'Final marble and victory'],
         'nested-four'=>['place'=>'Place piece','move'=>'Move and uncover','finish'=>'Four-in-a-row'],
-        'blackjack'=>['deal'=>'Bet and deal','hit'=>'Hit','double'=>'Double down','split'=>'Split pair','finish'=>'Stand and settle'],
+        'blackjack'=>['deal'=>'Bet and deal','hit'=>'Hit','double'=>'Double down','split'=>'Split pair','finish'=>'Stand and settle','win'=>'Final round and victory','loss'=>'Final round and defeat'],
         'puppy-panic'=>['deal'=>'Deal','draw'=>'Draw card','power'=>'Power card','finish'=>'Last player'],
         'tetris-versus'=>['move'=>'Move and rotate','clear'=>'Clear line','finish'=>'Top out'],
         'space-invasion'=>['move'=>'Move and shoot','hit'=>'Enemy hit','finish'=>'Invasion ending']] as $game=>$modes) {

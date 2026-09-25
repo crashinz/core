@@ -1,6 +1,7 @@
 // Native 80ms animation clock. Coordinates and frames are original OCX pixels.
 const mic = (id, frames) => ({ id, frames, x:384, y:21, width:12, height:13 });
 export const reactionStrips = Object.freeze({
+  "celebration-sound": [{id:523,frames:40,x:331,y:16,width:24,height:24}],
   "upper-crash-sound": [
     {id:524,frames:33,x:213,y:122,width:64,height:52},
     {id:525,frames:15,x:262,y:164,width:54,height:56},

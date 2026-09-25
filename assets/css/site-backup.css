@@ -1,0 +1,9 @@
+#site-backup-controls {min-width:0; width:100%; max-width:960px; overflow-wrap:anywhere}
+#site-backup-controls form, #site-backup-controls fieldset {min-width:0; max-width:100%; box-sizing:border-box}
+#site-backup-controls label {display:block; min-width:0}
+#site-backup-controls input, #site-backup-controls select, #site-backup-controls button {box-sizing:border-box; max-width:100%}
+#site-backup-controls fieldset[hidden], #site-backup-controls button[hidden] {display:none!important}
+#site-backup-controls .admin-export-choice {display:flex;align-items:center;gap:8px}
+#site-backup-controls [data-backup-preview] p {margin:10px 0}
+#site-backup-controls [data-recovery-items] form {margin:8px 0}
+@media(max-width:600px){#site-backup-controls select {width:100%;display:block}#site-backup-controls input[type=file]{width:100%}}

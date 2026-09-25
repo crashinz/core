@@ -38,6 +38,12 @@ function game_review_create(PDO $pdo, array $user, string $caseId, string $pack)
     if (in_array($case['game'], ['spades','hearts'], true)) $count=4;
     $state = ($adapter['initialState'])(range(1,$count), ['mode'=>'practice','settings'=>multiplayer_game_extension_only_settings($settings),'nowUnixMs'=>1000]);
     [$state,$steps,$instruction,$expected] = game_review_position($state,$case);
+    // Prepared comparisons wait for an administrator, not a timed opponent.
+    // Keep the normal match rules while suspending the review-only turn clock.
+    if($case['game']==='eight-ball'){
+        pool_clock_start($state,1000);
+        if(isset($state['turnClock']))$state['turnClock']['frozenAt']=$state['turnClock']['startsAt'];
+    }
     $review = ['id'=>'review-'.bin2hex(random_bytes(16)), 'owner'=>(int)$user['id'],'expires'=>time()+GAME_REVIEW_TTL,
         'case'=>$case,'gameKey'=>$def['key'],'pack'=>$pack,'settings'=>$settings,'state'=>$state,'version'=>1,'step'=>0,'steps'=>$steps,
         'instruction'=>$instruction,'expected'=>$expected,'receipts'=>[],'requests'=>[],
@@ -85,7 +91,14 @@ function game_review_apply(PDO $pdo, array &$review, int $actor, string $action,
 {
     $def=game_review_definition($pdo,$review['case']['game']);$adapter=multiplayer_game_extension_adapter($pdo,$def);
     $ctx=['mode'=>'practice','status'=>'active','viewerRole'=>'master','settings'=>$review['settings'],'randomnessRequestId'=>'review-roll-'.$review['version'],'now'=>gmdate('c'),'nowUnixMs'=>(int)floor(microtime(true)*1000)];
-    if(isset($review['state']['realtime']))$ctx['nowUnixMs']=(int)$review['state']['realtime']['lastAtMs']+100;
+    if(isset($review['state']['realtime'])){
+        $duration=100;
+        // Review time is deterministic, but must cover the full legal input
+        // batch (up to one second), just as the live clock would. The reducer
+        // still validates batch size, frame order and player permissions.
+        if($action==='arcade-input'&&isset($payload['frames']))$duration=max(0,min(1000,array_sum(array_column((array)$payload['frames'],'ticks'))*ARCADE_STEP_MS)-(int)($review['state']['realtime']['pendingMs']??0));
+        $ctx['nowUnixMs']=(int)$review['state']['realtime']['lastAtMs']+$duration;
+    }
     if($nowUnixMs!==null)$ctx['nowUnixMs']=$nowUnixMs;
     $seed=json_encode(['nonce'=>'review-'.$review['case']['id'].'-'.$review['version']]);
     if (!empty($adapter['deriveRandomness'])) $ctx['authoritativeRandomness']=($adapter['deriveRandomness'])($seed,$action,$payload,$ctx);
@@ -93,6 +106,7 @@ function game_review_apply(PDO $pdo, array &$review, int $actor, string $action,
     if(isset($ctx['authoritativeRandomness']['dice']))$ctx['authoritativeDice']=$ctx['authoritativeRandomness']['dice'];
     $result=($adapter['applyAction'])($review['state'],$actor,$action,$payload,$ctx);
     $review['state']=multiplayer_game_validate_initial_state_result($result['state']);$review['version']++;
+    if($review['case']['game']==='eight-ball'&&isset($review['state']['turnClock']))$review['state']['turnClock']['frozenAt']=$review['state']['turnClock']['startsAt'];
     return $result;
 }
 

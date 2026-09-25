@@ -50,7 +50,7 @@ function security_content_security_policy(array $additionalFrameUrls = []): stri
     }
     $frameSourceList = implode(' ', array_values(array_unique($frameSources)));
     return "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; "
-        . "script-src 'self' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com; "
+        . "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com; "
         . "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; "
         . "media-src 'self' data: blob: https://*.giphy.com https://*.klipy.com https://api.klipy.com https://*.tenor.com https://tenor.googleapis.com https://media.tenor.com; "
         . "font-src 'self'; connect-src 'self' https://api.giphy.com https://*.giphy.com https://api.klipy.com https://*.klipy.com https://tenor.googleapis.com https://*.tenor.com; "
@@ -115,6 +115,7 @@ function security_mark_authenticated(int $userId): void
     session_regenerate_id(true);
     $now = time();
     $_SESSION['user_id'] = $userId;
+    $_SESSION['_site_backup_auth_epoch'] = app_setting(db_migration_connection(), 'site_backup_auth_epoch', '');
     $_SESSION['_email_recovery_epoch'] = function_exists('account_email_epoch') ? account_email_epoch(db_migration_connection(), $userId) : 0;
     $_SESSION['_authenticated_at'] = $now;
     $_SESSION['_session_started_at'] = $now;

@@ -10,7 +10,18 @@ const TETRIS_ARCADE_SHAPES = [
     'T' => [[0,1,0],[1,1,1],[0,0,0]], 'Z' => [[1,1,0],[0,1,1],[0,0,0]],
 ];
 
-function tetris_arcade_extension_adapter(): array { return arcade_adapter('tetris-versus', 'tetris_arcade'); }
+function tetris_arcade_extension_adapter(): array { return array_replace(arcade_adapter('tetris-versus', 'tetris_arcade'), ['validateSettings'=>'tetris_arcade_validate_settings','settingsProjection'=>'tetris_arcade_settings_projection','projectVirtualMembers'=>'tetris_arcade_virtual_members']); }
+function tetris_arcade_validate_settings(array $settings,string $mode,array $definition=[]): array {
+    $opponent=$settings['opponent']??'human';
+    if(array_diff(array_keys($settings),['opponent'])||!in_array($opponent,['human','solo','easy','normal','expert'],true)||($mode!=='practice'&&$opponent!=='human'))throw new MultiplayerGameException('Solo and bots are available in Practice only.','ARCADE_SETTINGS_INVALID',422);
+    return $settings===[]?[]:['opponent'=>$opponent];
+}
+function tetris_arcade_settings_projection(array $settings,string $mode,array $definition=[]): array {
+    $settings=tetris_arcade_validate_settings($settings,$mode);
+    return ['label'=>'Game Options','description'=>'Choose solo practice, a bot, or another player.','controls'=>$mode==='practice'?[['key'=>'opponent','type'=>'select','label'=>'Opponent','description'=>'Play alone, against another person, or against the selected bot.','value'=>$settings['opponent']??'human','defaultValue'=>'human','options'=>[['value'=>'human','label'=>'Another player'],['value'=>'solo','label'=>'Solo practice'],['value'=>'easy','label'=>'Easy bot'],['value'=>'normal','label'=>'Normal bot'],['value'=>'expert','label'=>'Expert bot']]]]:[]];
+}
+function tetris_arcade_virtual_members(PDO $pdo,array $state,array $context): array {return empty($state['tetrisBot'])?[]:[['userId'=>-7202,'seat'=>2,'displayName'=>ucfirst($state['tetrisBot']['difficulty']).' Bot','difficulty'=>$state['tetrisBot']['difficulty']]];}
+
 
 function tetris_arcade_rules_projection(array $settings, string $mode, array $definition = []): array
 {
@@ -25,7 +36,15 @@ function tetris_arcade_rules_projection(array $settings, string $mode, array $de
 
 function tetris_arcade_initial_state(array $players, array $context = []): array
 {
-    $state = arcade_initial_state('tetris', $players, 2, $context);
+    $settings=tetris_arcade_validate_settings((array)($context['settings']??[]),(string)($context['mode']??'practice'));
+    $opponent=$settings['opponent']??'human';$context['settings']=[];
+    $state = arcade_initial_state('tetris', $players, $opponent==='human'?2:1, $context);
+    $state['settings']=$settings;
+    if(in_array($opponent,['easy','normal','expert'],true)){
+        $state['turnOrder'][]=-7202;$state['inputSequences'][-7202]=0;$state['inputBudgets'][-7202]=16;
+        $state['tetrisBot']=['difficulty'=>$opponent,'waitMs'=>0,'plan'=>[]];
+        $state['bots']=[-7202=>['userId'=>-7202,'seat'=>2,'difficulty'=>$opponent,'displayName'=>ucfirst($opponent).' Bot']];
+    }
     $state['boards'] = [];
     foreach ($state['turnOrder'] as $id) {
         $board = ['cells' => array_fill(0, 20, array_fill(0, 10, '')),
@@ -126,4 +145,50 @@ function tetris_arcade_tick(array &$board, int $milliseconds): void
         $board['gravityMs'] -= $speed;
         tetris_arcade_command($board, 'down');
     }
+}
+
+/** Reachable placements only: every path uses the same commands as a person. */
+function tetris_bot_candidates(array $board): array {
+    $queue=[[$board['active'],[]]];$head=0;$seen=[];$landings=[];
+    while($head<count($queue)&&$head<900){
+        [$piece,$path]=$queue[$head++];$key=$piece['rotation'].':'.$piece['col'].':'.$piece['row'];
+        if(isset($seen[$key]))continue;$seen[$key]=true;
+        $drop=$piece;while(tetris_arcade_fits($board,array_replace($drop,['row'=>$drop['row']+1])))$drop['row']++;
+        $landing=$drop['rotation'].':'.$drop['col'].':'.$drop['row'];
+        if(!isset($landings[$landing])){
+            $cells=$board['cells'];foreach(tetris_arcade_matrix($drop)as$r=>$row)foreach($row as$c=>$filled)if($filled)$cells[$drop['row']+$r][$drop['col']+$c]=$drop['kind'];
+            $kept=array_values(array_filter($cells,static fn($row)=>in_array('',$row,true)));$lines=20-count($kept);
+            $cells=array_merge(array_fill(0,$lines,array_fill(0,10,'')),$kept);
+            $heights=[];$holes=0;
+            for($c=0;$c<10;$c++){$height=0;$found=false;for($r=0;$r<20;$r++){if($cells[$r][$c]!==''){if(!$found)$height=20-$r;$found=true;}elseif($found)$holes++;}$heights[]=$height;}
+            $bump=0;for($c=1;$c<10;$c++)$bump+=abs($heights[$c]-$heights[$c-1]);
+            $score=8*$lines-.52*array_sum($heights)-5*$holes-.32*$bump-.25*max($heights);
+            $landings[$landing]=['path'=>[...$path,'drop'],'score'=>$score,'cells'=>$cells,'height'=>max($heights)];
+        }
+        // Descending paths permit tucks; never teleport through occupied cells.
+        foreach(['left','right','cw','ccw','down']as$command){$next=$piece;if($command==='left')$next['col']--;if($command==='right')$next['col']++;if($command==='down')$next['row']++;if($command==='cw')$next['rotation']=($next['rotation']+1)%4;if($command==='ccw')$next['rotation']=($next['rotation']+3)%4;
+            if(tetris_arcade_fits($board,$next)&&!isset($seen[$next['rotation'].':'.$next['col'].':'.$next['row']]))$queue[]=[$next,[...$path,$command]];}
+    }
+    return array_values($landings);
+}
+function tetris_bot_plan(array $board,string $difficulty): array {
+    $choices=tetris_bot_candidates($board);if(!$choices)return ['drop'];
+    foreach($choices as&$choice){
+        if($difficulty==='easy')$choice['score']=-$choice['height']-.2*count($choice['path']);
+        if($difficulty==='expert'&&!empty($board['queue'][0])){
+            $next=$board;$next['cells']=$choice['cells'];$next['active']=['kind'=>$board['queue'][0],'rotation'=>0,'row'=>0,'col'=>3];
+            $follow=tetris_arcade_fits($next,$next['active'])?tetris_bot_candidates($next):[];
+            $choice['score']+=.65*($follow?max(array_column($follow,'score')):-10000);
+        }
+    }unset($choice);
+    usort($choices,static fn($a,$b)=>$b['score']<=>$a['score']);return $choices[0]['path'];
+}
+function tetris_bot_tick(array &$state,int $milliseconds): void {
+    if(empty($state['tetrisBot'])||empty($state['boards'][-7202]['alive']))return;
+    $bot=&$state['tetrisBot'];$bot['waitMs']+=$milliseconds;
+    $delay=['easy'=>1500,'normal'=>1000,'expert'=>800][$bot['difficulty']];
+    if($bot['waitMs']<$delay)return;$bot['waitMs']-= $delay;
+    // Recompute from the actual current board after gravity, then execute legal
+    // controls. No hidden bag, seed, opponent board, or future pieces are used.
+    foreach(tetris_bot_plan($state['boards'][-7202],$bot['difficulty'])as$command)tetris_arcade_command($state['boards'][-7202],$command);
 }

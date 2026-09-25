@@ -92,11 +92,12 @@
       table.append(probe);
       const to = probe.getBoundingClientRect();
       probe.remove();
-      ghost = node.cloneNode(true);
+      ghost = probe.cloneNode(true);
+      ghost.style.visibility = "visible";
       ghost.classList.remove("is-selected", "is-unplayable");
       ghost.removeAttribute("aria-pressed");
       ghost.removeAttribute("aria-disabled");
-      Object.assign(ghost.style, { position: "fixed", left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, margin: "0", zIndex: "1000", pointerEvents: "none", transformOrigin: "50% 100%" });
+      Object.assign(ghost.style, { position: "fixed", left: `${from.left}px`, top: `${from.top}px`, width: `${to.width}px`, height: `${to.height}px`, margin: "0", zIndex: "1000", pointerEvents: "none", transformOrigin: "50% 100%" });
       document.body.append(ghost);
       node.style.visibility = "hidden";
       sourceObserver = new MutationObserver(hideMatchingSource);
@@ -105,7 +106,7 @@
       const angle = node.style.getPropertyValue("--card-angle") || "0deg";
       const flightStarted = performance.now();
       const flight = ghost.animate([
-        { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, transform: `rotate(${angle})` },
+        { left: `${from.left}px`, top: `${from.top}px`, width: `${to.width}px`, height: `${to.height}px`, transform: `rotate(${angle})` },
         { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, transform: "rotate(0deg)" },
       ], { duration: 320, easing: "cubic-bezier(.2,.85,.25,1)", fill: "forwards" });
       const removeAfterBoardRender = () => {
@@ -504,6 +505,7 @@
       if (pendingPlayCard === code) card.style.visibility = "hidden";
       fan.append(card);
     }); handArea.append(fan); root.append(handArea);
+    fan.querySelectorAll(".spm-card").forEach(card=>card.classList.toggle("is-received-card", context.receivedCards?.has(actionCodeOf(card.dataset.cardCode)) || context.receivedCards?.has(card.dataset.cardCode)));
     if (historyOpen) openHistoryPanel(root, state, historyButton, context.memberName, { focus: false });
     return root;
   }

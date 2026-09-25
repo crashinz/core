@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Five Dice</title>
-  <link rel="stylesheet" href="five-dice.css?v=2026091605">
+  <link rel="stylesheet" href="five-dice.css?v=20260924-startup1">
 </head>
-<body data-appearance="built-in">
+<body data-appearance="loading" data-presentation-ready="false">
   <main class="game" aria-labelledby="game-title">
     <header class="game-header">
       <div>
@@ -20,7 +20,7 @@
       </div>
     </header>
 
-    <p id="game-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">Loading the game...</p>
+    <p id="game-status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading the game...</p>
 
     <section id="game-options" class="game-options" tabindex="-1" aria-labelledby="game-options-heading" hidden>
       <h2 id="game-options-heading">Game Options</h2>
@@ -84,7 +84,7 @@
     <section id="rules-panel" class="rules" tabindex="-1" aria-labelledby="rules-panel-heading" hidden></section>
     <section id="accessibility-panel" class="accessibility-panel" tabindex="-1" aria-labelledby="accessibility-panel-heading" hidden></section>
 
-    <div class="presentation-grid">
+    <div class="presentation-grid" aria-busy="true" inert>
       <div class="play-surface-slot">
       <div id="five-dice-approved-artboard" class="five-dice-approved-artboard">
       <div id="five-dice-player-status-strip" class="player-status-strip" aria-label="Player timer status" hidden></div>
@@ -191,7 +191,6 @@
       </aside>
     </div>
   </main>
-  <script type="module" src="five-dice.js?v=e9894391b58a"></script>
+  <script type="module" src="five-dice.js?v=20260925-reference5"></script>
 </body>
 </html>
-

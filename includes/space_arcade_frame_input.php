@@ -24,18 +24,18 @@ function space_arcade_frame_action(array $state, int $actor, string $action, arr
             || !is_int($payload['frameStart'] ?? null) || $payload['frameStart'] < 0
             || $payload['frameStart'] % ARCADE_STEP_MS !== 0
             || !is_array($payload['frames'] ?? null) || !array_is_list($payload['frames'])
-            || count($payload['frames']) < 1 || count($payload['frames']) > 25) {
+            || count($payload['frames']) < 1 || count($payload['frames']) > 50) {
             throw new MultiplayerGameException('Invalid arcade input frames.', 'ARCADE_INPUT_INVALID', 422);
         }
         foreach ($payload['frames'] as $run) {
             if (!is_array($run) || array_diff(array_keys($run), ['ticks', 'left', 'right', 'fire'])
-                || !is_int($run['ticks'] ?? null) || $run['ticks'] < 1 || $run['ticks'] > 25
+                || !is_int($run['ticks'] ?? null) || $run['ticks'] < 1 || $run['ticks'] > 50
                 || !is_bool($run['left'] ?? null) || !is_bool($run['right'] ?? null) || !is_bool($run['fire'] ?? null)) {
                 throw new MultiplayerGameException('Invalid arcade input frames.', 'ARCADE_INPUT_INVALID', 422);
             }
             $ticks += $run['ticks'];
         }
-        if ($ticks > 25) throw new MultiplayerGameException('Too many arcade input frames.', 'ARCADE_INPUT_INVALID', 422);
+        if ($ticks > 50) throw new MultiplayerGameException('Too many arcade input frames.', 'ARCADE_INPUT_INVALID', 422);
         $sequence = $payload['sequence'];
         $hash = hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
         $last = (int)($state['inputSequences'][$actor] ?? 0);

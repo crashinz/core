@@ -14,13 +14,15 @@ function multiplayer_game_bot_slots(array $definition): array
         'uno' => range(1, 10),
         'blackjack', 'puppy-panic' => range(1,5),
         'chinese-checkers' => range(1,6),
-        'battleship', 'chess', 'checkers', 'backgammon-first-party', 'nested-four', 'acey-deucy' => [2],
+        'battleship', 'chess', 'checkers', 'backgammon-first-party', 'nested-four', 'acey-deucy', 'eight-ball', 'tetris-versus' => [2],
         default => [],
     };
 }
 
 function multiplayer_game_bot_choices(array $definition): array
 {
+    if (($definition['extensionId'] ?? '') === 'eight-ball') { require_once __DIR__.'/pool_bot_support.php'; return pool_bot_choices(); }
+    if (($definition['extensionId'] ?? '') === 'tetris-versus') return [['value'=>'none','label'=>'None'],['value'=>'easy','label'=>'Easy'],['value'=>'normal','label'=>'Normal'],['value'=>'expert','label'=>'Expert']];
     if (($definition['extensionId'] ?? '') === 'dominos') { require_once __DIR__.'/dominos_bot_support.php'; return dominos_bot_choices(); }
     if (($definition['extensionId'] ?? '') === 'five-dice') { require_once __DIR__ . '/five_dice_bot_support.php'; return five_dice_bot_choices(); }
     if (($definition['extensionId'] ?? '') === 'puppy-panic') { require_once __DIR__ . '/puppy_panic_bot_support.php'; return puppy_panic_bot_choices(); }
@@ -86,16 +88,19 @@ function multiplayer_game_bot_lobby_projection(array $definition, array $session
     foreach ($slots as $seat) {
         $occupied = isset($humans[$seat]);
         $difficulty = $occupied ? 'none' : ($settings['botSeat' . $seat . 'Difficulty'] ?? 'none');
+        if (!$occupied && ($definition['extensionId'] ?? '') === 'tetris-versus') $difficulty = in_array($settings['opponent'] ?? 'human', ['easy','normal','expert'], true) ? $settings['opponent'] : 'none';
         if (!$occupied && $session['mode'] === 'practice' && $difficulty !== 'none') $readyCount++;
         $options[] = ['seat' => $seat, 'occupantName' => $humans[$seat]['displayName'] ?? '',
             'difficulty' => $difficulty, 'editable' => $isHost && !$occupied];
     }
+    $practiceTable = in_array($definition['extensionId'] ?? '', ['eight-ball','tetris-versus'], true);
+    $tableReady = count($humans) >= multiplayer_game_minimum_players($definition, (string)$session['mode'], $settings);
     return ['choices' => multiplayer_game_bot_choices($definition),
         'strengthNote' => match ($definition['extensionId'] ?? '') { 'five-dice'=>'Easy keeps matching dice. Normal compares one reroll; Expert plans both remaining rerolls. Both consider the scorecard and bonuses. Practice only.', 'puppy-panic'=>'Practice bots use their own hand and permitted private views. Easy draws simply; Normal uses survival cards and counters; Expert manages danger and turn debt more carefully. Both decks supported.', 'blackjack' => 'Easy uses simple hit/stand choices. Normal uses basic strategy. Expert remembers exposed cards and adjusts bets to the standings and rounds left. Bots use only visible cards. Practice only.', 'acey-deucy' => 'Practice bots follow the selected Acey Deucy rules. Easy is forgiving; Normal plans dice sequences; Expert also considers replies. These are relative levels, not ratings.', 'nested-four' => 'Practice bots remember observed pieces. Normal plans replies; Expert searches farther. Difficulty names are relative, not ratings.', 'chinese-checkers' => 'Practice bots use classical JumpStar-derived evaluation. Difficulty names are relative levels, not Elo ratings.', 'hearts' => 'Easy uses simple legal play; Normal considers passing, played cards and shooting the moon; Expert adds a short lookahead. Practice only.', 'uno' => 'Easy uses simple legal play; Normal manages colors and action cards. Practice only.', 'chess' => chess_bot_strength_note(), 'checkers' => checkers_bot_strength_note(), 'backgammon-first-party' => backgammon_bot_strength_note(), default => '' },
         'options' => $options, 'isHost' => $isHost, 'mode' => $session['mode'],
         'settingsSha256' => $session['settings_sha256'], 'playerSetSha256' => $playerSetSha,
         'showStart' => $isHost && !multiplayer_game_has_seat_choices($definition),
-        'canStart' => $isHost && (($definition['extensionId'] ?? '') === 'five-dice' ? $readyCount >= (int)($session['mode']==='practice'?1:2) && $readyCount<=4 : (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : (($definition['extensionId'] ?? '') === 'hearts' ? in_array($readyCount, [2,4], true) : (in_array($definition['extensionId'] ?? '', ['chinese-checkers','blackjack','puppy-panic'], true) ? $readyCount>=2 && $readyCount<=(int)$definition['maxPlayers'] : $readyCount === (int)$definition['maxPlayers']))) ) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
+        'canStart' => $isHost && ($practiceTable ? $tableReady : (($definition['extensionId'] ?? '') === 'five-dice' ? $readyCount >= (int)($session['mode']==='practice'?1:2) && $readyCount<=4 : (($definition['extensionId'] ?? '') === 'uno' ? $readyCount >= 2 && $readyCount <= 10 : (($definition['extensionId'] ?? '') === 'hearts' ? in_array($readyCount, [2,4], true) : (in_array($definition['extensionId'] ?? '', ['chinese-checkers','blackjack','puppy-panic'], true) ? $readyCount>=2 && $readyCount<=(int)$definition['maxPlayers'] : $readyCount === (int)$definition['maxPlayers']))) )) && ($session['mode'] === 'practice' ? $hostAccepted : $allAccepted)];
 }
 
 /** Update one empty slot atomically with mode/acceptance; never start or displace a person. */
@@ -118,7 +123,12 @@ function multiplayer_game_set_lobby_bot(PDO $pdo, string $publicId, int $userId,
         $occupied->execute([(int)$session['id'], $seat]);
         if ((int)$occupied->fetchColumn() > 0) throw new MultiplayerGameException('That seat belongs to a player. Bots can only fill empty seats.', 'MULTIPLAYER_GAME_BOT_SEAT_OCCUPIED', 409);
         $settings = json_decode((string)$session['settings_json'], true) ?: [];
-        $settings['botSeat' . $seat . 'Difficulty'] = $difficulty;
+        if (($definition['extensionId'] ?? '') === 'tetris-versus') {
+            $settings['opponent'] = $difficulty === 'none' ? 'human' : $difficulty;
+        } else {
+            $settings['botSeat' . $seat . 'Difficulty'] = $difficulty;
+            if (($definition['extensionId'] ?? '') === 'eight-ball' && $difficulty !== 'none') $settings['tableMode'] = 'match';
+        }
         $mode = $difficulty === 'none' ? (string)$session['mode'] : 'practice';
         $result = multiplayer_game_update_settings($pdo, $publicId, $userId, $settings, $mode);
         database_transaction_commit($pdo, $transaction);

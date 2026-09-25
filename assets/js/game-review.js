@@ -1,5 +1,11 @@
 const reviewSelector = document.getElementById('review-selector');
-for (const select of reviewSelector?.querySelectorAll('select') || []) {
+const gameFilter=document.getElementById('review-game-filter');
+const examples=document.getElementById('review-example');
+const groups=[...(examples?.querySelectorAll('optgroup')||[])];
+function filterExamples(){if(!examples||!gameFilter)return;examples.replaceChildren(...groups.filter(g=>g.label===gameFilter.value));}
+filterExamples();
+gameFilter?.addEventListener('change',()=>{filterExamples();examples.selectedIndex=0;reviewSelector.requestSubmit();});
+for (const select of reviewSelector?.querySelectorAll('select:not(#review-game-filter)') || []) {
   select.addEventListener('change', () => reviewSelector.requestSubmit());
 }
 
@@ -49,3 +55,25 @@ const progressTimer = setInterval(async () => {
   finally { readingProgress = false; }
 }, 1500);
 window.addEventListener('pagehide', () => clearInterval(progressTimer), {once:true});
+
+// This example has a scripted opponent, not a running practice bot. Wait for
+// the actual board before playing its one prepared move through the same
+// admin/CSRF/step-checked action as the visible manual button.
+const opponentForm = document.getElementById('review-step');
+const opponentFrame = document.getElementById('review-game');
+if (opponentForm?.dataset.autoOpponent === 'true' && opponentFrame) {
+  let visibleSince = null;
+  const opponentTimer = setInterval(() => {
+    if (opponentForm.elements.step.value !== '0') { clearInterval(opponentTimer); return; }
+    let ready = false;
+    try { ready = opponentFrame.contentDocument?.querySelectorAll('.dm-player').length >= 2; } catch { /* Wait for the same-origin board. */ }
+    if (!ready || document.hidden) { visibleSince = null; return; }
+    visibleSince ??= Date.now();
+    if (Date.now() - visibleSince < 1500 || opponentForm.dataset.busy) return;
+    clearInterval(opponentTimer);
+    if (!opponentForm.querySelector('button').disabled) opponentForm.requestSubmit();
+    // A failed request leaves the manual button available; never retry a move
+    // repeatedly or advance the frozen reference automatically.
+  }, 250);
+  window.addEventListener('pagehide', () => clearInterval(opponentTimer), {once:true});
+}

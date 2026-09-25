@@ -671,7 +671,7 @@ async function initializeAvatarRuntime() {
 
   const [{ Core }, { ChatRuntime }, { RoomRuntime }, { VoiceRuntime }, { GameRuntime }, { RoomEffectsRuntime }, { ImportedRoomRuntime }, { AvatarRuntime }, { PollingRuntime }, { installRuntimeDiagnostics }, { RuntimeRequestClient }, { RuntimeIssueCaptureService }, { GesturePresentationService }, { GestureCatalogController }, { P2PTransferService }, ServerClock, { ChatOutbox }] = await Promise.all([
     import(appUrl('/assets/js/core/core.js')),
-    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260919-capabilities')),
+    import(appUrl('/assets/js/runtime/chat/chat-runtime.js?v=20260924e1')),
     import(appUrl('/assets/js/runtime/room/room-runtime.js?v=20260919-capabilities')),
     import(appUrl('/assets/js/runtime/voice/voice-runtime.js')),
     import(appUrl('/assets/js/runtime/game/game-runtime.js?v=20260916-dominos')),
@@ -1339,7 +1339,10 @@ function configureP2PAvatarRuntime() {
 }
 
 function configureChatPrivateChats() {
+  const tabSessionKey = () => `corechat.dm-tabs.v1:${APP_BASE}:${cfg?.myUserId || 0}`;
   chatRuntime?.privateChats?.configure({
+    readTabSession: () => window.sessionStorage.getItem(tabSessionKey()),
+    writeTabSession: value => window.sessionStorage.setItem(tabSessionKey(), value),
     apiPost,
     getConfig: () => cfg,
     getActiveChat: () => activeChatKey(),
@@ -13122,7 +13125,7 @@ async function bootRoom() {
     all: true,
     reason: 'room-bootstrap',
   });
-  (cfg.dmUsers || []).forEach(rememberDmUser);
+  chatPrivateChats().seedDmUsers(cfg.dmUsers || []);
   (cfg.messages || []).forEach(msg => addMessageToChannel(msg, 'room', false));
   (cfg.communityMessages || []).forEach(msg => addMessageToChannel(msg, 'community', false));
   (cfg.linkMessages || []).forEach(msg => {
@@ -13252,3 +13255,6 @@ async function postOutsideContentForm(...args) {
 window.CoreChatProfileRelationship?.startNotice(() => {
   if (cfg?.myUserId) openMemberProfile(cfg.myUserId);
 });
+
+// Chat owns contextual actions throughout its surface, including empty game margins.
+document.addEventListener("contextmenu", event => event.preventDefault(), true);

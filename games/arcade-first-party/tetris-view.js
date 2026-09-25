@@ -27,6 +27,7 @@ export class TetrisBoardView {
   render(state,binding,predictedPiece,matrix,fits) {
     this.sides.forEach((side,index)=>{
       const id=state?.turnOrder?.[index],board=state?.boards?.[String(id)];
+      side.side.hidden=!!state?.boards&&id===undefined;
       side.role.textContent=id===undefined?'Waiting':Number(id)===Number(binding.currentUserId())?'You':'Opponent';
       const occupied=Array(200).fill(''),ghosts=new Set();
       if(board){

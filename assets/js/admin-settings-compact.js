@@ -17,6 +17,7 @@
     return details;
   };
   const normalize = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const inboxImports = new Set();
 
   class CompactSettings extends Base {
     render() {
@@ -518,6 +519,54 @@
         }
       });
       section.append(input, choose, install, drop, status, rows); target.appendChild(section);
+      const inboxPacks = packs.filter(pack => pack.canManage && pack.inbox);
+      if (inboxPacks.length) {
+        const panel = node('div', 'settings-media-inbox');
+        panel.append(node('h4', '', 'Automatic server-folder import'));
+        const directory = inboxPacks.find(pack => pack.inbox.directory)?.inbox.directory;
+        panel.append(node('p', 'minor', 'Put original OCX files in this private server folder. Missing or incomplete games are validated and imported after initial setup, after database updates, and once daily when the site is used. Fully installed games are skipped without checking their inbox files. Existing installations stay available if validation fails.'));
+        if (directory) panel.append(node('code', '', directory));
+        panel.append(node('p', 'minor', inboxPacks.map(pack => `${pack.displayName || 'Five Dice'}: ${pack.inbox.acceptedNames.join(' or ')}`).join(' · ')));
+        panel.append(node('p', 'minor', 'Upload using a temporary filename, then rename it when finished. Successfully imported files are remembered, so keeping them here will not reinstall removed media. Five Dice prefers Yahtzee-mychange.ocx.'));
+        const scan = node('button', 'btn', 'Check inbox again'); scan.type = 'button';
+        scan.disabled = this.locked || this.readOnly;
+        const feedback = node('p', 'minor'); feedback.setAttribute('role', 'status');
+        const errors = inboxPacks.filter(pack => pack.inbox.error).map(pack => pack.inbox.error);
+        const lastChecks = inboxPacks.map(pack => pack.inbox.lastResult?.operation === 'failed'
+          ? `${pack.displayName || 'Five Dice'}: ${pack.inbox.lastResult.error}` : '').filter(Boolean);
+        const checkedAt = inboxPacks.find(pack => pack.inbox.lastCheckAt)?.inbox.lastCheckAt;
+        feedback.textContent = [...errors, ...lastChecks].join(' | ') || (checkedAt ? `Last automatic check: ${new Date(checkedAt).toLocaleString()}.` : 'Waiting for the first automatic check.');
+        panel.append(scan, feedback); section.append(panel);
+        const scanInbox = async (manual = false) => {
+          if (busy || this.locked || this.readOnly || !this.onMediaPackAction) return;
+          const pending = inboxPacks.filter(pack => manual || pack.inbox.pending);
+          if (!pending.length) return;
+          busy = true; scan.disabled = choose.disabled = install.disabled = true;
+          const results = [];
+          try {
+            for (const pack of pending) {
+              if (this.locked || this.readOnly) break;
+              const key = pack.extensionId || 'five-dice';
+              if (inboxImports.has(key)) continue;
+              inboxImports.add(key);
+              feedback.textContent = `Checking ${pack.displayName || 'Five Dice'} inbox…`;
+              try {
+                const data = await this.onMediaPackAction('install-inbox', { game:pack.extensionId || '', deferRefresh:true }, this);
+                refreshPack(pack, data);
+                const message = data.operation === 'inbox-complete' ? 'Already fully installed — skipped' : data.operation === 'inbox-unchanged' ? 'No new file' : 'Installed from inbox';
+                labels.get(pack).feedback.textContent = `${message}. ${verificationLabel(pack)}`;
+                results.push(`${pack.displayName || 'Five Dice'}: ${message}`);
+              } catch (error) { results.push(`${pack.displayName || 'Five Dice'}: ${error.message}`); }
+              finally { inboxImports.delete(key); }
+            }
+          } finally {
+            busy = false; scan.disabled = choose.disabled = this.locked || this.readOnly;
+            install.disabled = this.locked || this.readOnly || !selection.length;
+            feedback.textContent = results.join(' | ') || 'Another inbox check is running.';
+          }
+        };
+        scan.addEventListener('click', () => { void scanInbox(true); });
+      }
     }
   }
   window.SettingsRegistryUI = CompactSettings;

@@ -123,6 +123,9 @@
     "games/vendor/marcher/worker.js",
     "games/classic-game-audio.js",
     "games/game-view-storage.js",
-    "games/bot-pacing.js"
+    "games/bot-pacing.js",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

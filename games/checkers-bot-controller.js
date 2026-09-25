@@ -30,7 +30,7 @@ export function createCheckersBotController({snapshot,submit,showStatus,WorkerCl
     if(task.respondToDraw){void finish({elapsedMs:0});return;}
     showStatus('Loading the checkers bot…');
     try{
-      const worker=new WorkerClass(new URL('./vendor/marcher/worker.js?v=corechat-2',import.meta.url));active.worker=worker;
+      const worker=new WorkerClass(new URL('./vendor/marcher/worker.js?v=corechat-3',import.meta.url));active.worker=worker;
       active.timeout=setTimeout(()=>fail(active,'The checkers bot could not load. Check your connection, then retry.'),15000);
       worker.onerror=e=>{e?.preventDefault?.();fail(active,'The checkers engine could not run. Retry or use a current browser with WebAssembly support.');};
       worker.onmessage=({data})=>{

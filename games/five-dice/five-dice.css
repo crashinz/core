@@ -3998,3 +3998,26 @@ body[data-appearance="classic"] .classic-score-choice:is(:hover, :focus-visible,
 /* Reserve bot feedback below the board throughout a Practice match. */
 #five-dice-bot-status { min-height: 3.2em; line-height: 1.5; padding: .45rem .7rem; box-sizing: border-box; overflow-wrap: anywhere; }
 #five-dice-bot-status[hidden] { display: none; }
+
+/* A disabled die still displays its actual held/unheld artwork. */
+body[data-appearance="classic"] .die:disabled { opacity:1; cursor:default; }
+body[data-appearance="classic"] .classic-score-choice:is(:hover,.is-previewing) { box-shadow:none; background:transparent; }
+body[data-appearance="classic"] .classic-score-choice:focus-visible { outline:2px solid white; outline-offset:-2px; box-shadow:none; }
+
+body[data-appearance="classic"] #built-in-five-dice-result:not([hidden]){display:flex!important;position:fixed;inset:15% auto auto 50%;transform:translateX(-50%);z-index:80;width:min(480px,90vw)}
+.classic-best-cell{padding-top:4px;box-sizing:border-box}
+
+body[data-appearance="classic"] #built-in-five-dice-result:not([hidden]){flex-direction:column;gap:12px;padding:24px;background:#14213a;color:#fff;border:2px solid #92bad6;border-radius:16px;box-shadow:0 12px 48px #000a;text-align:center}
+@keyframes dice-victory{0%{transform:scale(.9);filter:brightness(1.6)}100%{transform:scale(1);filter:brightness(1)}}
+#built-in-five-dice-result[data-outcome="win"]:not([hidden]) #built-in-result-name{animation:dice-victory .6s ease-out 3 alternate}
+@media(prefers-reduced-motion:reduce){#built-in-five-dice-result #built-in-result-name{animation:none!important}}
+
+/* Original Music beater and SFX waves; decorative layers never intercept controls. */
+.classic-idle-control{display:none;pointer-events:none}
+body[data-appearance="classic"] .classic-idle-control:not([hidden]){display:block;position:absolute;z-index:8;overflow:hidden;pointer-events:none}
+.classic-idle-control>img{display:block;max-width:none;max-height:none;transform:translateY(0);image-rendering:pixelated}
+.classic-idle-control>img.is-running{animation:five-dice-idle-control var(--control-duration) steps(var(--control-frames),end) infinite}
+@keyframes five-dice-idle-control{from{transform:translateY(0)}to{transform:translateY(-100%)}}
+
+/* Reserve layout while the server resolves the saved appearance; never paint a guessed board. */
+body[data-presentation-ready="false"] .presentation-grid{visibility:hidden;pointer-events:none}

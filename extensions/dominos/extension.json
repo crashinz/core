@@ -97,6 +97,9 @@
     "assets/audio/dominos/shuffle.mp3",
     "games/dominos/art.js",
     "games/dominos/layout.js",
-    "includes/dominos_bot_search.php"
+    "includes/dominos_bot_search.php",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

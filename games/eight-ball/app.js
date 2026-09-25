@@ -2,7 +2,7 @@
  * keeps the canvas document mounted while authoritative snapshots arrive. */
 (() => {
   'use strict';
-  const source=new URL('table.html?v=f463a9473ce9',document.currentScript.src);
+  const source=new URL('table.html?v=20260925-feeder1',document.currentScript.src);
   let viewportWidth=0;
   document.addEventListener('corechat-pool-viewport',e=>{viewportWidth=e.detail.width;if(ready)frame.contentWindow.postMessage({type:'pool-viewport',width:viewportWidth},location.origin);});
   let root,frame,context,ready=false,inFlight=false,autoRackQueued=false,autoRackAttempt='';
@@ -41,7 +41,7 @@
       const image=node?.tagName==='IMG'?node:node?.querySelector?.('img');
       return {userId:Number(m.userId),name:context.memberName(Number(m.userId)),avatar:image?.src||''};
     });
-    frame.contentWindow.postMessage({type:'pool-snapshot',sessionId:s.publicId,status:s.status,review:!!s.review,state:s.state,currentUserId:Number(context.currentUserId()),members,options:context.options,busy:context.busy||inFlight},location.origin);
+    frame.contentWindow.postMessage({type:'pool-snapshot',sessionId:s.publicId,status:s.status,mode:s.mode,review:!!s.review,state:s.state,currentUserId:Number(context.currentUserId()),members,options:context.options,busy:context.busy||inFlight},location.origin);
     queueRack();
   }
   window.addEventListener('message',async e=>{
@@ -51,7 +51,7 @@
     if(e.data?.type==='pool-ready'){ready=true;if(viewportWidth)frame.contentWindow.postMessage({type:'pool-viewport',width:viewportWidth},location.origin);send();return;}
     if(e.data?.type!=='pool-action'||!context||inFlight)return;
     const {action,payload}=e.data;
-    if(!['timeout','shot','call','push-out','rack','place','cue','choice','layout','stalemate','practice-edit','practice-rewind'].includes(action))return;
+    if(!['timeout','shot','call','push-out','rack','place','cue','choice','layout','stalemate','practice-edit','practice-rewind','practice-opponent'].includes(action))return;
     if(action==='timeout'&&context.session?.review)return;
     await perform(action,payload||{});
   });

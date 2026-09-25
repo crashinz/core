@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/ocx_resource_archive.php';
 
 /**
  * Bounded, static-only media extraction for legacy OCX/PE containers.
@@ -497,7 +498,8 @@ function ocx_static_media_stage(
     $staged = 0;
     $recognizedResources = 0;
     $seenSlots = [];
-    foreach (ocx_static_media_resources($containerPath) as $resource) {
+    $resources = ocx_static_media_resources($containerPath);
+    foreach ($resources as $resource) {
         $payload = ocx_static_media_payload($resource);
         if ($payload === null) continue;
         foreach (ocx_static_media_candidate_names($resource, (string)$payload['extension']) as $candidate) {
@@ -535,5 +537,6 @@ function ocx_static_media_stage(
         }
     }
     if ($recognizedResources < 1) throw new RuntimeException('The selected OCX contains no recognized media resources for this game.');
-    return ['recognizedResources' => $recognizedResources, 'stagedSlots' => $staged, 'containerRetained' => false, 'executionUsed' => false];
+    $retained = ocx_resource_archive_store($resources, $attempt);
+    return ['recognizedResources' => $recognizedResources, 'stagedSlots' => $staged, 'retainedResources' => $retained, 'containerRetained' => false, 'executionUsed' => false];
 }

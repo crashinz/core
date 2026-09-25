@@ -1,3 +1,5 @@
+import { botAvatarOptions } from "./bot-avatar-options.js?v=20260925-reference5";
+import { createFrozenReviewPlayback } from "./frozen-review-playback.js";
 import { appendAceyMove, aceyMoveAnimating } from "./acey-deucy-motion.js?v=1e269499c30e";
 import { createPoolBotController } from "./eight-ball/bot-controller.js?v=afe76977d3c6";
 import { createAceyDeucyBotController } from "./acey-deucy-bot-controller.js?v=a16519af3c5b";
@@ -5,11 +7,11 @@ import { createNestedFourBotController } from "./nested-four-bot-controller.js?v
 import { createChineseCheckersBotController } from "./chinese-checkers-bot-controller.js?v=c1460ca5a716";
 import { gameViewStorage } from "./game-view-storage.js?v=1dd11e938aa8";
 import { originalAudioCatalog, originalVoiceEnabled, originalRollAnnouncement, originalPlacementCue, originalReminderPlan, originalPointRoll } from "./classic-game-audio.js?v=b0d39dcd022c";
-import { createCardBotController } from "./uno-bot-controller.js?v=19690003d452";
+import { createCardBotController } from "./uno-bot-controller.js?v=20260924e1";
 import { createBackgammonBotController } from "./backgammon-bot-controller.js?v=421ff552bf1e";
-import { createCheckersBotController } from "./checkers-bot-controller.js?v=18da92e0dd97";
+import { createCheckersBotController } from "./checkers-bot-controller.js?v=20260924e1";
 import { createChessBotController } from "./chess-bot-controller.js?v=45b22e9ad57b";
-import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=f69e083b7fee";
+import { classicSourceMap as immutableClassicSourceMap } from "./classic-source-maps.js?v=20260924-checkers-capture";
 import { viewerHeightFitEnabled, setViewerHeightFit, installViewportHeightFit } from "./viewport-height-fit.js?v=f9547db55052";
 
 import { bindGameAvatar } from "./game-avatar.js?v=2611117d49fd";
@@ -257,6 +259,10 @@ let reconciledBuiltInChessSound = null;
 let pendingBuiltInPointWin = null;
 let builtInPointWinTimer = 0;
 const scheduledSoundTimers = new Set();
+let checkersCaptureAudio = null;
+let checkersSoundEpoch = 0;
+let classicTimedSoundEpoch = 0;
+let classicTimedSoundAudio = null;
 const classicMotionMediaPreloads = new Map();
 let classicMotionMediaReadyKey = "";
 let classicMotionMediaReadyPromise = Promise.resolve();
@@ -1143,7 +1149,7 @@ function spadesAutomaticSettlementDelayMs(currentSession, localNow = Date.now())
 function scheduleSpadesAutomaticAction() {
   const phase = String(session?.state?.phase || "");
   const cancelPending = () => { if (spadesAutomaticTimer) clearSpadesAutomaticAction(); };
-  if (!gameSurfaceVisible || context.extensionId !== "spades" || !session || busy || !canCoordinateSpadesAutomaticAction(phase) || session.state?.completed || !["deal","settling"].includes(phase)) {
+  if (context.extensionId !== "spades" || !session || busy || !canCoordinateSpadesAutomaticAction(phase) || session.state?.completed || !["deal","settling"].includes(phase)) {
     cancelPending();
     return;
   }
@@ -1156,7 +1162,7 @@ function scheduleSpadesAutomaticAction() {
     if (spadesAutomaticTimer !== timerId || pendingSpadesAutomaticKey !== key) return;
     spadesAutomaticTimer = 0;
     const currentPhase = String(session?.state?.phase || "");
-    if (!gameSurfaceVisible || context.extensionId !== "spades" || !session || busy || !canCoordinateSpadesAutomaticAction(currentPhase) || session.state?.completed
+    if (context.extensionId !== "spades" || !session || busy || !canCoordinateSpadesAutomaticAction(currentPhase) || session.state?.completed
       || String(session.publicId || "") !== expectedPublicId
       || `${currentPhase}:${Number(session.stateVersion || 0)}` !== key) {
       if (pendingSpadesAutomaticKey === key) pendingSpadesAutomaticKey = "";
@@ -1179,7 +1185,7 @@ function clearBlackjackAutomaticAction() {
 function scheduleBlackjackAutomaticAction() {
   const phase = String(session?.state?.phase || "");
   const cancelPending = () => { if (blackjackAutomaticTimer) clearBlackjackAutomaticAction(); };
-  if (!gameSurfaceVisible || context.extensionId !== "blackjack" || !session || busy || !canAct() || session.state?.completed || !["deal","dealer"].includes(phase)) {
+  if (context.extensionId !== "blackjack" || !session || busy || !canAct() || session.state?.completed || !["deal","dealer","round-complete"].includes(phase)) {
     cancelPending();
     return;
   }
@@ -1192,7 +1198,7 @@ function scheduleBlackjackAutomaticAction() {
     if (blackjackAutomaticTimer !== timerId || pendingBlackjackAutomaticKey !== key) return;
     blackjackAutomaticTimer = 0;
     const currentPhase = String(session?.state?.phase || "");
-    if (!gameSurfaceVisible || context.extensionId !== "blackjack" || !session || busy || !canAct() || session.state?.completed
+    if (context.extensionId !== "blackjack" || !session || busy || !canAct() || session.state?.completed
       || String(session.publicId || "") !== expectedPublicId
       || `${currentPhase}:${Number(session.stateVersion || 0)}` !== key) {
       if (pendingBlackjackAutomaticKey === key) pendingBlackjackAutomaticKey = "";
@@ -1200,9 +1206,9 @@ function scheduleBlackjackAutomaticAction() {
     }
     const succeeded = phase === "deal"
       ? await performAction("deal", {}, "blackjack-shoe")
-      : await performAction("dealer-play");
+      : phase === "round-complete" ? await performAction("next-round") : await performAction("dealer-play");
     if (!succeeded && pendingBlackjackAutomaticKey === key) pendingBlackjackAutomaticKey = "";
-  }, Object.keys(session.state?.bots || {}).length ? 2000 : (phase === "dealer" ? 420 : 0));
+  }, phase === "round-complete" ? 2500 : Object.keys(session.state?.bots || {}).length ? 2000 : (phase === "dealer" ? 420 : 0));
   blackjackAutomaticTimer = timerId;
 }
 
@@ -1215,7 +1221,7 @@ function clearUnoAutomaticAction() {
 function scheduleUnoAutomaticAction() {
   const phase = String(session?.state?.phase || "");
   const cancelPending = () => { if (unoAutomaticTimer) clearUnoAutomaticAction(); };
-  if (!gameSurfaceVisible || context.extensionId !== "uno" || !session || busy || !canAct() || session.state?.completed || !["deal"].includes(phase)) {
+  if (context.extensionId !== "uno" || !session || busy || !canAct() || session.state?.completed || !["deal"].includes(phase)) {
     cancelPending();
     return;
   }
@@ -1228,7 +1234,7 @@ function scheduleUnoAutomaticAction() {
     if (unoAutomaticTimer !== timerId || pendingUnoAutomaticKey !== key) return;
     unoAutomaticTimer = 0;
     const currentPhase = String(session?.state?.phase || "");
-    if (!gameSurfaceVisible || context.extensionId !== "uno" || !session || busy || !canAct() || session.state?.completed
+    if (context.extensionId !== "uno" || !session || busy || !canAct() || session.state?.completed
       || String(session.publicId || "") !== expectedPublicId
       || `${currentPhase}:${Number(session.stateVersion || 0)}` !== key) {
       if (pendingUnoAutomaticKey === key) pendingUnoAutomaticKey = "";
@@ -1257,8 +1263,7 @@ function gameTerminalOutcome(value = session, extensionId = context.extensionId)
   const state = value?.state || {};
   const status = String(value?.status || "");
   const eligibleParticipant = id => Number.isSafeInteger(id) && (id > 0
-    || (id < 0 && value?.mode === "practice" && ["checkers", "chess", "backgammon-first-party", "acey-deucy", "blackjack"].includes(extensionId)
-      && state.bots?.[String(id)]?.userId === id));
+    || (id < 0 && value?.mode === "practice" && state.bots?.[String(id)]?.userId === id));
   const participants = Array.isArray(state.turnOrder)
     ? state.turnOrder.filter(eligibleParticipant)
     : (value?.members || []).filter(member => ["master", "player"].includes(member.role)).map(member => Number(member.userId));
@@ -1270,7 +1275,9 @@ function gameTerminalOutcome(value = session, extensionId = context.extensionId)
   };
   if (!outcome.terminal || state.completed !== true) return outcome;
   // A shared timeout/disconnect winner takes precedence over unfinished scores.
-  if (eligibleParticipant(state.winnerUserId)) {
+  if (extensionId === "eight-ball" && eligibleParticipant(state.winner) && outcome.participantIds.includes(state.winner)) {
+    outcome.known = true; outcome.winnerIds = [state.winner];
+  } else if (eligibleParticipant(state.winnerUserId)) {
     if (!outcome.participantIds.includes(state.winnerUserId)) return outcome;
     outcome.known = true;
     outcome.winnerIds = [state.winnerUserId];
@@ -1278,6 +1285,9 @@ function gameTerminalOutcome(value = session, extensionId = context.extensionId)
     outcome.known = true;
     outcome.draw = true;
     outcome.drawIds = outcome.participantIds;
+  } else if (extensionId === "dominos" && Array.isArray(state.winners) && state.winners.length
+    && state.winners.every(id => eligibleParticipant(id) && outcome.participantIds.includes(id))) {
+    outcome.known = true; outcome.winnerIds = [...new Set(state.winners)];
   } else if (extensionId === "blackjack") {
     if (outcome.reason && !["round-limit", "all-players-below-minimum-bet", "resignation"].includes(outcome.reason)) return outcome;
     const ids = outcome.participantIds;
@@ -1296,7 +1306,7 @@ function gameTerminalOutcome(value = session, extensionId = context.extensionId)
     && new Set(state.turnOrder).size === 4) {
     outcome.known = true;
     outcome.winningTeam = state.winningTeam;
-    outcome.winnerIds = state.turnOrder.filter((id, index) => index % 2 === state.winningTeam && id > 0);
+    outcome.winnerIds = state.turnOrder.filter((id, index) => index % 2 === state.winningTeam && eligibleParticipant(id));
   } else if (state.winnerUserId === null) {
     // Null also represents unrecorded or multiple-winner outcomes. Only an
     // explicit game-owned draw reason can classify it without a result receipt.
@@ -1465,9 +1475,11 @@ async function updateViewerOptions(next) {
   const revision = ++optionsMutationRevision;
   const returned = await apiPost("options", { game_key: context.gameKey, options: next });
   if (revision !== optionsMutationRevision) return false;
+  const previousVisual = optionCategory("visualFxEnabled", true);
   options = returned;
-  if (options.effectsEnabled===false) {cancelOriginalAudio();for(const audio of audioPlayers.values())audio.pause();}
-  else if(options.voiceEnabled===false)stopOriginalVoice();
+  if (previousVisual !== optionCategory("visualFxEnabled", true)) stopClassicAnimation("visual-preference-changed");
+  if (options.effectsEnabled===false) {cancelPendingGameSounds();cancelOriginalAudio();for(const audio of audioPlayers.values())audio.pause();}
+  else if(options.voiceEnabled===false){cancelPendingGameSounds();stopOriginalVoice();}
   return true;
 }
 
@@ -1487,6 +1499,21 @@ function chessPieceStyleMode() {
 
 function pointCheckerStyleMode() {
   return options?.categories?.pointCheckerStyle === "css" ? "css" : "high-quality";
+}
+
+function pointDiceStyleMode() {
+  return options?.categories?.pointDiceStyle === "original" ? "original" : "modern";
+}
+
+function pointOriginalDiceEnabled() {
+  return pointDiceStyleMode() === "original" && session?.presentation?.effectivePack === "classic" && session?.presentation?.classicAvailable === true;
+}
+
+async function setPointDiceStyleMode(mode) {
+  const nextMode = mode === "original" ? "original" : "modern";
+  if (nextMode === "original" && (session?.presentation?.effectivePack !== "classic" || session?.presentation?.classicAvailable !== true)) return;
+  const categories = { ...(options?.categories || {}), pointDiceStyle: nextMode };
+  if (await updateViewerOptions({ ...options, categories })) render();
 }
 
 async function setChessPieceSizeMode(mode) {
@@ -1698,10 +1725,21 @@ function mediaImage(slot, className = "", alt = "") {
 }
 
 let classicDiePaintId = 0;
-function pointGameClassicDie(value) {
+function pointGameClassicDie(value, allowOriginal = true) {
   const face = Math.max(1, Math.min(6, Math.trunc(Number(value) || 1)));
   if (!["acey-deucy", "backgammon-first-party"].includes(context.extensionId)) {
     return mediaImage(`gif-dice${face}`, "classic-die", `Die ${face}`);
+  }
+  if (allowOriginal && pointOriginalDiceEnabled()) {
+    const die = mediaImage(`gif-dice${face}`, "classic-die original-ocx-die", `Die ${face}`);
+    die.dataset.dieFace = String(face);
+    die.addEventListener("error", () => {
+      const fallback = pointGameClassicDie(face, false);
+      fallback.style.cssText = die.style.cssText;
+      Object.assign(fallback.dataset, die.dataset);
+      die.replaceWith(fallback);
+    }, { once:true });
+    return die;
   }
   // Every value uses the same rounded body and shaded sides. Mixing a new
   // six with the legacy faces made the two dice look like different sets.
@@ -1910,6 +1948,7 @@ function ensureClassicMotionMediaReady() {
     return Promise.resolve();
   }
   const source = classicSourceMap(context.extensionId);
+  if (context.extensionId === "checkers") prepareCheckersCaptureSounds();
   const slots = context.extensionId === "battleship"
     ? Array.from({ length:17 }, (_, index) => `dib-${index + 2}`)
     : [
@@ -2288,11 +2327,20 @@ function applyClassicActionArt(button, baseSlot) {
   return button;
 }
 
-function stopClassicAnimation(reason) {
-  if (classicAnimationTimer) clearTimeout(classicAnimationTimer);
-  classicAnimationTimer = 0;
+function cancelPendingGameSounds() {
+  window.CoreChatChineseCheckers?.stopSounds();
+  window.CoreChatNestedFour?.stopSounds();
+  window.CoreChatDominos?.stopSounds();
+  stopClassicTimedSound();
+  if (context.extensionId === "checkers") stopCheckersCaptureSound();
   for (const timer of scheduledSoundTimers) clearTimeout(timer);
   scheduledSoundTimers.clear();
+}
+
+function stopClassicAnimation(reason) {
+  cancelPendingGameSounds();
+  if (classicAnimationTimer) clearTimeout(classicAnimationTimer);
+  classicAnimationTimer = 0;
   pendingClassicMotion = null;
   trace("classic-animation-stopped", null, { reason });
 }
@@ -2401,7 +2449,10 @@ function checkersPromotionStrip(piece, destination) {
 function checkersMoveMotionLength(move, before) {
   if (!move) return 0;
   const source = classicSourceMap("checkers").motion;
-  let duration = Number(source.checkerSlide.durationMs);
+  const landing = move.captured
+    ? Number(source.capture.lift.durationMs) + Number(source.capture.landing.durationMs)
+    : Number(source.checkerSlide.durationMs);
+  let duration = landing;
   if (move.captured) {
     duration = Math.max(duration,
       Number(source.capture.projectile.delayMs)
@@ -2411,7 +2462,7 @@ function checkersMoveMotionLength(move, before) {
   if (move.promoted) {
     const piece = before?.board?.[move.from?.[0]]?.[move.from?.[1]];
     const strip = checkersPromotionStrip(piece, move.to);
-    if (strip) duration += Number(strip[1].frameCount) * Number(source.promotion.frameDurationMs);
+    if (strip) duration = Math.max(duration, landing + Number(strip[1].frameCount) * Number(source.promotion.frameDurationMs));
   }
   return duration;
 }
@@ -3105,16 +3156,22 @@ function playBuiltInGameSound(asset, reason, volumeScale = 1, channel = "effects
 }
 
 function playBuiltInGameSoundSequence(entries) {
+  const epoch = classicTimedSoundEpoch;
+  const id = session?.publicId;
+  const pack = session?.presentation?.effectivePack;
+  const valid = () => epoch === classicTimedSoundEpoch && session?.publicId === id
+    && session?.presentation?.effectivePack === pack;
   for (const [asset, reason, delayMs = 0, volumeScale = 1, channel = "effects"] of entries) {
     if (!asset) continue;
-    if (Number(delayMs) <= 0) {
+    const delay = optionCategory("visualFxEnabled", true) ? Number(delayMs) : 0;
+    if (delay <= 0) {
       playBuiltInGameSound(asset, reason, volumeScale, channel);
       continue;
     }
     const timer = setTimeout(() => {
       scheduledSoundTimers.delete(timer);
-      playBuiltInGameSound(asset, reason, volumeScale, channel);
-    }, Number(delayMs));
+      if (valid()) playBuiltInGameSound(asset, reason, volumeScale, channel);
+    }, delay);
     scheduledSoundTimers.add(timer);
   }
 }
@@ -3467,7 +3524,8 @@ function playBuiltInTransitionSound(previous, current) {
   const after = current?.state || {};
   const pointGame = ["acey-deucy", "backgammon-first-party"].includes(context.extensionId);
   if (pointGame && pendingClassicMotion?.pointNative && pendingClassicMotion.type === "point-hit") {
-    playOrderedSoundChain([["wav-eat", "native-checker-capture", 0], ["wav-move", "native-checker-move", 1520]]);
+    playBuiltInGameSoundSequence([[BUILT_IN_PUBLIC_SOUNDS.capture, "native-checker-capture", 0],
+      [builtInSoundAssetForClassicSlot("wav-move"), "native-checker-move", 1520]]);
     return;
   }
   const noLegalMove = after.lastNoLegalMove || after.lastBlockedRoll || null;
@@ -3690,12 +3748,122 @@ function playBuiltInTransitionSound(previous, current) {
   trace("effect-suppressed", slot || null, { reason, soundOwner: "built-in-public-cc0" });
 }
 
+function stopClassicTimedSound() {
+  classicTimedSoundEpoch += 1;
+  if (classicTimedSoundAudio) {
+    classicTimedSoundAudio.pause();
+    classicTimedSoundAudio.currentTime = 0;
+    classicTimedSoundAudio = null;
+  }
+}
+
+function prepareClassicTimedSounds(slots) {
+  for (const slot of slots) {
+    if (!slot || audioPlayers.has(slot)) continue;
+    const audio = new Audio(mediaUrl(slot));
+    audio.preload = "auto";
+    audioPlayers.set(slot, audio);
+    audio.load();
+  }
+}
+
+function playClassicTimedSoundSequence(entries) {
+  stopClassicTimedSound();
+  if (options?.effectsEnabled === false || session?.presentation?.effectivePack !== "classic") return;
+  // Native effects replace one another at animation callbacks, not WAV endings.
+  for (const [slot, audio] of audioPlayers) {
+    if (slot.startsWith("wav-")) { audio.pause(); audio.currentTime = 0; }
+  }
+  prepareClassicTimedSounds(entries.map(entry => entry[0]));
+  const epoch = classicTimedSoundEpoch, version = Number(session.stateVersion);
+  const startedAt = pendingClassicMotion?.startedAt ?? performance.now();
+  for (const [slot, reason, offsetMs = 0] of entries) {
+    if (!slot) continue;
+    const offset = optionCategory("visualFxEnabled", true) ? Number(offsetMs) : 0;
+    const play = () => {
+      if (epoch !== classicTimedSoundEpoch || Number(session?.stateVersion) !== version
+          || session?.presentation?.effectivePack !== "classic" || options?.effectsEnabled === false) return;
+      if (classicTimedSoundAudio) { classicTimedSoundAudio.pause(); classicTimedSoundAudio.currentTime = 0; }
+      trace("classic-timed-cue", slot, { reason, offsetMs:offset });
+      classicTimedSoundAudio = playSound(slot);
+    };
+    const remaining = offset - (performance.now() - startedAt);
+    if (remaining <= 0) play();
+    else {
+      const timer = setTimeout(() => { scheduledSoundTimers.delete(timer); play(); }, remaining);
+      scheduledSoundTimers.add(timer);
+    }
+  }
+}
+
+function prepareCheckersCaptureSounds() {
+  for (const slot of ["wav-jump", "wav-morph", "wav-victory"]) {
+    if (audioPlayers.has(slot)) continue;
+    const audio = new Audio(mediaUrl(slot));
+    audio.preload = "auto";
+    audioPlayers.set(slot, audio);
+    audio.load();
+  }
+}
+
+function stopCheckersCaptureSound() {
+  checkersSoundEpoch += 1;
+  if (checkersCaptureAudio) {
+    checkersCaptureAudio.pause();
+    checkersCaptureAudio.currentTime = 0;
+    checkersCaptureAudio = null;
+  }
+}
+
+function playCheckersCaptureSounds(move, before, after) {
+  stopCheckersCaptureSound();
+  // The original sndPlaySound channel replaces a previous effect; it does
+  // not wait for WAV_UNLOCK or WAV_JUMP's recording to finish.
+  for (const slot of ["wav-lock", "wav-unlock", "wav-move", "wav-jump", "wav-morph", "wav-victory"]) {
+    const audio = audioPlayers.get(slot);
+    if (audio) { audio.pause(); audio.currentTime = 0; }
+  }
+  if (options?.effectsEnabled === false) return;
+  prepareCheckersCaptureSounds();
+  const epoch = checkersSoundEpoch;
+  const version = Number(session?.stateVersion);
+  const startedAt = pendingClassicMotion?.startedAt ?? performance.now();
+  const animated = optionCategory("visualFxEnabled", true);
+  const capture = classicSourceMap("checkers").motion.capture;
+  const cue = (slot, reason, offset) => {
+    const play = () => {
+      if (epoch !== checkersSoundEpoch || Number(session?.stateVersion) !== version
+          || session?.presentation?.effectivePack !== "classic" || options?.effectsEnabled === false) return;
+      if (checkersCaptureAudio) { checkersCaptureAudio.pause(); checkersCaptureAudio.currentTime = 0; }
+      trace("checkers-capture-cue", slot, { reason, offsetMs: offset });
+      checkersCaptureAudio = playSound(slot);
+    };
+    const remaining = offset - (performance.now() - startedAt);
+    if (remaining <= 0) play();
+    else {
+      const timer = setTimeout(() => { scheduledSoundTimers.delete(timer); play(); }, remaining);
+      scheduledSoundTimers.add(timer);
+    }
+  };
+  cue("wav-jump", "capture-lift", 0);
+  if (move.promoted) cue("wav-morph", "capture-landing-promotion",
+    animated ? capture.lift.durationMs + capture.landing.durationMs : 0);
+  if (!before.completed && after.completed && isCheckersDecisiveTerminalReason(after.terminalReason)) {
+    cue("wav-victory", "capture-result", animated ? checkersMoveMotionLength(move, before) : 0);
+  }
+}
+
 function playOrderedSoundChain(entries, startedAt = performance.now()) {
+  const epoch = classicTimedSoundEpoch, version = session?.stateVersion, id = session?.publicId;
+  const checkersEpoch = context.extensionId === "checkers" ? checkersSoundEpoch : null;
   const queue = entries.filter(entry => safe(entry?.[0]) !== "");
   const playIndex = index => {
+    if (epoch !== classicTimedSoundEpoch || session?.stateVersion !== version || session?.publicId !== id) return;
+    if (checkersEpoch !== null && checkersEpoch !== checkersSoundEpoch) return;
     if (index >= queue.length || options?.effectsEnabled === false || session?.presentation?.effectivePack !== "classic") return;
     const [slot, reason, minimumOffsetMs = 0] = queue[index];
-    const remaining = Math.max(0, Number(minimumOffsetMs) - (performance.now() - startedAt));
+    const offset = optionCategory("visualFxEnabled", true) ? Number(minimumOffsetMs) : 0;
+    const remaining = Math.max(0, offset - (performance.now() - startedAt));
     if (remaining > 0) {
       const timer = setTimeout(() => {
         scheduledSoundTimers.delete(timer);
@@ -3742,8 +3910,10 @@ function playTransitionSound(previous, current) {
   if (context.extensionId==="chess" && listLength(after.history)>listLength(before.history)) {
     const move=latest(after.history)||{},chain=[[move.capture?"wav-die":"wav-move",move.capture?"capture":"move",0]];
     if(after.completed){const [slot,reason]=terminalSound(after);chain.push([slot,reason,Number(pendingClassicMotion?.leadDurationMs||0)]);}
-    else if(move.check)chain.push(["wav-check","check-after-move",0]);
-    playOrderedSoundChain(chain);return;
+    else if(move.check)chain.push(["wav-check","check-after-move",
+      pendingClassicMotion && !chessCastlingRook(before,move,after)
+        ? motionLength("chess",pendingClassicMotion.type) : 0]);
+    playClassicTimedSoundSequence(chain);return;
   }
   const sequence = [];
   let supplementalResultSlot = "";
@@ -3753,6 +3923,10 @@ function playTransitionSound(previous, current) {
   if (context.extensionId === "checkers") {
     const moveChanged = listLength(after.history) > listLength(before.history);
     const move = moveChanged ? (latest(after.history) || {}) : null;
+    if (move?.captured) {
+      playCheckersCaptureSounds(move, before, after);
+      return;
+    }
     if (!before.completed && after.completed && isCheckersDecisiveTerminalReason(after.terminalReason)) {
       const chain = [];
       if (move) {
@@ -3775,6 +3949,11 @@ function playTransitionSound(previous, current) {
       playOrderedSoundChain(chain);
       return;
     }
+  }
+  if (pointGame && pendingClassicMotion?.pointNative && pendingClassicMotion.type === "point-hit") {
+    playClassicTimedSoundSequence([["wav-eat", "native-checker-capture", 0],
+      ["wav-move", "native-checker-move", 1520]]);
+    return;
   }
   const acceptedPointRoll=pointGame ? originalPointRoll(context.extensionId,before,after) : null;
   if (acceptedPointRoll) {
@@ -3813,7 +3992,7 @@ function playTransitionSound(previous, current) {
         resultSettleMs,
       ]);
     }
-    playOrderedSoundChain(chain);
+    playClassicTimedSoundSequence(chain);
     return;
   }
   if (context.extensionId === "spades") {
@@ -3858,7 +4037,8 @@ function playTransitionSound(previous, current) {
     const [slot, reason] = transitionSound(previous, current);
     sequence.push([slot, reason, 0]);
   }
-  for (const [slot, reason, delayMs] of sequence) {
+  if (pointGame) playClassicTimedSoundSequence(sequence);
+  for (const [slot, reason, delayMs] of pointGame ? [] : sequence) {
     trace("transition-classified", slot || null, {
       reason,
       delayMs,
@@ -3876,6 +4056,12 @@ function playTransitionSound(previous, current) {
     scheduledSoundTimers.add(timer);
   }
   if (supplementalResultSlot) {
+    const epoch = classicTimedSoundEpoch;
+    const version = Number(session?.stateVersion);
+    const playSupplement = () => {
+      if (epoch === classicTimedSoundEpoch && Number(session?.stateVersion) === version
+          && options?.effectsEnabled !== false && session?.presentation?.effectivePack === "classic") playSound(supplementalResultSlot);
+    };
     const timer = setTimeout(() => {
       scheduledSoundTimers.delete(timer);
       const victory = audioPlayers.get("wav-victory");
@@ -3884,11 +4070,11 @@ function playTransitionSound(previous, current) {
         return;
       }
       if (victory.ended) {
-        playSound(supplementalResultSlot);
+        playSupplement();
         return;
       }
-      victory.addEventListener("ended", () => playSound(supplementalResultSlot), { once: true });
-    }, supplementalResultDelayMs + 1);
+      victory.addEventListener("ended", playSupplement, { once: true });
+    }, (optionCategory("visualFxEnabled", true) ? supplementalResultDelayMs : 0) + 1);
     scheduledSoundTimers.add(timer);
     trace("transition-classified", supplementalResultSlot, {
       reason: "supplemental-result-after-victory",
@@ -3902,7 +4088,9 @@ function playTransitionSound(previous, current) {
 function playHeartsSound(name, delayMs = 0) {
   const filename = HEARTS_PUBLIC_SOUNDS[name];
   if (!filename || options?.effectsEnabled === false || !gameSurfaceVisible) return;
+  const epoch = classicTimedSoundEpoch, id = session?.publicId;
   const run = () => {
+    if (epoch !== classicTimedSoundEpoch || session?.publicId !== id || !gameSurfaceVisible || options?.effectsEnabled === false) return;
     const key = `hearts-public:${name}`;
     let audio = audioPlayers.get(key);
     if (!audio) {
@@ -3963,7 +4151,9 @@ function playUnoSound(name, delayMs = 0) {
   const channel = name === "declare" ? "voice" : "effects";
   const enabled = channel === "voice" ? options?.voiceEnabled !== false : options?.effectsEnabled !== false;
   if (!filename || !enabled || !gameSurfaceVisible) return;
+  const epoch = classicTimedSoundEpoch, id = session?.publicId;
   const run = () => {
+    if (epoch !== classicTimedSoundEpoch || session?.publicId !== id || !gameSurfaceVisible || (channel === "voice" ? options?.voiceEnabled === false : options?.effectsEnabled === false)) return;
     const key = `uno-public:${name}`;
     let audio = audioPlayers.get(key);
     if (!audio) {
@@ -5303,24 +5493,69 @@ function animateLoopingSourceTravel(node, from, to, cycleDurationMs, startMs, tr
   ], { duration:cycleDurationMs, iterations:Infinity, easing:"linear" });
 }
 
-function appendCheckersCaptureEffect(stage, motion, movingFrom, capturedBox, delayMs = 0) {
+function appendCheckersCapturePhase(stage, slot, from, to, frameCount, className, delayMs) {
+  const source = classicSourceMap("checkers");
+  const duration = frameCount * source.motion.capture.frameDurationMs;
+  const image = mediaImage(slot, `classic-source-motion-asset ${className}`, "");
+  const start = { x: Math.round(from.x), y: Math.round(from.y) };
+  const dx = Math.trunc((Math.round(to.x) - start.x) / (frameCount - 1));
+  const dy = Math.trunc((Math.round(to.y) - start.y) / (frameCount - 1));
+  setSourceBox(image, { ...from, ...start }, source.canvas.width, source.canvas.height);
+  image.dataset.motionSlot = slot;
+  image.dataset.motionDurationMs = String(duration);
+  image.dataset.motionDelayMs = String(delayMs);
+  image.dataset.motionFrom = `${start.x},${start.y},${from.width},${from.height}`;
+  image.dataset.motionTo = `${Math.round(to.x)},${Math.round(to.y)},${from.width},${from.height}`;
+  image.style.opacity = "0";
+  stage.append(image);
+  requestAnimationFrame(() => {
+    // The OCX holds each integer-coordinate frame for one 80ms tick and
+    // destroys this phase before dispatching its completion callback.
+    const frames = Array.from({ length: frameCount + 1 }, (_, index) => ({
+      left: `${(start.x + Math.min(index, frameCount - 1) * dx) / source.canvas.width * 100}%`,
+      top: `${(start.y + Math.min(index, frameCount - 1) * dy) / source.canvas.height * 100}%`,
+      offset: index / frameCount,
+      easing: "steps(1, end)",
+    }));
+    const timing = { duration, delay: delayMs, fill: "forwards" };
+    const elapsed = Math.max(0, performance.now() - Number(pendingClassicMotion?.startedAt || performance.now()));
+    const moving = image.animate(frames, timing);
+    const visibility = image.animate([
+      { opacity: 1, offset: 0, easing: "steps(1, end)" },
+      { opacity: 0, offset: 1 },
+    ], timing);
+    moving.currentTime = elapsed;
+    visibility.currentTime = elapsed;
+  });
+  return image;
+}
+
+function appendCheckersCaptureEffect(stage, motion, movingFrom, capturedAnchor, delayMs = 0) {
   const source = classicSourceMap("checkers");
   const timeline = source.motion.capture;
   const piece = String(motion.before.board?.[motion.move.from?.[0]]?.[motion.move.from?.[1]] || "");
   const side = piece.toLowerCase();
   const projectileSlot = timeline.projectile.slots[side] || timeline.projectile.slots.b;
-  const projectileFrom = centeredSourceBox(movingFrom, timeline.projectile.naturalSize);
-  const projectileTo = centeredSourceBox(capturedBox, timeline.projectile.naturalSize);
+  const projectileFrom = {
+    x: capturedAnchor.x + timeline.projectile.offsetX,
+    y: capturedAnchor.y + movingFrom.height + timeline.projectile.startOffsetY,
+    ...timeline.projectile.naturalSize,
+  };
+  const projectileTo = { ...projectileFrom,
+    y: capturedAnchor.y + movingFrom.height + timeline.projectile.endOffsetY };
   const projectileDelay = delayMs + Number(timeline.projectile.delayMs);
-  const projectile = appendMovingAsset(
+  const projectile = appendCheckersCapturePhase(
     stage, projectileSlot, projectileFrom, projectileTo,
-    Number(timeline.projectile.durationMs), timeline.projectile.easing,
+    Number(timeline.projectile.frameCount),
     "classic-checkers-capture-projectile", projectileDelay,
   );
   projectile.dataset.motionKind = "checkers-side-projectile";
   projectile.dataset.moverSide = side;
   const explosionDelay = projectileDelay + Number(timeline.projectile.durationMs);
-  const explosionDuration = appendVerticalSourceStrip(stage, timeline.explosion.slot, capturedBox, {
+  const explosionBox = { x: capturedAnchor.x + timeline.explosion.offsetX,
+    y: capturedAnchor.y + timeline.explosion.offsetY,
+    width: timeline.explosion.frameWidth, height: timeline.explosion.frameHeight };
+  const explosionDuration = appendVerticalSourceStrip(stage, timeline.explosion.slot, explosionBox, {
     frameCount: timeline.explosion.frameCount,
     frameDurationMs: timeline.explosion.frameDurationMs,
   }, explosionDelay, "classic-checkers-capture-explosion");
@@ -5355,9 +5590,8 @@ function appendSquareMoveMotion(stage, gameId, motion, motionType, delayMs = 0) 
     const toLevel = source.pieceSizeByRow[checkersSourceCoordinates(Number(motion.move.to?.[0]), Number(motion.move.to?.[1])).row];
     const movingFrom = sourceAssetBox(from, source.pieceAssetDimensions[fromLevel]);
     const movingTo = sourceAssetBox(to, source.pieceAssetDimensions[toLevel]);
-    appendMovingAsset(stage, checkersMovingSurfaceSlot(piece, fromLevel), movingFrom, movingTo,
-      slideDuration, source.motion.checkerSlide.easing, "is-checker-slide is-native-bitmap-surface", delayMs);
-    let effectEnd = Number(slideDuration);
+    let landingEnd = Number(slideDuration);
+    let captureRendered = false;
     if (motionType === "checkers-capture" || motion.move.captured) {
       const victim = checkersCaptureVictim(motion);
       if (victim) {
@@ -5374,16 +5608,27 @@ function appendSquareMoveMotion(stage, gameId, motion, motionType, delayMs = 0) 
         predecessor.dataset.captureSquare = `${victim.row}:${victim.column}`;
         setSourceBox(predecessor, capturedBox, source.canvas.width, source.canvas.height);
         stage.append(predecessor);
-        const captureEnd = appendCheckersCaptureEffect(stage, motion, movingFrom, capturedBox, delayMs);
-        effectEnd = Math.max(effectEnd, captureEnd);
-        hideAfterMotion(predecessor, delayMs + captureEnd);
+        const timeline = source.motion.capture;
+        const lifted = { ...capturedBox, width: movingFrom.width, height: movingFrom.height,
+          y: capturedBox.y - timeline.lift.height };
+        const slot = checkersMovingSurfaceSlot(piece, fromLevel);
+        appendCheckersCapturePhase(stage, slot, movingFrom, lifted, timeline.lift.frameCount,
+          "is-checker-lift is-native-bitmap-surface", delayMs);
+        appendCheckersCapturePhase(stage, slot, lifted, movingTo, timeline.landing.frameCount,
+          "is-checker-landing is-native-bitmap-surface", delayMs + timeline.lift.durationMs);
+        appendCheckersCaptureEffect(stage, motion, movingFrom, capturedBox, delayMs);
+        landingEnd = timeline.lift.durationMs + timeline.landing.durationMs;
+        captureRendered = true;
+        hideAfterMotion(predecessor, delayMs + timeline.projectile.delayMs + timeline.projectile.durationMs);
       }
     }
+    if (!captureRendered) appendMovingAsset(stage, checkersMovingSurfaceSlot(piece, fromLevel), movingFrom, movingTo,
+      slideDuration, source.motion.checkerSlide.easing, "is-checker-slide is-native-bitmap-surface", delayMs);
     if (motion.move.promoted) {
-      const promotionDuration = appendCheckersPromotion(stage, motion, movingTo, delayMs + effectEnd);
-      effectEnd += promotionDuration;
+      const promotionDuration = appendCheckersPromotion(stage, motion, movingTo, delayMs + landingEnd);
+      landingEnd += promotionDuration;
     }
-    revealAfterMotion(destination, delayMs + effectEnd);
+    revealAfterMotion(destination, delayMs + landingEnd);
   } else {
     const classicPiece = { K:"k", Q:"q", R:"r", B:"b", N:"kn", P:"p" };
     const fromSize = source.pieceSizeByRow[squareVisualCoordinates("chess",Number(motion.move.from?.[0]),Number(motion.move.from?.[1])).row];
@@ -7463,6 +7708,7 @@ function renderPointGame(gameId) {
         ? (occupiedStep * (destinationCount - 1)) + checkerHeight
         : 0;
       const visibleBounds = source.destinationCueVisibleBounds;
+      cue.style.marginLeft = `${(source.destinationCueNaturalSize.width/2-visibleBounds.x-visibleBounds.width/2)/pointRow.width*100}%`;
       const hiddenEdge = point < 12
         ? Number(visibleBounds.y)
         : Number(source.destinationCueNaturalSize.height) - Number(visibleBounds.y + visibleBounds.height);
@@ -7745,6 +7991,9 @@ function renderBattleGrid(ownerUserId, target) {
   const attacks = new Map(Object.entries(fleet.attacksReceived || {}));
   const visibleFleet = battleshipVisibleFleet(state, ownerUserId);
   const ships = new Set(visibleFleet.flatMap(ship => ship.cells || []));
+  const activeAttack = pendingClassicMotion?.gameId === "battleship" && Number(pendingClassicMotion.attack?.targetUserId) === Number(ownerUserId) && optionCategory("visualFxEnabled", true) ? pendingClassicMotion : null;
+  const attackElapsed = activeAttack ? performance.now() - activeAttack.startedAt : Infinity;
+  const activeSunkCells = new Set(activeAttack && attackElapsed < battleshipAttackTimeline(activeAttack).settleMs && activeAttack.attack.result === "sunk" ? (battleshipAttackTimeline(activeAttack).ship?.cells || []) : []);
   const sunkCells = new Set(visibleFleet
     .filter(ship => (ship.cells || []).length > 0
       && (ship.cells || []).every(cell => ["hit", "sunk"].includes(String(attacks.get(String(cell)) || ""))))
@@ -7796,7 +8045,7 @@ function renderBattleGrid(ownerUserId, target) {
         );
         const anchor = battleshipNativeAnchor(gridName, row, column);
         setNestedSourceBox(persistedResult, {x:anchor.x + 4, y:anchor.y + 4, ...markerDefinition.nativeSize}, gridGeometry);
-      } else if (result === "hit" && !sunkCells.has(key)) {
+      } else if (["hit", "sunk"].includes(result) && (!sunkCells.has(key) || (activeSunkCells.has(key) && key !== String(activeAttack?.attack?.cell) && attackElapsed < battleshipAttackTimeline(activeAttack).aftermathMs))) {
         const hitDefinition = { ...source.motion.impacts.hit, frameDurationMs:source.motion.shot.frameDurationMs };
         persistedResult = persistentSourceStripNode(
           hitDefinition.slot,
@@ -7836,7 +8085,8 @@ function renderBattleGrid(ownerUserId, target) {
       const shipBox = battleshipShipSourceBox(ship, gridName);
       if (!shipBox) continue;
       let shipImage;
-      if (sunk) {
+      if (sunk && cells.some(cell => activeSunkCells.has(`${cell[0]}:${cell[1]}`)) && (!own || attackElapsed >= battleshipAttackTimeline(activeAttack).aftermathMs)) continue;
+      if (sunk && !cells.some(cell => activeSunkCells.has(`${cell[0]}:${cell[1]}`))) {
         const wreck = battleshipWreckDefinition(ship);
         if (!wreck) continue;
         shipImage = sourceStripFinalFrame(wreck.slot, wreck, `classic-native-wreck ${horizontal ? "is-horizontal" : "is-vertical"}`);
@@ -8280,7 +8530,7 @@ function renderBuiltInBattleshipGrid(ownerUserId, target) {
       marker.setAttribute("aria-hidden", "true");
       cell.append(marker);
     } else if (["hit", "sunk"].includes(result)
-      && (!shipSunk || (motionCell === key && Number(motion?.elapsed || 0) < 6400))) {
+      && (!shipSunk || ((shipAtCell?.cells || []).includes(motionCell) && Number(motion?.elapsed || 0) < 6400))) {
       cell.append(builtInBattleshipFireNode(row * 10 + column, motionCell === key));
     }
     grid.append(cell);
@@ -8513,18 +8763,8 @@ function renderBlackjackHand(hand, handIndex, isViewer) {
       || leftRank - rightRank
       || Number(suitOrder[leftMatch?.[1]] ?? 9) - Number(suitOrder[rightMatch?.[1]] ?? 9);
   });
-  if (orderedCards.length > 4) {
-    cards.classList.add("is-paged");
-    const pageCount = Math.ceil(orderedCards.length / 4);
-    for (let index = 0; index < orderedCards.length; index += 4) {
-      const page = make("span", "blackjack-card-page");
-      page.setAttribute("aria-label", `Cards ${index + 1} through ${Math.min(index + 4, orderedCards.length)} of ${orderedCards.length}, page ${Math.floor(index / 4) + 1} of ${pageCount}`);
-      for (const card of orderedCards.slice(index, index + 4)) page.append(renderBlackjackCard(card));
-      cards.append(page);
-    }
-  } else {
-    for (const card of orderedCards) cards.append(renderBlackjackCard(card));
-  }
+  if (orderedCards.length >= 4) { cards.classList.add("is-paged");cards.tabIndex=0;cards.setAttribute("aria-label","Your cards; scroll left or right to see the full hand"); }
+  for (const card of orderedCards) cards.append(renderBlackjackCard(card));
   const total = Number(hand?.value?.total || 0);
   const result = String(hand?.result || "");
   const summary = [
@@ -8621,7 +8861,22 @@ function heartsPointsSummary(userId) {
   return Number(session.state?.captured?.[String(userId)]?.points || 0);
 }
 
+const receivedCardPresentation = new Map();
+function receivedCardsForViewer() {
+  const id=String(currentUserId()), state=session?.state || {}, hand=state.hands?.[id];
+  if(!Array.isArray(hand))return new Set();
+  const key=`${session.publicId}:${context.extensionId}:${id}`, old=receivedCardPresentation.get(key);
+  const phase=String(state.phase || ''), passing=['passing','partner-pass'].includes(phase);
+  const entry={hand:[...hand],passing,until:old?.until || 0,cards:old?.cards || []};
+  if(old?.passing && hand.some(card=>!old.hand.includes(card))) {
+    entry.cards=hand.filter(card=>!old.hand.includes(card));entry.until=Date.now()+3000;
+  }
+  receivedCardPresentation.set(key,entry);
+  return new Set(Date.now()<entry.until?entry.cards:[]);
+}
+
 function renderHearts() {
+  const received = receivedCardsForViewer();
   const state = session.state || {};
   const viewerId = currentUserId();
   const terminal = gameSessionIsTerminal();
@@ -8662,7 +8917,8 @@ function renderHearts() {
   const plays = Array.isArray(state.currentTrick) ? state.currentTrick : [];
   if (plays.length === 0) trick.append(make("p", "hearts-empty-trick", terminal ? "No further cards to play" : lobby ? "Cards will be dealt when the game begins" : state.phase === "passing" ? "Complete the pass" : Number(state.trickNumber || 0) === 0 ? "Waiting for the opening card" : "Waiting for the next lead"));
   for (const play of plays) {
-    const wrap = make("figure", "hearts-trick-card");
+    const position = heartsSeatPosition(order.indexOf(Number(play.userId)), viewerIndex, order.length);
+    const wrap = make("figure", `hearts-trick-card is-${position}`);
     wrap.append(renderBlackjackCard(play.card, "hearts-played-card"), make("figcaption", "", memberName(play.userId)));
     trick.append(wrap);
   }
@@ -8671,17 +8927,18 @@ function renderHearts() {
     : state.phase === "passing"
       ? `Select ${Number(state.passCount || 0)} card${Number(state.passCount || 0) === 1 ? "" : "s"} to pass ${safe(state.passDirection || "")}`
       : state.phase === "deal" ? "Dealing the next hand" : `${memberName(session.turnUserId)} to play`;
-  center.append(make("p", "hearts-center-message", centerMessage), trick);
+  center.append(trick);
   if (Number(state.widowCount || state.widow?.count || 0) > 0) center.append(make("span", "hearts-widow", `${Number(state.widowCount || state.widow?.count || 0)}-card widow`));
   const viewerHand = make("div", `hearts-viewer-hand is-${heartsHandLayout}`);
   const handCards = Array.isArray(state.hands?.[String(viewerId)]) ? state.hands[String(viewerId)] : [];
   const legal = new Set(Array.isArray(state.legalCards) ? state.legalCards : []);
   selectedHeartsPassCards = selectedHeartsPassCards.filter(card => handCards.includes(card));
   if (!handCards.includes(selectedHeartsCard)) selectedHeartsCard = null;
-  for (const card of handCards) {
+  for (const card of handCards.filter(card => !(state.pendingPasses?.[String(viewerId)] || []).includes(card))) {
     const selected = selectedHeartsCard === card || selectedHeartsPassCards.includes(card);
     const button = make("button", `hearts-card-button${selected ? " is-selected" : ""}`);
     button.type = "button"; button.dataset.card = card;
+    button.classList.toggle("is-received-card", received.has(card));
     const passing = state.phase === "passing"; const playable = legal.has(card);
     button.disabled = passing ? !canAct() : (!canAct() || state.phase !== "playing" || !playable);
     button.classList.toggle("is-unplayable", canAct() && state.phase === "playing" && !playable);
@@ -8711,7 +8968,7 @@ function renderHearts() {
     actions.append(make("p", "hearts-last-hand", shooter !== 0 ? `${memberName(shooter)} shot the moon.` : `Hand ${Number(state.lastHandResult.handNumber || 0)} scored.`));
   }
   actions.append(renderInBoardHandLayout("hearts", heartsHandLayout));
-  table.append(banner, seats, center, viewerHand, actions);
+  table.append(banner, seats, center, make("p", "hearts-center-message", centerMessage), viewerHand, actions);
   return table;
 }
 
@@ -8818,7 +9075,7 @@ function renderUno() {
   piles.append(draw, discard);
   const color = make("div", "uno-current-color");
   color.append(make("span", "uno-color-swatch", ""), make("strong", "", `${unoColorName(state.currentColor)} to play`));
-  center.append(direction, piles, color);
+  center.append(direction, piles, color, make("p", "uno-turn-prompt", state.completed ? "Game complete" : Number(session.turnUserId) === viewerId ? "Your turn" : `${memberName(session.turnUserId)} to play`));
   const viewerStation = make("section", `uno-viewer-station${Number(session.turnUserId || 0) === viewerId ? " is-current" : ""}`);
   const viewerIdentity = make("header", "uno-viewer-identity");
   if (viewer) viewerIdentity.append(memberAvatar(viewer, "uno-avatar"));
@@ -8895,6 +9152,7 @@ function scheduleHeartsAutomaticAction() {
 }
 
 function renderSpades() {
+  const received = receivedCardsForViewer();
   const completed = Boolean(session.state?.completed || session.status === "completed");
   const currentTrick = Array.isArray(session.state?.currentTrick) ? session.state.currentTrick : [];
   const completedTrick = currentTrick.length === 0 && session.state?.phase === "settling" && Array.isArray(session.state?.lastCompletedTrick?.cards)
@@ -9005,6 +9263,7 @@ function renderSpades() {
         const passSelected = selectedSpadesPassCards.includes(card);
         button.classList.toggle("is-selected", selected);
         button.classList.toggle("is-pass-selected", passSelected);
+        button.classList.toggle("is-received-card", received.has(card));
         button.classList.toggle("is-legacy-activation", activationMode === "legacy-ocx-one-click");
         button.dataset.activationMode = activationMode;
         button.dataset.card = card;
@@ -9231,6 +9490,7 @@ function renderSpades() {
     const passSelected = selectedSpadesPassCards.includes(card);
     button.classList.toggle("is-selected", selected);
     button.classList.toggle("is-pass-selected", passSelected);
+        button.classList.toggle("is-received-card", received.has(card));
     cardSlot.classList.toggle("is-selected", selected);
     cardSlot.classList.toggle("is-pass-selected", passSelected);
     button.classList.toggle("is-legacy-activation", activationMode === "legacy-ocx-one-click");
@@ -9333,7 +9593,7 @@ function renderLifecycleControls() {
   if (pause.mode === "paused") {
     group.append(make("span", "lifecycle-status", pause.reason === "reconnect" ? "Paused while waiting for reconnect." : "Game paused by agreement."));
     if (actions.canStartResume) {
-      const resume = make("button", "", "Start 1-minute resume");
+      const resume = make("button", "", pause.resumeCountdownSeconds === 0 ? "Resume game" : "Start 1-minute resume");
       resume.dataset.externalGameRow = "pause";
       resume.disabled = busy;
       resume.addEventListener("click", () => performAction("start-resume"));
@@ -9472,7 +9732,8 @@ function renderControls() {
       const accept = make("button", "blackjack-primary-action", "Protect wager");
       accept.addEventListener("click", () => performAction("insurance", { take:true }));
       panel.append(decline, accept);
-      group.append(panel);
+      group.append(panel);group.classList.add("blackjack-insurance-actions");
+      requestAnimationFrame(()=>{const table=document.querySelector(".blackjack-table");if(table&&group.isConnected){table.append(group);const seat=table.querySelector(".blackjack-player-station.is-viewer");if(seat){const box=seat.getBoundingClientRect(),base=table.getBoundingClientRect();group.style.bottom="auto";group.style.top=(box.top-base.top+box.height/2-group.getBoundingClientRect().height/2)+"px";}}});
     } else if (session.state?.phase === "player-turns" && canAct()) {
       const labels = { hit:"Hit", stand:"Stand", double:"Double", split:"Split", surrender:"Surrender" };
       group.classList.add("blackjack-turn-actions");
@@ -10226,6 +10487,28 @@ function renderViewerGameOptions() {
     grid.append(wrapper);
   }
   if (["acey-deucy", "backgammon-first-party"].includes(context.extensionId)
+    && session?.presentation?.effectivePack === "classic") {
+    const wrapper = make("div", "game-setting point-dice-style-preference");
+    const label = make("span", "game-setting-label", "Dice appearance");
+    label.id = "point-dice-style-label";
+    const choices = make("div", "setting-choice-group");
+    choices.setAttribute("role", "group");
+    choices.setAttribute("aria-labelledby", label.id);
+    for (const [value, text] of [["modern", "Modern dice"], ["original", "Original OCX dice"]]) {
+      const button = make("button", "setting-choice-button", text);
+      button.type = "button";
+      button.dataset.pointDiceStyle = value;
+      button.classList.toggle("is-selected", value === (pointOriginalDiceEnabled() ? "original" : "modern"));
+      button.setAttribute("aria-pressed", String(value === (pointOriginalDiceEnabled() ? "original" : "modern")));
+      button.disabled = value === "original" && session?.presentation?.classicAvailable !== true;
+      if (button.disabled) button.title = "Install this game's Original OCX media pack to use its dice.";
+      button.addEventListener("click", () => setPointDiceStyleMode(value).catch(error => { el("status").textContent = error.message; }));
+      choices.append(button);
+    }
+    wrapper.append(label, choices, make("span", "minor", "Modern dice are used by default because they stay clearer when the board is enlarged. Choose Original OCX dice for the classic appearance. This changes only your view and requires the game's Original OCX media pack to be installed."));
+    grid.append(wrapper);
+  }
+  if (["acey-deucy", "backgammon-first-party"].includes(context.extensionId)
     && session?.presentation?.effectivePack === "built-in") {
     const wrapper = make("div", "game-setting point-checker-style-preference");
     const label = make("span", "game-setting-label", "Checker style");
@@ -10336,7 +10619,7 @@ function renderViewerGameOptions() {
     wrapper.append(label, toggle, help);
     grid.append(wrapper);
   }
-  section.append(grid);
+  section.append(grid, botAvatarOptions(context.csrf));
   return { section, hasOptions: grid.childElementCount > 0 };
 }
 
@@ -10761,7 +11044,7 @@ function renderBoard() {
     "acey-deucy":renderAceyDeucy,
     "backgammon-first-party":renderBackgammon,
     battleship:renderBattleship,
-    spades:()=>window.CoreChatSpadesModern?.render({session,options,busy,currentUserId,memberAvatar,memberName,performAction,optionCategory,rerender:render,spadesPassSelection:spadesPassSelectionForModernBoard(),setStatus:(message)=>{actionStatusError=String(message||"");const statusNode=el("status");if(statusNode)statusNode.textContent=actionStatusError;}})||renderSpades(),
+    spades:()=>window.CoreChatSpadesModern?.render({session,options,receivedCards:receivedCardsForViewer(),busy,currentUserId,memberAvatar,memberName,performAction,optionCategory,rerender:render,spadesPassSelection:spadesPassSelectionForModernBoard(),setStatus:(message)=>{actionStatusError=String(message||"");const statusNode=el("status");if(statusNode)statusNode.textContent=actionStatusError;}})||renderSpades(),
     blackjack:renderBlackjack,
     hearts:renderHearts,
     uno:renderUno,
@@ -10885,7 +11168,15 @@ function completedGameEventDialog(previous, current) {
       message:`The ${name} draw proposal was accepted.`,
     };
   }
-  if (!reason.includes("resign")) return null;
+  if (!reason.includes("resign")) {
+    if (!["eight-ball","blackjack","spades","hearts","uno","five-dice","chinese-checkers","nested-four","tetris-versus","dominos"].includes(context.extensionId)) return null;
+    const result = gameTerminalOutcome(current);
+    const mine = currentUserId(), player = result.participantIds.includes(mine);
+    const won = result.winnerIds.includes(mine), drawn = result.drawIds.includes(mine);
+    return {key,version,kind:won?"victory":"match-complete",
+      title:drawn?"Game drawn":won?"You win!":result.known&&player?"You lose":"Game over",
+      message:gameTerminalStatus(current)};
+  }
   const players = (current?.members || []).filter(member => ["master", "player"].includes(String(member?.role || "")));
   const viewerUserId = currentUserId();
   const viewerIsPlayer = players.some(member => Number(member.userId) === viewerUserId);
@@ -10951,6 +11242,8 @@ function shouldDeferGameEventDialogForClassicTerminal(event) {
 function renderGameEventDialog() {
   const existing = root.querySelector(".game-event-dialog-overlay");
   const event = pendingGameEventDialog;
+  const poolPlaying=context.extensionId==='eight-ball'&&[...root.querySelectorAll('iframe')].some(frame=>{try{return frame.contentWindow.CoreChatPoolPlayback?.isActive();}catch{return false;}});
+  if(event&&poolPlaying){setTimeout(renderGameEventDialog,150);return;}
   if (shouldDeferGameEventDialogForClassicTerminal(event)) {
     existing?.remove();
     setGameEventBackgroundInert(false);
@@ -10967,6 +11260,7 @@ function renderGameEventDialog() {
   overlay.dataset.eventKind = event.kind;
   overlay.dataset.stateVersion = String(event.version);
   const dialog = make("section", "game-event-dialog");
+  if(event.kind === "victory") { const celebration=make("div","game-victory-confetti");celebration.setAttribute("aria-hidden","true");for(let i=0;i<24;i++){const piece=make("i");piece.style.setProperty("--i",i);celebration.append(piece);}dialog.append(celebration); }
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   dialog.setAttribute("aria-labelledby", "game-event-dialog-title");
@@ -11112,9 +11406,10 @@ function showBotStatus(gameId, message, retry) {
 function createServerCardBot(gameId, gameName) { return createCardBotController({
   gameName,
   snapshot: () => ({
-    enabled: context.extensionId === gameId && gameSurfaceVisible && gameLifecycleAvailable()
+    enabled: context.extensionId === gameId && gameLifecycleAvailable()
       && !(gameId === "dominos" && window.CoreChatDominos?.isAnimating())
-      && !(pendingClassicMotion?.gameId === gameId && performance.now() - pendingClassicMotion.startedAt < motionLength(gameId, pendingClassicMotion.type)),
+      && !(gameId !== "battleship" && pendingClassicMotion?.gameId === gameId && performance.now() - pendingClassicMotion.startedAt < motionLength(gameId, pendingClassicMotion.type)),
+    waitForMotionMs: gameId === "battleship" && pendingClassicMotion?.gameId === gameId ? Math.max(0, motionLength(gameId, pendingClassicMotion.type) - (performance.now() - pendingClassicMotion.startedAt)) : 0,
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11122,7 +11417,7 @@ function createServerCardBot(gameId, gameName) { return createCardBotController(
   showStatus: (message, retry) => showBotStatus(gameId, message, retry),
 }); }
 const poolBotController = createPoolBotController({
-  snapshot: () => ({enabled: context.extensionId === "eight-ball" && gameSurfaceVisible && gameLifecycleAvailable() && !session?.review,
+  snapshot: () => ({enabled: context.extensionId === "eight-ball" && gameLifecycleAvailable() && !session?.review,
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`, task: session?.state?.botTask,
     animating: !!window.CoreChatEightBall?.isAnimating()}),
   submit: payload => performAction(payload.action === "rack" ? "bot-rack" : "bot-step", payload, payload.action === "rack" ? "eight-ball-rack" : ""),
@@ -11143,7 +11438,7 @@ window.addEventListener("pagehide", () => clearInterval(cardBotTimer));
 
 const chineseCheckersBotController = createChineseCheckersBotController({
   snapshot: () => ({
-    enabled: context.extensionId === "chinese-checkers" && gameSurfaceVisible && gameLifecycleAvailable() && !window.CoreChatChineseCheckers?.isAnimating(),
+    enabled: context.extensionId === "chinese-checkers" && gameLifecycleAvailable() && !window.CoreChatChineseCheckers?.isAnimating(),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11156,7 +11451,7 @@ window.addEventListener("pagehide", () => clearInterval(chineseBotTimer));
 
 const nestedFourBotController = createNestedFourBotController({
   snapshot: () => ({
-    enabled: context.extensionId === "nested-four" && gameSurfaceVisible && gameLifecycleAvailable() && !window.CoreChatNestedFour?.isAnimating(),
+    enabled: context.extensionId === "nested-four" && gameLifecycleAvailable() && !window.CoreChatNestedFour?.isAnimating(),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11169,7 +11464,7 @@ window.addEventListener("pagehide", () => clearInterval(nestedBotTimer));
 
 const chessBotController = createChessBotController({
   snapshot: () => ({
-    enabled: context.extensionId === "chess" && gameSurfaceVisible && gameLifecycleAvailable(),
+    enabled: context.extensionId === "chess" && gameLifecycleAvailable(),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11180,7 +11475,7 @@ window.addEventListener("pagehide", () => chessBotController.stop());
 
 const checkersBotController = createCheckersBotController({
   snapshot: () => ({
-    enabled: context.extensionId === "checkers" && gameSurfaceVisible && gameLifecycleAvailable(),
+    enabled: context.extensionId === "checkers" && gameLifecycleAvailable(),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11191,7 +11486,7 @@ window.addEventListener("pagehide", () => checkersBotController.stop());
 
 const backgammonBotController = createBackgammonBotController({
   snapshot: () => ({
-    enabled: context.extensionId === "backgammon-first-party" && gameSurfaceVisible && gameLifecycleAvailable() && !(pendingClassicMotion && performance.now() - pendingClassicMotion.startedAt < motionLength(pendingClassicMotion.gameId, pendingClassicMotion.type)),
+    enabled: context.extensionId === "backgammon-first-party" && gameLifecycleAvailable() && !(pendingClassicMotion && performance.now() - pendingClassicMotion.startedAt < motionLength(pendingClassicMotion.gameId, pendingClassicMotion.type)),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11205,7 +11500,7 @@ window.addEventListener("pagehide", () => clearInterval(backgammonBotTimer));
 
 const aceyDeucyBotController = createAceyDeucyBotController({
   snapshot: () => ({
-    enabled: context.extensionId === "acey-deucy" && gameSurfaceVisible && gameLifecycleAvailable() && !aceyMoveAnimating() && !(pendingClassicMotion && performance.now() - pendingClassicMotion.startedAt < motionLength(pendingClassicMotion.gameId, pendingClassicMotion.type)),
+    enabled: context.extensionId === "acey-deucy" && gameLifecycleAvailable() && !aceyMoveAnimating() && !(pendingClassicMotion && performance.now() - pendingClassicMotion.startedAt < motionLength(pendingClassicMotion.gameId, pendingClassicMotion.type)),
     key: `${session?.publicId}:${session?.stateVersion}:${session?.state?.botTask?.positionKey}`,
     task: session?.state?.botTask,
   }),
@@ -11247,6 +11542,11 @@ function render() {
   if(context.extensionId === "dominos") el("game-title").append(make("small","dominos-variant"," (All Fives)"));
   const pack = safe(session.presentation?.effectivePack || "built-in");
   document.body.dataset.appearance = pack;
+  if (pack === "classic") {
+    if (context.extensionId === "battleship") prepareClassicTimedSounds(["wav-shoot", "wav-hit", "wav-mis", "wav-sink", "wav-victory", "wav-looser"]);
+    else if (context.extensionId === "chess") prepareClassicTimedSounds(["wav-move", "wav-die", "wav-check", "wav-mate"]);
+    else if (["acey-deucy", "backgammon-first-party"].includes(context.extensionId)) prepareClassicTimedSounds(["wav-eat", "wav-move", "wav-out", "wav-victory"]);
+  }
   ensurePointBearOffMediaReady();
   ensurePointPresentationMediaReady();
   ensureNativeClassicMediaReady();
@@ -11398,6 +11698,8 @@ function notifyRematchSuccessor() {
   }, location.origin);
 }
 
+const frozenReviewPlayback = createFrozenReviewPlayback(frame => refreshSession(false, frame));
+
 async function refreshSession(refreshRecords = false, providedSession = null, { deferRender = false } = {}) {
   if (terminalSessionError) return;
   const optionsRevisionAtStart = optionsMutationRevision;
@@ -11407,6 +11709,9 @@ async function refreshSession(refreshRecords = false, providedSession = null, { 
   const [nextSession, nextOptions] = await Promise.all(tasks);
   if (terminalSessionError) return;
   assertGameSessionEnvelope(nextSession);
+  // Load options before dispatching frames, including the very first response.
+  if (shouldLoadOptions && options === null && optionsRevisionAtStart === optionsMutationRevision) options = nextOptions;
+  if (frozenReviewPlayback.receive(nextSession)) return;
   // Action and background-poll requests may overlap.  Own a transition from
   // the session that is current when this response is applied, not from the
   // value that happened to be current before awaiting the network.  A slower
@@ -11594,9 +11899,7 @@ function endUnavailableSession(error) {
 async function poll(providedSession = null) {
   if (terminalSessionError) return;
   try {
-    if (gameSurfaceVisible && !document.hidden) {
-      await refreshSession(false, providedSession);
-    }
+    await refreshSession(false, providedSession);
   }
   catch (error) {
     if (!endUnavailableSession(error)) {
@@ -11880,3 +12183,5 @@ if (LOOPBACK_HOST.test(location.hostname) && /^\d+$/.test(params.get("capture_au
     writable: false,
   });
 }
+
+document.addEventListener("contextmenu", event => event.preventDefault(), true);

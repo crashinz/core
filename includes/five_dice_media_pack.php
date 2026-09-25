@@ -464,6 +464,10 @@ function five_dice_media_pack_slots(): array
     }
     unset($definition);
     return $slots + [
+        'reaction-523' => ['label' => 'Original personal-record celebration', 'installName' => 'reaction-523.png', 'sourceName' => '523@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 48, 'maximumHeight' => 1920, 'requiredWidth' => 48, 'requiredHeight' => 1920, 'requiredForClassic' => false, 'requiredSha256' => '0b2216b2931a0e0f04756e05311a667a0434d72e3d004c9206c17bbba754b590', 'requiredPixelSha256' => 'd852332503c1f33aafe2629fa09541517189a4c4623facba3df644caf023013d'],
+        'control-sfx-left' => ['label' => 'Original idle control 519', 'installName' => 'control-sfx-left.png', 'sourceName' => '519@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 524288, 'maximumWidth' => 38, 'maximumHeight' => 216, 'requiredWidth' => 38, 'requiredHeight' => 216, 'requiredForClassic' => false, 'requiredSha256' => '1bbf81a0360413f4a8ab5c121e3260b465a6ebc40192f1a2bb42c5d268ecd17d', 'requiredPixelSha256' => '2163a69e69359df38d457ebbae33fd31f5faccbbfdb827b7a86828e3a2c427ac'],
+        'control-sfx-right' => ['label' => 'Original idle control 520', 'installName' => 'control-sfx-right.png', 'sourceName' => '520@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 524288, 'maximumWidth' => 38, 'maximumHeight' => 216, 'requiredWidth' => 38, 'requiredHeight' => 216, 'requiredForClassic' => false, 'requiredSha256' => '1d248591d755c6e216fe9c505d6c01e84bb9510d67a2154824846f9905d887a1', 'requiredPixelSha256' => '5e8bfe5885e570345adb0a76a4f0b00c93befcb05e8ad1b763a92e03ccb42c7d'],
+        'control-music-beater' => ['label' => 'Original idle control 521', 'installName' => 'control-music-beater.png', 'sourceName' => '521@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 524288, 'maximumWidth' => 48, 'maximumHeight' => 682, 'requiredWidth' => 48, 'requiredHeight' => 682, 'requiredForClassic' => false, 'requiredSha256' => 'dd896d77dbc0e0afc789a773a2540e1d0bc879c4716cea5cff05b971a2d299f8', 'requiredPixelSha256' => '44f12deb6f10c4f3736727d7c0e5aab5712c02d32146ecc9195174b69b77ad6e'],
         'reaction-524' => ['label' => 'Original reaction 524', 'installName' => 'reaction-524.png', 'sourceName' => '524@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 128, 'requiredHeight' => 3432, 'requiredForClassic' => false, 'requiredSha256' => '5726e920b07a9576306645fad1b9c2b1cc5571107be0c7159c9312881bf3ba81', 'requiredPixelSha256' => 'febf3b5ce3cf77cd60cf1b034bc87620106072f74b3946e00e0cb9ec60f1ec35'],
         'reaction-525' => ['label' => 'Original reaction 525', 'installName' => 'reaction-525.png', 'sourceName' => '525@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 108, 'requiredHeight' => 1680, 'requiredForClassic' => false, 'requiredSha256' => 'b96c1679f4de883e018530196d717117d026c6c09a500e1555dd68d7ddeb2e85', 'requiredPixelSha256' => '04f0ea5afde0e35806f3f2849d05b59c858e528718a24a3f7cc9230acf459452'],
         'reaction-526' => ['label' => 'Original reaction 526', 'installName' => 'reaction-526.png', 'sourceName' => '526@2x.png', 'kind' => 'image', 'mime' => 'image/png', 'maximumBytes' => 4194304, 'maximumWidth' => 2048, 'maximumHeight' => 8192, 'requiredWidth' => 24, 'requiredHeight' => 260, 'requiredForClassic' => false, 'requiredSha256' => '88dccccc3c37ba543686aeeaa3f3a8853728cc3ff9d36768df55db9a01c165cd', 'requiredPixelSha256' => '03d8126b81440a67f4cd7368edf58a3e577c2141f3e82adb192c617577cee07c'],
@@ -712,6 +716,12 @@ function five_dice_media_pack_validate_slot(string $slot, ?string $directory = n
     }
     $root = $directory ?? five_dice_media_pack_directory();
     $path = $root . DIRECTORY_SEPARATOR . (string)$definition['installName'];
+    if (!is_file($path)) {
+        ocx_resource_archive_restore($root, $slot, $definition, five_dice_media_pack_accepted_filename_map(),
+            static function (array $payload, string $work) use ($slot): void {
+                five_dice_media_stage_source($slot, $payload['bytes'], $work);
+            });
+    }
     if (!is_file($path)) {
         return $definition + ['slot' => $slot, 'state' => 'missing', 'path' => null];
     }
@@ -1314,6 +1324,7 @@ function five_dice_media_pack_delete_attempt_directory(string $path, string $bou
     if ($resolvedRoot === false || $resolvedPath === false || dirname($resolvedPath) !== $resolvedRoot
         || !str_starts_with(basename($resolvedPath), 'attempt-')) return;
     five_dice_media_pack_delete_prepared_directory($resolvedPath);
+    ocx_resource_archive_remove($resolvedPath);
     foreach (scandir($resolvedPath) ?: [] as $name) {
         if ($name === '.' || $name === '..') continue;
         $child = $resolvedPath . DIRECTORY_SEPARATOR . $name;
@@ -1330,6 +1341,7 @@ function five_dice_media_pack_delete_generation_directory(string $generation): v
     $resolved = realpath($path);
     if ($root === false || $resolved === false || dirname($resolved) !== $root) return;
     five_dice_media_pack_delete_prepared_directory($resolved);
+    ocx_resource_archive_remove($resolved);
     foreach (scandir($resolved) ?: [] as $name) {
         if ($name === '.' || $name === '..') continue;
         $child = $resolved . DIRECTORY_SEPARATOR . $name;

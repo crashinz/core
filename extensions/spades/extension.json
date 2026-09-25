@@ -48,10 +48,10 @@
     "recordedMinPlayers": 4,
     "maxPlayers": 4,
     "seats": [
-      "Team 1 \u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u009d Player 1",
-      "Team 2 \u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u009d Player 1",
-      "Team 1 \u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u009d Player 2",
-      "Team 2 \u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u20ac\u0161\u00c2\u00ac\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u009d Player 2"
+      "Team 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 1",
+      "Team 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 1",
+      "Team 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 2",
+      "Team 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Player 2"
     ],
     "adaptationVersion": "1.3.38",
     "presentationSelectionOwner": "viewer",
@@ -89,6 +89,7 @@
     }
   },
   "requiredFiles": [
+    "includes/spades_bot_endgame_support.php",
     "includes/spades_extension.php",
     "includes/spades_bot_support.php",
     "games/ocx-extension-game.css",
@@ -116,11 +117,13 @@
     "games/viewport-height-fit.js",
     "games/ocx-extension-game.js",
     "games/spades-first-party/index.html",
-    "games/game-avatar.js",
-    "includes/spades_bot_endgame_support.php",
     "games/classic-game-audio.js",
     "games/game-view-storage.js",
+    "games/game-avatar.js",
     "games/bot-pacing.js",
-    "includes/paced_bot_support.php"
+    "includes/paced_bot_support.php",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

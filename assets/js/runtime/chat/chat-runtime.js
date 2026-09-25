@@ -138,7 +138,7 @@ import {
 
     ChatPrivateChatService
 
-} from "./services/chat-private-chat-service.js?v=20260913-recipient-label";
+} from "./services/chat-private-chat-service.js?v=20260924e1";
 
 import {
 

@@ -4,7 +4,7 @@ require __DIR__.'/includes/base.php';require_once __DIR__.'/includes/game_review
 $user=require_user();security_protect_private_response();
 try {
     game_review_assert_admin($user);$path=(string)($_SERVER['PATH_INFO']??'');
-    if(!str_starts_with($path,'/v4/'))throw new MultiplayerGameException('Reference version not found.','GAME_REVIEW_REFERENCE_MISSING',404);
+    if(!str_starts_with($path,'/v5/'))throw new MultiplayerGameException('Reference version not found.','GAME_REVIEW_REFERENCE_MISSING',404);
     $key=substr($path,4);
     // Pool has an independent frozen dependency tree; its framework API remains isolated.
     if(in_array($key,['games/pool-reference/api/game_framework.php','games/pool-advanced-reference/api/game_framework.php'],true))$key='api/game_framework.php';

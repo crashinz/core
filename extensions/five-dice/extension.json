@@ -138,6 +138,9 @@
     "includes/five_dice_bot_support.php",
     "assets/js/runtime/game/renderers/game-seat-controls.js",
     "assets/css/game-seat-controls.css",
-    "includes/five_dice_expert_support.php"
+    "includes/five_dice_expert_support.php",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

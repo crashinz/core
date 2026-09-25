@@ -94,9 +94,10 @@ $rooms = $roomsStmt->fetchAll();
   <title><?= e(branded_page_title('Lobby', $pdo, 'lobby')) ?></title>
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/styles.css?v=20260913-permission-toggles')) ?>">
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/live-website-rooms.css')) ?>">
+  <link rel="stylesheet" href="<?= e(app_url('/assets/css/site-backup.css?v=20260924')) ?>">
   <link rel="stylesheet" href="<?= e(app_url('/assets/css/room-access.css?v=20260920-preview')) ?>">
   <?php if ($canvasAvailable): ?><link rel="stylesheet" href="<?= e(app_url('/extensions/canvas/assets/canvas.css?v=20260828-checklist-r2')) ?>"><?php endif; ?>
-<link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=e365788d6f6d')) ?>">
+<link rel="stylesheet" href="<?= e(app_url('/assets/css/admin-compact.css?v=20260924-inbox')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/unused-image-cleanup.css?v=20260915')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/library-duplicate-review.css?v=20260914')) ?>">
 <link rel="stylesheet" href="<?= e(app_url('/assets/css/popup-behavior.css?v=20260916-r1')) ?>">
@@ -931,11 +932,40 @@ $rooms = $roomsStmt->fetchAll();
 
         <section class="admin-section" id="admin-section-database">
           <div class="admin-section-title">Database</div>
-          <div class="admin-section-sub">Prepare protected application/database recovery, download SQLite backups, or move selected data through a portable JSON bundle.</div>
+          <div class="admin-section-sub">Back up your complete site data and media, or preview and merge selected content.</div>
           <div class="admin-panel">
             <div class="admin-actions">
               <a class="btn btn-primary" href="<?= e(app_url('/database-update.php?owner=1')) ?>">Update &amp; Recovery</a>
-              <a class="btn btn-primary" href="<?= e(app_url('/api/admin_database.php?action=download')) ?>">Full Backup</a>
+              <a class="btn btn-primary" href="<?= e(app_url('/api/admin_database.php?action=download')) ?>">Database only (SQLite)</a>
+              <div id="site-backup-controls" style="width:100%;max-width:960px">
+                <h3>Complete backup and selected content</h3>
+                <p>Encrypted backups include files as well as records. Keep the backup password: it cannot be recovered. Use the matching CoreChat release. Complete restore also requires the same database type.</p>
+                <form id="site-backup-export" method="post" class="admin-export-options">
+                  <?= csrf_input() ?>
+                  <input type="hidden" name="action" value="export">
+                  <label>Backup type <select name="mode"><option value="complete">Complete site data and media</option><option value="selective">Selected content</option></select></label>
+                  <fieldset data-export-sections hidden><legend>Include these sections</legend>
+                    <?php foreach (site_backup_groups() as $key => $label): ?>
+                    <label class="admin-export-choice"><input type="checkbox" name="sections[]" value="<?= e($key) ?>" checked><span><?= e($label) ?></span></label>
+                    <?php endforeach; ?>
+                  </fieldset>
+                  <label>Backup password <input name="password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" required></label>
+                  <button class="btn btn-primary" type="submit">Download encrypted backup</button>
+                </form>
+                <form id="site-backup-import" enctype="multipart/form-data" class="admin-restore" style="display:grid;gap:12px;margin-top:20px">
+                  <?= csrf_input() ?>
+                  <label>Backup file <input type="file" name="archive" accept=".corechat" required></label>
+                  <label>Backup password <input name="password" type="password" minlength="12" maxlength="1024" autocomplete="off" required></label>
+                  <label>Existing selected content <select name="conflicts"><option value="keep">Keep existing content; add missing items</option><option value="replace">Replace selected content; preserve existing login credentials</option></select></label>
+                  <fieldset data-import-sections hidden><legend>Import these sections</legend></fieldset>
+                  <div style="display:flex;gap:12px;flex-wrap:wrap"><button class="btn" type="submit">Preview import</button><button class="btn btn-danger" type="button" data-backup-apply hidden>Apply import</button></div>
+                </form>
+                <p data-backup-status role="status" aria-live="polite"></p>
+                <div data-backup-preview style="overflow-wrap:anywhere"></div>
+                <details><summary>Pre-import recovery backups</summary><p>These encrypted backups stay private on this server. Each uses the password entered for that import.</p><button type="button" class="btn" data-recovery-list>Show recovery backups</button><div data-recovery-items></div></details>
+              </div>
+              <details style="width:100%"><summary>Older database and portable JSON tools</summary>
+              <p>These older formats are not complete site backups. They do not include every library or private media pack.</p>
               <form id="admin-db-export" class="admin-export-options">
                 <?= csrf_input() ?>
                 <div class="admin-import-note">
@@ -963,6 +993,7 @@ $rooms = $roomsStmt->fetchAll();
                 </span>
                 <button class="btn btn-danger" type="submit">Import</button>
               </form>
+              </details>
             </div>
           </div>
         </section>
@@ -1051,12 +1082,13 @@ $rooms = $roomsStmt->fetchAll();
   </div>
 </div>
 <?php endif; ?>
-<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260920-settings-drafts')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260924-draft-loading')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/game-recordings.js?v=20260914')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260920-settings-drafts')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260924-original-resources')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/core/recent-authentication.js?v=20260916-retry')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260916-popups')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/lobby.js?v=20260920-preview')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/admin-settings-compact.js?v=20260924-inbox')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/lobby.js?v=20260924-backup')) ?>"></script>
+<script type="module" src="<?= e(app_url('/assets/js/site-backup.js?v=20260924')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/unused-image-cleanup.js?v=20260915')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/library-duplicate-review.js?v=20260916-popups')) ?>"></script>
 <?php if ($canvasAvailable): ?><script type="module" src="<?= e(app_url('/extensions/canvas/assets/canvas.js?v=20260828-checklist-r2')) ?>"></script><?php endif; ?>

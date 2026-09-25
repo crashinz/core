@@ -21,7 +21,7 @@
    // Stable modest evaluation noise makes Easy forgiving without changing dice.
    let seed=2166136261;for(const c of task.positionKey)seed=Math.imul(seed^c.charCodeAt(0),16777619)>>>0;
    let highest=-Infinity;
-   for(const t of ranked){seed=(Math.imul(seed,1664525)+1013904223)>>>0;const score=t.score+(seed/4294967296-.5)*.30;if(score>highest){highest=score;best=t;}}
+   for(const t of ranked){seed=(Math.imul(seed,1664525)+1013904223)>>>0;const hits=Math.max(0,t.board[0][24]-board[0][24]);const score=t.score+(seed/4294967296-.5)*1.2-hits*1.5;if(score>highest){highest=score;best=t;}}
   }else if(task.difficulty==='expert'&&ranked.length>1){
    const candidates=ranked.slice(0,3),scores=[];let complete=true;
    // Compare whole replies for every possible roll. A partial roll set never

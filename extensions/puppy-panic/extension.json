@@ -133,6 +133,9 @@
     "games/game-view-storage.js",
     "games/bot-pacing.js",
     "includes/puppy_panic_bot_support.php",
-    "games/uno-bot-controller.js"
+    "games/uno-bot-controller.js",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

@@ -682,9 +682,8 @@ function backup_import_core_bundle(PDO $pdo, array $bundle, int $actorId = 0): a
             if ($id) {
                 member_profiles_import_identity($pdo, $id, $username, $displayName);
                 $pdo->prepare(
-                    'UPDATE users SET password_hash = ?, role = ?, avatar_path = ?, '
-                    . 'aura_effect = ? WHERE id = ?'
-                )->execute([$hash, $role, $avatarPath, $auraEffect, $id]);
+                    'UPDATE users SET avatar_path = ?, aura_effect = ? WHERE id = ?'
+                )->execute([$avatarPath, $auraEffect, $id]);
             } else {
                 $identity = member_profiles_validate_identity(
                     $pdo,

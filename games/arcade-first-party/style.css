@@ -62,3 +62,5 @@ body[data-extension="tetris-versus"] .arcade-world canvas { display:none; }
 .arcade-tetris-next { width:140px; height:140px; display:grid; grid-template:repeat(4,28px)/repeat(4,28px); border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,.12); }
 .arcade-tetris-kv { font-size:14px; display:flex; justify-content:space-between; margin:2px 0; }
 .arcade-tetris-notice { color:#ffd84d; font-weight:800; text-align:center; }
+
+.arcade-world canvas:focus-visible,.arcade-tetris-versus:focus-visible{outline:none}

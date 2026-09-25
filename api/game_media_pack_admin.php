@@ -18,7 +18,8 @@ $action = strtolower(trim((string)($body['action'] ?? $_POST['action'] ?? '')));
 try {
     ocx_game_extension_identity($extensionId);
     $actorUserId = (int)$user['id'];
-    $result = ocx_game_media_with_lock($extensionId, static function () use ($action, $pdo, $extensionId, $actorUserId, $body): array {
+    $result = $action === 'install-inbox' ? ocx_media_inbox_import($pdo, $extensionId, $actorUserId)
+        : ocx_game_media_with_lock($extensionId, static function () use ($action, $pdo, $extensionId, $actorUserId, $body): array {
         return match ($action) {
             'begin' => ocx_game_media_begin_attempt($pdo, $extensionId, $actorUserId),
             'stage' => ocx_game_media_stage_attempt($pdo, $extensionId, $actorUserId, trim((string)($_POST['attemptId'] ?? ''))),
@@ -37,6 +38,7 @@ try {
     }
     $status = $result['status'] ?? ocx_game_media_pack_status($pdo, $extensionId);
     $status['acceptedFilenameSlots'] = ocx_game_media_pack_name_map($extensionId);
+    $status['inbox'] = ocx_media_inbox_projection($extensionId, $status);
     $definition = multiplayer_game_registry()[ocx_game_extension_identity($extensionId)['key']];
     unset($status['acceptedOriginalNames']);
     $status += [

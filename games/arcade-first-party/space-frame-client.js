@@ -1,5 +1,7 @@
-import {spaceSnapshot,spaceStep,spaceAliens,spaceKey,spaceCoopStep} from './space-simulation.js?v=194463e2259b';
+import {spaceSnapshot,spaceStep,spaceAliens,spaceKey,spaceCoopStep} from './space-simulation.js?v=4ca638202daf';
 
+// Keep acknowledged-in-flight frames plus newer local input; a request and its
+// reply can together occupy more than the one-second server input allowance.
 export class SpaceFrameClient {
   constructor(){this.reset();}
   reset(){this.state=null;this.authoritative=null;this.queue=[];this.version=null;this.previous=null;this.credit=0;this.updated=0;this.pulses={};this.resyncs=0;}
@@ -19,9 +21,9 @@ export class SpaceFrameClient {
     if(!this.state)return {x:268.8,orbs:[],aliens:[]};
     const dt=Math.max(0,Math.min(100,now-(this.previous ?? now)));this.previous=now;
     if(!active){this.state=spaceSnapshot(this.authoritative);this.queue=[];this.credit=0;this.pulses={};}
-    else if(now-this.updated<=1000&&this.queue.length<50){
+    else if(now-this.updated<=1000&&this.queue.length<100){
       this.credit+=dt;
-      while(this.credit>=20&&!this.state.completed&&this.queue.length<50){
+      while(this.credit>=20&&!this.state.completed&&this.queue.length<100){
         const input={left:!!(controls.left||this.pulses.left),right:!!(controls.right||this.pulses.right),fire:!!(controls.fire||this.pulses.fire)};
         const start=this.state.elapsedMs;spaceStep(this.state,input);
         this.queue.push({start,input,after:spaceSnapshot(this.state)});
@@ -33,7 +35,7 @@ export class SpaceFrameClient {
   batch(){
     if(this.queue.length<5&&!this.state?.completed)return null;
     const frames=[];
-    for(const frame of this.queue.slice(0,25)){
+    for(const frame of this.queue.slice(0,50)){
       const last=frames.at(-1),input=frame.input;
       if(last&&last.left===input.left&&last.right===input.right&&last.fire===input.fire)last.ticks++;
       else frames.push({ticks:1,...input});
@@ -73,9 +75,9 @@ export class SpaceCoopClient extends SpaceFrameClient {
     if(!this.state)return {x:268.8,ships:{},orbs:[],aliens:[]};
     const dt=Math.max(0,Math.min(100,now-(this.previous ?? now)));this.previous=now;
     if(!active){this.state=spaceSnapshot(this.authoritative);this.queue=[];this.credit=0;this.pulses={};}
-    else if(now-this.updated<=1000&&this.queue.length<50){
+    else if(now-this.updated<=1000&&this.queue.length<100){
       this.credit+=dt;
-      while(this.credit>=20&&!this.state.completed&&this.queue.length<50){
+      while(this.credit>=20&&!this.state.completed&&this.queue.length<100){
         const input={left:!!(controls.left||this.pulses.left),right:!!(controls.right||this.pulses.right),fire:!!(controls.fire||this.pulses.fire)};
         const start=this.state.elapsedMs;spaceCoopStep(this.state,this.actor,input);
         this.queue.push({start,input});this.credit-=20;this.pulses={};
@@ -87,7 +89,7 @@ export class SpaceCoopClient extends SpaceFrameClient {
     const queue=this.queue.filter(frame=>frame.start>=Math.max(this.through || 0,this.authoritative?.elapsedMs || 0));
     if(queue.length<5&&!this.state?.completed)return null;
     const frames=[];
-    for(const frame of queue.slice(0,25)){
+    for(const frame of queue.slice(0,50)){
       const last=frames.at(-1),input=frame.input;
       if(last&&last.left===input.left&&last.right===input.right&&last.fire===input.fire)last.ticks++;
       else frames.push({ticks:1,...input});

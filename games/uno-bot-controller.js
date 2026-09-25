@@ -26,7 +26,7 @@ export function createCardBotController({ gameName = "UNO", snapshot, submit, sh
         stop(); failedKey = active.key;
         showStatus(`The ${gameName} bot action could not be saved. Retry when the connection is available.`, () => { failedKey = ""; sync(); });
       }
-    }, Math.max(BOT_ACTION_PAUSE_MS, Math.min(5000, Number(current.task.delayMs) || BOT_ACTION_PAUSE_MS)));
+    }, Math.max(Number(current.waitForMotionMs) || 0, BOT_ACTION_PAUSE_MS, Math.min(5000, Number(current.task.delayMs) || BOT_ACTION_PAUSE_MS)));
   }
   return { sync, stop };
 }

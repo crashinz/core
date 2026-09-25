@@ -869,6 +869,7 @@ if (!$setupReconciliationBlocked && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_
             throw $transactionError;
         }
         authenticate_user($adminUserId);
+        ocx_media_inbox_schedule($pdo, true);
         redirect_to('/setup.php?done=1');
     } catch (Throwable $e) {
         $error = setup_error_message($e);
@@ -1079,7 +1080,7 @@ $setupSettingsRegistry = $step === 'admin' && chatspace_configured() ? settings_
 </main>
 <script src="<?= e(app_url('/assets/js/avatar-processing.js')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/core/popup-behavior.js?v=20260920-settings-drafts')) ?>"></script>
-<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260920-settings-drafts')) ?>"></script>
+<script src="<?= e(app_url('/assets/js/settings-registry.js?v=20260924-original-resources')) ?>"></script>
 <script src="<?= e(app_url('/assets/js/setup.js')) ?>"></script>
 </body>
 </html>

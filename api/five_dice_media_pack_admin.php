@@ -20,7 +20,9 @@ $body = input_json();
 $action = trim((string)($body['action'] ?? $_POST['action'] ?? ''));
 
 try {
-    if ($action === 'begin') {
+    if ($action === 'install-inbox') {
+        $result = ocx_media_inbox_import($pdo, 'five-dice', (int)$user['id']);
+    } elseif ($action === 'begin') {
         $result = five_dice_media_pack_begin_attempt($pdo, (int)$user['id']);
     } elseif ($action === 'stage') {
         $result = five_dice_media_pack_stage_attempt($pdo, (int)$user['id'], trim((string)($_POST['attemptId'] ?? '')));
@@ -44,6 +46,7 @@ try {
         json_out(['error' => 'Choose an allowed Classic artwork and sound action.', 'code' => 'ACTION_INVALID'], 400);
     }
     $status = $result['status'] ?? five_dice_media_pack_status($pdo);
+    $status['inbox'] = ocx_media_inbox_projection('five-dice', $status);
     $status['displayName'] = multiplayer_game_effective_display_name(
         $pdo,
         multiplayer_game_registry()[FIVE_DICE_GAME_KEY]

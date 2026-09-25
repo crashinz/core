@@ -95,6 +95,9 @@
     "includes/nested_four_bot_support.php",
     "games/nested-four-engine.js",
     "games/nested-four-worker.js",
-    "games/nested-four-bot-controller.js"
+    "games/nested-four-bot-controller.js",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

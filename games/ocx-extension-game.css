@@ -3502,3 +3502,57 @@ body[data-external-game-controls="true"] #surface-options-music {
 .classic-audio-row label{display:flex;align-items:center;gap:.35rem;min-width:0}
 .classic-audio-row button{flex:0 0 auto;padding:.3rem .6rem}
 .classic-audio-other{margin-top:.7rem}
+
+/* Owner readability and hand-space corrections. */
+.blackjack-player-station.is-viewer{justify-self:center;max-width:none}
+.blackjack-player-station.is-viewer .blackjack-turn-action.is-surrender,.blackjack-player-station.is-viewer .blackjack-turn-action.is-split{left:2px;width:72px;padding:3px;translate:none}
+.blackjack-cards.is-paged{display:flex;gap:0;padding-bottom:8px;scroll-snap-type:none;scrollbar-width:auto;scrollbar-color:#e5c56e #102c24}
+.blackjack-cards.is-paged .blackjack-card{flex:0 0 auto}
+.blackjack-cards.is-paged::-webkit-scrollbar{height:12px}
+.blackjack-cards.is-paged::-webkit-scrollbar-thumb{background:#e5c56e;border:2px solid #17382b;border-radius:6px}
+.blackjack-table>.blackjack-bet-actions{margin:20px auto 0;width:294px;max-width:100%}
+.blackjack-table>.blackjack-insurance-actions{position:absolute;bottom:18px;left:5%;width:24%;padding:10px;background:#0b3429;border:1px solid #dcc579;border-radius:10px;z-index:9}
+.game-event-dialog{position:relative;overflow:hidden}
+.game-victory-confetti{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.game-victory-confetti i{position:absolute;left:calc(var(--i)*4.2%);top:-14px;width:7px;height:13px;background:hsl(calc(var(--i)*37) 85% 67%);animation:game-confetti 2.5s calc(var(--i)*-.1s) 3 linear}
+@keyframes game-confetti{to{transform:translateY(420px) rotate(640deg)}}
+@media(prefers-reduced-motion:reduce){.game-victory-confetti i{animation:none;top:5px}}
+
+.uno-turn-prompt { text-align:center; font-weight:800; font-size:1.1rem; margin:6px 0; }
+.hearts-trick { position:relative; width:min(100%,460px); height:350px; margin:auto; }
+.hearts-trick-card { position:absolute; margin:0; transform:translate(-50%,-50%); }
+.hearts-trick-card.is-top { left:50%; top:21%; }
+.hearts-trick-card.is-bottom { left:50%; top:79%; }
+.hearts-trick-card.is-left { left:20%; top:50%; }
+.hearts-trick-card.is-right { left:80%; top:50%; }
+.hearts-table > .hearts-center-message { grid-column:1/-1; text-align:center; margin:8px; }
+
+.chess-classic .classic-cell:disabled,.checkers-classic .classic-cell:disabled,.battleship-classic .battle-cell:disabled{cursor:default}
+
+.is-received-card{animation:received-card-glow 3s ease-out both}@keyframes received-card-glow{0%,75%{box-shadow:0 0 0 4px #66f5df,0 0 20px #66f5df}100%{box-shadow:none}}
+
+@media(min-width:1000px){.blackjack-player-arc{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 320px minmax(0,1fr) minmax(0,1fr);gap:16px}.blackjack-player-station.is-viewer{transform:none}}
+.blackjack-player-station.is-viewer .blackjack-hand.is-active:has(.blackjack-cards.is-paged){transform:none}
+
+/* Separate the four trick positions from the player seats and the hand. */
+.hearts-table{min-height:920px;grid-template-rows:auto minmax(620px,1fr) auto auto auto}
+.hearts-center{width:min(58%,540px)}
+.hearts-table>.hearts-center-message{grid-row:3;justify-self:center}
+.hearts-viewer-hand{grid-row:4}
+.hearts-actions{grid-row:5}
+.hearts-seats{bottom:232px}
+@media(max-width:720px){.hearts-table{min-height:1020px;grid-template-rows:auto minmax(720px,1fr) auto auto auto}.hearts-center{width:56%}.hearts-trick{height:350px}.hearts-trick-card.is-left{left:12%}.hearts-trick-card.is-right{left:88%}}
+
+/* Reserve real side lanes so wager actions never cover the hand. */
+@media(min-width:1000px){
+.blackjack-player-arc{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 416px minmax(0,1fr) minmax(0,1fr)}
+.blackjack-player-station.is-viewer{width:390px}
+.blackjack-table>.blackjack-bet-actions{width:390px}
+.blackjack-player-station.is-viewer .blackjack-turn-action.is-split,.blackjack-player-station.is-viewer .blackjack-turn-action.is-surrender{left:6px;width:64px}
+.blackjack-player-station.is-viewer .blackjack-turn-action.is-hit,.blackjack-player-station.is-viewer .blackjack-turn-action.is-stand,.blackjack-player-station.is-viewer .blackjack-turn-action.is-double{right:6px;translate:none}
+.blackjack-table:has(>.blackjack-insurance-actions) .blackjack-player-station:not(.is-viewer){transform:translateY(-180px)}
+}
+.blackjack-insurance-actions .blackjack-action-panel{grid-template-columns:1fr 1fr;gap:6px;font-size:12px}
+.blackjack-insurance-actions .blackjack-action-panel h3,.blackjack-insurance-actions .blackjack-action-panel p{grid-column:1/-1}
+.blackjack-insurance-actions button{font-size:12px;padding:6px;min-height:32px}
+@media(max-width:999px){.blackjack-player-station.is-viewer .blackjack-turn-actions{position:static;display:flex;flex-wrap:wrap;gap:4px}.blackjack-player-station.is-viewer .blackjack-turn-action{position:static;width:auto;translate:none}.blackjack-table>.blackjack-insurance-actions{position:relative;left:auto;top:auto!important;bottom:auto;width:min(390px,90%);margin:12px auto}}

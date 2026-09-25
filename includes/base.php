@@ -82,6 +82,7 @@ require_once __DIR__ . '/ocx_game_extension_support.php';
 require_once __DIR__ . '/five_dice_identity.php';
 require_once __DIR__ . '/five_dice_media_pack.php';
 require_once __DIR__ . '/ocx_game_media_pack.php';
+require_once __DIR__ . '/ocx_media_inbox.php';
 require_once __DIR__ . '/retention_lifecycle.php';
 require_once __DIR__ . '/network_moderation.php';
 require_once __DIR__ . '/operational_capacity.php';
@@ -246,6 +247,7 @@ function db(): PDO {
         unset($GLOBALS['CHATSPACE_RUNTIME_PDO']);
         throw $error;
     }
+    ocx_media_inbox_schedule($candidate);
     return $GLOBALS['CHATSPACE_RUNTIME_PDO'];
 }
 
@@ -1932,6 +1934,10 @@ function uuid_v4(): string {
 
 function current_user(): ?array {
     if (empty($_SESSION['user_id'])) return null;
+    if ((string)($_SESSION['_site_backup_auth_epoch'] ?? '') !== app_setting(db(), 'site_backup_auth_epoch', '')) {
+        security_destroy_session();
+        return null;
+    }
     if (!two_factor_session_valid(db(), (int)$_SESSION['user_id'])
         || (int)($_SESSION['_email_recovery_epoch'] ?? 0) !== account_email_epoch(db(), (int)$_SESSION['user_id'])) {
         security_destroy_session();
@@ -2153,6 +2159,8 @@ function csrf_input(): string {
 }
 
 if (!chatspace_canonical_metadata_bootstrap_enabled()) {
+    require_once __DIR__ . '/site_backup.php';
+    site_backup_runtime_guard();
     csrf_protect_post();
     runtime_issue_install_server_capture();
 }

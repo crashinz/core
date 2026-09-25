@@ -1931,6 +1931,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
                 && $viewerId > 0
                 && moderation_identity_is_owner($pdo, $viewerId);
             $status = five_dice_media_pack_status($pdo);
+            if ($canManage) $status['inbox'] = ocx_media_inbox_projection('five-dice', $status);
             if (!$canManage) {
                 unset($status['acceptedOriginalNames'], $status['acceptedPreparedNames'], $status['acceptedFilenameSlots'],
                     $status['acceptedFilenamePriorities'], $status['imageSlotDimensions'], $status['sourceSelection']);
@@ -1961,6 +1962,7 @@ function settings_registry_snapshot(PDO $pdo, string $surface = 'admin'): array 
                 $identity = ocx_game_extension_identity($extensionId);
                 $definition = multiplayer_game_registry()[$identity['key']];
                 $status = ocx_game_media_pack_status($pdo, $extensionId);
+                if ($canManage) $status['inbox'] = ocx_media_inbox_projection($extensionId, $status);
                 if ($canManage) $status['acceptedFilenameSlots'] = ocx_game_media_pack_name_map($extensionId);
                 unset($status['acceptedOriginalNames']);
                 foreach (['installed', 'missing', 'invalid'] as $collection) {

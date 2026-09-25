@@ -24,6 +24,20 @@ function eight_ball_apply_action(array $s,int $actor,string $action,array $p,arr
     if($actor<=0||!in_array($actor,$s['turnOrder']??[],true))eight_ball_fail('Only an authenticated participant may act.','PLAYER_INVALID',403);
     if(!empty($s['bots'])&&($c['mode']??'')!=='practice')eight_ball_fail('Bot games are Practice only.','PRACTICE_ONLY',422);
     $before=$s;$trace=null;$clockNow=pool_clock_now($c);
+    if($action==='practice-opponent'){
+        $humans=array_values(array_filter($s['turnOrder'],static fn($id)=>$id>0));
+        $difficulty=$p['difficulty']??'';
+        if(($c['mode']??'')!=='practice'||$humans!==[$actor]||!in_array($difficulty,['none','easy','normal','expert'],true))eight_ball_fail('Only the player at a one-person Practice table may change its opponent.','PRACTICE_ONLY',403);
+        if($clockNow<(float)($s['animationUntil']??0))eight_ball_fail('Wait for the shot to finish.','IN_MOTION',409);
+        $settings=array_replace($s['settings'],['tableMode'=>$difficulty==='none'?'solo':'match','botSeat2Difficulty'=>$difficulty]);
+        $next=eight_ball_initial_state([$actor],array_replace($c,['settings'=>$settings]));
+        $next['sequence']=($s['sequence']??0)+1;
+        $next['cues'][$actor]=$s['cues'][$actor]??6;
+        if(isset($s['_framework']))$next['_framework']=$s['_framework'];
+        $r=eight_ball_result($next);
+        if(function_exists('game_recording_observe'))game_recording_observe($c,'eight-ball',$before,$actor,$action,$p,$r['state'],null);
+        return $r;
+    }
     if($action==='timeout'&&(!is_string($p['clockId']??null)||($s['turnClock']['id']??null)!==$p['clockId']))eight_ball_fail('The turn has changed.','CLOCK_STALE',409);
     if($action!=='resign'&&pool_clock_expired($s,$clockNow)){
         $r=pool_clock_timeout($s,$clockNow);

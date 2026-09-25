@@ -111,6 +111,9 @@
     "games/eight-ball/bot-worker.js",
     "games/eight-ball/boot.js",
     "games/eight-ball/placement-hint.js",
-    "games/eight-ball/recorded-impacts.js"
+    "games/eight-ball/recorded-impacts.js",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

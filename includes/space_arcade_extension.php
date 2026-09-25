@@ -47,7 +47,7 @@ function space_arcade_initial_state(array $players, array $context = []): array
     $count=$settings['playerCount'] ?? 1;
     $context['settings']=[];
     $state = arcade_initial_state('space', $players, $count, $context);
-    $state += ['level' => 1, 'levelElapsedMs' => -300, 'kills' => [], 'orbs' => [],
+    $state += ['spaceInputMode' => 'frames', 'level' => 1, 'levelElapsedMs' => -300, 'kills' => [], 'orbs' => [],
         'ship' => ['x' => 268.8, 'score' => 0, 'cooldownMs' => 0, 'inputLeaseMs' => 0,
             'controls' => ['left' => false, 'right' => false, 'fire' => false]]];
     if ($count===2) {

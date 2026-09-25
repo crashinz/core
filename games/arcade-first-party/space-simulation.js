@@ -71,5 +71,11 @@ export function spaceStep(state,controls) {
 export function spaceKey(state) {
   const value=spaceSnapshot(state);
   value.kills=Object.keys(value.kills).filter(k=>value.kills[k]).map(Number).sort((a,b)=>a-b);
-  return JSON.stringify(value,(_,v)=>typeof v==='number'?Math.round(v*1e6)/1e6:v);
+  // Stored framework snapshots sort object keys. Compare values, not the
+  // insertion order of ships, controls or projectiles in a transport reply.
+  return JSON.stringify(value,(_,v)=>{
+    if(typeof v==='number')return Math.round(v*1e6)/1e6;
+    if(v&&typeof v==='object'&&!Array.isArray(v))return Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]]));
+    return v;
+  });
 }

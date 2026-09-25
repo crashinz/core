@@ -229,6 +229,7 @@ if ($requestMethod === 'POST') {
             $notice = !empty($result['no_op'])
                 ? 'The database was already current. No database update ran.'
                 : 'The protected recovery set and database update completed successfully.';
+            ocx_media_inbox_schedule($pdo, true);
         } elseif ($action === 'prepare') {
             $actor = database_update_require_admin($pdo);
             if ((string)($_POST['prepare_confirm'] ?? '') !== 'prepare-paired-set') {

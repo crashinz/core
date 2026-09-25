@@ -1359,7 +1359,7 @@
       chooseFiles.type = 'button';
       const chooseFolder = element('button', 'btn', 'Choose original source folder');
       chooseFolder.type = 'button';
-      const drop = element('div', 'settings-five-dice-media-drop', 'Drop a legacy OCX for static-only media extraction, the MyChange source folder, original files, or a prepared pack here. The OCX is never executed, registered, or retained.');
+      const drop = element('div', 'settings-five-dice-media-drop', 'Drop one original OCX to keep all its resources privately for future updates, or select original/prepared media files. Only supported media is used. The OCX program itself is never executed, registered, or retained.');
       drop.tabIndex = 0;
       drop.setAttribute('role', 'button');
       drop.setAttribute('aria-label', 'Choose Classic artwork and sound files');
@@ -1546,7 +1546,7 @@
         const folderInput = fileInput.cloneNode(); folderInput.setAttribute('webkitdirectory', ''); folderInput.setAttribute('directory', '');
         const chooseFiles = element('button', 'btn', 'Select OCX or original/prepared files'); chooseFiles.type = 'button';
         const chooseFolder = element('button', 'btn', 'Choose original source folder'); chooseFolder.type = 'button';
-        const drop = element('div', 'settings-five-dice-media-drop', 'Drop a legacy OCX for static-only media extraction, recognized original files, or a prepared semantic-name pack here. The OCX is never executed, registered, or retained.');
+        const drop = element('div', 'settings-five-dice-media-drop', 'Drop one original OCX to keep all its resources privately for future updates, or select original/prepared media files. Only supported media is used. The OCX program itself is never executed, registered, or retained.');
         drop.tabIndex = 0; drop.setAttribute('role', 'button'); drop.setAttribute('aria-label', `Choose Classic artwork and sound for ${String(status.displayName || 'this game')}`);
         const progress = document.createElement('progress'); progress.max = Number(status.requiredCount || 1); progress.value = 0; progress.setAttribute('aria-label', 'Recognized Classic media slots');
         const selectionStatus = element('p', 'minor settings-five-dice-media-selection', 'No files selected.'); selectionStatus.setAttribute('role', 'status'); selectionStatus.setAttribute('aria-live', 'polite');

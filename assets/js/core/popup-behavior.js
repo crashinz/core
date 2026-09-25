@@ -23,26 +23,52 @@
     return fields.map(el => ({el, value:el.value, checked:el.checked, selected:el.tagName === 'SELECT' ? [...el.options].map(o=>o.selected) : null}));
   }
   const extras = record => [...record.box.querySelectorAll('.aura-option.selected')].map(el=>el.dataset.auraKey).join('|');
+  function rememberField(record, field) {
+    if (!tracksDraft(record) || record.editedFields.has(field)) return;
+    const current = snapshot(record).find(item => item.el === field);
+    if (!current) return;
+    const index = record.baseline.findIndex(item => item.el === field);
+    if (index < 0) record.baseline.push(current);
+    else record.baseline[index] = current;
+  }
+  function noteFieldEdit(record, field) {
+    if (!tracksDraft(record)) return;
+    const current = snapshot(record).find(item => item.el === field);
+    if (!current) return;
+    if (!record.baseline.some(item => item.el === field)) {
+      // Normal keyboard/pointer edits capture the loaded value before editing.
+      // Defaults cover autofill or a programmatically dispatched change event.
+      record.baseline.push({...current, value:field.defaultValue ?? current.value,
+        checked:field.defaultChecked, selected:field.tagName === 'SELECT' ? [...field.options].map(option=>option.defaultSelected) : null});
+    }
+    const before = record.baseline.find(item => item.el === field);
+    if (current.value===before.value && current.checked===before.checked && JSON.stringify(current.selected)===JSON.stringify(before.selected)) record.editedFields.delete(field);
+    else record.editedFields.add(field);
+  }
   function markSaved(root, fields = null) {
     if (!root) return;
     if (!records.has(root)) enhance(root);
     const record = records.get(root);
-    if (fields && record.baseline) { const current=snapshot(record); for(const field of fields){const updated=current.find(item=>item.el===field);const index=record.baseline.findIndex(item=>item.el===field);if(updated&&index>=0)record.baseline[index]=updated;}return; }
+    if (fields && record.baseline) { const current=snapshot(record); for(const field of fields){const updated=current.find(item=>item.el===field);const index=record.baseline.findIndex(item=>item.el===field);if(updated){if(index>=0)record.baseline[index]=updated;else record.baseline.push(updated);}record.editedFields.delete(field);}return; }
     record.baseline = snapshot(record); record.extraBaseline = extras(record); record.dirty = false;
+    record.editedFields.clear(); record.extraEdited = false;
   }
   function isDirty(record) {
     if (!tracksDraft(record) || !record.baseline) return false;
     if ([...draftOwners].some(([container, owner]) => record.box.contains(container) && owner.isDirty())) return true;
-    const current = snapshot(record);
-    const baseline = record.baseline.filter(field => !managedField(field.el));
-    return current.length !== baseline.length || current.some((field,i)=> {
-      const before=baseline[i];
-      return field.el!==before.el || field.value!==before.value || field.checked!==before.checked || JSON.stringify(field.selected)!==JSON.stringify(before.selected);
-    }) || extras(record)!==record.extraBaseline;
+    // Loading/rerendering server records is not an unsaved user edit. Compare
+    // only edited controls; model-owned editors retain their own draft checks.
+    return [...record.editedFields].some(el => {
+      if (managedField(el)) return false;
+      const before = record.baseline.find(field => field.el === el);
+      if (!before) return true;
+      const selected = el.tagName === 'SELECT' ? [...el.options].map(option=>option.selected) : null;
+      return el.value!==before.value || el.checked!==before.checked || JSON.stringify(selected)!==JSON.stringify(before.selected);
+    }) || (record.extraEdited && extras(record)!==record.extraBaseline);
   }
   function discardChanges(record) {
     for (const field of record.baseline || []) {
-      if (!field.el.isConnected || managedField(field.el)) continue;
+      if (!record.editedFields.has(field.el) || !field.el.isConnected || managedField(field.el)) continue;
       field.el.value=field.value;
       if (field.checked!==undefined) field.el.checked=field.checked;
       if (field.selected) [...field.el.options].forEach((o,i)=>o.selected=field.selected[i]);
@@ -129,7 +155,7 @@
     }
     if (root.matches('.modal') && !box.matches('[role=dialog],[role=alertdialog]')) {root.setAttribute('role','dialog');if(!root.hasAttribute('aria-modal'))root.setAttribute('aria-modal','true');}
 
-    const record={root,box,header,native,button:buttonFor(root),active:false,dirty:false,order:0,moved:false,closing:false,returnFocus:null};
+    const record={root,box,header,native,button:buttonFor(root),active:false,dirty:false,editedFields:new Set(),extraEdited:false,baseline:[],order:0,moved:false,closing:false,returnFocus:null};
     records.set(root,record);
     let close=header.querySelector('.window-close,[id$="-close"],[data-close],.cc-popup-close') || (record.button && header.contains(record.button) ? record.button : null);
     if (!close) {
@@ -156,15 +182,18 @@
       // Portal dialogs must not trigger the room's background outside-click handlers.
       box.addEventListener('click',event=>event.stopPropagation());
     }
-    box.addEventListener('input',event=>{
-      if (!draftIds.has(root.id)) return;
-      const input=event.target;
-      if (input.type==='search' || /search|filter/.test(input.id||'') || input.closest('[data-popup-no-draft]')) return;
-      record.dirty=true;
-    });
-    box.addEventListener('change',event=>{
-      if (draftIds.has(root.id) && !/search|filter/.test(event.target.id||'')) record.dirty=true;
-    });
+    for (const type of ['focusin','pointerdown','keydown','beforeinput']) {
+      box.addEventListener(type,event=>rememberField(record,event.target),true);
+    }
+    for (const type of ['input','change']) {
+      box.addEventListener(type,event=>noteFieldEdit(record,event.target),true);
+    }
+    box.addEventListener('click',event=>{
+      if (tracksDraft(record) && event.target.closest('.aura-option')) {
+        if (!record.extraEdited) record.extraBaseline=extras(record);
+        record.extraEdited=true;
+      }
+    },true);
     box.addEventListener('reset',()=>{queueMicrotask(()=>markSaved(root));});
     // Game pickers and music already own pointer dragging; do not double-bind it.
     dragHeader(record, !root.matches('.game-start-menu,#vp-music-modal,.avatar-library-dialog'));

@@ -104,7 +104,8 @@ function five_dice_media_stage_source(string $slot, string $bytes, string $attem
 function five_dice_media_stage_ocx(string $container, string $attempt): array
 {
     $map = five_dice_media_pack_accepted_filename_map(); $seen = []; $staged = 0;
-    foreach (ocx_static_media_resources($container) as $resource) {
+    $resources = ocx_static_media_resources($container);
+    foreach ($resources as $resource) {
         $payload = ocx_static_media_payload($resource);
         if (!$payload) continue;
         foreach (ocx_static_media_candidate_names($resource, $payload['extension']) as $name) {
@@ -121,5 +122,6 @@ function five_dice_media_stage_ocx(string $container, string $attempt): array
         }
     }
     if (!$seen) throw new RuntimeException('The selected OCX contains no recognized Five Dice media.');
-    return ['recognizedResources' => count($seen), 'stagedSlots' => $staged, 'containerRetained' => false, 'executionUsed' => false];
+    $retained = ocx_resource_archive_store($resources, $attempt);
+    return ['recognizedResources' => count($seen), 'stagedSlots' => $staged, 'retainedResources' => $retained, 'containerRetained' => false, 'executionUsed' => false];
 }

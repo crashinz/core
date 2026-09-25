@@ -300,7 +300,16 @@ function ocx_game_media_with_lock(string $extensionId, callable $operation): mix
 function ocx_game_media_validate_slot(string $extensionId,string $slot,?string $directory): array
 {
     $definition=ocx_game_media_pack_slots($extensionId)[$slot]??null;if(!is_array($definition))return['state'=>'invalid','reason'=>'Unknown media slot.'];
-    if($directory===null)return $definition+['slot'=>$slot,'state'=>'missing','path'=>null];$path=$directory.DIRECTORY_SEPARATOR.$definition['installName'];if(!is_file($path))return $definition+['slot'=>$slot,'state'=>'missing','path'=>null];
+    if($directory===null)return $definition+['slot'=>$slot,'state'=>'missing','path'=>null];
+    $path=$directory.DIRECTORY_SEPARATOR.$definition['installName'];
+    if(!is_file($path))ocx_resource_archive_restore($directory,$slot,$definition,ocx_game_media_pack_name_map($extensionId),
+        static function(array $payload,string $work)use($extensionId,$slot,$definition):void{
+            $bytes=ocx_static_media_derive_slot_bytes($payload['bytes'],$payload['extension'],$definition);
+            if(strlen($bytes)>(int)$definition['maximumBytes'])throw new RuntimeException('Prepared resource exceeds its slot limit.');
+            if(file_put_contents($work.'/'.$definition['installName'],$bytes,LOCK_EX)!==strlen($bytes))throw new RuntimeException('Cannot prepare retained resource.');
+            if(ocx_game_media_validate_slot($extensionId,$slot,$work)['state']!=='installed')throw new RuntimeException('Retained resource failed slot validation.');
+        });
+    if(!is_file($path))return $definition+['slot'=>$slot,'state'=>'missing','path'=>null];
     $root=realpath($directory);$resolved=realpath($path);$bytes=$resolved===false?false:filesize($resolved);
     if($root===false||$resolved===false||!str_starts_with(strtolower($resolved).DIRECTORY_SEPARATOR,strtolower(rtrim($root,DIRECTORY_SEPARATOR)).DIRECTORY_SEPARATOR)||$bytes===false||$bytes<1||$bytes>(int)$definition['maximumBytes'])return $definition+['slot'=>$slot,'state'=>'invalid','path'=>null,'reason'=>'The file is unavailable or outside its safe size boundary.'];
     $valid=false;$dimensions=null;$kind=(string)$definition['kind'];

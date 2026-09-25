@@ -76,3 +76,9 @@ html,body{min-height:0;overflow:hidden}.table-wrap{width:min(100%,var(--table-wi
 #table:focus,#table:focus-visible{outline:none}
 /* The timer is an overlay within the avatar frame: no new layout space. */
 .portrait{position:relative}.turn-countdown{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;filter:drop-shadow(0 0 2px #9b83ff88)}.turn-countdown path{fill:none;stroke:#b39aff;stroke-width:5;stroke-linecap:butt}
+
+.match-strip{width:min(100%,var(--pool-hud-width,1120px));margin-inline:auto;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);height:auto;min-height:122px;padding:10px 12px;gap:14px}
+.match-strip .portrait{width:84px;height:84px;flex-basis:84px}.match-strip .player{gap:9px}.match-strip .you{justify-content:flex-end}.match-strip .opponent{justify-content:flex-start}
+.match-strip .ball-list{flex-wrap:wrap;gap:3px}.match-strip .mini-ball{width:var(--pool-ball-size,29px);height:var(--pool-ball-size,29px);flex:0 0 var(--pool-ball-size,29px)}
+.match-strip .mini-ball span{width:55%;height:55%;font-size:10px;line-height:1.4}.match-strip .player-title strong{font-size:14px;max-width:180px}
+@media(max-width:700px){.match-strip{grid-template-columns:1fr 1fr}.match-strip .shot-tools{grid-column:1/-1;grid-row:2}.match-strip .portrait{width:72px;height:72px;flex-basis:72px}.match-strip .player{flex-wrap:wrap;justify-content:center}}

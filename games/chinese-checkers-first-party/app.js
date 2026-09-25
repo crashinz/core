@@ -27,6 +27,30 @@ const ChineseCheckers = (() => {
   });
   let selectedHole = "";
   let lastHeardVersion = null;
+  let soundSession = null, soundEpoch = 0, soundEnabled = true, soundVisual = true;
+  const cueTimers = new Set(), cuePlayers = new Set();
+  function stopSounds() {
+    soundEpoch++;
+    for (const timer of cueTimers) window.clearTimeout(timer);
+    cueTimers.clear();
+    for (const audio of cuePlayers) { audio.pause(); audio.currentTime = 0; }
+    cuePlayers.clear();
+  }
+  function scheduleCue(callback, delay = 0) {
+    const epoch = soundEpoch;
+    const run = () => { if (epoch === soundEpoch && soundEnabled) callback(); };
+    if (delay <= 0) { run(); return; }
+    const timer = window.setTimeout(() => { cueTimers.delete(timer); run(); }, delay);
+    cueTimers.add(timer);
+  }
+  function observeSound(session, enabled, visual) {
+    const id = String(session?.publicId || "preview"), version = Number(session?.stateVersion || 0);
+    const changedSession = id !== soundSession;
+    const previous = lastHeardVersion;
+    if (changedSession || version !== previous || enabled !== soundEnabled || visual !== soundVisual) stopSounds();
+    soundSession = id; soundEnabled = enabled; soundVisual = visual; lastHeardVersion = version;
+    return !changedSession && previous !== null && version > previous && enabled;
+  }
   let activeMasterVolume = 100;
   let selectedBoardScale = (() => {
     try {
@@ -193,10 +217,13 @@ const ChineseCheckers = (() => {
   }
 
   function playCue(name, effectsEnabled = true) {
-    if (!effectsEnabled || !SOUND_FILES[name]) return;
+    if (!effectsEnabled || !soundEnabled || !SOUND_FILES[name]) return;
     const slot = SOUND_FILES[name];
     const url = new URL(`../../assets/audio/built-in-games/${slot}`, window.location.href);
     const player = new Audio(url.href);
+    cuePlayers.add(player);
+    player.addEventListener("ended", () => cuePlayers.delete(player), { once: true });
+    player.addEventListener("error", () => cuePlayers.delete(player), { once: true });
     player.volume = Math.max(0, Math.min(1, activeMasterVolume / 100)) * (name === "error" ? 0.42 : 0.52);
     const recordTrace = (event, error = "") => {
       document.body.dataset.lastMediaTrace = JSON.stringify({
@@ -215,33 +242,19 @@ const ChineseCheckers = (() => {
       .catch(error => recordTrace("effect-unavailable", String(error?.message || error || "Audio playback failed.")));
   }
 
-  function syncAuthoritativeCue(session, viewerUserId, effectsEnabled) {
-    const version = Number(session?.stateVersion || 0);
-    if (lastHeardVersion === null) {
-      lastHeardVersion = version;
-      return;
-    }
-    if (version <= lastHeardVersion) return;
-    lastHeardVersion = version;
-    const state = session?.state || {};
-    if (state.completed) {
-      playCue(Number(state.winnerUserId || 0) === viewerUserId ? "win" : "loss", effectsEnabled);
-      return;
-    }
-    const action = state.lastAction || {};
+  function syncAuthoritativeCue(session, viewerUserId, effectsEnabled, motion, visualFxEnabled) {
+    if (!observeSound(session, effectsEnabled, visualFxEnabled)) return;
+    const state = session?.state || {}, action = state.lastAction || {};
+    const duration = motion?.duration || 0;
+    const elapsed = motion ? Math.max(0, performance.now() - motion.startedAt) : 0;
+    const at = (name, offset) => scheduleCue(() => playCue(name, soundEnabled), Math.max(0, offset - elapsed));
     if (action.type === "move") {
-      const jumpCount = Number(action.jumpCount || 0);
-      if (jumpCount > 0) {
-        for (let segment = 0; segment < jumpCount; segment += 1) {
-          window.setTimeout(() => playCue("jump", effectsEnabled), segment * 210);
-        }
-      } else {
-        playCue("move", effectsEnabled);
-      }
+      const segments = motion ? Math.max(1, motion.path.length - 1) : 1;
+      const jumping = Number(action.jumpCount || 0) > 0 || action.kind === "jump";
+      for (let segment = 0; segment < segments; segment++) at(jumping ? "jump" : "move", segment * duration / segments);
     }
-    if (Number(session?.turnUserId || 0) === viewerUserId) {
-      window.setTimeout(() => playCue("turn", effectsEnabled), 160);
-    }
+    if (state.completed) at(Number(state.winnerUserId || 0) === viewerUserId ? "win" : "loss", duration);
+    else if (Number(session?.turnUserId || 0) === viewerUserId) at("turn", duration);
   }
 
   function render(api) {
@@ -267,7 +280,7 @@ const ChineseCheckers = (() => {
     const motion = moveMotion.observe(session, visualFxEnabled && typeof Element.prototype.animate === "function");
     clearTimeout(motionEndTimer);
     if (motion) motionEndTimer = window.setTimeout(rerender, Math.max(1, motion.duration - (performance.now() - motion.startedAt)) + 20);
-    syncAuthoritativeCue(session, viewerUserId, effectsEnabled);
+    syncAuthoritativeCue(session, viewerUserId, effectsEnabled, motion, visualFxEnabled);
 
     const turnOrder = Array.isArray(state.turnOrder) ? state.turnOrder.map(Number) : [];
     const board = state.board || {};
@@ -507,7 +520,7 @@ const ChineseCheckers = (() => {
     return shell;
   }
 
-  return Object.freeze({ render, appendBoardSizeOption, boardScale, isAnimating: () => Boolean(moveMotion.current()) });
+  return Object.freeze({ render, stopSounds, appendBoardSizeOption, boardScale, isAnimating: () => Boolean(moveMotion.current()) });
 })();
 
 window.CoreChatChineseCheckers = ChineseCheckers;

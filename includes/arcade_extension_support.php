@@ -103,6 +103,7 @@ function arcade_advance(array $state, int $now): array
         if ($state['arcadeKind'] === 'tetris') {
             foreach ($state['boards'] as &$board) tetris_arcade_tick($board, ARCADE_STEP_MS);
             unset($board);
+            tetris_bot_tick($state, ARCADE_STEP_MS);
             $dead = array_keys(array_filter($state['boards'], static fn(array $board): bool => !$board['alive']));
             if ($dead !== []) {
                 $living = array_values(array_diff($state['turnOrder'], array_map('intval', $dead)));
@@ -190,7 +191,7 @@ function arcade_apply_action(array $state, int $actorUserId, string $action, arr
                 tetris_arcade_command($state['boards'][$actorUserId], $command);
                 if (!$state['boards'][$actorUserId]['alive']) {
                     $others = array_values(array_diff($state['turnOrder'], [$actorUserId]));
-                    return arcade_finish($state, (int)$others[0], 'top-out');
+                    return arcade_finish($state, $others===[]?null:(int)$others[0], 'top-out');
                 }
             }
         } else {

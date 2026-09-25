@@ -84,12 +84,19 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
         b: { manBase: 500, kingBase: 508 },
       },
       capture: {
+        // Native callbacks: lift -> (landing + missile) -> explosion.
+        frameDurationMs: 80,
+        lift: { frameCount: 6, durationMs: 480, height: 40 },
+        landing: { frameCount: 6, durationMs: 480 },
         projectile: {
           slots: { a: "bitmap-524", b: "bitmap-525" },
           naturalSize: { width: 5, height: 11 },
-          delayMs: 280,
-          durationMs: 480,
-          easing: "linear",
+          delayMs: 480,
+          durationMs: 320,
+          frameCount: 4,
+          offsetX: 17,
+          startOffsetY: -38,
+          endOffsetY: -20,
         },
         explosion: {
           slot: "bitmap-526",
@@ -98,6 +105,8 @@ export const CLASSIC_SOURCE_MAPS = deepFreeze({
           frameCount: 16,
           frameDurationMs: 80,
           durationMs: 1280,
+          offsetX: -5,
+          offsetY: -6,
         },
       },
       promotion: {

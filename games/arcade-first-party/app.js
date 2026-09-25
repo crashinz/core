@@ -1,8 +1,8 @@
 import { gameViewStorage } from "../game-view-storage.js?v=1dd11e938aa8";
 // Presentation and bounded input transport only. Server reducers own all results.
 import { availableGameViewportHeight } from "../viewport-height-fit.js?v=f9547db55052";
-import { SpaceFrameClient, SpaceCoopClient } from "./space-frame-client.js?v=751614b24395";
-import { TetrisBoardView } from "./tetris-view.js?v=29fc86bae5b5";
+import { SpaceFrameClient, SpaceCoopClient } from "./space-frame-client.js?v=257325da2398";
+import { TetrisBoardView } from "./tetris-view.js?v=20260924e1";
 const kind = document.body.dataset.extension === "tetris-versus" ? "tetris" : "space";
 const storageKey = `corechat.arcade.${kind}.presentation.v1`;
 let preferences = { size:100, fit:false };
@@ -46,7 +46,7 @@ const buttons = document.createElement("div"); buttons.className="arcade-buttons
 const summary = document.createElement("p"); summary.className="arcade-summary";
 const guide = document.createElement("p"); guide.className="arcade-control-guide";
 guide.textContent=kind === "tetris"
-  ? "Keyboard: Left/Right move, Down soft-drops, Up rotates, Z rotates back, Space drops. Click the board first. Mouse / touch: use the labeled buttons below. Tetris Versus needs two players."
+  ? "Keyboard: Left/Right move, Down soft-drops, Up rotates, Z rotates back, Space drops. Click the board first. Mouse / touch: use the labeled buttons below. Choose Solo, a bot, or another player in Game Options before starting."
   : "Move with A/D or Left/Right. Fire with Space, W, Up, or Enter.";
 canvas.setAttribute("aria-describedby", "arcade-control-guide"); guide.id="arcade-control-guide";
 const history = document.createElement("div"); history.className="arcade-history"; history.hidden=true;
@@ -96,6 +96,7 @@ function resize() {
 function live() {
   const session=binding?.session;
   const pause=session?.state?._framework?.pause?.mode || "running";
+  if(session?.frozenReference)return false;
   return !stopped && state?.phase === "playing" && !state.completed && session?.status === "active"
     && ["master","player"].includes(session.viewerRole) && ["running","proposed"].includes(pause)
     && !session.state?._framework?.serviceInterruption?.active
@@ -278,7 +279,7 @@ window.CoreChatArcade={
   render(next) {
     const changed=next.session?.publicId!==binding?.session?.publicId;
     binding=next;
-    if(changed){pending=null;commands=[];release();lastControls="";spaceView.reset();spaceCoopView.reset();}
+    if(changed){heartbeatAt=performance.now();pending=null;commands=[];release();lastControls="";spaceView.reset();spaceCoopView.reset();}
     if(state!==next.session?.state){state=next.session?.state;snapshotAt=performance.now();}
     if(kind === "space" && state?.ship){spaceCoopView.setActor(next.currentUserId());currentSpaceView().accept(state,next.session.stateVersion,performance.now());}
     if(kind === "space" && pending?.frames && pending.frameStart < state.elapsedMs
@@ -296,7 +297,7 @@ window.CoreChatArcade={
       if(state.ships){spaceScoreTwo.textContent=`P2: ${state.ships[state.turnOrder[1]].score}`;spacePlayerLabelTwo.textContent=Number(state.turnOrder[1])===Number(next.currentUserId())?"Player 2 (You)":"Player 2";}
     }
     if(kind === "tetris" && !state?.arcadeKind)status.textContent="Waiting for an opponent. Tetris Versus requires two players.";
-    summary.textContent=state?.completed?"Use the shared controls to leave or start a rematch.":
+    summary.textContent=next.session?.frozenReference?"Frozen recording: use Play reference action above. Reset reference repeats the prepared sequence.":state?.completed?"Use the shared controls to leave or start a rematch.":
       kind === "tetris" && !state?.arcadeKind?"The game starts after two players have joined and accepted the rules. Controls stay disabled while waiting.":
       ["paused","resuming"].includes(state?._framework?.pause?.mode)?"Paused. Use the shared resume controls when you are ready.":
       "Click the board to use keyboard controls. Pause and leave are in the shared game controls.";

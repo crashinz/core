@@ -93,6 +93,7 @@
     }
   },
   "requiredFiles": [
+    "includes/chinese_checkers_extension.php",
     "games/chinese-checkers-first-party/index.html",
     "games/ocx-extension-game.css",
     "games/chinese-checkers-first-party/style.css",
@@ -105,7 +106,6 @@
     "games/viewport-height-fit.js",
     "games/ocx-extension-game.js",
     "games/game-avatar.js",
-    "includes/chinese_checkers_extension.php",
     "games/classic-game-audio.js",
     "games/game-view-storage.js",
     "includes/chinese_checkers_bot_support.php",
@@ -113,6 +113,9 @@
     "games/chinese-checkers-engine.js",
     "games/chinese-checkers-worker.js",
     "games/bot-pacing.js",
-    "games/chinese-checkers-first-party/motion.js"
+    "games/chinese-checkers-first-party/motion.js",
+    "games/bot-avatar-options.js",
+    "includes/game_bot_avatars.php",
+    "api/game_bot_avatars.php"
   ]
 }

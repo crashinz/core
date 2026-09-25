@@ -10,7 +10,7 @@
     for(const side of ['west','east','north','south']) {
       const vertical=side==='north'||side==='south',flip=side==='east'||side==='south'?-1:1;
       let x=vertical?0:-root.w/2,y=vertical?-root.h/2:0,dx=vertical?0:-1,dy=vertical?-1:0;
-      let pendingTurn=vertical?'first':null;
+      let pendingTurn=null;
       const branch=s.branches?.[side]||[];
       const reach=640;
       function place(n,placeholder=false) {
@@ -21,7 +21,7 @@
         if(!double) {
           let nx=dx,ny=dy;
           if(pendingTurn==='first'){nx=1;ny=0;pendingTurn=null;}
-          else if(dy){nx=vertical?(x>150?-1:1):(x< -150?1:-1);ny=0;}
+          else if(dy && (!vertical || y-64 < -190)){nx=vertical?(x>150?-1:1):(x< -150?1:-1);ny=0;}
           else if((dx<0 && x-64<(vertical?64:-reach)) || (dx>0 && x+64>(vertical?reach:-96))){nx=0;ny=-1;}
           if(nx!==dx||ny!==dy){x-=dx*16;y-=dy*16;x+=nx*cross/2;y+=ny*cross/2;dx=nx;dy=ny;}
         }

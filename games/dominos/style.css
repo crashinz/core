@@ -5,3 +5,6 @@ body[data-extension=dominos] .game-bot-status{min-height:64px;box-sizing:border-
 .dm-drawing{position:absolute;pointer-events:none;z-index:8}.dm-skip{position:absolute;bottom:170px;left:470px;width:160px;border:1px solid #d5bf87;border-radius:6px;background:#182035;color:#fff;padding:8px}
 
 body[data-extension=dominos] #game-title{min-width:190px}.dominos-variant{display:inline-block;white-space:nowrap}
+
+.dm-player.is-turn{outline:4px solid #68e4d9;box-shadow:0 0 20px #68e4d955}.dm-hand-label{font-size:14px;font-weight:800;color:#b9fff3}
+.dm-victory>button{margin:8px auto}

@@ -515,6 +515,7 @@ export class ChatPrivateChatService {
 
             });
 
+        this.#saveTabSession();
         context.renderLinkTabs?.();
 
         return user;
@@ -552,6 +553,7 @@ export class ChatPrivateChatService {
             Number(dmUser.id)
         );
 
+        this.#saveTabSession();
         context.renderLinkTabs?.();
 
         context.switchChat(
@@ -562,6 +564,21 @@ export class ChatPrivateChatService {
 
         return dmUser;
 
+    }
+
+    /** Keep message history separate from tabs opened in this window session. */
+    seedDmUsers(users = []) {
+        let open = [];
+        try { open = JSON.parse(this.#context?.readTabSession?.() || "[]"); } catch {}
+        const ids = new Set(Array.isArray(open) ? open.map(Number) : []);
+        for (const source of users) {
+            const user = this.rememberDmUser(source);
+            if (user && !ids.has(user.id)) this.#closedDmUserIds.add(user.id);
+        }
+    }
+
+    #saveTabSession() {
+        try { this.#context?.writeTabSession?.(JSON.stringify(this.visibleDmUsers().map(user => user.id))); } catch {}
     }
 
     /**
@@ -672,6 +689,7 @@ export class ChatPrivateChatService {
         this.#closedDmUserIds.add(
             userId
         );
+        this.#saveTabSession();
 
         context.clearUnread(
             key

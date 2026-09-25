@@ -56,7 +56,11 @@ function game_review_position(array $s,array $case): array
         $instruction='Select your movable checker and its highlighted destination, or Play example action. For two bear-offs, repeat the action after the first animation finishes.';
         $expected=match($mode){'hit','stacked-hit'=>'The captured checker travels to the opponent’s bar; the moving checker lands on its destination.','entry'=>'The bar checker enters the board at the correct point.','bear-off','final'=>'The checker enters its correct winning slot. Remaining stack spacing stays consistent; the final checker is followed by the victory sequence.','blocked'=>'No checker moves, and the turn passes because bar entry is blocked.',default=>'The checker follows the correct direction and lands without disappearing.'};
     } elseif(in_array($game,['battleship','spades'],true)) {
-        if($mode==='placement')return [$s,[],'Place, rotate and accept your fleet using the game controls.','Ships align with the grid; placement sounds and legal positioning follow the installed rules.'];
+        if($mode==='placement'){
+            $fleet=[];for($length=1;$length<=5;$length++)$fleet[]=['length'=>$length,'row'=>($length-1)*2,'column'=>0,'orientation'=>'horizontal'];
+            $rotated=[];for($length=1;$length<=5;$length++)$rotated[]=['length'=>$length,'row'=>0,'column'=>($length-1)*2,'orientation'=>'vertical'];
+            return [$s,[game_review_step(1,'place',['ships'=>$fleet]),game_review_step(1,'place',['ships'=>$rotated]),game_review_step(1,'start'),game_review_step(2,'place',['ships'=>$fleet]),game_review_step(2,'start')],'Play the reference actions to place the fleet horizontally, rotate the layout, and accept both fleets. The live board also allows manual placement.','Ships align with the grid, then both accepted fleets start the battle.'];
+        }
         if($game==='spades'&&$mode==='partner-pass'){
             spades_begin_hand($s,spades_deck(),3);foreach($s['turnOrder'] as $id)$s['bids'][(string)$id]=['kind'=>'standard','amount'=>2,'role'=>'team'];
             $s['bids']['3']=['kind'=>'blind-nil','amount'=>0,'role'=>'team'];$s['blindSelections']['3']='blind-nil';$s['handViewed']['3']=false;$s['teamScores']=['0'=>-100,'1'=>0];spades_prepare_partner_passes($s);
@@ -64,7 +68,12 @@ function game_review_position(array $s,array $case): array
             return [$s,$steps,'Play the offer and return in order, or choose your two cards on the table. Reset repeats the exchange.','Partners exchange exactly two cards each way; neither hand loses cards.'];
         }
         $native=$case;$native['mode']=$case['nativeMode']??($mode==='opponent-play'?'play':$mode);
+        if($game==='spades'&&in_array($mode,['win','loss'],true))$native['mode']='last-trick';
         [$s,$step,$instruction]=game_review_native_position($s,$native);if($step)$steps[]=$step+['random'=>null];
+        if($game==='spades'&&in_array($mode,['win','loss'],true)){
+            $s['teamScores'][$mode==='win'?0:1]=$s['settings']['winningScore']-1;
+            $instruction='Play the final card, then allow the trick to settle. The prepared leading team reaches the winning score.';
+        }
         if($mode==='deal')$steps=[game_review_step($s['turnOrder'][$s['turnIndex']],'deal')];
         $expected=$game==='spades'?'The card/trick moves and score updates follow the selected event. The viewer slide is retained; Classic opponents and collection use direct placement.':'The shot resolves to the prepared miss, hit, sunk ship or victory; the board retains the result.';
     } elseif($game==='five-dice') {

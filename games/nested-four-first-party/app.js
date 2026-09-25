@@ -18,6 +18,30 @@ const NestedFour = (() => {
     }
   })();
   let lastHeardVersion = null;
+  let soundSession = null, soundEpoch = 0, soundEnabled = true, soundVisual = true;
+  const cueTimers = new Set(), cuePlayers = new Set();
+  function stopSounds() {
+    soundEpoch++;
+    for (const timer of cueTimers) window.clearTimeout(timer);
+    cueTimers.clear();
+    for (const audio of cuePlayers) { audio.pause(); audio.currentTime = 0; }
+    cuePlayers.clear();
+  }
+  function scheduleCue(callback, delay = 0) {
+    const epoch = soundEpoch;
+    const run = () => { if (epoch === soundEpoch && soundEnabled) callback(); };
+    if (delay <= 0) { run(); return; }
+    const timer = window.setTimeout(() => { cueTimers.delete(timer); run(); }, delay);
+    cueTimers.add(timer);
+  }
+  function observeSound(session, enabled, visual) {
+    const id = String(session?.publicId || "preview"), version = Number(session?.stateVersion || 0);
+    const changedSession = id !== soundSession;
+    const previous = lastHeardVersion;
+    if (changedSession || version !== previous || enabled !== soundEnabled || visual !== soundVisual) stopSounds();
+    soundSession = id; soundEnabled = enabled; soundVisual = visual; lastHeardVersion = version;
+    return !changedSession && previous !== null && version > previous && enabled;
+  }
   let motionSession=null, motionSequence=null, motionMoveNumber=null, activeMotion=null, motionTimer=0;
   const isAnimating=()=>Boolean(activeMotion && performance.now()-activeMotion.started<800);
 
@@ -97,28 +121,22 @@ const NestedFour = (() => {
   }
 
   function playCue(name, effectsEnabled, volume) {
-    if (!effectsEnabled || !SOUND_FILES[name]) return;
+    if (!effectsEnabled || !soundEnabled || !SOUND_FILES[name]) return;
     const audio = new Audio(new URL("../../assets/audio/built-in-games/" + SOUND_FILES[name], window.location.href).href);
+    cuePlayers.add(audio);
+    audio.addEventListener("ended", () => cuePlayers.delete(audio), { once: true });
+    audio.addEventListener("error", () => cuePlayers.delete(audio), { once: true });
     audio.volume = Math.max(0, Math.min(1, Number(volume ?? 1))) * 0.68;
     audio.play().catch(() => {});
   }
 
-  function syncAuthoritativeCue(session, viewerUserId, effectsEnabled, volume) {
-    const version = Number(session?.stateVersion || 0);
-    if (lastHeardVersion === null) {
-      lastHeardVersion = version;
-      return;
-    }
-    if (version <= lastHeardVersion) return;
-    lastHeardVersion = version;
-    const state = session?.state || {};
-    const action = state.lastAction || {};
-    if (action.type === "select") playCue("select", effectsEnabled, volume);
-    if (action.type === "move") playCue(action.covered ? "cover" : "move", effectsEnabled, volume);
-    if (state.completed) {
-      const won = Number(state.winnerUserId || 0) === viewerUserId;
-      window.setTimeout(() => playCue(won ? "win" : "loss", effectsEnabled, volume), 140);
-    }
+  function syncAuthoritativeCue(session, viewerUserId, effectsEnabled, volume, motion, visualFxEnabled) {
+    if (!observeSound(session, effectsEnabled, visualFxEnabled)) return;
+    const state = session?.state || {}, action = state.lastAction || {};
+    const landing = motion ? Math.max(0, 800 - (performance.now() - motion.started)) : 0;
+    if (action.type === "select") playCue("select", soundEnabled, volume);
+    if (action.type === "move") scheduleCue(() => playCue(action.covered ? "cover" : "move", soundEnabled, volume), landing);
+    if (state.completed) scheduleCue(() => playCue(Number(state.winnerUserId || 0) === viewerUserId ? "win" : "loss", soundEnabled, volume), landing);
   }
 
   function pieceNode(piece, playerIndex, extraClass = "") {
@@ -161,7 +179,7 @@ const NestedFour = (() => {
     const selected = state.selected || null;
     const legalSources = state.legalSources || {};
     const legalDestinations = new Set((state.legalDestinations || []).map(Number));
-    syncAuthoritativeCue(session, viewerUserId, effectsEnabled, masterVolume);
+    syncAuthoritativeCue(session, viewerUserId, effectsEnabled, masterVolume, motion, enabled);
 
     const shell = makeNode("section", "nf-shell");
     shell.dataset.visualFx = optionCategory("visualFxEnabled", true) ? "on" : "off";
@@ -319,7 +337,7 @@ const NestedFour = (() => {
     return shell;
   }
 
-  return Object.freeze({ render, appendBoardSizeOption, boardScale, isAnimating });
+  return Object.freeze({ render, stopSounds, appendBoardSizeOption, boardScale, isAnimating });
 })();
 
 window.CoreChatNestedFour = NestedFour;
